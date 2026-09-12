@@ -15,6 +15,9 @@ const [command, name = 'surtitle-devcontainer-check'] = args.filter(arg => arg !
 if (!/^[a-z0-9][a-z0-9_.-]+$/.test(name)) throw new Error('Invalid container name');
 const source = viaWsl ? root.replace(/^([A-Za-z]):[\\/]/, (_, drive) => '/mnt/' + drive.toLowerCase() + '/').replaceAll('\\', '/') : root;
 const image = 'surtitle-devcontainer:local-check';
+function log(message) {
+  console.log(`[${new Date().toISOString()}] ${message}`);
+}
 function docker(arguments_, { capture = false, allowFailure = false } = {}) {
   const result = spawnSync(viaWsl ? 'wsl' : 'docker', viaWsl ? ['-d', 'Ubuntu', '-u', 'root', '--', 'docker', ...arguments_] : arguments_, {
     cwd: root, encoding: 'utf8', stdio: capture ? 'pipe' : 'inherit', maxBuffer: 8 * 1024 * 1024,
@@ -30,12 +33,16 @@ function inspect() {
 }
 function resume() {
   const [container] = inspect();
-  if (!container.State?.Running) docker(['start', name]);
+  if (!container.State?.Running) {
+    log('Resuming development container ' + name);
+    docker(['start', name]);
+  }
 }
 function inside(code, extra = []) {
   return docker(['exec', '--user', config.remoteUser, '--workdir', workspace, name, 'node', '--input-type=module', '-e', code, ...extra], { capture: true }).stdout;
 }
 function probe() {
+  log('Checking source sharing and dependency/output isolation');
   inspect();
   const filename = '.surtitle-isolation-probe-' + randomUUID();
   const sourceProbe = resolve(root, '.devcontainer', filename);
@@ -56,7 +63,10 @@ function probe() {
   }
 }
 switch (command) {
-  case 'build': docker(['build', '-f', '.devcontainer/Dockerfile', '-t', image, source]); break;
+  case 'build':
+    log('Building the development container image');
+    docker(['build', '-f', '.devcontainer/Dockerfile', '-t', image, source]);
+    break;
   case 'start': {
     const runtimeUser = runtimeUserForHost({ platform: process.platform, viaWsl, remoteUser: config.remoteUser, uid: process.getuid?.(), gid: process.getgid?.() });
     // Start unprivileged with the host IDs, leaving the image user's old UID free
@@ -66,9 +76,11 @@ switch (command) {
     run.push(...config.runArgs);
     for (const [key, value] of Object.entries(config.containerEnv)) run.push('--env', key + '=' + value);
     if (runtimeUser.home) run.push('--env', 'HOME=' + runtimeUser.home);
+    log('Starting development container ' + name);
     docker([...run, image, 'sleep', 'infinity']);
     inspect();
     if (runtimeUser.home) {
+      log('Aligning the container account with the host UID/GID');
       docker(['exec', '--user', 'root', '--workdir', '/', name, 'bash', workspace + '/.devcontainer/align-user.sh',
         config.remoteUser, String(runtimeUser.uid), String(runtimeUser.gid)]);
     }
@@ -78,10 +90,11 @@ switch (command) {
   case 'check': resume(); probe(); break;
   case 'verify': {
     resume(); probe();
-    const result = docker(['exec', '--user', config.remoteUser, '--workdir', workspace, name, 'bash', '-lc', 'bash .devcontainer/verify.sh > /opt/surtitle-build/verification.log 2>&1'], { allowFailure: true });
-    docker(['exec', name, 'tail', '-n', '80', '/opt/surtitle-build/verification.log']);
-    if (result.status !== 0) throw new Error('Container verification failed; full log stays at /opt/surtitle-build/verification.log');
+    log('Running Linux checks and native E2E; streaming output to /opt/surtitle-build/verification.log');
+    const result = docker(['exec', '--user', config.remoteUser, '--workdir', workspace, name, 'bash', '-o', 'pipefail', '-lc', 'bash .devcontainer/verify.sh 2>&1 | tee /opt/surtitle-build/verification.log'], { allowFailure: true });
+    if (result.status !== 0) throw new Error('Container verification failed (exit ' + result.status + '); full log stays at /opt/surtitle-build/verification.log');
     probe();
+    log('Full container verification passed');
     break;
   }
   default: throw new Error('Usage: node .devcontainer/container.mjs build|start|check|verify [container-name] [--wsl]');

@@ -1,6 +1,9 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { assertContainer, assertDefinition, maskTargets, runtimeUserForHost, workspace } from './isolation.mjs';
 
 const definition = JSON.parse(readFileSync(new URL('./devcontainer.json', import.meta.url), 'utf8'));
@@ -35,6 +38,55 @@ test('Linux account alignment preserves source ownership and completes before wr
   assert.match(align, /chown -R --no-dereference "\$uid:\$gid" "\$user_home" \/opt\/surtitle-build/);
   assert.doesNotMatch(align, /chmod|\/workspaces\/|\$workspace/);
   assert.equal(definition.updateRemoteUserUID, false);
+});
+
+test('live verification output is retained and producer or tee failures stay nonzero', t => {
+  const launcher = readFileSync(new URL('./container.mjs', import.meta.url), 'utf8');
+  const invocation = launcher.match(/'bash', '-o', '(pipefail)', '(-lc)', '([^']+)'/);
+  assert.ok(invocation, 'Verification must explicitly preserve the status of the tee pipeline');
+  assert.match(invocation[3], /^bash \.devcontainer\/verify\.sh 2>&1 \| tee \/opt\/surtitle-build\/verification\.log$/);
+  assert.doesNotMatch(launcher, /'tail', '-n', '80'/);
+  let bash = 'bash';
+  if (process.platform === 'win32') {
+    const git = spawnSync('git', ['--exec-path'], { encoding: 'utf8' });
+    bash = resolve(git.stdout?.trim() ?? '', '../../../bin/bash.exe');
+    if (git.status !== 0 || !existsSync(bash)) {
+      t.skip('Git Bash is needed to execute the Linux streaming pipeline on Windows');
+      return;
+    }
+  }
+  const directory = mkdtempSync(join(tmpdir(), 'surtitle verification stream 日本語 & '));
+  t.onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
+  for (const exitCode of [0, 23]) {
+    const log = join(directory, `verification-${exitCode}.log`);
+    const pipeline = invocation[3]
+      .replace('bash .devcontainer/verify.sh', `(printf 'stdout marker\\n'; printf 'stderr marker\\n' >&2; exit ${exitCode})`)
+      .replace('/opt/surtitle-build/verification.log', '"$1"');
+    const result = spawnSync(bash, ['--noprofile', '--norc', '-o', invocation[1], invocation[2], pipeline, 'verification-stream-test', log.replaceAll('\\', '/')], {
+      encoding: 'utf8', timeout: 10_000,
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, exitCode, result.stderr);
+    assert.equal(result.stdout, 'stdout marker\nstderr marker\n');
+    assert.equal(readFileSync(log, 'utf8'), result.stdout);
+  }
+  const failingLog = join(directory, 'missing-directory', 'verification.log').replaceAll('\\', '/');
+  const pipeline = invocation[3].replace('bash .devcontainer/verify.sh', "printf 'stdout marker\\n'").replace('/opt/surtitle-build/verification.log', '"$1"');
+  const result = spawnSync(bash, ['--noprofile', '--norc', '-o', invocation[1], invocation[2], pipeline, 'verification-stream-test', failingLog], { encoding: 'utf8', timeout: 10_000 });
+  assert.equal(result.error, undefined);
+  assert.notEqual(result.status, 0, 'An unwritable log must not silently lose verification evidence');
+});
+
+test('verification labels long-running phases without printing the environment', () => {
+  const script = readFileSync(new URL('./verify.sh', import.meta.url), 'utf8');
+  assert.match(script, /date -u \+'%Y-%m-%dT%H:%M:%SZ'/);
+  for (const command of ['cargo test --workspace', 'cargo clippy --workspace', 'cargo deny check', 'pnpm test:fixtures', 'dbus-run-session -- xvfb-run']) {
+    const position = script.indexOf(command);
+    const precedingLine = script.slice(0, position).trimEnd().split(/\r?\n/).at(-1);
+    assert.match(precedingLine, /^step '/, `${command} must identify the active phase`);
+  }
+  assert.match(script, /if ! command -v cargo-deny[^\n]+\n\s+step 'Installing cargo-deny/);
+  assert.doesNotMatch(script, /set -x|set -o xtrace|^\s*(?:env|printenv)\s*$/m);
 });
 
 test('each full verification seeds and launches one fresh profile inside the work mask', () => {

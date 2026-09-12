@@ -300,11 +300,11 @@
   "inputs": [
     {
       "path": ".devcontainer/Dockerfile",
-      "sha256": "6b2a5d90064907a4dbba0b822bdbddc4b1f4bf74b92854bf3b91f6a98bf80b3c"
+      "sha256": "26655646301746fa5ac1635d9657d218d2904a908fcc248c6972b94170e3119b"
     },
     {
       "path": ".devcontainer/README.md",
-      "sha256": "cb31e9611689e04eb5342f2f675a5fbc5bb1befea379b94670161bf2788a039a"
+      "sha256": "13af9d47c2de17d5160a65f3af375b44c7cca9bf63887d9a36d32c8f07131d93"
     },
     {
       "path": ".devcontainer/align-user.sh",
@@ -312,7 +312,7 @@
     },
     {
       "path": ".devcontainer/container.mjs",
-      "sha256": "61eb38ffd6a4058d7da65ba0c1fc4a8d9f681804fbe53e7d0ada97a00add5a06"
+      "sha256": "476e10e3111d1f2fe1ba90a8012b70265a011ed4cbc923caa68c8390d40ceb59"
     },
     {
       "path": ".devcontainer/devcontainer.json",
@@ -328,7 +328,7 @@
     },
     {
       "path": ".devcontainer/isolation.test.mjs",
-      "sha256": "b7cecc19079d93e3590ae7632f4461e9382e8ed485c66517c9a7bf9038fd93cc"
+      "sha256": "b641a0d1920b8e454590018eae039ce3b9730569eeef0bb10a9952eee0a64eb0"
     },
     {
       "path": ".devcontainer/runtime-preflight.mjs",
@@ -336,7 +336,7 @@
     },
     {
       "path": ".devcontainer/verify.sh",
-      "sha256": "23deeac552a28bb016918fd335c4967d0e2b65b6d113ee12126d7c79e66c7570"
+      "sha256": "54ab2f518638d18a7fdaa5caf65ba2f0f0a11d70cf9f0fc18cb822a584ef3782"
     },
     {
       "path": ".dockerignore",
