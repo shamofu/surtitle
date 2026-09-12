@@ -4,6 +4,8 @@ Use Ubuntu 24.04, Node 24.21.0 LTS from `.node-version` and Rust 1.98.0 for Reac
 
 The repository is a read/write bind mount at `/workspaces/surtitle`. Source, `.git` and lockfile edits are immediately visible on the host. Do not add host credentials, SSH agents, Docker sockets or GUI sockets to this container.
 
+On native Linux, the launcher starts with the non-root host UID and primary GID, then aligns the `vscode` account before running source-write probes. Only `/home/vscode` and `/opt/surtitle-build` ownership changes inside the container; source permissions and ownership stay unchanged. An existing target group is reused, while a UID owned by another account is rejected. Launch as a non-root host user. Windows and `--wsl` keep the image's named account, and `updateRemoteUserUID` remains disabled because the launcher performs Linux alignment explicitly.
+
 Dependencies and generated outputs never use host binds or named volumes. Temporary filesystems mask `node_modules`, `target`, `dist`, `work`, `artifacts`, `test-results`, `playwright-report`, `src-tauri/gen`, `src-tauri/resources/native` and `src-tauri/resources/notices`. Existing Windows dependencies at those host paths are hidden. Large Cargo outputs and caches use the container writable layer at `/opt/surtitle-build`. Tmpfs data disappears when the container stops or restarts; writable-layer caches disappear when the container is removed. Initialize and install dependencies again after restarting. Ordinary Docker image layers remain cached. [Docker tmpfs documentation](https://docs.docker.com/engine/storage/tmpfs/)
 
 ## Verified launch path

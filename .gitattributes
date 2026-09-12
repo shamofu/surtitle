@@ -6,6 +6,7 @@
 /native/build/reviewed-inputs.json -text
 /.devcontainer/Dockerfile -text
 /.devcontainer/README.md -text
+/.devcontainer/align-user.sh -text
 /.devcontainer/container.mjs -text
 /.devcontainer/devcontainer.json -text
 /.devcontainer/initialize.sh -text

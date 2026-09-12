@@ -304,11 +304,15 @@
     },
     {
       "path": ".devcontainer/README.md",
-      "sha256": "e29184852fde73b61f3c00dac82b664f38d6f1bdaed10a54ea0209929708e32f"
+      "sha256": "cb31e9611689e04eb5342f2f675a5fbc5bb1befea379b94670161bf2788a039a"
+    },
+    {
+      "path": ".devcontainer/align-user.sh",
+      "sha256": "b9cc5a26a8f721cfa1224b2de4714fdcacae2ae0bf82c01db973bf0032811dbe"
     },
     {
       "path": ".devcontainer/container.mjs",
-      "sha256": "cdfbcaff379f90194588405651d7e2632b919470dc79ebd2c84c63a705d52274"
+      "sha256": "61eb38ffd6a4058d7da65ba0c1fc4a8d9f681804fbe53e7d0ada97a00add5a06"
     },
     {
       "path": ".devcontainer/devcontainer.json",
@@ -320,11 +324,11 @@
     },
     {
       "path": ".devcontainer/isolation.mjs",
-      "sha256": "115cd2b5e712e3d9f52400f46d93b0ec3a810a29696e08f3f857481d7bca1ff4"
+      "sha256": "31b600bb1c75239be12e44afe799cc85bfa6751aa572e2b41eaa0879a4525226"
     },
     {
       "path": ".devcontainer/isolation.test.mjs",
-      "sha256": "ca4220990a07f78d569b6c7fd9da633a35dc090a6f34678b3d2f3eed2d1bce1d"
+      "sha256": "b7cecc19079d93e3590ae7632f4461e9382e8ed485c66517c9a7bf9038fd93cc"
     },
     {
       "path": ".devcontainer/runtime-preflight.mjs",
@@ -340,7 +344,7 @@
     },
     {
       "path": ".gitattributes",
-      "sha256": "cefa26b37aade24d07f840d7317549aa21542648dc12f86cb71db52ba80b5fff"
+      "sha256": "933bcaec98ee47544998af894fe0ae15a59d4ef33248a7faca5af075337d5997"
     },
     {
       "path": ".github/workflows/ci.yml",

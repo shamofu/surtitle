@@ -1,13 +1,41 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { assertContainer, assertDefinition, maskTargets, workspace } from './isolation.mjs';
+import { assertContainer, assertDefinition, maskTargets, runtimeUserForHost, workspace } from './isolation.mjs';
 
 const definition = JSON.parse(readFileSync(new URL('./devcontainer.json', import.meta.url), 'utf8'));
 const dockerfiles = [readFileSync(new URL('./Dockerfile', import.meta.url), 'utf8'), readFileSync(new URL('../native/build/Dockerfile', import.meta.url), 'utf8')];
 const ignore = readFileSync(new URL('../.dockerignore', import.meta.url), 'utf8');
 const inspection = () => [{ Mounts: [{ Type: 'bind', Source: '/repo', Destination: workspace, RW: true }, ...maskTargets.map(Destination => ({ Type: 'tmpfs', Destination }))], HostConfig: { Binds: [], Privileged: false } }];
 test('repository source is shared while every dependency/output location is masked', () => assertDefinition(definition, dockerfiles, ignore));
+
+test('native Linux uses host IDs while Windows and WSL retain the image account', () => {
+  for (const uid of [1000, 1001]) {
+    assert.deepEqual(runtimeUserForHost({ platform: 'linux', remoteUser: 'vscode', uid, gid: 1001 }),
+      { user: `${uid}:1001`, uid, gid: 1001, home: '/home/vscode' });
+  }
+  for (const context of [{ platform: 'win32' }, { platform: 'linux', viaWsl: true }, { platform: 'darwin' }]) {
+    assert.deepEqual(runtimeUserForHost({ ...context, remoteUser: 'vscode' }), { user: 'vscode' });
+  }
+  for (const [uid, gid] of [[0, 1000], [1000, 0], [-1, 1000], [1000, undefined]]) {
+    assert.throws(() => runtimeUserForHost({ platform: 'linux', remoteUser: 'vscode', uid, gid }), /non-root/);
+  }
+});
+
+test('Linux account alignment preserves source ownership and completes before write probes', () => {
+  const launcher = readFileSync(new URL('./container.mjs', import.meta.url), 'utf8');
+  const start = launcher.slice(launcher.indexOf("case 'start':"), launcher.indexOf("case 'check':"));
+  assert.match(start, /'--user', runtimeUser\.user/);
+  assert.match(start, /'HOME=' \+ runtimeUser\.home/);
+  const alignment = start.indexOf("'/.devcontainer/align-user.sh'");
+  assert.ok(alignment >= 0 && alignment < start.indexOf('probe();'));
+  const align = readFileSync(new URL('./align-user.sh', import.meta.url), 'utf8');
+  assert.match(align, /Host UID \$uid belongs to another container account/);
+  assert.match(align, /if ! getent group "\$gid"/);
+  assert.match(align, /chown -R --no-dereference "\$uid:\$gid" "\$user_home" \/opt\/surtitle-build/);
+  assert.doesNotMatch(align, /chmod|\/workspaces\/|\$workspace/);
+  assert.equal(definition.updateRemoteUserUID, false);
+});
 
 test('each full verification seeds and launches one fresh profile inside the work mask', () => {
   const script = readFileSync(new URL('./verify.sh', import.meta.url), 'utf8');

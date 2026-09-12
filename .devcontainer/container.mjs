@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertContainer, assertDefinition, maskedDirectories, workspace } from './isolation.mjs';
+import { assertContainer, assertDefinition, maskedDirectories, runtimeUserForHost, workspace } from './isolation.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const config = JSON.parse(readFileSync(resolve(root, '.devcontainer/devcontainer.json'), 'utf8'));
@@ -58,12 +58,20 @@ function probe() {
 switch (command) {
   case 'build': docker(['build', '-f', '.devcontainer/Dockerfile', '-t', image, source]); break;
   case 'start': {
-    const run = ['run', '--detach', '--name', name, '--label', 'app.surtitle.purpose=development-verification', '--user', config.remoteUser, '--workdir', workspace,
+    const runtimeUser = runtimeUserForHost({ platform: process.platform, viaWsl, remoteUser: config.remoteUser, uid: process.getuid?.(), gid: process.getgid?.() });
+    // Start unprivileged with the host IDs, leaving the image user's old UID free
+    // while its account and container-only directories are aligned below.
+    const run = ['run', '--detach', '--name', name, '--label', 'app.surtitle.purpose=development-verification', '--user', runtimeUser.user, '--workdir', workspace,
       '--mount', 'type=bind,source=' + source + ',target=' + workspace];
     run.push(...config.runArgs);
     for (const [key, value] of Object.entries(config.containerEnv)) run.push('--env', key + '=' + value);
+    if (runtimeUser.home) run.push('--env', 'HOME=' + runtimeUser.home);
     docker([...run, image, 'sleep', 'infinity']);
     inspect();
+    if (runtimeUser.home) {
+      docker(['exec', '--user', 'root', '--workdir', '/', name, 'bash', workspace + '/.devcontainer/align-user.sh',
+        config.remoteUser, String(runtimeUser.uid), String(runtimeUser.gid)]);
+    }
     probe();
     break;
   }
