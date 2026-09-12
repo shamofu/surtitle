@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "license": "GPL-3.0-or-later",
+  "evidenceKind": "authored-oracle",
+  "provenance": "Original text preservation oracle only; no recorded audio or real stitch/model evaluation.",
+  "boundaries": [
+    {
+      "id": "B01-01",
+      "language": "en",
+      "text": "I said no, no, no, and then I left."
+    },
+    {
+      "id": "B01-02",
+      "language": "en",
+      "text": "We cannot leave until the last train has arrived."
+    },
+    {
+      "id": "B01-03",
+      "language": "en",
+      "text": "There were thirteen boxes, not thirty boxes."
+    },
+    {
+      "id": "B01-04",
+      "language": "en",
+      "text": "If the rain stops, we will walk across the bridge."
+    },
+    {
+      "id": "B01-05",
+      "language": "en",
+      "text": "I, um, I thought she had already called."
+    },
+    {
+      "id": "B01-06",
+      "language": "en",
+      "text": "The light bag was beside the light switch."
+    },
+    {
+      "id": "B01-07",
+      "language": "en",
+      "text": "We are looking forward to seeing you again."
+    },
+    {
+      "id": "B01-08",
+      "language": "en",
+      "text": "He said yes, and she said yes, and both stayed."
+    },
+    {
+      "id": "B01-09",
+      "language": "en",
+      "text": "Please turn off the lamp before you go upstairs."
+    },
+    {
+      "id": "B01-10",
+      "language": "en",
+      "text": "The bill was 13.5 dollars, not 135 dollars."
+    },
+    {
+      "id": "B01-11",
+      "language": "ja",
+      "text": "いや、いや、いや、と言ってから帰った。"
+    },
+    {
+      "id": "B01-12",
+      "language": "ja",
+      "text": "最終電車が到着するまでは、出発できない。"
+    },
+    {
+      "id": "B01-13",
+      "language": "ja",
+      "text": "箱は三十個ではなく、十三個あった。"
+    },
+    {
+      "id": "B01-14",
+      "language": "ja",
+      "text": "雨がやんだら、橋を渡って歩いて行こう。"
+    },
+    {
+      "id": "B01-15",
+      "language": "ja",
+      "text": "あの、ええと、もう電話したと思っていました。"
+    },
+    {
+      "id": "B01-16",
+      "language": "ja",
+      "text": "橋の端で、箸を拾った。"
+    },
+    {
+      "id": "B01-17",
+      "language": "ja",
+      "text": "またお会いできるのを楽しみにしています。"
+    },
+    {
+      "id": "B01-18",
+      "language": "ja",
+      "text": "彼もはいと言い、彼女もはいと言って、二人とも残った。"
+    },
+    {
+      "id": "B01-19",
+      "language": "ja",
+      "text": "二階へ行く前に、ランプを消してください。"
+    },
+    {
+      "id": "B01-20",
+      "language": "ja",
+      "text": "請求額は百三十五ドルではなく、十三・五ドルだった。"
+    }
+  ]
+}

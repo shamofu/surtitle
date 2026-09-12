@@ -1,0 +1,45 @@
+# Surtitle E2E checks
+
+`pnpm test` runs semantic frontend tests. `pnpm test:browser` runs Chromium against the explicit browser-only preview: no fake library, persistence, or paid API service is supplied. Install its runtime with `pnpm exec playwright install chromium` (use `--with-deps` on Linux CI). Screenshots and traces are under `test-results/browser`.
+
+`pnpm test:e2e` runs the actual Tauri binary through `tauri-driver` and the platform WebDriver. It uses real SQLite fixtures and generated video/audio, with no cloud credentials. It never accepts a paid quote. Windows covers native libmpv controls. Linux runs the application checks under Xvfb and skips the Windows HWND playback assertion.
+
+Before a native test run:
+
+1. Run `pnpm build` and build the desktop with `e2e-test,custom-protocol` features. The `e2e-test` feature enables the isolated data-directory override, Windows software decoding/rendering with a null audio output, and a deterministic Linux playback adapter. Windows still loads the real libmpv and decodes actual media. This feature is not enabled in release builds; hardware decoding and audible speaker output need separate production checks.
+2. Install `tauri-driver`. On Windows run `pwsh -NoProfile -File scripts/prepare-webdriver.ps1`; it checks the installed WebView2 version and verifies Microsoft's matching driver signature. On Linux install the WebKitGTK driver through the distribution packages.
+3. Run `pnpm test:fixtures work/e2e-fixtures`. It streams project-owned test signals through `ffmpeg` (or `FFMPEG_PATH`): a short video with a Japanese filename and ampersand, a compressed six-hour mono 16 kHz silence FLAC, and an interleaved video/audio/subtitle MKV. The additional fixtures stay alongside the short video as `six-hour-silence.flac` and `多言語 & tracks.mkv`.
+4. Run `cargo run -p surtitle-core --example seed_fixture -- <absolute-data-dir> <absolute-media-path>`. This writes `learning.sqlite` and `fixture.json`. Re-seed before each complete run because reviews intentionally mutate the test database.
+5. Set `SURTITLE_E2E_BINARY` and `SURTITLE_E2E_DATA_DIR` to these absolute paths. Set `SURTITLE_E2E_AI_RECOVERY=translation` for saved-translation recovery and `SURTITLE_E2E_TRANSCRIPT_REVIEW=boundary` for transcript review/adoption (CI enables both). Set `SURTITLE_TAURI_DRIVER` and `SURTITLE_NATIVE_DRIVER` when they are not on PATH. Run `pnpm test:e2e` (under Xvfb on Linux).
+
+Native checks validate local media import, a 20,000-row subtitle collection while bounding DOM rows, manual-scroll auto-follow suspension, subtitle search, interval replay and rate changes, blocked AI preflight, and saved review scheduling after reload. Windows additionally reads a real six-hour duration and replays an interval beyond five hours without installing FFmpeg. Subtitle editing preserves milliseconds and repeatedly replaces the generated player track. A real PATH-selected FFmpeg extracts card audio; subsequent transcript edits must preserve that audio and the card's context, explanation, and translation. Windows checks native decoded dimensions and `IsWindowVisible`-derived state before, during, and after a dialog.
+
+Failed checks and selected checkpoints save screenshots under `test-results/native`. WebDriver screenshots show the webview; they do not necessarily include libmpv's child HWND pixels.
+
+`media-management.e2e.js` additionally verifies a complete process restart with a saved audio selection and playback position, explicit embedded subtitle replacement and restoration of an edited previous edition, a four-second card spanning two subtitles, card audio playback/edit/suspend/delete, and library removal without deleting original files. Its multitrack fixture deliberately gives the English audio different mpv and FFmpeg IDs, and checks the saved waveform's frequency and duration. A loopback HTTP server exercises background download completion, automatic library refresh, cancellation, retry from the original request and partial-file cleanup. No external video service or cloud API is contacted by this suite.
+
+`replay-context.e2e.js` uses real Windows playback and FFmpeg extraction to check
+the default 150 ms, zero, and maximum 1,000 ms context. It verifies source seek,
+source repeat, media-edge bounds, unchanged nominal subtitle times, exact PCM
+sample counts, and separate actual clip ranges. Existing card bytes and context
+must survive settings changes, source edits, and a process restart. The ordinary
+four-second media-management assertion explicitly selects zero context; archive
+roundtrip validation is covered by the common Rust transfer tests.
+
+Native IPC may take longer than the WebDriver defaults while debug Rust hashes large external tools. The configuration uses a 180-second script/request timeout and disables transport retries so a timed-out mutation is never silently replayed. Individual UI conditions remain bounded, and each test has a five-minute overall deadline. Tests must await both the persisted change and the closing dialog before acting on the underlying page. Download controls are scoped to their job IDs.
+
+For an interactive development checkout, copy and hash any existing normal `target/debug/surtitle.exe` and PDB before building with E2E features. Run the resulting E2E executable from an isolated directory, restore the normal files, and verify their hashes. Do not leave a test-feature binary at the normal launch path or run it against the user's normal data directory.
+
+To test a source-built libmpv candidate before replacing the production bundle, use `scripts/native-candidate-e2e.ps1` with an absolute `-CandidateDirectory`, a fresh absolute `-RunDirectory` under `work`, and the selected DLL's `-ExpectedSha256`. The script verifies the candidate and its source bundle, compiles a private copy of the workspace/resources with a private manifest hash, and runs the Windows media-management suite with disposable data. It preserves and restores the current normal EXE/PDB and checks that the production manifest and DLL did not change. Do not run another normal executable build concurrently. A passing candidate test does not approve redistribution or clear the release audit gate.
+
+Pass `-Av1Fixture` with an absolute path to a locally generated AV1 clip of at least three seconds to add the optional CPU AV1 decode/play/seek check. It uses the same `hwdec=no` E2E configuration and records the selected fixture hash; the normal suite skips this case when no fixture is supplied.
+
+Fixture generation does not download third-party test media. No production account, media library, credentials, or budget ledger should be used as the E2E data directory.
+
+The explicit Windows restore regression runs through the same native restore coordinator used by IPC, with real libmpv and a temporary profile. Set `SURTITLE_TEST_FFMPEG` to an explicitly selected absolute FFmpeg executable, then run `cargo test -p surtitle --lib --features e2e-test real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks -- --ignored --nocapture`. It generates a three-second, two-audio-track MKV and verifies restored position, selected audio, actual displayed subtitle text and sentence stopping while a concurrent worker polls and persists every millisecond. It also checks safe stopping for missing/removed media and unchanged settings and cost summaries. The portable companion test `restore_preserves_operational_files_and_backs_up_replaced_learning` checks the before-restore database backup and unchanged operational-file bytes. These tests do not exercise the operating-system file picker or run an application binary against normal data.
+
+The AI recovery preset stores two authored subtitle translations as already received results, with an explicit zero-cost/offline marker. It does not simulate a paid request or import a credential. The native suite previews this persisted result, rejects changed source subtitles, applies it using the real SQLite transaction, terminates/relaunches Tauri through a new WebDriver session, and confirms idempotency and an unchanged fee ledger. The shared paid worker is independently tested with fixed auth/transport in `surtitle-ai`; the recovery preset does not claim to test a real Vertex connection.
+
+The `surtitle-ai/e2e-fixtures` feature is enabled only by `surtitle/e2e-test`. `scripts/check-production-features.mjs` rejects either E2E features or development validation permits in the production dependency graph before packaging.
+
+The transcript preset contains authored conflicting responses, a separate incomplete job, and an unapproved repair preparation. Its exact silent WAV inputs and response text are fixed by the seed code. Tests use normal IPC to inspect raw alternatives, reject partial/stale adoption, resolve a boundary, adopt explicitly and preserve edits after a real process restart. Repair estimates remain blocked by the normal model gate, and the fee/approval ledger must remain unchanged. The silent media is for reproducible persistence/playback checks; it is not speech-recognition quality evidence.

@@ -1,0 +1,16 @@
+/node_modules/
+/dist/
+/target/
+/work/
+/artifacts/
+/src-tauri/resources/native/*
+!/src-tauri/resources/native/.gitkeep
+/src-tauri/gen/
+/.env
+*.key
+*.pem
+*service-account*.json
+test-results/
+playwright-report/
+.DS_Store
+*.tsbuildinfo

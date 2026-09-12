@@ -1,0 +1,38 @@
+[package]
+name = "surtitle-ai"
+publish = false
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+
+[features]
+default = []
+development-validation = []
+e2e-fixtures = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+sha2 = "0.10"
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+gcp_auth = "0.12"
+tokio = { version = "1", features = ["sync", "time", "rt"] }
+base64 = "0.22"
+zeroize = "1"
+unicode-normalization = "0.1"
+ort = { version = "=2.0.0-rc.10", default-features = false, features = ["std", "ndarray", "load-dynamic"] }
+ndarray = "0.16"
+surtitle-tools = { path = "../tools" }
+fs2 = "0.4"
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

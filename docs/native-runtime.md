@@ -1,0 +1,93 @@
+# Native runtime and redistribution
+
+The intended Windows x64 payload contains the source-built `mpv-2.dll` and official CPU ONNX Runtime 1.29.0 (`onnxruntime.dll` and `onnxruntime_providers_shared.dll`). Microsoft VC runtime DLLs and the unused Vulkan loader are excluded. `native/runtime-windows-x64.json` identifies the exact payload, notices, corresponding sources and prerequisite checks. CLI FFmpeg/ffprobe, yt-dlp and Deno remain separate first-use downloads or user-selected PATH tools. Silero VAD is also a first-use download.
+
+## Source and license evidence
+
+The libmpv build uses fixed source archives for mpv 0.41.0, FFmpeg 8.1.2 libraries, dav1d and their subtitle/rendering/build dependencies. Twenty upstream archives, complete build recipes/configuration, notices and the actual compiler-package inventory are retained. FFmpeg programs, network acquisition, Vulkan and OpenGL are disabled; D3D11, WASAPI and CPU AV1 decoding remain available. The combined library is distributed under GPL-3.0-or-later. FreeType attribution and component notices are included in `native/libmpv-ThirdPartyNotices.txt`.
+
+The local candidate DLL SHA-256 is `6d52b35d9c014b9df432b171523880505a73c3f0425226cf939e64570379be06`; its corresponding-source archive is `faef56ae474043a4d8edc5ce2bcdef7691e078d3df337a4c52990ee09c02dc0a`. The exact candidate passed six Windows application cases, including a visible D3D11 surface and CPU AV1 playback/seek. These results identify the local candidate; a later CI build must pass its own Windows tests.
+
+The official ORT DLL and unstripped PDB have matching CodeView GUID/age. All 1,181 observed dependency source/header checksum records match the selected 13 vcpkg sources and exact patches: 1,176 original source files and five installed/generated-header reconstructions. Abseil requires its upstream C++20 ABI pinning and CRLF output; ONNX headers match protobuf 3.21.12 ML/lite generation. The full original ORT archive and Eigen MPL-2.0 sources are included. The canonical source package is 320,694,687 bytes, SHA-256 `1daba056b30e7d4b639ef2c44ab8d8dd59af8bbb79388ea1780b4ac8488c851d`; all 144 packaged file records were rehashed after export. Fresh staging includes only the selected overlay recipes. PDB coverage is evidence of observed inputs, not a claim that a PDB enumerates every build input.
+
+See `native/reviews/`, `native/upstream-evidence/onnxruntime-source-comparison.json` and `native/onnxruntime-ActualDependencyNotices.txt`. Generic upstream ORT notices are retained separately; mentioning an optional component in that upstream document does not establish that the CPU DLL links it.
+
+The compiler package notices retain the GCC Runtime Library Exception and MinGW notices. The recipe uses ordinary GCC compilation without proprietary compiler plugins. The exception applies to eligible compiled combinations, while independently distributed GCC libraries would have their own source obligations. [FSF exception explanation](https://www.gnu.org/licenses/gcc-exception-3.1-faq.en.html)
+
+## Microsoft prerequisites
+
+The app executable itself imports `VCRUNTIME140.dll` and `VCRUNTIME140_1.dll`, so VC runtime checks run before installation/startup rather than waiting for VAD. ORT additionally needs `MSVCP140.dll` and `MSVCP140_1.dll`. These four files must come from a separately installed Microsoft x64 VC Runtime. The configured required minimum is 14.44.35211.0; the actual local check used 14.51.36247.0. They are never copied into the Surtitle package.
+
+Microsoft's 2022 Build Tools terms permit specified third-party open-source dependency compilation but do not by themselves establish runtime redistribution rights. The applicable Visual Studio Community terms contain a separate redistribution grant; no license entitlement is inferred from the presence of Build Tools. The FSF's Windows runtime guidance permits dynamic linking as a system-library use and advises against distributing those runtime DLLs with the GPL application. The separate prerequisite avoids relying on a publisher entitlement assertion to waive that issue. [Microsoft runtime redistribution](https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution), [FSF Windows runtime guidance](https://www.gnu.org/licenses/gpl-faq.en.html#WindowsRuntimeAndGPL)
+
+`native/windows-prerequisite.nsh` and `native/vc-prerequisite.ps1` implement the prerequisite:
+
+- Check the 64-bit Microsoft installation registry and the four System32 files, their versions and valid Microsoft Authenticode signatures.
+- If missing, interactive NSIS displays Japanese/English consent with No selected by default. Only after Yes does the helper download the x64 installer directly from Microsoft's HTTPS endpoint, verify Microsoft signature/version, and open Microsoft's interactive installer with its terms and UAC prompt. Surtitle does not mirror or embed that installer.
+- No quiet Microsoft installation, automatic restart, app-managed runtime update or uninstall is performed. A requested restart stops Surtitle Setup and asks the user to retry afterward.
+- Silent setup never installs the prerequisite; it fails with code 1603 when unavailable. Offline setup works when the verified runtime is already installed; otherwise the user installs Microsoft's runtime separately before retrying.
+
+The local check-only probe passed with Microsoft-installed version 14.51.36247.0. The hook compiled with warnings treated as errors in the same include-before-language order used by Tauri. The system-install, missing-runtime and UAC branches have not been executed on this workstation. [Microsoft installer behavior](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files)
+
+WebView2 explicitly uses Tauri's `downloadBootstrapper` mode with interactive installation. Its bootstrapper/runtime is downloaded from Microsoft on the end user's machine when needed; the NSIS package does not embed a fixed WebView2 runtime or bootstrapper. Windows application tests use the existing system WebView2 runtime.
+
+## Auditing and local preparation
+
+`node scripts/native-audit.mjs --release` hashes payload/notices/source/review evidence, rejects extra DLLs/models, and checks ordinary and delayed PE imports. Windows platform files and the separately installed VC prerequisite have distinct classifications. The hook/helper hashes and explicit NSIS/WebView2 configuration are checked. In CI it additionally validates the native build artifact against the current commit and reviewed inputs. The local intended payload passed this audit on 2026-09-09; that does not mean a release was published or the installer lifecycle completed.
+
+`pwsh scripts/native-prepare.ps1` consumes the selected source-built runtime and downloads the fixed official ORT archive. It rejects absent source-build artifacts instead of substituting an unrelated upstream binary. `pwsh scripts/native-smoke.ps1` checks the existing Microsoft prerequisite without installing it, then loads the three exact DLL paths with app-directory/System32-only search and initializes mpv/ORT. Rendering and Silero inference require separate application tests.
+
+For a fresh Git checkout, first build or download the native artifact for its exact commit. On Linux with Docker and Node 24, from that checkout:
+
+```sh
+export GITHUB_SHA="$(git rev-parse HEAD)"
+bash scripts/native-ci-build.sh
+```
+
+Alternatively, download `native-build-<exact commit SHA>` from that commit's successful Actions run into `work/native-ci-artifact/`. On Windows, consume and prepare it explicitly:
+
+```powershell
+$sha = (git rev-parse HEAD).Trim()
+node scripts/native-ci-artifact.mjs consume work/native-ci-artifact $sha
+pwsh scripts/native-prepare.ps1
+pwsh scripts/native-smoke.ps1
+pnpm tauri dev
+```
+
+The first route builds dependencies inside an unmounted container and exports only selected final artifacts. The second route verifies the same source/recipe and actual output hashes before changing the local effective manifest. Neither route downloads a prepublished libmpv binary. For a published source ZIP without Git metadata, use the separate [source rebuild instructions](../native/SOURCE-REBUILD.md); they create a local candidate without inventing a commit or requiring a hidden working directory.
+
+## Same-commit native CI build
+
+`scripts/native-ci-build.sh` builds the reviewed recipe in a fresh Docker container with no mounts or named volumes. Verified downloads and builds stay in the container writable layer. Network access is disconnected after source acquisition. Only the selected final DLL, source archives and evidence are explicitly exported with `docker cp`.
+
+`native/build/reviewed-inputs.json` binds the reviewed source/recipe/notice/packaging inputs. CI never regenerates this policy or creates a commit. The build records actual container image and toolchain packages, produces an effective native manifest for its actual output hashes, and seals a `native-build-<commit SHA>` internal Actions artifact. The Windows and package jobs consume that same artifact only after SHA, source, recipe, file and manifest checks. Each build then passes PE closure, actual Windows playback including AV1, and installer gates. Neither PE timestamps nor the apt toolchain are claimed to reproduce the earlier local DLL hash byte for byte.
+
+`.gitattributes` disables Git text normalization for every byte-bound input and the policy itself. The preflight checks effective Git attributes for each path, so Windows `core.autocrlf` cannot silently alter the hashes. Shell recipes retain LF. Retained upstream license/source evidence is not rewritten to satisfy the policy.
+
+The corresponding application-source ZIP contains the effective `native/runtime-windows-x64.json` and `native/native-build-artifact.json`, not merely the checkout's local candidate manifest. Packaging extracts those two entries again and compares them to the tested artifact. The publish contract also binds the effective manifest and native build receipt to the tested SHA. This design uses internal same-run artifacts and does not require public binary bootstrap publication.
+
+Every configured push to `main` or `release`, and every pull request targeting either branch, runs the package job after Linux and Windows checks succeed. It builds and audits the native payload and installer plugin, exercises installation/overwrite/uninstall in the runner's fresh profile, assembles source/notices/SBOM, and validates the complete same-SHA artifact contract. Successful runs upload `release-<github.sha>` as an internal Actions artifact; this name does not mean a GitHub Release was published. Pull request artifacts use the tested merge SHA. Only a push to `release` can enter the separate publish job, which consumes that run's exact artifact and revalidates it before publishing.
+
+The complete native recipe was also replayed locally from empty object directories with no host mounts; ORT source reconstruction again matched all 1,181 records. Its new libmpv hash differs from the independently Windows-tested local candidate and was retained as recipe-validation output. Local contract and build results do not certify a hosted same-SHA Actions run.
+
+## Installer sources and exact embedded plugin
+
+NSIS 3.11's standard plugins, wizard image and LZMA stub are bound to the official tools archive. The original NSIS source archive, COPYING, Modern UI and NSISdl notices are supplied. LZMA uses CPL-1.0 with NSIS's linking exception; the original module source and explicit source-location notice remain included. [NSIS licensing](https://nsis.sourceforge.io/Docs/AppendixI.html)
+
+`scripts/nsis-plugin-build.ps1` builds the unmodified Tauri utility 0.5.3 source with its reviewed lockfile and a repository-local i686 Rust sysroot. It retains seven exact dependency sources, notices, Rust 1.98.0 runtime sources and the compiler/runtime inventory. Four actual i686 DLL tests passed. The selected DLL SHA-256 is `41099f82a25154cf45c45f8f12a832197a1e5328ae148ef17d8e5cec06a28e31`; the source archive is `209e6f60d8e45838d713d481750bb4d516a6c536925f37a6f19248989a334dfa`. The reusable Rust runtime source/notices also cover the exact verified x64 standard-library release used by the application. See [the plugin recipe](../native/nsis-plugin/README.md).
+
+`scripts/native-installer-prepare.ps1` prepares NSIS under `target/.tauri` and stages the built DLL as `surtitle_nsis_utils.dll`. The custom template is checked against the exact upstream Tauri 2.11.4 template with only the added plugin directory, helper include routing and renamed utility calls. Tauri can validate its normal cache-only plugin, but that plugin is never referenced by the custom template. `scripts/native-installer-audit.ps1` extracts the final NSIS without executing it, requires the built alias, rejects an embedded upstream utility, and checks every standard plugin, helper and notice. The resulting receipt binds those bytes and all corresponding-source packages to the exact installer hash.
+
+The source ZIP contains `native-installer-sources/` with unchanged NSIS source, the locked utility source/vendor tree, Rust runtime source, and the exact installer build receipt. Packaging extracts and rehashes those entries before publication. The separate production probe launches the installed optimized application, checks real UI/IPC/SQLite readiness and native playback/stop/seek, and records executable/DLL hashes plus unchanged zero AI accounting. It complements the broader development-feature E2E suite; their application binaries are not described as identical.
+
+Tauri changes its single 27-byte bundle marker from `__TAURI_BUNDLE_TYPE_VAR_UNK` to `__TAURI_BUNDLE_TYPE_VAR_NSS` while packaging and then restores the original build executable. The installer audit retains both hashes and requires that exact unique marker change, with every other byte equal. The installed-production probe uses the verified embedded hash. No other PE, resource, timestamp or signing changes are accepted by this unsigned-release gate. The exact upstream implementation is retained in `native/upstream-evidence/tauri-bundle-2.11.4.rs`. [Tauri bundle implementation](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.4/crates/tauri-bundler/src/bundle.rs)
+
+## Dev Container and installer lifecycle
+
+See the [Dev Container instructions](../.devcontainer/README.md) for source read/write sharing and the ten temporary output masks. Dependencies/build outputs stay in tmpfs or the container writable layer; no named or anonymous volume is used. The latest local Linux sequence passed with 69 UI tests, 90 Node tests and Rust/Clippy/license checks. A new test selector initially failed; after its correction, all five real Tauri E2E specs completed with 17 passing cases and 8 Windows-only skips. Each invocation uses a fresh profile within the work mask. Selected evidence, including the initial failure and corrected rerun, is retained under `artifacts/devcontainer/completion-gaps-20260909-0714/`; see [implementation status](status.md) for the current verification record. Editor attachment remains a separate untested path and unexpected editor-managed mounts are rejected.
+
+`scripts/package-installer-smoke.ps1` requires a fresh isolated CI runner or explicitly disposable Windows profile and refuses existing Surtitle data/installations. It tests fresh installation, the production application probe, same-version overwrite, and silent uninstall with default database/generated-card-audio retention in a Japanese/space/ampersand path. It also rejects bundled VC/Vulkan/WebView2 payloads. The selected NSIS artifact has been built and inspected locally, but its install/overwrite/uninstall lifecycle has not been executed against this workstation's existing profile. No existing user data is removed to make the test pass.
+
+Read-only inspection on 2026-09-09 found Windows 11 Home, build 26200, with WSL2 Linux environments but no available Windows Sandbox, Hyper-V management tools, or known VirtualBox/VMware/QEMU executable. Windows Home does not support Windows Sandbox or the Hyper-V role. The optional-feature detail query required administrator elevation and was not completed; no features were enabled and no users or guest systems were created. This workstation therefore has no verified disposable Windows environment for the installer lifecycle. The remaining execution requires a fresh Windows CI runner or a separately provisioned disposable Windows VM, preserving the existing profile and its credentials. [Windows Sandbox requirements](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/), [Hyper-V requirements](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/get-started/install-hyper-v)
+
+Release publication remains conditional on a single tested commit, complete source/notices/SBOM, successful Windows installer lifecycle, immutable version tags and server-verified release asset hashes. No commit, push, tag or publication is performed by these implementation changes.

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "pluginVersion": "0.5.3",
+  "sourceCommit": "13d9edd27b69310e108d6fbd49f90992f8a05390",
+  "source": {
+    "file": "nsis-tauri-utils-13d9edd27b69310e108d6fbd49f90992f8a05390.tar.gz",
+    "url": "https://codeload.github.com/tauri-apps/nsis-tauri-utils/tar.gz/13d9edd27b69310e108d6fbd49f90992f8a05390",
+    "sha256": "9b277f7cdec4277b48d319c32e10b5dc4303e9efce8c3b44f1db77f86a8131c7"
+  },
+  "rustVersion": "1.98.0",
+  "rustCommit": "88d9e12ae178fab0fb5cc050a94da85685d449ea",
+  "rustDistributionDate": "2026-08-20",
+  "target": "i686-pc-windows-msvc",
+  "host": "x86_64-pc-windows-msvc",
+  "rustStd": {
+    "file": "rust-std-1.98.0-i686-pc-windows-msvc.tar.xz",
+    "url": "https://static.rust-lang.org/dist/2026-08-20/rust-std-1.98.0-i686-pc-windows-msvc.tar.xz",
+    "sha256": "4fd93ce63ce77358f35851e6b688d2b29e4367e140d710c6f5271f8ebe5b2c33"
+  },
+  "rustSource": {
+    "file": "rust-src-1.98.0.tar.xz",
+    "url": "https://static.rust-lang.org/dist/2026-08-20/rust-src-1.98.0.tar.xz",
+    "sha256": "0e977492aed5ff137815bf9b4b796e8a85b80fb2367ed64e82d5c5839870f2bf"
+  },
+  "cargoLockSha256": "3fa07bf1380a99df96624ccee17820445a789fffec16cae9c8663183c320de9c",
+  "rustHostStd": {
+    "file": "rust-std-1.98.0-x86_64-pc-windows-msvc.tar.xz",
+    "url": "https://static.rust-lang.org/dist/2026-08-20/rust-std-1.98.0-x86_64-pc-windows-msvc.tar.xz",
+    "sha256": "81d123f834111ebeaf8b1eed0e93b0b66ea4bcf4cc1d3836d9a0314d4ea94a73"
+  },
+  "rustRuntimeNotices": [
+    {
+      "file": "COPYRIGHT-library.html",
+      "sha256": "68129500b616d5838629e68f55ff3aed5e096dacf60ce9eb41bbe599a563afa6"
+    },
+    {
+      "file": "licenses/Apache-2.0.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+    },
+    {
+      "file": "licenses/BSD-2-Clause.txt",
+      "sha256": "f32fb3b417a194167cfad068223fc975ba96c5960513a10f66a3c28720aec1df"
+    },
+    {
+      "file": "licenses/CC-BY-SA-4.0.txt",
+      "sha256": "23ee78c8bae49cf08ea2f0c84945c66b987ebe4520881fb51b3dad4fb43d07c2"
+    },
+    {
+      "file": "licenses/GCC-exception-3.1.txt",
+      "sha256": "a3966c9410ef94a1efbfa9ec04e9c1994026a70623fbf0885ce36737bfba3b54"
+    },
+    {
+      "file": "licenses/GPL-2.0-only.txt",
+      "sha256": "54b212ba1f97f6948fa5486239ab505dd820b02e50cbfd296b4062c8609a70af"
+    },
+    {
+      "file": "licenses/GPL-3.0-or-later.txt",
+      "sha256": "05315fce6c35f79b8a35454828995fa26336f235895ac64557abc028f4ffcea2"
+    },
+    {
+      "file": "licenses/ISC.txt",
+      "sha256": "0ff61769b238634e042ab759dddfd104a8e69d091e3600ae3410e401a6164381"
+    },
+    {
+      "file": "licenses/LLVM-exception.txt",
+      "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e"
+    },
+    {
+      "file": "licenses/MIT.txt",
+      "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+    },
+    {
+      "file": "licenses/NCSA.txt",
+      "sha256": "39cb0234065c92b9e6cee3830cbb52b1aa289aa8fe9ba2e66730fec5cf05c630"
+    },
+    {
+      "file": "licenses/OFL-1.1.txt",
+      "sha256": "8eea8287e5876b539670cadb82e99f9a7afddec6f6730811be1daf25d2e9bcfd"
+    },
+    {
+      "file": "licenses/Unicode-3.0.txt",
+      "sha256": "f5062c9a188d81dfe66b56db4182dcf9e4b17c0d9b0d311a8e20b3a1b075c443"
+    }
+  ]
+}

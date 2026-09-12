@@ -1,0 +1,58 @@
+{
+  "name": "Surtitle • Ubuntu 24.04",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspaces/surtitle",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/surtitle,type=bind",
+  "mounts": [],
+  "updateRemoteUserUID": false,
+  "forwardPorts": [
+    1420
+  ],
+  "containerEnv": {
+    "RUST_BACKTRACE": "1",
+    "CARGO_TARGET_DIR": "/opt/surtitle-build/target",
+    "SURTITLE_BUILD_ROOT": "/opt/surtitle-build",
+    "npm_config_store_dir": "/opt/surtitle-build/pnpm-store",
+    "npm_config_cache": "/opt/surtitle-build/npm-cache",
+    "PLAYWRIGHT_BROWSERS_PATH": "/opt/surtitle-build/playwright",
+    "XDG_CACHE_HOME": "/opt/surtitle-build/cache",
+    "TMPDIR": "/opt/surtitle-build/tmp",
+    "WEBKIT_DISABLE_COMPOSITING_MODE": "1"
+  },
+  "postCreateCommand": "bash .devcontainer/initialize.sh && pnpm install --frozen-lockfile --store-dir /opt/surtitle-build/pnpm-store && cargo fetch --locked",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tauri-apps.tauri-vscode",
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  },
+  "runArgs": [
+    "--tmpfs",
+    "/workspaces/surtitle/node_modules:rw,exec,nosuid,nodev,mode=1777",
+    "--tmpfs",
+    "/workspaces/surtitle/target:rw,exec,nosuid,nodev,mode=1777",
+    "--tmpfs",
+    "/workspaces/surtitle/dist:rw,exec,nosuid,nodev,mode=1777",
+    "--tmpfs",
+    "/workspaces/surtitle/work:rw,exec,nosuid,nodev,mode=1777",
+    "--tmpfs",
+    "/workspaces/surtitle/artifacts:rw,exec,nosuid,nodev,mode=1777",
+    "--tmpfs",
+    "/workspaces/surtitle/test-results:rw,exec,nosuid,nodev,mode=1777",
+    "--tmpfs",
+    "/workspaces/surtitle/playwright-report:rw,exec,nosuid,nodev,mode=1777",
+    "--tmpfs",
+    "/workspaces/surtitle/src-tauri/gen:rw,exec,nosuid,nodev,mode=1777",
+    "--tmpfs",
+    "/workspaces/surtitle/src-tauri/resources/native:rw,exec,nosuid,nodev,mode=1777",
+    "--tmpfs",
+    "/workspaces/surtitle/src-tauri/resources/notices:rw,exec,nosuid,nodev,mode=1777"
+  ]
+}

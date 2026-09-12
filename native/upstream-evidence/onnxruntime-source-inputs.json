@@ -1,0 +1,439 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "id": "abseil",
+      "version": "20250814.0",
+      "repository": "abseil/abseil-cpp",
+      "reference": "20250814.0",
+      "url": "https://codeload.github.com/abseil/abseil-cpp/tar.gz/20250814.0",
+      "file": "abseil-20250814.0.tar.gz",
+      "sha512": "4ee1a217203933382e728d354a149253a517150eee7580a0abecc69584b2eb200d91933ef424487e3a3fe0e8ab5e77b0288485cac982171b3585314a4417e7d4",
+      "sha256": "9b2b72d4e8367c0b843fa2bcfa2b08debbe3cee34f7aaa27de55a6cbb3e843db",
+      "bytes": 2235497,
+      "license": "Apache-2.0",
+      "recipeOrigin": "onnxruntime-overlay",
+      "recipeFiles": [
+        {
+          "file": "003-force-cxx-17.patch",
+          "sha256": "6481fcaa774212d1453396c26c5240bdbd3cbb25784a94ffa077651b718cf367"
+        },
+        {
+          "file": "absl_cuda13_member_template.patch",
+          "sha256": "c9677fbb8d25cdcc0e8e1b3f158930fd8e77639d1b0098da9396381be81de733"
+        },
+        {
+          "file": "absl_cuda_warnings.patch",
+          "sha256": "dfc09be4b38a1ff5a4e19fe3781ec86d32196581f644b85a43f4fa851bcc8151"
+        },
+        {
+          "file": "absl_windows.patch",
+          "sha256": "bcd5bf031f6a6e050f9dd1f3c70ee9dadf66744bfe532bb342050333bc0d362c"
+        },
+        {
+          "file": "fix-gcc13-constexpr-function-pointer.patch",
+          "sha256": "4ea325ea617d3b6ed9dc29e09f4d22b9836c99c114d8c4b09e181e8cbae51e6c"
+        },
+        {
+          "file": "fix-heterogeneous_lookup_testing-target.patch",
+          "sha256": "fc84e3f929674dd0f0dfd84e267f7ed431b95417bf69a61149b69c5e40c4ab6c"
+        },
+        {
+          "file": "fix-mingw-dll.patch",
+          "sha256": "da10bf980900c2b8c2bde9028419999a8cfa1ec3c3d77707239459a078231a5c"
+        },
+        {
+          "file": "portfile.cmake",
+          "sha256": "52e589d656eaced348f50630ba47a09196dfcc7814dc3b84b4ed5e0d74b099d6"
+        },
+        {
+          "file": "vcpkg.json",
+          "sha256": "25c433345656361b0847e52c1a80a8519c19e5a10a702cb47eff48f42c3621e4"
+        }
+      ]
+    },
+    {
+      "id": "cpuinfo",
+      "version": "2025-11-18",
+      "repository": "pytorch/cpuinfo",
+      "reference": "4628dc060ce4e82345dc166bbac875609db4ff69",
+      "url": "https://codeload.github.com/pytorch/cpuinfo/tar.gz/4628dc060ce4e82345dc166bbac875609db4ff69",
+      "file": "cpuinfo-4628dc060ce4e82345dc166bbac875609db4ff69.tar.gz",
+      "sha512": "db7a93279f2f6daaf825fbd8552935d8ed671d276b65ad614e11f722b6a6848e663850d65180d33b554d67ef1a36aae842feb368699f90be8f21172a1af1924e",
+      "sha256": "a550205e891f9f1982044a306cb54556347645cba129af34cd907160f83bd0f1",
+      "bytes": 3553030,
+      "license": "BSD-2-Clause",
+      "recipeOrigin": "onnxruntime-overlay",
+      "recipeFiles": [
+        {
+          "file": "add-clog-cmake.patch",
+          "sha256": "def65130029c278264e29f69b77d668a0559f596df1e1a3643c61071220b3c41"
+        },
+        {
+          "file": "patch_cpuinfo_h_for_arm64ec.patch",
+          "sha256": "74e9561300fb25ae31134f70ef2fc3ab02bfe9b839c04eee32e93ddb098164fb"
+        },
+        {
+          "file": "patch_vcpkg_arm64ec_support.patch",
+          "sha256": "b56750cb5bc60600b3b67aef1480ab38c4882865a30c55525f50a2b83ed45d75"
+        },
+        {
+          "file": "portfile.cmake",
+          "sha256": "1bb906e58b2807556357b4ad5f1360741ea62dd45423c83313d831d36a6d1403"
+        },
+        {
+          "file": "vcpkg.json",
+          "sha256": "73d66229974ecfe1cc7d1d57122c0df740da382a3411e6f27da3607ea213a1ac"
+        }
+      ]
+    },
+    {
+      "id": "onnx",
+      "version": "1.22.0",
+      "repository": "onnx/onnx",
+      "reference": "v1.22.0",
+      "url": "https://codeload.github.com/onnx/onnx/tar.gz/v1.22.0",
+      "file": "onnx-v1.22.0.tar.gz",
+      "sha512": "13fafff073a8e0bcf67fd06195da979c3c6273b3f5fdd25f5e5c39ad6af20eefe107f13dc73d52b6021e986d87401e46121e00bba8fbd09f098334e34f78462f",
+      "sha256": "70bb8b25cf31ea9b1d9f94baacfdc8c4fa27a760f9a10f5d93881bc9eede5fbc",
+      "bytes": 13687818,
+      "license": "Apache-2.0",
+      "recipeOrigin": "onnxruntime-overlay",
+      "recipeFiles": [
+        {
+          "file": "binskim.patch",
+          "sha256": "1470c713e0399e690e8c057e7e1a05456f66e010bd3c9804b7a989eaded70935"
+        },
+        {
+          "file": "fix-cmakelists.patch",
+          "sha256": "18266602500bd4f7f1ebba0a0b20ecbd14c10c3dfb2692bc6c871f1dea876781"
+        },
+        {
+          "file": "fix-dependency-protobuf.patch",
+          "sha256": "a02892e3657d4b7d80d700e774a0266a5dfb8d87125a129d15e0890514f16fe6"
+        },
+        {
+          "file": "fix-pr-7390.patch",
+          "sha256": "980af94b12198571fb8aad5558633ff0f60090c0975e62cc562454a8d5e0e139"
+        },
+        {
+          "file": "portfile.cmake",
+          "sha256": "c27a4455d11b86aa20ab3e77c7ba0d2d1acd26d3529ea4f1f6af8ef893c10f1b"
+        },
+        {
+          "file": "vcpkg.json",
+          "sha256": "b5cacb985e8f11be393ecc23906e203c6ba3db3dd4ddc8087bff613d06972bb0"
+        }
+      ]
+    },
+    {
+      "id": "protobuf",
+      "version": "3.21.12",
+      "repository": "protocolbuffers/protobuf",
+      "reference": "v3.21.12",
+      "url": "https://codeload.github.com/protocolbuffers/protobuf/tar.gz/v3.21.12",
+      "file": "protobuf-v3.21.12.tar.gz",
+      "sha512": "152f8441c325e808b942153c15e82fdb533d5273b50c25c28916ec568ada880f79242bb61ee332ac5fb0d20f21239ed6f8de02ef6256cc574b1fc354d002c6b0",
+      "sha256": "930c2c3b5ecc6c9c12615cf5ad93f1cd6e12d0aba862b572e076259970ac3a53",
+      "bytes": 5141502,
+      "license": "BSD-3-Clause",
+      "recipeOrigin": "onnxruntime-overlay",
+      "recipeFiles": [
+        {
+          "file": "compile_options.patch",
+          "sha256": "2cee33ca7844b27e275ebed87fe419e432f9ed774c539c0aee8cc5b1923710a9"
+        },
+        {
+          "file": "fix-constinit-with-clang-cl.patch",
+          "sha256": "44d38cd5e71ac40876c4362333f3acf39c149963955fd9f27fd015b2d3297192"
+        },
+        {
+          "file": "fix-default-proto-file-path.patch",
+          "sha256": "a991a3e51e4c0d91b30b5dcaacee9009abf510dd172efa08c9184f7d0609e3e1"
+        },
+        {
+          "file": "fix-install-dirs.patch",
+          "sha256": "95c5ca6b16abf70b9d01437e26e1ff7e3c35606a968a97ce42a58faddb4725a3"
+        },
+        {
+          "file": "fix-static-build.patch",
+          "sha256": "8997787fc7f393557f86475f448156fee9720f79014f7cdf398668647b525316"
+        },
+        {
+          "file": "fix-upb.patch",
+          "sha256": "06128eeba4fd6271c423cbb2167c0442c1cd46e6fbff59a9a87c325979af86d2"
+        },
+        {
+          "file": "fix-utf8-range.patch",
+          "sha256": "28b3cd5a56819250371551c3c066f19466dd3defe045d408a0b1beb7a44b5344"
+        },
+        {
+          "file": "portfile.cmake",
+          "sha256": "09866b61d69350ca381fd0fabe989bb8cc84b3d0c73ea6dcc90e8b125d0066ff"
+        },
+        {
+          "file": "protobuf-targets-vcpkg-protoc.cmake",
+          "sha256": "b6392072936942aef973ec15da763076831774502c59241ddbc104e0beceab64"
+        },
+        {
+          "file": "protobuf_cmake.patch",
+          "sha256": "22e798efa9d588c00c6fa5eefbc2a530e45147ba75f0a1e823dce40c686bad54"
+        },
+        {
+          "file": "vcpkg-cmake-wrapper.cmake",
+          "sha256": "aab3824ed66b1e4eaf11064fe2ea2183588ab807dbc70b6cb0ddc85a1f93d03c"
+        },
+        {
+          "file": "vcpkg.json",
+          "sha256": "ceacca14a04561228ab6e25f5701a32baed9b37bd1617e0041c39e23e19be735"
+        }
+      ]
+    },
+    {
+      "id": "re2",
+      "version": "2025-11-05",
+      "repository": "google/re2",
+      "reference": "927f5d53caf8111721e734cf24724686bb745f55",
+      "url": "https://codeload.github.com/google/re2/tar.gz/927f5d53caf8111721e734cf24724686bb745f55",
+      "file": "re2-927f5d53caf8111721e734cf24724686bb745f55.tar.gz",
+      "sha512": "35103a46a6350084f2d09ccfcf4322dac7364c61fbdad8bfcbd41b39990f83a260d2a8cd5ca019a3f24b71faf1588c7dabf07c3dddae5268bcc5b9502b87658a",
+      "sha256": "8635bc46ac8d73974b4198229805287c8d620245f2081af155d7d96d4988a3a5",
+      "bytes": 397888,
+      "license": "BSD-3-Clause",
+      "recipeOrigin": "vcpkg-baseline-18a4723aeb7adbbae84bcff0edf510883800f32f",
+      "recipeFiles": [
+        {
+          "file": "portfile.cmake",
+          "sha256": "b85f302d11f21ba7cedd228b4a96dff9dfa7317979047b62c9cfb2d329147de4"
+        },
+        {
+          "file": "vcpkg.json",
+          "sha256": "050234748a052b8f27341586826521cc34ebe5877985db1bbcd7fa568e577fcd"
+        }
+      ]
+    },
+    {
+      "id": "eigen3",
+      "version": "3.4.0",
+      "repository": "libeigen/eigen",
+      "reference": "1d8b82b0740839c0de7f1242a3585e3390ff5f33",
+      "url": "https://gitlab.com/libeigen/eigen/-/archive/1d8b82b0740839c0de7f1242a3585e3390ff5f33/eigen-1d8b82b0740839c0de7f1242a3585e3390ff5f33.tar.gz",
+      "file": "eigen3-1d8b82b0740839c0de7f1242a3585e3390ff5f33.tar.gz",
+      "sha512": "26a0d86ece9a28c93d64ee3e6ff96276b096a80e34fa2f3c474638824ffa2c56e582d9b2b9ffbb73b18a28b4828b827654b65a3471bc83505c48feab26fb836d",
+      "sha256": "c8adb6532fbfacd2ec1418c66404159b00c34d855bdc19cefa1f0db0e5e0aa5f",
+      "bytes": 2894190,
+      "license": "MPL-2.0",
+      "recipeOrigin": "onnxruntime-overlay",
+      "recipeFiles": [
+        {
+          "file": "fix-vectorized-reductions-half.patch",
+          "sha256": "ca4b1fd2f2a8e7805d167157478eb63f42ae852e00697720730dc3e58e73e025"
+        },
+        {
+          "file": "portfile.cmake",
+          "sha256": "fb2304afbb8f71650c255926732de8aa6f55f7dba9abcf3a318b741f794fd402"
+        },
+        {
+          "file": "remove_configure_checks.patch",
+          "sha256": "60acd9d6811fb26f44bef80ef6f7d852f2b2d622157168076d560f48419edac4"
+        },
+        {
+          "file": "update-warning-suppression-to-latest.patch",
+          "sha256": "f1a340d2833b33d828d494c2120fdd110e543857cce0596835f289d53e1b511c"
+        },
+        {
+          "file": "vcpkg.json",
+          "sha256": "1552c959c3600a2fd6d05ed79ea028da51216a565960dfdb20b05e252292be00"
+        }
+      ]
+    },
+    {
+      "id": "nlohmann-json",
+      "version": "3.12.0",
+      "repository": "nlohmann/json",
+      "reference": "v3.12.0",
+      "url": "https://codeload.github.com/nlohmann/json/tar.gz/v3.12.0",
+      "file": "nlohmann-json-v3.12.0.tar.gz",
+      "sha512": "6cc1e86261f8fac21cc17a33da3b6b3c3cd5c116755651642af3c9e99bb3538fd42c1bd50397a77c8fb6821bc62d90e6b91bcdde77a78f58f2416c62fc53b97d",
+      "sha256": "4b92eb0c06d10683f7447ce9406cb97cd4b453be18d7279320f7b2f025c10187",
+      "bytes": 9678593,
+      "license": "MIT",
+      "recipeOrigin": "vcpkg-baseline-18a4723aeb7adbbae84bcff0edf510883800f32f",
+      "recipeFiles": [
+        {
+          "file": "fix-4736_char8_t.patch",
+          "sha256": "4c0177c5b4c4fb0978b54e2e113d2c76865059a85aa1b060b87f441056813fde"
+        },
+        {
+          "file": "fix-4742_std_optional.patch",
+          "sha256": "218c2182366f1e9b997fc81f1b27b951a1438a3578f8e0cb22a1957cc326ccbd"
+        },
+        {
+          "file": "portfile.cmake",
+          "sha256": "9bae6425097eb8d78e6f9a213de5258a3dfac57056e4c42e76a3a8d805fbdc1b"
+        },
+        {
+          "file": "usage",
+          "sha256": "ec6460d4688d7908d8adc698700f77639013641f1ab27066e9324c9ca11276c3"
+        },
+        {
+          "file": "vcpkg.json",
+          "sha256": "b576fa660ad7fcd9aa0324cc775b596d48aa7f14c993f63b23865a8673835310"
+        }
+      ]
+    },
+    {
+      "id": "boost-config",
+      "version": "1.91.0",
+      "repository": "boostorg/config",
+      "reference": "boost-1.91.0",
+      "url": "https://codeload.github.com/boostorg/config/tar.gz/boost-1.91.0",
+      "file": "boost-config-boost-1.91.0.tar.gz",
+      "sha512": "e2f264e3986000656a1c46930e2ce6a83ab07d09a88c286ce0b2509e56760549a1dcffd6c0f81d2edb019fdb632b7ec0ccaa9948e29d8b4b6f67dfc18e804c11",
+      "sha256": "e69618fa862927db69b4dd8e6b070c647a799b892fd0ee141d28db0dab025531",
+      "bytes": 399041,
+      "license": "BSL-1.0",
+      "recipeOrigin": "vcpkg-baseline-18a4723aeb7adbbae84bcff0edf510883800f32f",
+      "recipeFiles": [
+        {
+          "file": "portfile.cmake",
+          "sha256": "c5d26335a724c615e17eef807f665126f799e0876128259d2ead145cebdde01c"
+        },
+        {
+          "file": "vcpkg.json",
+          "sha256": "f207e58d433be77781ec0109bb92b4b86b399c52759ff7b0d23b0726f52aacbe"
+        }
+      ]
+    },
+    {
+      "id": "boost-mp11",
+      "version": "1.91.0",
+      "repository": "boostorg/mp11",
+      "reference": "boost-1.91.0",
+      "url": "https://codeload.github.com/boostorg/mp11/tar.gz/boost-1.91.0",
+      "file": "boost-mp11-boost-1.91.0.tar.gz",
+      "sha512": "5951acc5ab2f5661d9ac84654b6ba2761455469c9e2b52236ad4bbd5f1feac7c136fd07144dbf6954143e80b0dc12da09165f31e42107eb682bca4e46bf93225",
+      "sha256": "6ab871e0ef397a2e7b0602f13a5f473a7381043c91b57fe907ca4925a6a1ee58",
+      "bytes": 130942,
+      "license": "BSL-1.0",
+      "recipeOrigin": "vcpkg-baseline-18a4723aeb7adbbae84bcff0edf510883800f32f",
+      "recipeFiles": [
+        {
+          "file": "portfile.cmake",
+          "sha256": "07dc7ce5a695d190a2df09354e2d299efadcf114033dca7655a18dfb522e5a3b"
+        },
+        {
+          "file": "vcpkg.json",
+          "sha256": "f006df072af0aa4839d764c757d9c75394e9a21d3576f0584ebe262a63eea1eb"
+        }
+      ]
+    },
+    {
+      "id": "flatbuffers",
+      "version": "23.5.26",
+      "repository": "google/flatbuffers",
+      "reference": "v23.5.26",
+      "url": "https://codeload.github.com/google/flatbuffers/tar.gz/v23.5.26",
+      "file": "flatbuffers-v23.5.26.tar.gz",
+      "sha512": "cd0a5efad8016e1217d01a181d6b02e546f5693c6412361bfeaee820d5dfe5e2a424cee1963270e851c1a4f936ae8a0032a51c5bb16ee19313e0ecc77dc4ba31",
+      "sha256": "1cce06b17cddd896b6d73cc047e36a254fb8df4d7ea18a46acf16c4c0cd3f3f3",
+      "bytes": 2257271,
+      "license": "Apache-2.0",
+      "recipeOrigin": "vcpkg-history-5146d5516c8570263780a1cdf73df98d70936e07",
+      "recipeFiles": [
+        {
+          "file": "fix-uwp-build.patch",
+          "sha256": "8a363f9e6052511d97a477795304bd14f0009f2ee9ba0423dedc4032d98351de"
+        },
+        {
+          "file": "portfile.cmake",
+          "sha256": "e62979f89d3d8bb0e85d9ca3c405e043cadfd6a0f4d808d970ac6e6680c905ba"
+        },
+        {
+          "file": "vcpkg.json",
+          "sha256": "71eb624e166c3a202fcfeed1bd24282e0a232a33f2ccababefd44a2313e57c13"
+        }
+      ]
+    },
+    {
+      "id": "ms-gsl",
+      "version": "4.2.2",
+      "repository": "Microsoft/GSL",
+      "reference": "v4.2.2",
+      "url": "https://codeload.github.com/Microsoft/GSL/tar.gz/v4.2.2",
+      "file": "ms-gsl-v4.2.2.tar.gz",
+      "sha512": "3b9eb1c670dadc5f14e2ffedc225a8b60164853d3f9099d37d03ec4a6c2d88c6184ff16f930395b047248cd92d0034c93fb42aa73472b5dced8d8d63eace8223",
+      "sha256": "59e2a0a0ea22e8bcf9db2dc4d4bd21212ac6595748295fc27a7e02cf75eac4b5",
+      "bytes": 62316,
+      "license": "MIT",
+      "recipeOrigin": "vcpkg-baseline-18a4723aeb7adbbae84bcff0edf510883800f32f",
+      "recipeFiles": [
+        {
+          "file": "portfile.cmake",
+          "sha256": "24948a60556ad3ef8cbbf8e7c24527d82ab36073d378e0bd5b05eb3949415673"
+        },
+        {
+          "file": "vcpkg.json",
+          "sha256": "c8f2a3675022bb21e2d43be7d303e89af7eb4f976b1a4b824324e8248251890e"
+        }
+      ]
+    },
+    {
+      "id": "wil",
+      "version": "1.0.260126.7",
+      "repository": "Microsoft/wil",
+      "reference": "v1.0.260126.7",
+      "url": "https://codeload.github.com/Microsoft/wil/tar.gz/v1.0.260126.7",
+      "file": "wil-v1.0.260126.7.tar.gz",
+      "sha512": "0ee05a1beccf17478a34f5c9251a9291b98584e87f113dbeff8cb0466ca53dc60740a4dc961d67bbe3cf77181571cf76d3f204070fa46cd6f3a595305ffe7700",
+      "sha256": "de9e03b38ff0ff8d22048f00b111cb631d21c550328f12530ccba71c05c9e361",
+      "bytes": 550496,
+      "license": "MIT",
+      "recipeOrigin": "vcpkg-baseline-18a4723aeb7adbbae84bcff0edf510883800f32f",
+      "recipeFiles": [
+        {
+          "file": "cpp14.patch",
+          "sha256": "ab863a7c685b2b35118083c5ff5881a332ab76e1f9aec0b120113dff9522e55c"
+        },
+        {
+          "file": "portfile.cmake",
+          "sha256": "8f7163e64b47902c13eb8acc3aafc7ab47bfe43f0f11699ee395bdfd9cd00bf2"
+        },
+        {
+          "file": "vcpkg.json",
+          "sha256": "8cba735e6f8364ebe097a1cd6e1eafa6d5aa2e029d150b8802f2ff0f3d703766"
+        }
+      ]
+    },
+    {
+      "id": "safeint",
+      "version": "3.0.28",
+      "repository": "dcleblanc/SafeInt",
+      "reference": "3.0.28",
+      "url": "https://codeload.github.com/dcleblanc/SafeInt/tar.gz/3.0.28",
+      "file": "safeint-3.0.28.tar.gz",
+      "sha512": "9f0be3f42b05ce3ea0b8208d5d5277167b129e77dc7e15174d0e3e038cb886b16a3cb63918b4f2e21ba79021f45ee6486ff9aa61d9f856828b291699c1355f61",
+      "sha256": "d6b164bcea92a746e4d44132e505c7ab1816d1089ba99ebc674ccd4b70262ed5",
+      "bytes": 579420,
+      "license": null,
+      "recipeOrigin": "vcpkg-baseline-18a4723aeb7adbbae84bcff0edf510883800f32f",
+      "recipeFiles": [
+        {
+          "file": "portfile.cmake",
+          "sha256": "8ffbe8a35d455af1e21afc9d66b9e453855fb290199e1b41c705e6afcaf885b2"
+        },
+        {
+          "file": "vcpkg.json",
+          "sha256": "d64c6e8315b7c27c9e06c2d3b9679ae9aa3cfbe8c3ccd560f33d798c14b069bc"
+        }
+      ]
+    }
+  ],
+  "complete": true,
+  "releaseEligible": false,
+  "remainingChecks": [
+    "Apply conditional patches and compare PDB source/header checksums",
+    "Per-component redistribution review and source packaging",
+    "Microsoft runtime entitlement"
+  ]
+}

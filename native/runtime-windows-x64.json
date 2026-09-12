@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "platform": "windows-x64",
+  "purpose": "Intended Windows distribution: source-built libmpv and official CPU ONNX Runtime; Microsoft VC Runtime is a separately installed prerequisite.",
+  "components": [
+    {
+      "id": "libmpv",
+      "version": "0.41.0-surtitle-source-20260909",
+      "provider": "Surtitle source build in isolated Linux container (MinGW x64)",
+      "sourcePage": "https://github.com/mpv-player/mpv/tree/41f6a645068483470267271e1d09966ca3b9f413",
+      "upstreamSourceCommit": "41f6a645068483470267271e1d09966ca3b9f413",
+      "archiveUrl": null,
+      "archiveFile": null,
+      "archiveSha256": null,
+      "digestProvenance": "Locally built candidate; reviewed source/recipe and exact output hashes, with Windows application/AV1 evidence. Future same-SHA CI builds have separate effective hashes.",
+      "runtimeFiles": [
+        {
+          "source": "mpv-2.dll",
+          "target": "mpv-2.dll",
+          "sha256": "6d52b35d9c014b9df432b171523880505a73c3f0425226cf939e64570379be06"
+        }
+      ],
+      "noticeFiles": [
+        {
+          "path": "native/libmpv-ThirdPartyNotices.txt",
+          "sha256": "8c45422d43377c6ecc4711d7db9247a89b2c9a664c26063f98b0c77ec8889740"
+        }
+      ],
+      "buildEvidence": [
+        "native/reviews/libmpv-dependencies.json"
+      ],
+      "redistribution": {
+        "status": "complete",
+        "reason": "Exact source/notice evidence retained; Microsoft runtimes are an external prerequisite.",
+        "reviewEvidence": {
+          "path": "native/reviews/libmpv.json",
+          "sha256": "f44654b52194d2814d3b9d20515842683518428b95cc2b18c42c9c01ad84cce0"
+        },
+        "dependencyInventory": {
+          "path": "native/reviews/libmpv-dependencies.json",
+          "sha256": "a1d58b5e9c33f05908070612e92ce0b6a4e0b961f0c212e48a114152ae9419f7"
+        },
+        "correspondingSource": {
+          "path": "work/native-candidate-av1-20260909/libmpv-candidate-source.tar.gz",
+          "sha256": "faef56ae474043a4d8edc5ce2bcdef7691e078d3df337a4c52990ee09c02dc0a"
+        }
+      },
+      "format": "source-build",
+      "localRuntimePath": "work/native-candidate-av1-20260909/runtime"
+    },
+    {
+      "id": "onnxruntime",
+      "version": "1.29.0",
+      "provider": "microsoft/onnxruntime (official CPU release)",
+      "sourcePage": "https://github.com/microsoft/onnxruntime/releases/tag/v1.29.0",
+      "archiveUrl": "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-win-x64-1.29.0.zip",
+      "archiveFile": "ort.zip",
+      "archiveSha256": "c9b4b7086b529ad814f428c1bad028e20a25d7dc0699836775faace4ab5b78b2",
+      "digestProvenance": "GitHub release asset digest over HTTPS; not a separate publisher signature",
+      "runtimeFiles": [
+        {
+          "source": "onnxruntime-win-x64-1.29.0/lib/onnxruntime.dll",
+          "target": "onnxruntime.dll",
+          "sha256": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471"
+        },
+        {
+          "source": "onnxruntime-win-x64-1.29.0/lib/onnxruntime_providers_shared.dll",
+          "target": "onnxruntime_providers_shared.dll",
+          "sha256": "87f6878cdc1f80b3a9afa5b0c84663315030b4957f5bbb6b66470557cb2f48d8"
+        }
+      ],
+      "noticeFiles": [
+        {
+          "path": "native/onnxruntime-LICENSE",
+          "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674"
+        },
+        {
+          "path": "native/onnxruntime-ThirdPartyNotices.txt",
+          "sha256": "4c5b864d8974c94b37461f38163facef79a1bb5dea461667ee9e5be6a8e73f83"
+        },
+        {
+          "path": "native/onnxruntime-ActualDependencyNotices.txt",
+          "sha256": "47e9332ddffbbf95316f24e788df3baf77124d8a9ee0ad1d5cde257ba2a1c8fd"
+        }
+      ],
+      "redistribution": {
+        "status": "complete",
+        "reason": "Exact source/notice evidence retained; Microsoft runtimes are an external prerequisite.",
+        "reviewEvidence": {
+          "path": "native/reviews/onnxruntime.json",
+          "sha256": "a59ed08c6873a4f5d3ce78bcbdfbed4aa7708871e840ea7b846c77c40a4e21e5"
+        },
+        "dependencyInventory": {
+          "path": "native/reviews/onnxruntime-dependencies.json",
+          "sha256": "cf731b4051a571e05d6f3391c385aded5dfceb6bf1cbc398ac81dd73ac1d3747"
+        },
+        "correspondingSource": {
+          "path": "work/native-ci-replay-20260909/onnxruntime-source.tar.gz",
+          "sha256": "1daba056b30e7d4b639ef2c44ab8d8dd59af8bbb79388ea1780b4ac8488c851d"
+        }
+      }
+    }
+  ],
+  "models": [
+    {
+      "id": "silero-vad",
+      "version": "6.2",
+      "sourceCommit": "be95df9152c0d7618fa1edfeb296fc3dae32376f",
+      "url": "https://raw.githubusercontent.com/snakers4/silero-vad/be95df9152c0d7618fa1edfeb296fc3dae32376f/src/silero_vad/data/silero_vad.onnx",
+      "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+      "developmentPath": "work/native-fixtures/silero_vad.onnx",
+      "installedPath": "models/silero_vad.onnx",
+      "bundled": false,
+      "license": "MIT",
+      "noticePath": "native/silero-LICENSE",
+      "noticeSha256": "2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b"
+    }
+  ],
+  "prerequisites": [
+    {
+      "id": "microsoft-vc-runtime-x64",
+      "minimumVersion": "14.44.35211.0",
+      "bundled": false,
+      "installedBy": "Microsoft interactive installer after explicit user consent",
+      "downloadUrl": "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+      "requiredSystemFiles": [
+        "msvcp140.dll",
+        "msvcp140_1.dll",
+        "vcruntime140.dll",
+        "vcruntime140_1.dll"
+      ],
+      "checkBeforeAppLaunch": true,
+      "hookPath": "native/windows-prerequisite.nsh",
+      "helperPath": "native/vc-prerequisite.ps1",
+      "hookSha256": "431816b28151c3a7db3f93b6551b95426bf21d8da92c2ea1e4bddd1cee34a323",
+      "helperSha256": "79f4b46cb3f8bf771185ceb8e8366a190e3713760870f5564a87fed29955789a"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "kind": "translation",
+  "target_language": "ja",
+  "cues": [
+    { "id": "check-1", "start_ms": 0, "end_ms": 3000, "text": "I look forward to our next lesson." },
+    { "id": "check-2", "start_ms": 3000, "end_ms": 6000, "text": "Let's take a break before we carry on." }
+  ]
+}

@@ -1,0 +1,165 @@
+import { createHash } from 'node:crypto';
+import { readFile, readdir, mkdir, writeFile, realpath, stat } from 'node:fs/promises';
+import { dirname, resolve, relative, isAbsolute, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const manifest = JSON.parse(await readFile(resolve(root, 'native/runtime-windows-x64.json'), 'utf8'));
+const runtime = resolve(root, 'src-tauri/resources/native');
+const errors = [], blockers = [], components = [];
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+function inside(base, path) { const rel = relative(base, path); return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel); }
+async function checkedFile(path, expected) {
+  const resolved = await realpath(path);
+  if (!inside(root, resolved)) throw new Error(`File resolves outside repository: ${path}`);
+  const bytes = await readFile(resolved);
+  if (!/^[0-9a-f]{64}$/i.test(expected) || sha256(bytes) !== expected.toLowerCase()) throw new Error(`SHA-256 mismatch: ${relative(root, path)}`);
+  return bytes;
+}
+function peInfo(bytes) {
+  if (bytes.length < 0x40 || bytes.readUInt16LE(0) !== 0x5a4d) throw new Error('Invalid PE DOS header');
+  const pe = bytes.readUInt32LE(0x3c);
+  if (pe + 24 > bytes.length || bytes.toString('ascii', pe, pe + 4) !== 'PE\0\0') throw new Error('Invalid PE signature');
+  const machine = bytes.readUInt16LE(pe + 4), count = bytes.readUInt16LE(pe + 6), optionalSize = bytes.readUInt16LE(pe + 20);
+  const optional = pe + 24;
+  if (machine !== 0x8664 || bytes.readUInt16LE(optional) !== 0x20b) throw new Error('Native DLL is not Windows x64 PE32+');
+  const sections = Array.from({ length: count }, (_, i) => {
+    const at = optional + optionalSize + i * 40;
+    return { virtualSize: bytes.readUInt32LE(at + 8), rva: bytes.readUInt32LE(at + 12), rawSize: bytes.readUInt32LE(at + 16), raw: bytes.readUInt32LE(at + 20) };
+  });
+  function offset(rva) {
+    const section = sections.find(s => rva >= s.rva && rva < s.rva + Math.max(s.virtualSize, s.rawSize));
+    if (!section) throw new Error('PE import RVA is outside sections');
+    const value = section.raw + rva - section.rva;
+    if (value >= bytes.length) throw new Error('PE import offset exceeds file');
+    return value;
+  }
+  function dllName(rva) {
+    const start = offset(rva), end = bytes.indexOf(0, start);
+    if (end < start || end - start > 512) throw new Error('Invalid imported DLL name');
+    const name = bytes.toString('ascii', start, end);
+    if (!/^[a-z0-9_.-]+\.dll$/i.test(name)) throw new Error('Unsafe imported DLL name');
+    return name;
+  }
+  const importRva = bytes.readUInt32LE(optional + 120), imports = [], delayImports = [];
+  if (importRva) {
+    let at = offset(importRva);
+    for (let i = 0; i < 512; i++, at += 20) {
+      if (at + 20 > bytes.length) throw new Error('Truncated import table');
+      const nameRva = bytes.readUInt32LE(at + 12);
+      if (!nameRva) break;
+      imports.push(dllName(nameRva));
+    }
+  }
+  const delayRva = bytes.readUInt32LE(optional + 112 + 13 * 8);
+  if (delayRva) {
+    let at = offset(delayRva);
+    for (let i = 0; i < 512; i++, at += 32) {
+      if (at + 32 > bytes.length) throw new Error('Truncated delay import table');
+      const attributes = bytes.readUInt32LE(at), nameRva = bytes.readUInt32LE(at + 4);
+      if (!nameRva) break;
+      if (attributes !== 1) throw new Error('Unsupported non-RVA delay import table');
+      delayImports.push(dllName(nameRva));
+    }
+  }
+  return { machine: 'x86_64', imports, delayImports };
+}
+const expectedDlls = new Set();
+for (const component of manifest.components) {
+  const result = { id: component.id, version: component.version, provider: component.provider, files: [], notices: [], redistribution: component.redistribution };
+  for (const file of component.runtimeFiles) {
+    expectedDlls.add(file.target.toLowerCase());
+    try {
+      if (basename(file.target) !== file.target) throw new Error('Unsafe DLL target');
+      const bytes = await checkedFile(resolve(runtime, file.target), file.sha256);
+      result.files.push({ file: file.target, sha256: file.sha256, ...peInfo(bytes), verified: true });
+    } catch (error) { errors.push(`${component.id}: ${error.message}`); }
+  }
+  for (const notice of component.noticeFiles) {
+    try {
+      await checkedFile(resolve(root, notice.path), notice.sha256);
+      await checkedFile(resolve(runtime, basename(notice.path)), notice.sha256);
+      result.notices.push({ path: notice.path, sha256: notice.sha256, shipped: true });
+    } catch (error) { errors.push(`${component.id} notice: ${error.message}`); }
+  }
+  const review = component.redistribution;
+  if (review.status !== 'complete') blockers.push(`${component.id}: ${review.reason}`);
+  // A status flag alone cannot waive absent evidence. Any future review must
+  // identify actual hashed files committed/generated by the release workflow.
+  for (const [field, required] of [['reviewEvidence', true], ['dependencyInventory', true], ['correspondingSource', component.id === 'libmpv']]) {
+    const evidence = review[field];
+    if (required && !evidence) blockers.push(`${component.id}: missing ${field}`);
+    if (evidence) {
+      try {
+        await checkedFile(resolve(root, evidence.path), evidence.sha256);
+        if ((await stat(resolve(root, evidence.path))).size === 0) throw new Error('Empty evidence');
+      } catch (error) { blockers.push(`${component.id} ${field}: ${error.message}`); }
+    }
+  }
+  components.push(result);
+}
+// Windows platform DLLs and explicit separately installed prerequisites have
+// different evidence paths. A prerequisite is never a bundled or verified DLL.
+const vcPrerequisite = manifest.prerequisites?.find(item => item.id === 'microsoft-vc-runtime-x64');
+const vcNames = ['msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'];
+if (!vcPrerequisite || vcPrerequisite.bundled !== false || vcPrerequisite.checkBeforeAppLaunch !== true ||
+    vcPrerequisite.minimumVersion !== '14.44.35211.0' ||
+    !Array.isArray(vcPrerequisite.requiredSystemFiles) || JSON.stringify([...vcPrerequisite.requiredSystemFiles].sort()) !== JSON.stringify([...vcNames].sort())) {
+  errors.push('Missing or invalid separately installed Microsoft VC prerequisite contract');
+}
+if (vcNames.some(name => expectedDlls.has(name))) errors.push('Microsoft VC runtime DLLs must not be bundled with the GPL application');
+for (const field of ['hook', 'helper']) {
+  try { await checkedFile(resolve(root, vcPrerequisite[`${field}Path`]), vcPrerequisite[`${field}Sha256`]); }
+  catch (error) { errors.push(`VC prerequisite ${field}: ${error.message}`); }
+}
+const tauri = JSON.parse(await readFile(resolve(root, 'src-tauri/tauri.conf.json'), 'utf8'));
+if (tauri.bundle?.windows?.nsis?.installerHooks !== '../native/windows-prerequisite.nsh') errors.push('The NSIS runtime prerequisite hook is not configured');
+if (tauri.bundle?.windows?.webviewInstallMode?.type !== 'downloadBootstrapper') errors.push('WebView2 must remain a separately downloaded Microsoft prerequisite');
+if (process.env.GITHUB_SHA) {
+  try {
+    const { validateNativeArtifact } = await import('./native-ci-contract.mjs');
+    validateNativeArtifact(resolve(root, 'work/native-ci-artifact'), root, process.env.GITHUB_SHA);
+    if (manifest.buildBinding?.sha !== process.env.GITHUB_SHA) throw new Error('Effective native manifest belongs to another commit');
+  } catch (error) { errors.push(`Same-SHA native build contract: ${error.message}`); }
+}
+const windowsSystemDlls = new Set([
+  'advapi32.dll', 'avicap32.dll', 'avrt.dll', 'bcrypt.dll', 'bcryptprimitives.dll',
+  'cfgmgr32.dll', 'combase.dll', 'crypt32.dll', 'd2d1.dll', 'd3d11.dll', 'd3d12.dll',
+  'd3dcompiler_47.dll', 'dbghelp.dll', 'dcomp.dll', 'dwmapi.dll', 'dwrite.dll',
+  'dxgi.dll', 'gdi32.dll', 'imm32.dll', 'iphlpapi.dll', 'kernel32.dll',
+  'mf.dll', 'mfplat.dll', 'mfreadwrite.dll', 'mfuuid.dll', 'msvcrt.dll', 'normaliz.dll', 'ntdll.dll',
+  'ole32.dll', 'oleaut32.dll', 'opengl32.dll', 'powrprof.dll', 'propsys.dll',
+  'rpcrt4.dll', 'secur32.dll', 'setupapi.dll', 'shcore.dll', 'shell32.dll',
+  'shlwapi.dll', 'ucrtbase.dll', 'user32.dll', 'userenv.dll', 'uxtheme.dll',
+  'version.dll', 'winmm.dll', 'wintrust.dll', 'wldap32.dll', 'ws2_32.dll',
+]);
+const dependencyClosure = [];
+for (const component of components) for (const file of component.files) {
+  for (const [kind, names] of [['import', file.imports], ['delay-import', file.delayImports]]) {
+    for (const name of names) {
+      const normalized = name.toLowerCase();
+      const system = windowsSystemDlls.has(normalized) || /^(api|ext)-ms-win-[a-z0-9-]+\.dll$/.test(normalized);
+      const resolution = expectedDlls.has(normalized) ? 'verified-app-local' : system ? 'windows-system' : vcNames.includes(normalized) && vcPrerequisite ? 'separately-installed-microsoft-prerequisite' : 'unresolved';
+      dependencyClosure.push({ from: file.file, name, kind, resolution });
+      if (resolution === 'unresolved') errors.push(`Unresolved non-system DLL dependency: ${file.file} -> ${name}`);
+    }
+  }
+}
+try {
+  for (const name of await readdir(runtime)) {
+    if (name.toLowerCase().endsWith('.dll') && !expectedDlls.has(name.toLowerCase())) errors.push(`Unmanifested native DLL: ${name}`);
+    if (name.toLowerCase().endsWith('.onnx')) errors.push(`Model must be downloaded on first use, not bundled: ${name}`);
+  }
+} catch (error) { errors.push(error.message); }
+const report = {
+  schemaVersion: 1, sha: process.env.GITHUB_SHA ?? null, auditedAt: new Date().toISOString(),
+  effectiveManifestSha256: sha256(await readFile(resolve(root, 'native/runtime-windows-x64.json'))),
+  nativeBuildSha: manifest.buildBinding?.sha ?? null,
+  artifactIntegrityPassed: errors.length === 0, releaseEligible: errors.length === 0 && blockers.length === 0,
+  components, prerequisites: manifest.prerequisites, dependencyClosure, errors, blockers,
+  limitations: ['PE imports do not enumerate statically linked codec dependencies or optional runtime-loaded libraries.', 'This report is technical evidence, not a legal compliance guarantee.'],
+};
+await mkdir(resolve(root, 'artifacts'), { recursive: true });
+await writeFile(resolve(root, 'artifacts/native-audit.json'), `${JSON.stringify(report, null, 2)}\n`);
+console.log(JSON.stringify({ artifactIntegrityPassed: report.artifactIntegrityPassed, releaseEligible: report.releaseEligible, errors, blockers }, null, 2));
+if (errors.length || (process.argv.includes('--release') && !report.releaseEligible)) process.exitCode = 1;

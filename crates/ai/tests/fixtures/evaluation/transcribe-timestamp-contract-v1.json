@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "license": "GPL-3.0-or-later",
+  "evidenceKind": "authored-oracle",
+  "description": "Minimal authored words preserve historical numeric failure shapes without reproducing corpus text or provider responses. These are strict offline contract regressions, not live quality evidence.",
+  "cases": [
+    {
+      "id": "ja-94s-reversed-word",
+      "language": "ja",
+      "durationMs": 94000,
+      "reference": [{"id":"word","text":"例","startMs":7500,"endMs":7600}],
+      "hypothesis": [{"id":"word","text":"例","startMs":7600,"endMs":7500}],
+      "expected": "reject"
+    },
+    {
+      "id": "en-15ms-overrun",
+      "language": "en",
+      "durationMs": 16085,
+      "reference": [{"id":"word","text":"example","startMs":16000,"endMs":16080}],
+      "hypothesis": [{"id":"word","text":"example","startMs":16000,"endMs":16100}],
+      "expected": "reject"
+    },
+    {
+      "id": "quantized-point-is-not-invented-duration",
+      "language": "ja",
+      "durationMs": 5000,
+      "reference": [{"id":"word","text":"例","startMs":4000,"endMs":4200}],
+      "hypothesis": [{"id":"word","text":"例","startMs":4100,"endMs":4100}],
+      "expected": "measure-point"
+    }
+  ]
+}
