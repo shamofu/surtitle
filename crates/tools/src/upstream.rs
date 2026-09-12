@@ -410,5 +410,13 @@ mod tests {
         let mut tampered = checksums.to_vec();
         tampered[0] ^= 1;
         assert!(verify_ytdlp_signature(&tampered, signature).is_err());
+
+        // Git must preserve the signed bytes on Windows; verification must not
+        // hide a changed payload by normalizing its line endings.
+        let crlf = std::str::from_utf8(checksums)
+            .unwrap()
+            .replace('\n', "\r\n");
+        assert_ne!(crlf.as_bytes(), checksums);
+        assert!(verify_ytdlp_signature(crlf.as_bytes(), signature).is_err());
     }
 }

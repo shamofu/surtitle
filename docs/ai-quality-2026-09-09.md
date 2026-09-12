@@ -96,7 +96,7 @@ Reproduce the evaluation with a new output filename; the command intentionally e
 
 ```powershell
 node scripts/ai-tests/evaluate.mjs --manifest work/ai-evaluation-20260909/text-reference.json --results work/ai-evaluation-20260909/text-results-only.json --rubric work/ai-evaluation-20260909/text-rubric.json --output work/ai-evaluation-20260909/text-evaluation-reproduced.json
-node --test scripts/ai-tests/*.test.mjs
+pnpm test:scripts scripts/ai-tests
 ```
 
 The evaluator's 33 offline tests pass, including separate language/task outcomes, critical-error gates, explicit AI provenance, source/hash binding, and quantized point-word timing handling. A passing structural test does not erase a semantic defect. These judgments remain an AI assessment of this bounded corpus; they neither declare human approval nor guarantee future model output quality.

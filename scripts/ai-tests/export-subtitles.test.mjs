@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { exportSubtitles } from './export-subtitles.mjs';
 const report = { schemaVersion: 1, requests: [{ id: 'audio', output: { kind: 'transcript', cues: [

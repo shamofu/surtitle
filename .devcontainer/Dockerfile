@@ -9,7 +9,8 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --pr
 ENV PATH="/home/vscode/.cargo/bin:${PATH}"
 RUN rustup component add rustfmt clippy
 RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-RUN bash -lc '. "$HOME/.nvm/nvm.sh" && nvm install 24 && npm install -g pnpm@12.3.4 && mkdir -p /home/vscode/.local/bin && ln -s "$(which node)" /home/vscode/.local/bin/node && ln -s "$(which pnpm)" /home/vscode/.local/bin/pnpm'
+COPY .node-version /tmp/surtitle-node-version
+RUN bash -lc '. "$HOME/.nvm/nvm.sh" && nvm install "$(cat /tmp/surtitle-node-version)" && npm install -g pnpm@12.3.4 && mkdir -p /home/vscode/.local/bin && ln -s "$(which node)" /home/vscode/.local/bin/node && ln -s "$(which pnpm)" /home/vscode/.local/bin/pnpm'
 ENV PATH="/home/vscode/.local/bin:${PATH}"
 RUN cargo install tauri-driver --version 2.0.6 --locked
 WORKDIR /workspaces/surtitle

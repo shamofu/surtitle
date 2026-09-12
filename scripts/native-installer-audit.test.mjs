@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, cpSync } from 'node:fs';
@@ -35,7 +35,7 @@ test('rejects duplicate, missing, shifted or already patched bundle markers', ()
 });
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'surtitle-installer-audit-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.onTestFinished(() => rmSync(root, { recursive: true, force: true }));
   const extracted = join(root, 'extracted');
   const put = (name, bytes) => { const path = join(extracted, name); mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, bytes); };
   mkdirSync(join(root, 'native'));

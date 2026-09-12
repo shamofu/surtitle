@@ -8,5 +8,28 @@ export default defineConfig({
   server: { port: 1420, strictPort: true, watch: { ignored: ['**/target/**', '**/src-tauri/**', '**/crates/**', '**/work/**', '**/test-results/**'] } },
   envPrefix: ['VITE_', 'TAURI_ENV_'],
   build: { target: 'es2022' },
-  test: { include: ['src/test/**/*.test.{ts,tsx}'], environment: 'jsdom', setupFiles: './src/test/setup.ts', css: false },
+  test: {
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'ui',
+          include: ['src/test/**/*.test.{ts,tsx}'],
+          environment: 'jsdom',
+          setupFiles: './src/test/setup.ts',
+          css: false,
+        },
+      },
+      {
+        test: {
+          name: 'scripts',
+          include: ['scripts/**/*.test.mjs', '.devcontainer/**/*.test.mjs'],
+          environment: 'node',
+          setupFiles: [],
+          pool: 'forks',
+          isolate: true,
+        },
+      },
+    ],
+  },
 });

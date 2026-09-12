@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -215,7 +215,7 @@ test('provider label alone cannot qualify unreviewed references or unlock a mode
 
 test('CLI writes hash-bound incomplete report and review template without overwriting', t => {
   const temp = mkdtempSync(join(tmpdir(), 'surtitle 評価 & '));
-  t.after(() => rmSync(temp, { recursive: true, force: true }));
+  t.onTestFinished(() => rmSync(temp, { recursive: true, force: true }));
   const { results } = translationFixture(), input = join(temp, 'results.json'), output = join(temp, 'report.json'), template = join(temp, 'review.json');
   writeFileSync(input, JSON.stringify(results));
   const args = [fileURLToPath(new URL('./evaluate.mjs', import.meta.url)), '--manifest', fileURLToPath(new URL('../../crates/ai/tests/fixtures/evaluation/text-corpus.json', import.meta.url)), '--results', input, '--case-id', reference.id, '--output', output, '--rubric-template', template];

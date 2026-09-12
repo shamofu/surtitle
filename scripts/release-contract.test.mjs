@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,7 +8,7 @@ import { validateRelease } from './release-contract.mjs';
 const sha = 'a'.repeat(40), version = '0.1.0';
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'surtitle-release-test-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
   for (const name of ['surtitle.exe', 'surtitle-source.zip', 'js-sbom.cdx.json', 'rust-dependencies.json']) writeFileSync(join(directory, name), 'test payload');
   const nativeFiles = [{ file: 'mpv-2.dll', sha256: 'c'.repeat(64) }, { file: 'onnxruntime.dll', sha256: 'd'.repeat(64) }];
   const nativeManifest = JSON.stringify({ buildBinding: { sha }, components: [{ runtimeFiles: nativeFiles.map(file => ({ target: file.file, sha256: file.sha256 })) }] });

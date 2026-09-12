@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Repository sources are Docker build inputs; no dependency/output bind or volume.
 set -euo pipefail
+prebuilt_image=false
+case "$#:${1:-}" in
+  0:) ;;
+  1:--prebuilt-image) prebuilt_image=true ;;
+  *) echo 'Usage: bash scripts/native-ci-build.sh [--prebuilt-image]' >&2; exit 1 ;;
+esac
 sha=${GITHUB_SHA:?A tested Git commit SHA is required}
 [[ "$sha" =~ ^[a-fA-F0-9]{40}$ ]] || { echo 'Invalid commit SHA' >&2; exit 1; }
 [[ "$(git rev-parse HEAD)" == "$sha" ]] || { echo 'Checkout differs from GITHUB_SHA' >&2; exit 1; }
@@ -9,7 +15,11 @@ name="surtitle-native-ci-${sha:0:12}"
 image="surtitle-native-ci:$sha"
 destination=work/native-ci-artifact
 [[ ! -L work && ( ! -e work || -d work ) && ! -e "$destination" && ! -L "$destination" ]] || { echo 'Native CI output must have regular ancestry and a fresh path' >&2; exit 1; }
-docker build -f native/build/Dockerfile -t "$image" .
+if [[ "$prebuilt_image" == true ]]; then
+  [[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")" == "$sha" ]] || { echo 'Prebuilt native image must match GITHUB_SHA' >&2; exit 1; }
+else
+  docker build -f native/build/Dockerfile -t "$image" --label "org.opencontainers.image.revision=$sha" .
+fi
 docker create --name "$name" "$image" sleep infinity
 trap 'docker rm --force "$name" >/dev/null' EXIT
 docker start "$name"

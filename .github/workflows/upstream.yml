@@ -7,17 +7,19 @@ permissions:
   contents: read
 jobs:
   windows:
-    runs-on: windows-2022
+    runs-on: windows-2025
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: windows-2025-upstream
       - name: Latest upstream CLI contract (no Vertex)
         run: cargo test -p surtitle-tools --test live -- --ignored --nocapture
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
           name: upstream-cli-evidence

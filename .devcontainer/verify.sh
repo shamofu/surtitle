@@ -7,12 +7,7 @@ export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-/opt/surtitle-build/target}
 export WEBKIT_DISABLE_COMPOSITING_MODE=1
 pnpm install --frozen-lockfile --store-dir /opt/surtitle-build/pnpm-store
 node scripts/check-version.mjs
-node --test .devcontainer/isolation.test.mjs
 node .devcontainer/isolation.mjs
-node --test scripts/release-contract.test.mjs
-node --test scripts/native-ci-contract.test.mjs
-node --test scripts/native-installer-audit.test.mjs scripts/package-production-smoke.test.mjs
-node --test scripts/check-production-features.test.mjs scripts/ai-tests/*.test.mjs
 node scripts/check-production-features.mjs
 pnpm test
 pnpm build

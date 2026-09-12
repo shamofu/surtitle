@@ -1,4 +1,7 @@
 # Byte-bound inputs retain original bytes on all hosts.
+/.node-version -text
+/crates/tools/src/ytdlp-checksums.fixture -text
+/crates/tools/src/ytdlp-checksums.fixture.sig -text
 /.devcontainer/*.sh text eol=lf
 /native/build/reviewed-inputs.json -text
 /.devcontainer/Dockerfile -text

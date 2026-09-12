@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, copyFileSync, symlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -21,7 +21,7 @@ function write(path, value) {
 function read(path) { return JSON.parse(readFileSync(path, 'utf8')); }
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'surtitle native 日本語 & '));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.onTestFinished(() => rmSync(root, { recursive: true, force: true }));
   const directory = join(root, 'artifact'), workspace = join(root, 'workspace'), source = join(root, 'source');
   for (const path of [directory, workspace, source]) mkdirSync(path);
   const policyPath = join(workspace, 'native/build/reviewed-inputs.json');

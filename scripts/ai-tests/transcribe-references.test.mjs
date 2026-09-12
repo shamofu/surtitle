@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { secondsToSample, parseAmiNxt, verifyAmiExtraction, inspectKoniwa, prepareChunkReference, suggestSelectionEdges } from './transcribe-references.mjs';
 import { referenceReadiness } from './transcribe-policy.mjs';

@@ -1,6 +1,6 @@
 # Development container
 
-Use Ubuntu 24.04, Node 24 and Rust 1.98.0 for React, shared Rust and real Tauri Linux E2E tests. Windows libmpv rendering, DPAPI and NSIS require separate Windows verification.
+Use Ubuntu 24.04, Node 24.21.0 LTS from `.node-version` and Rust 1.98.0 for React, shared Rust and real Tauri Linux E2E tests. Windows libmpv rendering, DPAPI and NSIS require separate Windows verification.
 
 The repository is a read/write bind mount at `/workspaces/surtitle`. Source, `.git` and lockfile edits are immediately visible on the host. Do not add host credentials, SSH agents, Docker sockets or GUI sockets to this container.
 
@@ -35,6 +35,8 @@ Use the native E2E suite for headless interaction; visible Windows playback
 development remains on the Windows host.
 
 The full check sequence is `.devcontainer/verify.sh`. Isolation evidence is written to both temporary `artifacts/container-isolation.json` and writable-layer `/opt/surtitle-build/evidence/container-isolation.json`; the full log is `/opt/surtitle-build/verification.log`. Read it with `docker exec surtitle-dev tail -n 80 /opt/surtitle-build/verification.log`. The verification helper never automatically copies dependency trees, executables or build outputs to the host. CI separately exports only selected JSON reports, the verification log and native E2E screenshots for artifact retention.
+
+`pnpm test` runs both the Vitest UI and Node script projects. Select `pnpm test:ui` or `pnpm test:scripts` for focused checks; `pnpm test:watch` watches both. CI builds this image with Buildx and a dedicated GitHub Actions layer cache, then uses the same `start` and `verify` commands above. The native toolchain image has a separate cache scope. These image caches do not persist runtime pnpm/Cargo stores or build directories, and do not add container mounts.
 
 Every full verification allocates a fresh `work/e2e-linux.XXXXXXXX` profile with
 `mktemp`. The SQLite seeder and Tauri E2E process use that same directory, so

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { evaluationCoverage } from './coverage.mjs';
 import { semanticReport, evaluate } from './evaluation.mjs';

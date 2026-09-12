@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { parseOptions, sanitizedEnvironment, validateSnapshot, validateMetadata, validateSeededProfile } from './package-production-smoke.mjs';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -71,7 +71,7 @@ test('production driver removes fixture overrides, inherited browser options and
 });
 test('fresh profile guard rejects prior app/credential state before any application is launched', t => {
   const parent = mkdtempSync(join(tmpdir(), 'surtitle production guard 日本語 & ')), root = join(parent, 'local'), roaming = join(parent, 'roaming');
-  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  t.onTestFinished(() => rmSync(parent, { recursive: true, force: true }));
   mkdirSync(root); writeFileSync(join(root, 'learning.sqlite'), 'stand-in: no SQLite is opened by the guard');
   writeFileSync(join(root, 'fixture.json'), JSON.stringify(fixture));
   assert.deepEqual(validateSeededProfile(root, roaming), fixture);

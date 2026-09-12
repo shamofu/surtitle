@@ -7,22 +7,51 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/release' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+  queue: max
 
 jobs:
   native-build:
+    needs: [linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        id: node
         with:
-          node-version: 24
-      - run: node --test scripts/native-ci-contract.test.mjs scripts/native-installer-audit.test.mjs scripts/package-production-smoke.test.mjs scripts/release-workflow.test.mjs
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Install the package manager declared by this checkout
+        id: pnpm
+        run: |
+          package_manager=$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync('package.json', 'utf8')).packageManager)")
+          npm install -g "$package_manager"
+          echo "version=$(pnpm --version)" >> "$GITHUB_OUTPUT"
+          echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:scripts
+      - run: node scripts/native-ci-artifact.mjs check-inputs
+      - uses: docker/setup-buildx-action@v4.3.0
+      - name: Build the reviewed native toolchain image
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: .
+          file: native/build/Dockerfile
+          load: true
+          push: false
+          tags: surtitle-native-ci:${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=native-toolchain-linux-amd64-v1
+          cache-to: type=gha,scope=native-toolchain-linux-amd64-v1,mode=max
       - name: Build reviewed native inputs without host dependency/output mounts
-        run: bash scripts/native-ci-build.sh
-      - uses: actions/upload-artifact@v4
+        run: bash scripts/native-ci-build.sh --prebuilt-image
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: native-build-${{ github.sha }}
           path: work/native-ci-artifact/
@@ -32,12 +61,23 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        id: node
         with:
-          node-version: 24
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: docker/setup-buildx-action@v4.3.0
       - name: Build the development container
-        run: node .devcontainer/container.mjs build
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: .
+          file: .devcontainer/Dockerfile
+          load: true
+          push: false
+          tags: surtitle-devcontainer:local-check
+          cache-from: type=gha,scope=devcontainer-linux-amd64-v1
+          cache-to: type=gha,scope=devcontainer-linux-amd64-v1,mode=max
       - name: Share sources and verify temporary dependency/output masks
         run: node .devcontainer/container.mjs start surtitle-ci
       - name: Linux checks and actual headless Tauri E2E
@@ -48,16 +88,19 @@ jobs:
           mkdir -p artifacts
           for report in container-isolation.json js-licenses.json js-sbom.cdx.json; do
             if docker exec surtitle-ci test -f /workspaces/surtitle/artifacts/$report; then
-              docker cp surtitle-ci:/workspaces/surtitle/artifacts/$report artifacts/$report
+              docker exec --user vscode surtitle-ci cp "/workspaces/surtitle/artifacts/$report" "/opt/surtitle-build/evidence/$report"
+              docker cp "surtitle-ci:/opt/surtitle-build/evidence/$report" "artifacts/$report"
             fi
           done
           if docker exec surtitle-ci test -f /opt/surtitle-build/verification.log; then
             docker cp surtitle-ci:/opt/surtitle-build/verification.log artifacts/linux-verification.log
           fi
           if docker exec surtitle-ci test -d /workspaces/surtitle/test-results/native; then
-            docker cp surtitle-ci:/workspaces/surtitle/test-results/native artifacts/native-screenshots
+            docker exec --user vscode surtitle-ci mkdir -p /opt/surtitle-build/evidence/native-screenshots
+            docker exec --user vscode surtitle-ci cp -a /workspaces/surtitle/test-results/native/. /opt/surtitle-build/evidence/native-screenshots/
+            docker cp surtitle-ci:/opt/surtitle-build/evidence/native-screenshots artifacts/native-screenshots
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
           name: linux-evidence-${{ github.sha }}
@@ -67,18 +110,30 @@ jobs:
         run: docker rm --force surtitle-ci
   windows:
     needs: [native-build]
-    runs-on: windows-2022
+    runs-on: windows-2025
     timeout-minutes: 60
     defaults:
       run:
         shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        id: node
         with:
-          node-version: 24
-      - run: npm install -g pnpm@12.3.4
-      - uses: actions/download-artifact@v4
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Install the package manager declared by this checkout
+        id: pnpm
+        run: |
+          $packageManager = (Get-Content package.json -Raw | ConvertFrom-Json).packageManager
+          npm install -g $packageManager
+          "version=$(pnpm --version)" >> $env:GITHUB_OUTPUT
+          "store=$(pnpm store path --silent)" >> $env:GITHUB_OUTPUT
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: native-build-${{ github.sha }}
           path: work/native-ci-artifact/
@@ -88,11 +143,11 @@ jobs:
         with:
           toolchain: 1.98.0
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: windows-2025-debug
       - run: pnpm install --frozen-lockfile
       - run: node scripts/check-version.mjs
-      - run: node --test scripts/release-contract.test.mjs
-      - run: node --test scripts/check-production-features.test.mjs scripts/ai-tests/*.test.mjs
       - run: node scripts/check-production-features.mjs
       - run: pnpm test
       - run: pnpm build
@@ -127,7 +182,7 @@ jobs:
           SURTITLE_E2E_TRANSCRIPT_REVIEW: boundary
           SURTITLE_E2E_AV1_FIXTURE: ${{ github.workspace }}\work\e2e-av1.mkv
           SURTITLE_TAURI_DRIVER: ${{ github.workspace }}\work\driver\bin\tauri-driver.exe
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
           name: windows-evidence-${{ github.sha }}
@@ -136,18 +191,30 @@ jobs:
             test-results/
   package:
     needs: [linux, windows, native-build]
-    runs-on: windows-2022
+    runs-on: windows-2025
     timeout-minutes: 60
     defaults:
       run:
         shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        id: node
         with:
-          node-version: 24
-      - run: npm install -g pnpm@12.3.4
-      - uses: actions/download-artifact@v4
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Install the package manager declared by this checkout
+        id: pnpm
+        run: |
+          $packageManager = (Get-Content package.json -Raw | ConvertFrom-Json).packageManager
+          npm install -g $packageManager
+          "version=$(pnpm --version)" >> $env:GITHUB_OUTPUT
+          "store=$(pnpm store path --silent)" >> $env:GITHUB_OUTPUT
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: native-build-${{ github.sha }}
           path: work/native-ci-artifact/
@@ -156,7 +223,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: windows-2025-release
       - run: pnpm install --frozen-lockfile
       - run: node scripts/check-production-features.mjs
       - run: pwsh scripts/native-prepare.ps1
@@ -182,7 +251,7 @@ jobs:
           pnpm test:fixtures
       - name: Test production installer and assemble source/SBOM
         run: pwsh scripts/package-verify.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: release-${{ github.sha }}
           path: artifacts/release/
@@ -194,11 +263,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        id: node
         with:
-          node-version: 24
-      - uses: actions/download-artifact@v4
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: release-${{ github.sha }}
           path: artifacts/release/

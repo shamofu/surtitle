@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,7 +9,7 @@ import { sha256 } from './evaluation.mjs';
 
 test('PCM fixtures have exact sample counts, deterministic hashes and explicit non-speech provenance', t => {
   const temp = mkdtempSync(join(tmpdir(), 'surtitle-pcm-'));
-  t.after(() => rmSync(temp, { recursive: true, force: true }));
+  t.onTestFinished(() => rmSync(temp, { recursive: true, force: true }));
   const first = generate(join(temp, 'one'), 7), second = generate(join(temp, 'two'), 7);
   assert.deepEqual(first.files.map(file => file.sha256), second.files.map(file => file.sha256));
   assert.equal(first.files[1].samples, 16007);
@@ -31,7 +31,7 @@ test('PCM fixtures have exact sample counts, deterministic hashes and explicit n
 
 test('invalid generation limits fail before files are created', t => {
   const temp = mkdtempSync(join(tmpdir(), 'surtitle-pcm-limits-'));
-  t.after(() => rmSync(temp, { recursive: true, force: true }));
+  t.onTestFinished(() => rmSync(temp, { recursive: true, force: true }));
   const path = join(temp, 'invalid.wav');
   for (const samples of [0, -1, .5, NaN, 21600 * 16000 + 1]) assert.throws(() => writePcm(path, samples), /Invalid bounded/);
   assert.equal(existsSync(path), false);

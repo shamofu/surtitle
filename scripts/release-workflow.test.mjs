@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -16,6 +16,106 @@ function job(name) {
   return block[1];
 }
 
+function actionStep(name, action) {
+  const steps = job(name).split(/^      - /m).slice(1);
+  const step = steps.find(value => value.includes(`uses: ${action}@`));
+  assert.ok(step, `Missing ${action} in ${name}`);
+  return step;
+}
+
+test('same-ref runs queue without cancellation and every verification job runs serially', () => {
+  assert.match(workflow, /^  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}$/m);
+  assert.match(workflow, /^  cancel-in-progress: false$/m);
+  assert.match(workflow, /^  queue: max$/m);
+  const order = ['linux', 'native-build', 'windows', 'package', 'publish'];
+  const ancestors = new Map();
+  for (const name of order) {
+    const dependencies = job(name).match(/^    needs: \[([^\]]+)\]$/m)?.[1].split(', ') ?? [];
+    const reachable = new Set(dependencies);
+    for (const dependency of dependencies) {
+      assert.ok(ancestors.has(dependency), `${name} depends on an unknown or later job: ${dependency}`);
+      for (const ancestor of ancestors.get(dependency)) reachable.add(ancestor);
+    }
+    for (const earlier of order.slice(0, order.indexOf(name))) {
+      assert.ok(reachable.has(earlier), `${name} can run before ${earlier} completes`);
+    }
+    ancestors.set(name, reachable);
+  }
+});
+
+test('Docker caching loads two isolated image caches while retaining runtime verification', () => {
+  const scopes = [];
+  for (const [name, dockerfile, tag] of [
+    ['linux', '.devcontainer/Dockerfile', 'surtitle-devcontainer:local-check'],
+    ['native-build', 'native/build/Dockerfile', 'surtitle-native-ci:${{ github.sha }}'],
+  ]) {
+    const image = actionStep(name, 'docker/build-push-action');
+    assert.match(image, /^          context: \.$/m);
+    assert.ok(image.includes(`          file: ${dockerfile}`));
+    assert.ok(image.includes(`          tags: ${tag}`));
+    assert.match(image, /^          load: true$/m);
+    assert.match(image, /^          push: false$/m);
+    const scope = image.match(/^          cache-from: type=gha,scope=([a-z0-9-]+)$/m)?.[1];
+    assert.ok(scope, `Missing image cache scope in ${name}`);
+    assert.ok(image.includes(`          cache-to: type=gha,scope=${scope},mode=max`));
+    scopes.push(scope);
+    assert.ok(job(name).indexOf('docker/setup-buildx-action@') < job(name).indexOf('docker/build-push-action@'));
+  }
+  assert.equal(new Set(scopes).size, 2, 'Image caches must not overwrite one another');
+  assert.match(job('linux'), /node \.devcontainer\/container\.mjs start surtitle-ci/);
+  assert.match(job('linux'), /node \.devcontainer\/container\.mjs verify surtitle-ci/);
+  assert.doesNotMatch(job('linux'), /container\.mjs build/);
+  assert.match(job('native-build'), /native-ci-build\.sh --prebuilt-image/);
+  assert.match(actionStep('native-build', 'docker/build-push-action'), /labels: org\.opencontainers\.image\.revision=\$\{\{ github\.sha \}\}/);
+});
+
+test('host package caches retain only the pnpm store with explicit runtime and lockfile keys', () => {
+  for (const name of ['native-build', 'windows', 'package']) {
+    const node = actionStep(name, 'actions/setup-node');
+    assert.match(node, /^        id: node$/m);
+    assert.match(node, /^          node-version-file: \.node-version$/m);
+    assert.match(node, /^          package-manager-cache: false$/m);
+    const cache = actionStep(name, 'actions/cache');
+    assert.match(cache, /^          path: \$\{\{ steps\.pnpm\.outputs\.store \}\}$/m);
+    for (const key of ['runner.os', 'runner.arch', 'steps.node.outputs.node-version', 'steps.pnpm.outputs.version', "hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml')"]) {
+      assert.ok(cache.includes(`\${{ ${key} }}`), `Cache key omits ${key} in ${name}`);
+    }
+    assert.match(job(name), /^        id: pnpm$/m);
+    assert.match(job(name), /pnpm store path --silent/);
+    assert.match(job(name), /pnpm install --frozen-lockfile/);
+    assert.doesNotMatch(cache, /node_modules|native-ci-artifact|target\/|artifacts\//);
+  }
+  assert.notEqual(actionStep('windows', 'Swatinem/rust-cache').match(/key: (.+)/)?.[1],
+    actionStep('package', 'Swatinem/rust-cache').match(/key: (.+)/)?.[1], 'Debug and release dependency caches need separate keys');
+  assert.doesNotMatch(workflow, /node --test/);
+  assert.match(job('native-build'), /pnpm test:scripts/);
+  assert.match(job('windows'), /^      - run: pnpm test$/m);
+});
+
+test('Linux exports selected tmpfs evidence through the container writable layer', () => {
+  const exporter = job('linux').split(/^      - /m).find(value => value.startsWith('name: Export selected verification evidence'));
+  assert.ok(exporter);
+  assert.match(exporter, /for report in container-isolation\.json js-licenses\.json js-sbom\.cdx\.json; do/);
+  assert.match(exporter, /docker exec --user vscode surtitle-ci cp "\/workspaces\/surtitle\/artifacts\/\$report" "\/opt\/surtitle-build\/evidence\/\$report"/);
+  assert.match(exporter, /docker exec --user vscode surtitle-ci cp -a \/workspaces\/surtitle\/test-results\/native\/\. \/opt\/surtitle-build\/evidence\/native-screenshots\//);
+  const exports = [...exporter.matchAll(/docker cp "?surtitle-ci:([^"\s]+)/g)].map(match => match[1]);
+  assert.deepEqual(exports, ['/opt/surtitle-build/evidence/$report', '/opt/surtitle-build/verification.log', '/opt/surtitle-build/evidence/native-screenshots']);
+  assert.doesNotMatch(exporter, /docker cp[^\n]+:\/workspaces\/surtitle/);
+});
+
+test('prebuilt native images still require this commit, reviewed inputs and unmounted offline compilation', () => {
+  const script = readFileSync(new URL('./native-ci-build.sh', import.meta.url), 'utf8');
+  assert.match(script, /1:--prebuilt-image\) prebuilt_image=true/);
+  assert.match(script, /git rev-parse HEAD/);
+  assert.match(script, /native-ci-artifact\.mjs check-inputs/);
+  assert.match(script, /image="surtitle-native-ci:\$sha"/);
+  assert.match(script, /docker image inspect --format '[^\n]+org\.opencontainers\.image\.revision[^\n]+"\$image"[^\n]+== "\$sha"/);
+  assert.match(script, /docker inspect --format '\{\{json \.Mounts\}\}'/);
+  assert.ok(script.indexOf('docker network disconnect bridge') < script.indexOf('docker exec "$name" bash /workspace/scripts/native-ci-build-inside.sh'));
+  assert.match(script, /native-ci-artifact\.mjs seal "\$destination" "\$sha"/);
+  assert.doesNotMatch(script, /docker (?:create|run)[^\n]+(?:--mount|--volume| -v )/);
+});
+
 test('package validation runs for main/release pushes and pull requests after all native checks', () => {
   const events = workflow.slice(0, workflow.indexOf('\npermissions:'));
   assert.match(events, /^  push:\r?\n    branches: \[main, release\]$/m);
@@ -23,7 +123,7 @@ test('package validation runs for main/release pushes and pull requests after al
   assert.doesNotMatch(events, /pull_request_target|paths(?:-ignore)?:/);
   const packaging = job('package');
   assert.match(packaging, /^    needs: \[linux, windows, native-build\]$/m);
-  assert.match(packaging, /^    runs-on: windows-2022$/m);
+  assert.match(packaging, /^    runs-on: windows-2025$/m);
   assert.doesNotMatch(packaging, /^\s+if:|continue-on-error:/m);
   for (const command of ['nsis-plugin-build.ps1', 'native-installer-prepare.ps1', 'native-audit.mjs --release',
     'pnpm tauri build --bundles nsis -- --locked', 'native-installer-audit.ps1', 'package-verify.ps1']) {
@@ -39,9 +139,9 @@ test('native and package artifacts are consumed only from the current run and SH
   const packaging = job('package');
   assert.match(packaging, /name: native-build-\$\{\{ github\.sha \}\}/);
   assert.match(packaging, /native-ci-artifact\.mjs consume work\/native-ci-artifact \$\{\{ github\.sha \}\}/);
-  assert.match(packaging, /uses: actions\/upload-artifact@v4[\s\S]+name: release-\$\{\{ github\.sha \}\}[\s\S]+path: artifacts\/release\/[\s\S]+if-no-files-found: error/);
+  assert.match(packaging, /uses: actions\/upload-artifact@\S+[\s\S]+name: release-\$\{\{ github\.sha \}\}[\s\S]+path: artifacts\/release\/[\s\S]+if-no-files-found: error/);
   const publisher = job('publish');
-  assert.match(publisher, /uses: actions\/download-artifact@v4[\s\S]+name: release-\$\{\{ github\.sha \}\}[\s\S]+path: artifacts\/release\//);
+  assert.match(publisher, /uses: actions\/download-artifact@\S+[\s\S]+name: release-\$\{\{ github\.sha \}\}[\s\S]+path: artifacts\/release\//);
   for (const block of [packaging, publisher]) {
     assert.doesNotMatch(block, /^\s+(run-id|repository|github-token|pattern|merge-multiple):/m);
   }

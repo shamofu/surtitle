@@ -1,6 +1,6 @@
 # Local AI evaluation tools
 
-These Node.js tools evaluate saved results using only standard libraries. They do not connect to cloud services, TTS, or service accounts. Run `node --test scripts/ai-tests/*.test.mjs` for the offline suite.
+These Node.js tools evaluate saved results using only standard libraries. They do not connect to cloud services, TTS, or service accounts. After `pnpm install --frozen-lockfile`, run `pnpm test:scripts scripts/ai-tests` for the offline Vitest suite.
 
 ## Prepare text inputs
 
