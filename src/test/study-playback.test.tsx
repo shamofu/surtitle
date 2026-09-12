@@ -77,6 +77,35 @@ describe('study sentence and source playback', () => {
     expect(api.saveCard).not.toHaveBeenCalled();
     expect(api.createQuote).not.toHaveBeenCalled();
   });
+  it('keeps a repeat requested as soon as the selected source becomes available', async () => {
+    mount();
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Pause at the end of a caption group' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Suggestions' }));
+    const source = await screen.findByRole('button', { name: 'Listen to source' });
+    const repeat = screen.getByRole('button', { name: 'Repeat selected segment' });
+    let clicked = false;
+    // Observe the selection commit before React flushes passive effects. This
+    // forces the ordering that previously depended on the runner's timing.
+    const observer = new MutationObserver(() => {
+      if (!repeat.hasAttribute('disabled') && !clicked) {
+        clicked = true;
+        fireEvent.click(repeat);
+      }
+    });
+    observer.observe(repeat, { attributes: true, attributeFilter: ['disabled'] });
+    try {
+      fireEvent.click(source);
+      await waitFor(() => expect(clicked).toBe(true));
+      expect(api.player).toHaveBeenCalledWith({ action: 'source-loop', startMs: 0, endMs: 2000 });
+      expect(repeat).toHaveAttribute('aria-pressed', 'true');
+      expect(api.player).not.toHaveBeenCalledWith({ action: 'loop' });
+      fireEvent.click(repeat);
+      expect(repeat).toHaveAttribute('aria-pressed', 'false');
+      expect(api.player).toHaveBeenCalledWith({ action: 'loop' });
+    } finally {
+      observer.disconnect();
+    }
+  });
   it('keeps direct subtitle replay as an explicit range and suspends follow for keyboard scrolling', async () => {
     mount();
     const button = await screen.findByRole('button', { name: 'Play subtitle 0:00' });
@@ -123,7 +152,6 @@ describe('study sentence and source playback', () => {
     expect(screen.getByRole('button', { name: 'Save a phrase' })).toBeDisabled();
     expect(screen.getByText('The source subtitles changed. Select the subtitles or phrase again.')).toBeVisible();
     expect(document.querySelector('.context-sentence')).toBeNull();
-    // Disabled controls render before the passive effect clears the native loop.
     await waitFor(() => expect(api.player).toHaveBeenCalledExactlyOnceWith({ action: 'loop' }));
     expect(api.playSourceRange).not.toHaveBeenCalled();
     // Restoring the same IDs does not silently resume the old selection.

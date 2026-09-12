@@ -4,7 +4,7 @@
   "recipe": [
     {
       "path": "native/build/Dockerfile",
-      "sha256": "4195513f60baaedcd57787b3740121e33511f0d911915c600ada4d74b245bd15"
+      "sha256": "0a24f702e3e76a9a38e0b1d8dae40882ef216bd8d514a9f61654eb517018afe3"
     },
     {
       "path": "native/build/sources.json",
@@ -12,7 +12,7 @@
     },
     {
       "path": "native/build/cross-win64.ini",
-      "sha256": "9bdf36d5bf75abc88cb6e0cebd38f63b452e80d0e67fffb46459aacac42f2a28"
+      "sha256": "cb713dfdfd979f7c8bc6608a2a79c3ecc433108e79155269306f4521b01060c6"
     },
     {
       "path": "native/build/toolchain-win64.cmake",
@@ -20,7 +20,7 @@
     },
     {
       "path": "scripts/native-build.sh",
-      "sha256": "0ab11bf59a4a11883f98c8be60c22d205714442ff9d1ed1ee0d45d2f4eb3c222"
+      "sha256": "f8e0e33a9ffed09ef94f354b0b5e2b70b7a85add12850dbda66878d739a4e031"
     },
     {
       "path": "scripts/native-source-inputs.py",
@@ -344,11 +344,11 @@
     },
     {
       "path": ".gitattributes",
-      "sha256": "933bcaec98ee47544998af894fe0ae15a59d4ef33248a7faca5af075337d5997"
+      "sha256": "f1ea73bb4070cfaeee73d56e39ddf45e09f360f8ecef23a3e5ac3c698521a990"
     },
     {
       "path": ".github/workflows/ci.yml",
-      "sha256": "4a141cf9910f5f0fe9daf894739e738144c79260311a4dc481c103ade7aa8dd3"
+      "sha256": "b7be5f8a5bd6f09e066f612a0ec1d5bfb92a3536c49350eabb7fd1461fbeb166"
     },
     {
       "path": ".node-version",
@@ -360,11 +360,11 @@
     },
     {
       "path": "native/build/Dockerfile",
-      "sha256": "4195513f60baaedcd57787b3740121e33511f0d911915c600ada4d74b245bd15"
+      "sha256": "0a24f702e3e76a9a38e0b1d8dae40882ef216bd8d514a9f61654eb517018afe3"
     },
     {
       "path": "native/build/cross-win64.ini",
-      "sha256": "9bdf36d5bf75abc88cb6e0cebd38f63b452e80d0e67fffb46459aacac42f2a28"
+      "sha256": "cb713dfdfd979f7c8bc6608a2a79c3ecc433108e79155269306f4521b01060c6"
     },
     {
       "path": "native/build/sources.json",
@@ -840,7 +840,7 @@
     },
     {
       "path": "scripts/native-build.sh",
-      "sha256": "0ab11bf59a4a11883f98c8be60c22d205714442ff9d1ed1ee0d45d2f4eb3c222"
+      "sha256": "f8e0e33a9ffed09ef94f354b0b5e2b70b7a85add12850dbda66878d739a4e031"
     },
     {
       "path": "scripts/native-candidate-e2e.ps1",
@@ -856,11 +856,23 @@
     },
     {
       "path": "scripts/native-ci-build-inside.sh",
-      "sha256": "08c4413ac7adf42212a090d3f9a8703cf8da1fd95f04affcc75a98c28a37fc28"
+      "sha256": "b5ce5617ecf983b067412cc50d99c938f7a24a7823ea97ec92bcd13081830578"
     },
     {
       "path": "scripts/native-ci-build.sh",
-      "sha256": "ce79b697d41ae4b3e38547ee18c0df028489c4a1e17a27f2298025717bfccf29"
+      "sha256": "4df15dcc006a2b63d6fba1cf201243bdcd2ab18cc3a73bfd54a1fe2d924b9aeb"
+    },
+    {
+      "path": "scripts/native-ci-build.test.mjs",
+      "sha256": "8c925936af23317eb6e255aaa4ded6b3bcc7af11591684c43e3bae7680300cbc"
+    },
+    {
+      "path": "scripts/native-ci-cache.mjs",
+      "sha256": "1f6a31696d562a2d463898a17174c40017007d8d032e2f9e51971ee87a142cca"
+    },
+    {
+      "path": "scripts/native-ci-cache.test.mjs",
+      "sha256": "44491e29f15c8a738eaaf50eefb2b6e549609deb32b3437a62b79cc3c96ca6e4"
     },
     {
       "path": "scripts/native-ci-contract.mjs",
@@ -968,7 +980,7 @@
     },
     {
       "path": "scripts/release-workflow.test.mjs",
-      "sha256": "5471100ee28cf43b9efc1be9471526d2c9060f8b6b234b52ef0b00bbdfea1db6"
+      "sha256": "d4c1485747f4e566450a51d372c1ca78f4714994ccd8edbb952ec4fb00f1a746"
     },
     {
       "path": "scripts/release.mjs",

@@ -49,8 +49,41 @@ jobs:
           labels: org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=native-toolchain-linux-amd64-v1
           cache-to: type=gha,scope=native-toolchain-linux-amd64-v1,mode=max
+      - name: Fingerprint the prepared toolchain and create fresh cache staging
+        id: native-cache
+        run: node scripts/native-ci-cache.mjs prepare surtitle-native-ci:${{ github.sha }}
+      - name: Restore native compiler results for these exact tools and flags
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ steps.native-cache.outputs.directory }}/compiler
+          key: ${{ steps.native-cache.outputs.compiler-key }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ${{ steps.native-cache.outputs.compiler-key }}-
+      - name: Restore source archives for checksum verification before extraction
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: |
+            ${{ steps.native-cache.outputs.directory }}/source-cache
+            ${{ steps.native-cache.outputs.directory }}/ort-archives
+          key: ${{ steps.native-cache.outputs.source-key }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ${{ steps.native-cache.outputs.source-key }}-
       - name: Build reviewed native inputs without host dependency/output mounts
         run: bash scripts/native-ci-build.sh --prebuilt-image
+        env:
+          SURTITLE_NATIVE_CACHE_DIR: ${{ steps.native-cache.outputs.directory }}
+      - name: Save verified native compiler cache from a trusted main push
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ steps.native-cache.outputs.directory }}/compiler
+          key: ${{ steps.native-cache.outputs.compiler-key }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Save verified source archives from a trusted main push
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: |
+            ${{ steps.native-cache.outputs.directory }}/source-cache
+            ${{ steps.native-cache.outputs.directory }}/ort-archives
+          key: ${{ steps.native-cache.outputs.source-key }}-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: native-build-${{ github.sha }}

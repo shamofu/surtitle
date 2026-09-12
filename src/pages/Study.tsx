@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -31,11 +31,13 @@ function NativePlayer({ media, selected, selectionRevision, onPosition, onReady,
   const control = useCallback(async (request: Parameters<typeof api.player>[0]) => { if ((request.action === 'seek' || request.action === 'source-seek')) { loopActive.current = false; setLoop(false); } try { await api.player(request); } catch (error) { notify(String(error), 'error'); } }, [notify]);
   const selectionSignature = selected ? JSON.stringify([selected.id, selected.startMs, selected.endMs]) : '';
   const previousSelection = useRef({ mediaId: media.id, revision: selectionRevision, signature: selectionSignature });
-  useEffect(() => {
+  useLayoutEffect(() => {
     const previous = previousSelection.current;
     previousSelection.current = { mediaId: media.id, revision: selectionRevision, signature: selectionSignature };
     // Explicit replays already clear the native loop with their seek. Only a
     // source refresh must clear it here, without erasing a newly requested range stop.
+    // Finish before the updated controls become interactive, so a repeat click
+    // for the new selection cannot be erased by a pending passive effect.
     if (loopActive.current && previous.mediaId === media.id && previous.revision === selectionRevision && previous.signature !== selectionSignature) {
       void api.player({ action: 'loop' }).catch(error => notify(String(error), 'error'));
     }

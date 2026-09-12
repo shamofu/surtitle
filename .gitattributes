@@ -144,6 +144,9 @@
 /scripts/native-ci-artifact.mjs -text
 /scripts/native-ci-build-inside.sh -text
 /scripts/native-ci-build.sh -text
+/scripts/native-ci-build.test.mjs -text
+/scripts/native-ci-cache.mjs -text
+/scripts/native-ci-cache.test.mjs -text
 /scripts/native-ci-contract.mjs -text
 /scripts/native-ci-contract.test.mjs -text
 /scripts/native-ci-inputs.py -text

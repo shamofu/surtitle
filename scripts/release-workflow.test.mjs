@@ -92,6 +92,35 @@ test('host package caches retain only the pnpm store with explicit runtime and l
   assert.match(job('windows'), /^      - run: pnpm test$/m);
 });
 
+test('native caches restore by content and save improved entries only after validation on trusted main pushes', () => {
+  const native = job('native-build'), steps = native.split(/^      - /m).slice(1);
+  const prepare = steps.find(value => value.includes('id: native-cache'));
+  assert.ok(prepare?.includes('native-ci-cache.mjs prepare surtitle-native-ci:${{ github.sha }}'));
+  const buildIndex = steps.findIndex(value => value.includes('run: bash scripts/native-ci-build.sh --prebuilt-image'));
+  assert.match(steps[buildIndex], /SURTITLE_NATIVE_CACHE_DIR: \$\{\{ steps\.native-cache\.outputs\.directory \}\}/);
+  const restore = steps.filter(value => value.includes('uses: actions/cache/restore@v6.1.0'));
+  const save = steps.filter(value => value.includes('uses: actions/cache/save@v6.1.0'));
+  assert.equal(restore.length, 2);
+  assert.equal(save.length, 2);
+  for (const [index, kind] of ['compiler', 'source'].entries()) {
+    const prefix = `\${{ steps.native-cache.outputs.${kind}-key }}`;
+    const key = `${prefix}-\${{ github.run_id }}-\${{ github.run_attempt }}`;
+    assert.ok(restore[index].includes(`key: ${key}`));
+    assert.ok(save[index].includes(`key: ${key}`));
+    assert.ok(restore[index].includes(`restore-keys: ${prefix}-`));
+    assert.match(save[index], /^        if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'$/m);
+    assert.ok(steps.indexOf(prepare) < steps.indexOf(restore[index]));
+    assert.ok(steps.indexOf(restore[index]) < buildIndex);
+    assert.ok(steps.indexOf(save[index]) > buildIndex);
+    assert.doesNotMatch(restore[index] + save[index], /always\(\)|reviewed-inputs\.json|target\/|\/objects|\/prefix|native-ci-artifact/);
+    const expectedPaths = kind === 'compiler' ? ['compiler'] : ['source-cache', 'ort-archives'];
+    for (const step of [restore[index], save[index]]) {
+      const paths = [...step.matchAll(/\$\{\{ steps\.native-cache\.outputs\.directory \}\}\/([a-z-]+)/g)].map(value => value[1]);
+      assert.deepEqual(paths, expectedPaths);
+    }
+  }
+});
+
 test('Linux exports selected tmpfs evidence through the container layer into a runner-owned directory', () => {
   const exporter = job('linux').split(/^      - /m).find(value => value.startsWith('name: Export selected verification evidence'));
   assert.ok(exporter);
