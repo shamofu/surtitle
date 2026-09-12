@@ -92,15 +92,23 @@ test('host package caches retain only the pnpm store with explicit runtime and l
   assert.match(job('windows'), /^      - run: pnpm test$/m);
 });
 
-test('Linux exports selected tmpfs evidence through the container writable layer', () => {
+test('Linux exports selected tmpfs evidence through the container layer into a runner-owned directory', () => {
   const exporter = job('linux').split(/^      - /m).find(value => value.startsWith('name: Export selected verification evidence'));
   assert.ok(exporter);
+  assert.match(exporter, /^        id: evidence$/m);
+  assert.match(exporter, /evidence_dir="\$\(mktemp -d "\$RUNNER_TEMP\/surtitle-linux-evidence\.XXXXXXXX"\)"/);
+  assert.match(exporter, /printf 'directory=%s\\n' "\$evidence_dir" >> "\$GITHUB_OUTPUT"/);
   assert.match(exporter, /for report in container-isolation\.json js-licenses\.json js-sbom\.cdx\.json; do/);
   assert.match(exporter, /docker exec --user vscode surtitle-ci cp "\/workspaces\/surtitle\/artifacts\/\$report" "\/opt\/surtitle-build\/evidence\/\$report"/);
   assert.match(exporter, /docker exec --user vscode surtitle-ci cp -a \/workspaces\/surtitle\/test-results\/native\/\. \/opt\/surtitle-build\/evidence\/native-screenshots\//);
   const exports = [...exporter.matchAll(/docker cp "?surtitle-ci:([^"\s]+)/g)].map(match => match[1]);
   assert.deepEqual(exports, ['/opt/surtitle-build/evidence/$report', '/opt/surtitle-build/verification.log', '/opt/surtitle-build/evidence/native-screenshots']);
   assert.doesNotMatch(exporter, /docker cp[^\n]+:\/workspaces\/surtitle/);
+  for (const destination of ['$report', 'linux-verification.log', 'native-screenshots']) {
+    assert.ok(exporter.includes(`"$evidence_dir/${destination}"`));
+  }
+  assert.doesNotMatch(exporter, /mkdir -p artifacts|docker cp[^\n]+ artifacts\//);
+  assert.match(actionStep('linux', 'actions/upload-artifact'), /^          path: \$\{\{ steps\.evidence\.outputs\.directory \}\}$/m);
 });
 
 test('prebuilt native images still require this commit, reviewed inputs and unmounted offline compilation', () => {

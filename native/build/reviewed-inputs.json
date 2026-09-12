@@ -348,7 +348,7 @@
     },
     {
       "path": ".github/workflows/ci.yml",
-      "sha256": "32f8a0c99d6f519f63d395c727f0ac85a485b542d0cb9036280ee2529f98ce25"
+      "sha256": "4a141cf9910f5f0fe9daf894739e738144c79260311a4dc481c103ade7aa8dd3"
     },
     {
       "path": ".node-version",
@@ -968,7 +968,7 @@
     },
     {
       "path": "scripts/release-workflow.test.mjs",
-      "sha256": "454132dd6f8ba6809b9cdcf2fb169fd5bf4e6c7b7b7aabc6568d16d30d6b82d4"
+      "sha256": "5471100ee28cf43b9efc1be9471526d2c9060f8b6b234b52ef0b00bbdfea1db6"
     },
     {
       "path": "scripts/release.mjs",

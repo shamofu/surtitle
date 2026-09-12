@@ -83,28 +83,30 @@ jobs:
       - name: Linux checks and actual headless Tauri E2E
         run: node .devcontainer/container.mjs verify surtitle-ci
       - name: Export selected verification evidence (never dependency/build trees)
+        id: evidence
         if: always()
         run: |
-          mkdir -p artifacts
+          evidence_dir="$(mktemp -d "$RUNNER_TEMP/surtitle-linux-evidence.XXXXXXXX")"
+          printf 'directory=%s\n' "$evidence_dir" >> "$GITHUB_OUTPUT"
           for report in container-isolation.json js-licenses.json js-sbom.cdx.json; do
             if docker exec surtitle-ci test -f /workspaces/surtitle/artifacts/$report; then
               docker exec --user vscode surtitle-ci cp "/workspaces/surtitle/artifacts/$report" "/opt/surtitle-build/evidence/$report"
-              docker cp "surtitle-ci:/opt/surtitle-build/evidence/$report" "artifacts/$report"
+              docker cp "surtitle-ci:/opt/surtitle-build/evidence/$report" "$evidence_dir/$report"
             fi
           done
           if docker exec surtitle-ci test -f /opt/surtitle-build/verification.log; then
-            docker cp surtitle-ci:/opt/surtitle-build/verification.log artifacts/linux-verification.log
+            docker cp surtitle-ci:/opt/surtitle-build/verification.log "$evidence_dir/linux-verification.log"
           fi
           if docker exec surtitle-ci test -d /workspaces/surtitle/test-results/native; then
             docker exec --user vscode surtitle-ci mkdir -p /opt/surtitle-build/evidence/native-screenshots
             docker exec --user vscode surtitle-ci cp -a /workspaces/surtitle/test-results/native/. /opt/surtitle-build/evidence/native-screenshots/
-            docker cp surtitle-ci:/opt/surtitle-build/evidence/native-screenshots artifacts/native-screenshots
+            docker cp surtitle-ci:/opt/surtitle-build/evidence/native-screenshots "$evidence_dir/native-screenshots"
           fi
       - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
           name: linux-evidence-${{ github.sha }}
-          path: artifacts/
+          path: ${{ steps.evidence.outputs.directory }}
       - name: Remove this job's container writable layer
         if: always()
         run: docker rm --force surtitle-ci
