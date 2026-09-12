@@ -304,7 +304,7 @@
     },
     {
       "path": ".devcontainer/README.md",
-      "sha256": "13af9d47c2de17d5160a65f3af375b44c7cca9bf63887d9a36d32c8f07131d93"
+      "sha256": "48a9af01c3a7f56427dfac737f7d7db2df60e304875ddae1eb3bc773908f129c"
     },
     {
       "path": ".devcontainer/align-user.sh",

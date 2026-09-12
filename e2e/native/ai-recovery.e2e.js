@@ -54,7 +54,20 @@ async function settings() {
     await invoke('edit_segment', { segment: { ...source, text: 'An edited source.' } });
     const stale = await invoke('list_saved_ai_results', { jobId });
     assert.equal(stale[0].canApply, false);
-    await assert.rejects(invoke('apply_saved_ai_result', { jobId, ordinal: 0 }));
+    // Serialize the application's rejection inside the webview: a WebDriver
+    // transport/serialization failure must fail this test, not satisfy it.
+    const application = JSON.parse(await browser.execute(async id => {
+      try {
+        await window.__TAURI_INTERNALS__.invoke('apply_saved_ai_result', { jobId: id, ordinal: 0 });
+        return JSON.stringify({ succeeded: true });
+      } catch (error) {
+        return JSON.stringify({ succeeded: false, reason: String(error?.message ?? error) });
+      }
+    }, jobId));
+    assert.deepEqual(application, {
+      succeeded: false,
+      reason: 'approved source subtitles changed; output was retained for review and further sending stopped',
+    });
     assert.equal((await segments())[0].translation, null);
     await invoke('edit_segment', { segment: source });
     assert.equal((await invoke('list_saved_ai_results', { jobId }))[0].canApply, true);

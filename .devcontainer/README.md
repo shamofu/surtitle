@@ -40,6 +40,10 @@ The full check sequence is `.devcontainer/verify.sh`. The launcher announces bui
 
 The image includes the pinned `cargo-deny` license-audit tool so Docker image caching also retains its installation. Verification installs that version only when using an older image where the tool is absent.
 
+During headless E2E, `AT-SPI ... org.a11y.Bus` reports that the optional accessibility bus is absent; WebDriver tests do not verify screen-reader integration. `libEGL ... DRI3` reports an unavailable accelerated rendering path in the virtual display; Mesa can fall back to software rendering. These messages alone do not mean the E2E suite failed, and a passing Linux run does not certify GPU rendering. See the [AT-SPI bus description](https://github.com/GNOME/at-spi2-core/blob/main/bus/README.md) and [Mesa EGL fallback documentation](https://docs.mesa3d.org/egl.html).
+
+Check the final spec results and process exit code. WebDriver command errors need separate investigation: an interaction error may recover after WebdriverIO waits for the element, but an expected application rejection must assert the actual application error. Capture that rejection inside the webview and serialize it explicitly so a driver transport error cannot accidentally satisfy the test.
+
 `pnpm test` runs both the Vitest UI and Node script projects. Select `pnpm test:ui` or `pnpm test:scripts` for focused checks; `pnpm test:watch` watches both. CI builds this image with Buildx and a dedicated GitHub Actions layer cache, then uses the same `start` and `verify` commands above. The native toolchain image has a separate cache scope. These image caches do not persist runtime pnpm/Cargo stores or build directories, and do not add container mounts.
 
 Every full verification allocates a fresh `work/e2e-linux.XXXXXXXX` profile with
