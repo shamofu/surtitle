@@ -25,8 +25,8 @@ step 'Running Rust workspace tests with all features'
 cargo test --workspace --all-features --locked
 step 'Testing AI accounting without default features'
 cargo test -p surtitle-ai --no-default-features --locked
-step 'Checking extracted audio against FFmpeg waveform references'
-SURTITLE_TEST_FFMPEG="$(command -v ffmpeg)" cargo test -p surtitle --lib --features e2e-test --locked installed_ffmpeg_preserves_ -- --ignored
+step 'Running the three required FFmpeg waveform and stream regressions'
+SURTITLE_TEST_FFMPEG="$(command -v ffmpeg)" node scripts/run-required-rust-tests.mjs linux-ffmpeg
 step 'Running Rust Clippy checks'
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 if ! command -v cargo-deny >/dev/null; then

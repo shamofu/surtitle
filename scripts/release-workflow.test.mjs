@@ -131,16 +131,16 @@ test('Linux exports selected tmpfs evidence through the container layer into a r
   assert.match(exporter, /docker exec --user vscode surtitle-ci cp "\/workspaces\/surtitle\/artifacts\/\$report" "\/opt\/surtitle-build\/evidence\/\$report"/);
   assert.match(exporter, /docker exec --user vscode surtitle-ci cp -a \/workspaces\/surtitle\/test-results\/native\/\. \/opt\/surtitle-build\/evidence\/native-screenshots\//);
   const exports = [...exporter.matchAll(/docker cp "?surtitle-ci:([^"\s]+)/g)].map(match => match[1]);
-  assert.deepEqual(exports, ['/opt/surtitle-build/evidence/$report', '/opt/surtitle-build/verification.log', '/opt/surtitle-build/evidence/native-screenshots']);
+  assert.deepEqual(exports, ['/opt/surtitle-build/evidence/$report', '/opt/surtitle-build/verification.log', '/opt/surtitle-build/evidence/required-rust-tests', '/opt/surtitle-build/evidence/native-screenshots']);
   assert.doesNotMatch(exporter, /docker cp[^\n]+:\/workspaces\/surtitle/);
-  for (const destination of ['$report', 'linux-verification.log', 'native-screenshots']) {
+  for (const destination of ['$report', 'linux-verification.log', 'required-rust-tests', 'native-screenshots']) {
     assert.ok(exporter.includes(`"$evidence_dir/${destination}"`));
   }
   assert.doesNotMatch(exporter, /mkdir -p artifacts|docker cp[^\n]+ artifacts\//);
   assert.match(actionStep('linux', 'actions/upload-artifact'), /^          path: \$\{\{ steps\.evidence\.outputs\.directory \}\}$/m);
 });
 
-test('prebuilt native images still require this commit, reviewed inputs and unmounted offline compilation', () => {
+test('prebuilt native images still require this commit, committed inputs and unmounted offline compilation', () => {
   const script = readFileSync(new URL('./native-ci-build.sh', import.meta.url), 'utf8');
   assert.match(script, /1:--prebuilt-image\) prebuilt_image=true/);
   assert.match(script, /git rev-parse HEAD/);
@@ -182,6 +182,55 @@ test('native and package artifacts are consumed only from the current run and SH
   for (const block of [packaging, publisher]) {
     assert.doesNotMatch(block, /^\s+(run-id|repository|github-token|pattern|merge-multiple):/m);
   }
+});
+
+test('independent producer digests bind native consumers and the final publisher', () => {
+  assert.match(job('native-build'), /receipt-sha256: \$\{\{ steps\.native-build\.outputs\.receipt-sha256 \}\}/);
+  assert.match(job('native-build'), /id: native-build\r?\n        run: bash scripts\/native-ci-build\.sh/);
+  for (const name of ['windows', 'package']) {
+    assert.match(job(name), /SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256: \$\{\{ needs\.native-build\.outputs\.receipt-sha256 \}\}/);
+    assert.match(job(name), /consume[^\r\n]+--expected-receipt-sha256 \$env:SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256/);
+  }
+  assert.match(job('package'), /release-manifest-sha256: \$\{\{ steps\.package-verify\.outputs\.release-manifest-sha256 \}\}/);
+  assert.match(job('package'), /id: package-verify\r?\n        run: pwsh scripts\/package-verify\.ps1/);
+  assert.match(job('publish'), /SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256: \$\{\{ needs\.package\.outputs\.receipt-sha256 \}\}/);
+  assert.match(job('publish'), /SURTITLE_EXPECTED_RELEASE_MANIFEST_SHA256: \$\{\{ needs\.package\.outputs\.release-manifest-sha256 \}\}/);
+  const verifier = readFileSync(new URL('./package-verify.ps1', import.meta.url), 'utf8');
+  const validated = verifier.indexOf("throw 'The packaged artifact failed the same-SHA release contract.'");
+  assert.ok(validated > 0);
+  assert.ok(verifier.indexOf('"release-manifest-sha256=$releaseManifestSha256" >> $env:GITHUB_OUTPUT') > validated);
+  assert.ok(verifier.indexOf('foreach ($component in $nativeManifest.components)') < verifier.indexOf('& node scripts/native-ci-source-check.mjs'));
+  assert.equal(verifier.match(/native-ci-source-check\.mjs[^\r\n]+--reference-workspace \$workspace/g)?.length, 2);
+  assert.match(verifier, /\$archiver x[^\r\n]+'native\/build\/\*'[^\r\n]+'native-sources\/\*'/);
+});
+
+test('short native regressions are required after preparing the fixed runtime and development model', () => {
+  const windows = job('windows');
+  assert.match(windows, /native-prepare\.ps1 -WithDevModel/);
+  assert.ok(windows.indexOf('native-prepare.ps1 -WithDevModel') < windows.indexOf('run-required-rust-tests.mjs windows-native'));
+  const required = windows.split(/^      - /m).find(step => step.includes('run-required-rust-tests.mjs windows-native'));
+  assert.ok(required);
+  assert.doesNotMatch(required, /if:|continue-on-error:|\|\|/);
+  const linux = readFileSync(new URL('../.devcontainer/verify.sh', import.meta.url), 'utf8');
+  assert.match(linux, /SURTITLE_TEST_FFMPEG="\$\(command -v ffmpeg\)" node scripts\/run-required-rust-tests\.mjs linux-ffmpeg/);
+  assert.match(job('linux'), /cp -a \/workspaces\/surtitle\/artifacts\/required-rust-tests \/opt\/surtitle-build\/evidence\/required-rust-tests/);
+});
+
+test('long audio acceptance is manual, serial, source-built and uses a separate optimized Rust cache', () => {
+  const manual = readFileSync(new URL('../.github/workflows/native-acceptance.yml', import.meta.url), 'utf8');
+  assert.match(manual, /^on:\r?\n  workflow_dispatch:$/m);
+  assert.doesNotMatch(manual, /^  schedule:|contents: write|scripts\/release\.mjs|windows-spoken/m);
+  assert.match(manual, /group: Test and release-\$\{\{ github\.ref \}\}/);
+  assert.match(manual, /cancel-in-progress: false\r?\n  queue: max/);
+  const native = manual.match(/^  native-build:\r?\n([\s\S]*?)(?=^  [a-z][a-z-]*:\r?$)/m)?.[1];
+  assert.equal(native, job('native-build').replace(/^    needs: \[linux\]\r?\n/m, ''));
+  assert.match(manual, /needs: \[native-build\]/);
+  assert.match(manual, /SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256: \$\{\{ needs\.native-build\.outputs\.receipt-sha256 \}\}/);
+  assert.match(manual, /native-prepare\.ps1 -WithDevModel/);
+  assert.match(manual, /key: windows-2025-native-acceptance-optimized-v1/);
+  assert.match(manual, /node scripts\/run-required-rust-tests\.mjs windows-six-hour/);
+  assert.match(manual, /timeout-minutes: 15/);
+  assert.match(manual, /if: always\(\)/);
 });
 
 test('only the release-push publisher receives write permission', () => {

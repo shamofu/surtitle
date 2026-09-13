@@ -50,8 +50,6 @@ Expand-Archive -LiteralPath (Join-Path $workspace 'work/application-source.zip')
 # manifest that was tested, rather than the checkout's local candidate hashes.
 Copy-Item -LiteralPath (Join-Path $workspace 'native/runtime-windows-x64.json') -Destination (Join-Path $sourceDir 'native/runtime-windows-x64.json') -Force
 Copy-Item -LiteralPath (Join-Path $workspace 'work/native-ci-artifact/native-build-artifact.json') -Destination (Join-Path $sourceDir 'native/native-build-artifact.json')
-& node scripts/native-ci-source-check.mjs $sourceDir (Join-Path $workspace 'work/native-ci-artifact') $env:GITHUB_SHA
-if ($LASTEXITCODE -ne 0) { throw 'Corresponding source omitted the effective tested native manifest.' }
 Push-Location -LiteralPath $sourceDir
 try {
     # Keep the emitted source replacement portable after extracting the ZIP.
@@ -90,6 +88,8 @@ foreach ($component in $nativeManifest.components) {
         Copy-Item -LiteralPath $evidencePath -Destination (Join-Path $componentSources ($field + '-' + $item.Name))
     }
 }
+& node scripts/native-ci-source-check.mjs $sourceDir (Join-Path $workspace 'work/native-ci-artifact') $env:GITHUB_SHA --reference-workspace $workspace
+if ($LASTEXITCODE -ne 0) { throw 'Corresponding source differs from the tested native artifact or committed inputs.' }
 $sevenZip = Get-Command 7z.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 $archiver = if ($sevenZip) { $sevenZip.Source } else { Join-Path ${env:ProgramFiles} '7-Zip/7z.exe' }
 if (-not (Test-Path -LiteralPath $archiver)) { throw '7-Zip is required for a ZIP64 source archive with all dotfiles.' }
@@ -101,9 +101,9 @@ try {
 $sourceCheck = Join-Path $workspace 'work/release-source-check'
 if (Test-Path -LiteralPath $sourceCheck) { throw 'Source archive verification directory must be fresh.' }
 New-Item -ItemType Directory -Path $sourceCheck | Out-Null
-& $archiver x '-y' ('-o' + $sourceCheck) (Join-Path $releaseDir 'surtitle-source.zip') 'native/runtime-windows-x64.json' 'native/native-build-artifact.json' 'native-installer-sources/*' | Out-Null
+& $archiver x '-y' ('-o' + $sourceCheck) (Join-Path $releaseDir 'surtitle-source.zip') 'native/runtime-windows-x64.json' 'native/native-build-artifact.json' 'native/build/*' 'scripts/native-build.sh' 'scripts/native-source-inputs.py' 'scripts/native-build-evidence.py' 'native-sources/*' 'native-installer-sources/*' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Cannot verify the effective native manifest inside the source archive.' }
-& node scripts/native-ci-source-check.mjs $sourceCheck (Join-Path $workspace 'work/native-ci-artifact') $env:GITHUB_SHA
+& node scripts/native-ci-source-check.mjs $sourceCheck (Join-Path $workspace 'work/native-ci-artifact') $env:GITHUB_SHA --reference-workspace $workspace
 if ($LASTEXITCODE -ne 0) { throw 'The source archive does not contain the exact tested native manifest and receipt.' }
 & node scripts/native-installer-audit.mjs source-check $sourceCheck
 if ($LASTEXITCODE -ne 0) { throw 'The source archive omitted exact installer sources or its build receipt.' }
@@ -115,5 +115,8 @@ $version = (Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).ver
 Get-ChildItem -LiteralPath $releaseDir -File | Where-Object Name -NE 'SHA256SUMS.txt' | Sort-Object Name | ForEach-Object { "$( (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)" } | Set-Content -LiteralPath (Join-Path $releaseDir 'SHA256SUMS.txt') -Encoding utf8
 # Validate the complete artifact on main and PRs as well as release pushes.
 # This contract checks evidence and hashes only; it never publishes anything.
-& node --input-type=module -e 'import { readFileSync } from "node:fs"; import { validateRelease } from "./scripts/release-contract.mjs"; validateRelease("artifacts/release", process.env.GITHUB_SHA, JSON.parse(readFileSync("package.json", "utf8")).version);'
+& node --input-type=module -e 'import { readFileSync } from "node:fs"; import { validateRelease } from "./scripts/release-contract.mjs"; validateRelease("artifacts/release", process.env.GITHUB_SHA, JSON.parse(readFileSync("package.json", "utf8")).version, { expectedRunId: process.env.GITHUB_RUN_ID, expectedReceiptSha256: process.env.SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256 });'
 if ($LASTEXITCODE -ne 0) { throw 'The packaged artifact failed the same-SHA release contract.' }
+if (-not $env:GITHUB_OUTPUT) { throw 'Package verification requires the Actions job output channel.' }
+$releaseManifestSha256 = (Get-FileHash -LiteralPath (Join-Path $releaseDir 'release-manifest.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+"release-manifest-sha256=$releaseManifestSha256" >> $env:GITHUB_OUTPUT

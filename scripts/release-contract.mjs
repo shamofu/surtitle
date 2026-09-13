@@ -2,8 +2,24 @@ import { readFileSync, readdirSync, lstatSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 
-export function validateRelease(directory, sha, version) {
+/** Publish only the complete asset set verified by the package job. */
+export function validateReleaseForPublish(directory, sha, version, { expectedReleaseManifestSha256, ...nativeContext } = {}) {
+  if (!/^[a-f0-9]{64}$/.test(expectedReleaseManifestSha256 ?? '')) {
+    throw new Error('An independently supplied release manifest SHA-256 is required');
+  }
+  const path = join(directory, 'release-manifest.json');
+  const stat = lstatSync(path);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Release manifest must be a regular file');
+  if (createHash('sha256').update(readFileSync(path)).digest('hex') !== expectedReleaseManifestSha256) {
+    throw new Error('Release manifest differs from the package job output');
+  }
+  return validateRelease(directory, sha, version, nativeContext);
+}
+
+export function validateRelease(directory, sha, version, { expectedRunId, expectedReceiptSha256 } = {}) {
   if (!/^[0-9a-f]{40}$/i.test(sha ?? '') || !/^\d+\.\d+\.\d+$/.test(version ?? '')) throw new Error('Invalid release identity');
+  if (typeof expectedRunId !== 'string' || !/^[1-9][0-9]*$/.test(expectedRunId)
+      || !/^[a-f0-9]{64}$/.test(expectedReceiptSha256 ?? '')) throw new Error('An independent native producer run and receipt hash are required');
   const names = readdirSync(directory);
   if (names.some(name => basename(name) !== name || !lstatSync(join(directory, name)).isFile() || lstatSync(join(directory, name)).isSymbolicLink())) throw new Error('Release assets must be regular files in a flat directory');
   const required = ['release-manifest.json', 'SHA256SUMS.txt', 'surtitle-source.zip', 'native-audit.json', 'installer-smoke.json', 'production-smoke.json', 'installer-audit.json', 'installer-build-receipt.json', 'js-sbom.cdx.json', 'rust-dependencies.json', 'native-runtime-manifest.json', 'native-build-artifact.json'];
@@ -15,6 +31,13 @@ export function validateRelease(directory, sha, version) {
   const hash = name => createHash('sha256').update(readFileSync(join(directory, name))).digest('hex');
   const nativeManifest = JSON.parse(readFileSync(join(directory, 'native-runtime-manifest.json'), 'utf8'));
   const nativeBuild = JSON.parse(readFileSync(join(directory, 'native-build-artifact.json'), 'utf8'));
+  if (nativeBuild.schemaVersion !== 2 || nativeBuild.runId !== expectedRunId
+      || nativeManifest.buildBinding?.runId !== expectedRunId || audit.nativeBuildRunId !== expectedRunId
+      || hash('native-build-artifact.json') !== expectedReceiptSha256 || audit.nativeReceiptSha256 !== expectedReceiptSha256
+      || !/^[a-f0-9]{64}$/.test(nativeBuild.baseManifestSha256 ?? '')
+      || nativeManifest.buildBinding?.baseManifestSha256 !== nativeBuild.baseManifestSha256) {
+    throw new Error('Native build receipt differs from the independent producer identity');
+  }
   if (nativeBuild.sha !== sha || nativeManifest.buildBinding?.sha !== sha || audit.nativeBuildSha !== sha ||
       nativeBuild.files?.['effective-native-manifest.json'] !== hash('native-runtime-manifest.json') ||
       audit.effectiveManifestSha256 !== hash('native-runtime-manifest.json')) {

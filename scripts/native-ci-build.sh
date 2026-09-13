@@ -10,7 +10,7 @@ esac
 sha=${GITHUB_SHA:?A tested Git commit SHA is required}
 [[ "$sha" =~ ^[a-fA-F0-9]{40}$ ]] || { echo 'Invalid commit SHA' >&2; exit 1; }
 [[ "$(git rev-parse HEAD)" == "$sha" ]] || { echo 'Checkout differs from GITHUB_SHA' >&2; exit 1; }
-node scripts/native-ci-artifact.mjs check-inputs
+node scripts/native-ci-artifact.mjs check-inputs "$sha"
 name="surtitle-native-ci-${sha:0:12}"
 image="surtitle-native-ci:$sha"
 destination=work/native-ci-artifact

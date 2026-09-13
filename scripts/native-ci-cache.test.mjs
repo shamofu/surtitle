@@ -26,9 +26,9 @@ function fixture(t) {
   return { root, write, toolchain, runnerTemp, outputPath: join(root, 'github-output') };
 }
 
-test('frontend, documentation, review policy and commit changes retain both native cache keys', t => {
+test('frontend, documentation, CI and commit changes retain both native cache keys', t => {
   const f = fixture(t), expected = cacheKeys(f.root, f.toolchain);
-  for (const path of ['src/app.tsx', 'README.md', '.github/workflows/ci.yml', 'native/build/reviewed-inputs.json', '.git/HEAD']) {
+  for (const path of ['src/app.tsx', 'README.md', '.github/workflows/ci.yml', '.git/HEAD']) {
     f.write(path, 'unrelated new commit content');
   }
   assert.deepEqual(cacheKeys(f.root, f.toolchain), expected);

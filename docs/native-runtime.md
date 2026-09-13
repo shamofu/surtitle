@@ -33,28 +33,23 @@ WebView2 explicitly uses Tauri's `downloadBootstrapper` mode with interactive in
 
 ## Auditing and local preparation
 
-`node scripts/native-audit.mjs --release` hashes payload/notices/source/review evidence, rejects extra DLLs/models, and checks ordinary and delayed PE imports. Windows platform files and the separately installed VC prerequisite have distinct classifications. The hook/helper hashes and explicit NSIS/WebView2 configuration are checked. In CI it additionally validates the native build artifact against the current commit and reviewed inputs. The local intended payload passed this audit on 2026-09-09; that does not mean a release was published or the installer lifecycle completed.
+`node scripts/native-audit.mjs --release` hashes payload/notices/source/review evidence, rejects extra DLLs/models, and checks ordinary and delayed PE imports. Windows platform files and the separately installed VC prerequisite have distinct classifications. The hook/helper hashes and explicit NSIS/WebView2 configuration are checked. In CI it additionally validates the native build artifact against the selected Git commit and the producer's independent receipt hash. The local intended payload passed this audit on 2026-09-09; that does not mean a release was published or the installer lifecycle completed.
 
 `pwsh scripts/native-prepare.ps1` consumes the selected source-built runtime and downloads the fixed official ORT archive. It rejects absent source-build artifacts instead of substituting an unrelated upstream binary. `pwsh scripts/native-smoke.ps1` checks the existing Microsoft prerequisite without installing it, then loads the three exact DLL paths with app-directory/System32-only search and initializes mpv/ORT. Rendering and Silero inference require separate application tests.
 
-For a fresh Git checkout, first build or download the native artifact for its exact commit. On Linux with Docker and Node 24, from that checkout:
-
-```sh
-export GITHUB_SHA="$(git rev-parse HEAD)"
-bash scripts/native-ci-build.sh
-```
-
-Alternatively, download `native-build-<exact commit SHA>` from that commit's successful Actions run into `work/native-ci-artifact/`. On Windows, consume and prepare it explicitly:
+For a fresh Git checkout, download `native-build-<exact commit SHA>` from that commit's successful Actions run into `work/native-ci-artifact/`. Obtain the run ID and the receipt SHA-256 printed by that run's successful seal step independently of the downloaded receipt. On Windows, consume and prepare it explicitly:
 
 ```powershell
 $sha = (git rev-parse HEAD).Trim()
-node scripts/native-ci-artifact.mjs consume work/native-ci-artifact $sha
+$env:GITHUB_RUN_ID = '<the selected Actions run ID>'
+$env:SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256 = '<receipt SHA-256 from the producer seal step>'
+node scripts/native-ci-artifact.mjs consume work/native-ci-artifact $sha --expected-receipt-sha256 $env:SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256
 pwsh scripts/native-prepare.ps1
 pwsh scripts/native-smoke.ps1
 pnpm tauri dev
 ```
 
-The first route builds dependencies inside an unmounted container and exports only selected final artifacts. The second route verifies the same source/recipe and actual output hashes before changing the local effective manifest. Neither route downloads a prepublished libmpv binary. For a published source ZIP without Git metadata, use the separate [source rebuild instructions](../native/SOURCE-REBUILD.md); they create a local candidate without inventing a commit or requiring a hidden working directory.
+The Actions-only `native-ci-build.sh` requires the real producer run ID, attempt and commit. It builds dependencies inside an unmounted container and exports only selected final artifacts. Consumption checks source/recipe and output identities before changing the local effective manifest. Neither operation downloads a prepublished libmpv binary. For a local candidate build or a published source ZIP without Git metadata, use the separate [source rebuild instructions](../native/SOURCE-REBUILD.md); do not invent Actions provenance for a local build.
 
 ## Same-commit native CI build
 
@@ -64,11 +59,17 @@ Compiler-cache keys bind the actual toolchain binaries, package versions, truste
 
 After a successful build and artifact seal, only ccache data and verified download archives are copied back for caching. Restored paths must contain regular files and directories; links, special files and incomplete downloads are rejected. GitHub cache saves are limited to successful `main` push builds. Pull requests can restore eligible caches but do not save them. Container mount isolation and the same-run/SHA artifact checks remain mandatory.
 
-`native/build/reviewed-inputs.json` binds the reviewed source/recipe/notice/packaging inputs. CI never regenerates this policy or creates a commit. The build records actual container image and toolchain packages, produces an effective native manifest for its actual output hashes, and seals a `native-build-<commit SHA>` internal Actions artifact. The Windows and package jobs consume that same artifact only after SHA, source, recipe, file and manifest checks. Each build then passes PE closure, actual Windows playback including AV1, and installer gates. Neither PE timestamps nor the apt toolchain are claimed to reproduce the earlier local DLL hash byte for byte.
+The broad manually updated `reviewed-inputs.json` ledger has been removed. Ordinary application, test and CI edits need no companion hash update. `check-inputs SHA` reads the selected commit's Git blobs and compares the native recipe bytes actually used. The seven libmpv recipe hashes in build evidence are computed observations, checked against that commit; they are not a generated review approval. External archive/DLL/model/notice hashes remain in the existing source catalog, runtime manifest and dependency reviews. Changing those dependencies still requires updating their own source/license evidence.
 
-`.gitattributes` disables Git text normalization for every byte-bound input and the policy itself. The preflight checks effective Git attributes for each path, so Windows `core.autocrlf` cannot silently alter the hashes. Shell recipes retain LF. Retained upstream license/source evidence is not rewritten to satisfy the policy.
+The source catalog supplies all 20 libmpv inputs, and the existing ORT review supplies the 91 fixed source/port/notice records. The older ORT acquisition metadata is not used as a replacement review inventory: it retains historical patch entries and omits the ORT/vcpkg root archives. Human source/license reviews remain separate from CI observations. Neither the former ledger nor a commit hash proves an independent human review took place.
 
-The corresponding application-source ZIP contains the effective `native/runtime-windows-x64.json` and `native/native-build-artifact.json`, not merely the checkout's local candidate manifest. Packaging extracts those two entries again and compares them to the tested artifact. The publish contract also binds the effective manifest and native build receipt to the tested SHA. This design uses internal same-run artifacts and does not require public binary bootstrap publication.
+Receipt schema 2 records the commit, producer run/attempt, Git base-manifest hash and exact payload hashes. After full validation, seal exports the receipt SHA-256 as a job output. Windows and package consume only this run's artifact, first matching that independent digest; package passes it onward to publish. Audit repeats the comparison and checks that the working manifest exactly matches the verified effective manifest. A consumer retry may have a different attempt from the producer; the run must still match. The receipt's own digest is not embedded in its effective manifest, avoiding a hash cycle. This protects transfer and resealing after the producer, not a producer that forges its output and all its evidence together.
+
+The original manifest always comes from `Git SHA:native/runtime-windows-x64.json`, even after consume overwrites the working file. Only the declared libmpv output and source-reference changes are allowed. `.gitattributes` continues to preserve bytes for native recipes and retained source/license evidence. A mismatch fails rather than rewriting the retained evidence or an expected hash. Compiler/image observations do not claim bit-for-bit reproduction of the earlier candidate DLL.
+
+The archive checker streams the source tar files without extraction. It checks libmpv's seven recipes, 20 source archives and retained component notices against the commit/catalog/review, and checks ORT's stable files and packaged scripts against review/Git. Missing files, substitutions, duplicate entries, links and unsafe paths fail even when outer transport hashes are recalculated.
+
+The corresponding application-source ZIP contains the effective `native/runtime-windows-x64.json`, `native/native-build-artifact.json` and exact native source/review evidence. Packaging extracts and verifies these entries and recipe files from the final ZIP. `native-ci-source-check.mjs SOURCE ARTIFACT SHA --reference-workspace CHECKOUT` uses the separate checkout's Git objects and independent producer digest; the extracted source needs no `.git`. After the complete release contract passes, the package job exports the release-manifest SHA-256 separately from the artifact. Publish first compares this independent digest, preventing a replaced ZIP from passing merely by recalculating its bundled manifest and checksum file. A ZIP alone supports integrity inspection and candidate rebuilding, while independent commit-origin verification needs that trusted reference. PE closure, Windows playback including AV1, actual installer and production smoke gates remain mandatory.
 
 Every configured push to `main` or `release`, and every pull request targeting either branch, runs the package job after Linux and Windows checks succeed. It builds and audits the native payload and installer plugin, exercises installation/overwrite/uninstall in the runner's fresh profile, assembles source/notices/SBOM, and validates the complete same-SHA artifact contract. Successful runs upload `release-<github.sha>` as an internal Actions artifact; this name does not mean a GitHub Release was published. Pull request artifacts use the tested merge SHA. Only a push to `release` can enter the separate publish job, which consumes that run's exact artifact and revalidates it before publishing.
 

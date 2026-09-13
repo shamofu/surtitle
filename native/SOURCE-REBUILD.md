@@ -115,5 +115,8 @@ separately installed runtime described in [native-runtime.md](../docs/native-run
 
 The local rebuild remains ineligible for the project's automated release until
 its source/notice review, fresh Windows tests and isolated installer lifecycle
-are complete. Do not alter reviewed-input hashes or insert a synthetic Git SHA
-to make a release gate pass.
+are complete. Do not change pinned dependency hashes to match unexpected output,
+or insert a synthetic Git SHA/Actions run identity to make a release gate pass.
+The CI verifier reads original inputs from a separate checkout at the selected
+commit. An extracted source ZIP does not need its own `.git` or a generated
+review ledger to build a local candidate.

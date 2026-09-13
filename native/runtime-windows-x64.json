@@ -55,6 +55,7 @@
       "sourcePage": "https://github.com/microsoft/onnxruntime/releases/tag/v1.29.0",
       "archiveUrl": "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-win-x64-1.29.0.zip",
       "archiveFile": "ort.zip",
+      "format": "zip",
       "archiveSha256": "c9b4b7086b529ad814f428c1bad028e20a25d7dc0699836775faace4ab5b78b2",
       "digestProvenance": "GitHub release asset digest over HTTPS; not a separate publisher signature",
       "runtimeFiles": [

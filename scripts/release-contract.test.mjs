@@ -4,18 +4,24 @@ import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'n
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { validateRelease } from './release-contract.mjs';
+import { validateRelease as validateReleaseContract, validateReleaseForPublish } from './release-contract.mjs';
 const sha = 'a'.repeat(40), version = '0.1.0';
+const runId = '12345', baseManifestSha256 = 'b'.repeat(64), producerContexts = new Map();
+const validateRelease = (directory, expectedSha, expectedVersion) => validateReleaseContract(directory, expectedSha, expectedVersion, producerContexts.get(directory));
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'surtitle-release-test-'));
   t.onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
+  t.onTestFinished(() => producerContexts.delete(directory));
   for (const name of ['surtitle.exe', 'surtitle-source.zip', 'js-sbom.cdx.json', 'rust-dependencies.json']) writeFileSync(join(directory, name), 'test payload');
   const nativeFiles = [{ file: 'mpv-2.dll', sha256: 'c'.repeat(64) }, { file: 'onnxruntime.dll', sha256: 'd'.repeat(64) }];
-  const nativeManifest = JSON.stringify({ buildBinding: { sha }, components: [{ runtimeFiles: nativeFiles.map(file => ({ target: file.file, sha256: file.sha256 })) }] });
+  const nativeManifest = JSON.stringify({ buildBinding: { sha, runId, baseManifestSha256 }, components: [{ runtimeFiles: nativeFiles.map(file => ({ target: file.file, sha256: file.sha256 })) }] });
   const nativeHash = createHash('sha256').update(nativeManifest).digest('hex');
   writeFileSync(join(directory, 'native-runtime-manifest.json'), nativeManifest);
-  writeFileSync(join(directory, 'native-build-artifact.json'), JSON.stringify({ sha, files: { 'effective-native-manifest.json': nativeHash } }));
-  writeFileSync(join(directory, 'native-audit.json'), JSON.stringify({ sha, nativeBuildSha: sha, effectiveManifestSha256: nativeHash, artifactIntegrityPassed: true, releaseEligible: true, errors: [], blockers: [] }));
+  const nativeReceipt = JSON.stringify({ schemaVersion: 2, sha, runId, runAttempt: '1', baseManifestSha256, files: { 'effective-native-manifest.json': nativeHash } });
+  const nativeReceiptSha256 = createHash('sha256').update(nativeReceipt).digest('hex');
+  writeFileSync(join(directory, 'native-build-artifact.json'), nativeReceipt);
+  producerContexts.set(directory, { expectedRunId: runId, expectedReceiptSha256: nativeReceiptSha256 });
+  writeFileSync(join(directory, 'native-audit.json'), JSON.stringify({ sha, nativeBuildSha: sha, nativeBuildRunId: runId, nativeReceiptSha256, effectiveManifestSha256: nativeHash, artifactIntegrityPassed: true, releaseEligible: true, errors: [], blockers: [] }));
   const emptyProfile = { credentialConfigured: false, savedModelPreferenceCount: 0,
     budget: { spentUsd: 0, reservedUsd: 0, limitUsd: 0, unpricedAttempts: 0, monetaryTotalsComplete: true, unknownAttempts: [] } };
   const production = { schemaVersion: 1, sha, passed: true, normalBuild: true, applicationSha256: 'e'.repeat(64), effectiveManifestSha256: nativeHash,
@@ -48,13 +54,55 @@ function reseal(directory) {
 }
 test('accepts a complete same-SHA artifact set', t => assert.equal(validateRelease(fixture(t), sha, version).length, 13));
 
+test('publishing requires the independently supplied package manifest digest', t => {
+  const directory = fixture(t), context = producerContexts.get(directory);
+  for (const expectedReleaseManifestSha256 of [undefined, '', 'not-a-hash', 'A'.repeat(64)]) {
+    assert.throws(() => validateReleaseForPublish(directory, sha, version, { ...context, expectedReleaseManifestSha256 }),
+      /independently supplied release manifest/);
+  }
+  const expectedReleaseManifestSha256 = createHash('sha256').update(readFileSync(join(directory, 'release-manifest.json'))).digest('hex');
+  assert.equal(validateReleaseForPublish(directory, sha, version, { ...context, expectedReleaseManifestSha256 }).length, 13);
+  assert.throws(() => validateReleaseForPublish(directory, sha, version, { expectedReleaseManifestSha256 }),
+    /independent native producer/);
+});
+
+test('resealing a substituted source ZIP cannot replace the package job output', t => {
+  const directory = fixture(t);
+  const expectedReleaseManifestSha256 = createHash('sha256').update(readFileSync(join(directory, 'release-manifest.json'))).digest('hex');
+  writeFileSync(join(directory, 'surtitle-source.zip'), 'replacement ZIP omitting corresponding source');
+  reseal(directory);
+  // The producer validator checks internal consistency; publish also needs its independent output.
+  assert.equal(validateRelease(directory, sha, version).length, 13);
+  assert.throws(() => validateReleaseForPublish(directory, sha, version,
+    { ...producerContexts.get(directory), expectedReleaseManifestSha256 }), /differs from the package job output/);
+});
+
+test('requires the producer identity independently of the release files', t => {
+  const directory = fixture(t);
+  for (const context of [undefined, {}, { expectedRunId: runId }, { expectedRunId: '0', expectedReceiptSha256: 'a'.repeat(64) }]) {
+    assert.throws(() => validateReleaseContract(directory, sha, version, context), /independent native producer/);
+  }
+  assert.throws(() => validateReleaseContract(directory, sha, version, { ...producerContexts.get(directory), expectedRunId: '98765' }), /producer identity/);
+});
+
+test('resealing a substituted receipt and audit cannot replace the producer job output', t => {
+  const directory = fixture(t), receiptPath = join(directory, 'native-build-artifact.json');
+  const receipt = JSON.parse(readFileSync(receiptPath));
+  receipt.runAttempt = '2';
+  writeFileSync(receiptPath, JSON.stringify(receipt));
+  const auditPath = join(directory, 'native-audit.json'), audit = JSON.parse(readFileSync(auditPath));
+  audit.nativeReceiptSha256 = createHash('sha256').update(readFileSync(receiptPath)).digest('hex');
+  writeFileSync(auditPath, JSON.stringify(audit)); reseal(directory);
+  assert.throws(() => validateRelease(directory, sha, version), /producer identity/);
+});
+
 test('rejects substituted native build identity even with resealed transport hashes', t => {
   const directory = fixture(t);
   const path = join(directory, 'native-build-artifact.json');
   const receipt = JSON.parse(readFileSync(path, 'utf8'));
   writeFileSync(path, JSON.stringify({ ...receipt, sha: 'b'.repeat(40) }));
   reseal(directory);
-  assert.throws(() => validateRelease(directory, sha, version), /Native build\/effective manifest/);
+  assert.throws(() => validateRelease(directory, sha, version), /Native build receipt/);
 });
 test('rejects a different commit even with intact checksums', t => assert.throws(() => validateRelease(fixture(t), 'b'.repeat(40), version), /commit\/version/));
 test('rejects altered installer before publishing', t => {

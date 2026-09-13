@@ -1,6 +1,6 @@
 # AI test plan
 
-Updated 2026-09-09. This plan separates free, deterministic regression tests from explicitly authorized live Vertex evaluations. It does not itself authorize paid requests. See [AI design](ai.md), [verification instructions](vertex-verification.md), and [recorded status](status.md).
+Updated 2026-09-13; historical quality criteria below retain their original scope. This plan separates free, deterministic regression tests from explicitly authorized live Vertex evaluations. It does not itself authorize paid requests. See [AI design](ai.md), [verification instructions](vertex-verification.md), and [recorded status](status.md).
 
 For the subsequent Transcribe production campaign, use the separately versioned [review-assisted evaluation policy](transcribe-production.md) and [implementation evidence](transcribe-implementation-2026-09-12.md). That policy makes 90% automatic joining an improvement target and evaluates local recovery. The earlier criteria and reports below remain historical; vocabulary and explanations currently remain experimental.
 
@@ -44,6 +44,84 @@ Use real FFmpeg, Silero, and ONNX Runtime for local preparation. Verify the chos
 A six-hour fixture is processed locally in full; record elapsed time, peak memory scope, temporary storage, final storage, sample counts, and tool hashes. The [recorded silent fixture](ai.md#six-hour-local-processing-evidence) is a processing test, not a speech-quality benchmark.
 
 Native E2E verifies SQLite and IPC through real WebView2/libmpv on Windows and WebKitGTK under Xvfb on Linux. Use multilingual paths containing spaces and ampersands. Check 20,000-cue navigation, six-hour metadata/seeking, source-track persistence, subtitle version replacement/recovery, card audio, URL cancellation/retry cleanup, and that no paid requests occur.
+
+### Required integration suites
+
+`scripts/run-required-rust-tests.mjs` makes selected ignored regressions mandatory. It compiles each selected Rust test target once, obtains its executable from Cargo's JSON output, and lists each complete test name with `--ignored --exact`. Each listing must contain exactly that one test. Execution requires its success line, exactly one pass, and zero ignored tests; a successful process that runs zero tests is a failure. Tests run sequentially with `--test-threads=1`. Success output is retained with `--show-output`; stdout, stderr, command arguments, durations, input paths/hashes and the suite report are written below `artifacts/required-rust-tests/<suite>/`. An existing evidence directory is rejected; use `--evidence-dir` for another fresh local run.
+
+The ordinary Linux verification runs `linux-ffmpeg` (three tests). The ordinary Windows job runs `windows-native` (six tests) after consuming its same-run/SHA native artifact, preparing/smoke-checking the DLLs and development model, and making FFmpeg available. The two card-audio tests were already explicitly executed by both jobs; this replaces their permissive prefix invocation and adds the selected-stream test, without duplicating card coverage. `windows-ffmpeg` is the same three-test subset for local Windows checks that do not have native DLLs/model prepared.
+
+The following inventory accounts for all 12 ignored declarations. Ordinary `cargo test --workspace --all-features` still leaves explicit integration tests ignored. Child helpers are deliberately invoked only by their parent tests.
+
+| Complete Rust test name | Execution and dependency |
+| --- | --- |
+| `tool_commands::card_audio::tests::installed_ffmpeg_preserves_native_rate_wav_tail_without_padding` | Linux/Windows FFmpeg suites; selected absolute FFmpeg path and adjacent ffprobe; generated PCM |
+| `tool_commands::card_audio::tests::installed_ffmpeg_preserves_source_clock_and_cleans_failed_outputs` | Linux/Windows FFmpeg suites; generated PCM/AAC/MP3, timestamp offsets and cleanup |
+| `command::tests::multitrack_extraction_preserves_selected_stream` | Linux/Windows FFmpeg suites; generated one-second 440/880 Hz multitrack MKV and both extracted waveforms |
+| `player::subtitle_tests::real_mpv_load_restores_position_and_maps_audio_stream` | `windows-native`; `surtitle --lib --features e2e-test`, native DLLs, FFmpeg |
+| `commands::restore_tests::real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks` | `windows-native`; same native prerequisites, independent temporary profile |
+| `prepare::tests::real_silero_and_ffmpeg_preserve_selection_time` | `windows-native`; `surtitle-ai --lib --no-default-features`, pinned ORT/Silero, generated PCM, FFmpeg |
+| `command::tests::installed_tools_probe_and_extract` | Explicit local manual diagnostic; existing absolute `SURTITLE_TEST_FFMPEG`, `SURTITLE_TEST_YTDLP` and `SURTITLE_TEST_DENO` paths; local extraction and capability probes |
+| `manager::tests::live_rolling_update` | Explicit Windows manual diagnostic with `SURTITLE_TEST_UPDATE=ffmpeg\|deno\|yt-dlp`; downloads and executes the selected tool in temporary app-owned storage |
+| `prepare::tests::six_hour_streaming_acceptance` | `windows-six-hour`; separate manual native-acceptance workflow or prepared local environment; generated six-hour silence |
+| `prepare::spoken_pause_test::real_spoken_audio_and_interior_pause_require_only_local_warning_review` | `windows-spoken`; local only, existing explicit speech fixture directory and native prerequisites |
+| `ledger::fault_tests::process_checkpoint_child` | Subprocess helper for ordinary parent fault tests, with an isolated temporary database; never selected independently |
+| `vertex::fault_tests::crash_child_after_paid_dispatch` | Subprocess helper for ordinary parent crash tests using fixed transport; its name does not mean a real paid API call |
+
+The Windows E2E suites remain necessary. Media management already checks restored playback/audio selection after an entire application restart and the frequency of saved card audio. Sentence playback already checks caption stops and repeat priority. The additional direct libmpv tests cover load-in-progress/play reconciliation, invalid-media completion, and restoration while another thread persists playback ticks every millisecond, including the actual restored subtitle text, stop boundaries and missing/removed media. The small tools test additionally checks both selected frequencies on Linux. Native E2E software rendering uses `hwdec=no`, D3D11 WARP and null audio; it does not establish hardware-decoder or speaker-output quality.
+
+The upstream workflow and its separate live integration target were removed from main. The required runner therefore has no upstream acquisition suite or snapshot handoff. The two remaining tools diagnostics above stay manual and are outside ordinary CI. The external-path diagnostic uses already selected executables and performs no tool acquisition; the rolling-update diagnostic acquires its selected tool only when explicitly invoked. Required suites treat an unsupported OS, missing executable, absent native asset, wrong hash, missing test or skipped test as an error.
+
+Local commands, after preparing the relevant dependencies:
+
+```sh
+SURTITLE_TEST_FFMPEG="$(command -v ffmpeg)" node scripts/run-required-rust-tests.mjs linux-ffmpeg
+```
+
+```powershell
+$env:SURTITLE_TEST_FFMPEG = 'C:\Tools\ffmpeg\ffmpeg.exe'
+node scripts/run-required-rust-tests.mjs windows-ffmpeg
+
+# Requires an already selected source-built native payload; the model remains a development fixture.
+pwsh scripts/native-prepare.ps1 -WithDevModel
+pwsh scripts/native-smoke.ps1
+node scripts/run-required-rust-tests.mjs windows-native
+
+# Authored silence is generated locally; no speech recording is downloaded.
+node scripts/generate-fixtures.mjs
+$env:SURTITLE_LONG_AUDIO_FILE = Join-Path $PWD 'test-results/fixtures/six-hour-silence.flac'
+node scripts/run-required-rust-tests.mjs windows-six-hour
+
+$env:SURTITLE_SPOKEN_FIXTURES = 'C:\existing\reviewed-librispeech-fixtures'
+node scripts/run-required-rust-tests.mjs windows-spoken
+```
+
+The optional existing-tool diagnostic can be invoked separately after setting all three executable paths; it does not use the required-suite runner:
+
+```powershell
+$env:SURTITLE_TEST_YTDLP = 'C:\Tools\yt-dlp.exe'
+$env:SURTITLE_TEST_DENO = 'C:\Tools\deno.exe'
+cargo test -p surtitle-tools --lib --locked command::tests::installed_tools_probe_and_extract -- --ignored --exact --test-threads=1 --show-output
+```
+
+Silero is fetched by `native-prepare.ps1 -WithDevModel` from the commit-fixed URL in `native/runtime-windows-x64.json` and checked against its SHA-256. It is MIT-licensed and stays under `work/native-fixtures`, outside bundled resources. The runner checks the manifest's three DLL hashes and model hash before native execution; in CI it also requires the effective manifest's current SHA. The AI integration tests retain their independently fixed ORT DLL/model expectations. A deliberate ORT/model version change must update the corresponding tests and evidence together.
+
+The spoken test requires six existing hash-pinned files: WAV, text and TextGrid for LibriSpeech utterances `1089-134686-0001` and `1089-134686-0003`. The WAV files preserve 52,400 and 42,880 PCM samples. TextGrid alignment is not human timing ground truth. A reproducible acquisition/conversion route for these exact six bytes, including distributable alignment provenance and license evidence, is not yet encoded for clean CI. Therefore no speech download or scheduled speech suite is added. Existing local fixtures can run the strict suite; [historical spoken-pause evidence](ai-audio-quality-2026-09-09.md#real-spoken-audio-integration-check) remains separate from a new hosted CI result.
+
+Six hours describes input duration, not elapsed test time. The manual `native-acceptance.yml` builds and consumes the same-run/SHA native artifact, generates silence, and invokes only `windows-six-hour`. That suite uses test-only optimization levels 3 for sha2/surtitle-tools and 1 for surtitle-ai, matching the historical measurement configuration. It requires all 345,600,000 core samples, zero cloud calls, removed temporary PCM, positive measured storage/chunk counts and Windows working-set evidence with its limited scope. Preparation must finish within 360 seconds; the external process watchdog also bounds hangs. The acceptance workflow has no publish job and does not promote its output into a release.
+
+| Work | Cost evidence and current limit |
+| --- | --- |
+| Existing card regressions | Local Windows 2026-09-13: native-rate tail 15.79 seconds and source-clock/cleanup 184.98 seconds, both passing. Historical source-clock run: 194.14 seconds |
+| Added selected-stream regression | Local Windows 2026-09-13: 12.38 seconds, passing. One-second generated media and two half-second extractions; each FFmpeg command has a 30-second internal bound, runner limit three minutes; hosted timing remains to be measured |
+| Direct libmpv/Silero regressions | Short generated inputs and bounded player waits; runner limit three minutes each; no new native execution measurement without prepared DLLs/model |
+| Manual tools diagnostics | External-path probe/extraction and rolling-update acquisition have no new execution measurement or hosted CI budget; neither is selected by the required runner |
+| Six-hour acceptance | Historical preparation 122.2166538 seconds, 180 chunks and about 51 MB Rust-process peak working set; excludes FFmpeg and OS cache. New hosted measurements remain separate |
+| Compilation | Local Windows 2026-09-13: Tauri library target 103.924 seconds, tools library target 31.226 seconds. Targets compile once per suite, with a 20-minute process watchdog and existing Rust caches |
+
+The 2026-09-13 local `windows-ffmpeg` run passed all three exact-name/list/run checks with the existing user-selected FFmpeg n9.0.1; the external executables were hashed before and after tests and were not copied into distribution. Evidence, including stdout/stderr, measured command durations, selected tool hashes/version and the successful suite report, is retained under `work/required-rust-verification-20260913/`. Compilation used the separate `work/required-rust-target` output directory. The two libmpv test names were also confirmed by actual exact listings; neither body ran. These are local working-checkout results, not a hosted same-SHA native run.
+
+The runner's 14 local unit checks cover suite selection, exact-name/zero-count failures, environment/hash failures, tool replacement during a passing test, acceptance-report/PCM validation and timeout termination of its own process tree while an unrelated process continues. Full native execution and hosted workflow success are separate completion evidence; this checkout did not have the prepared native DLLs/model. None of these suites makes an external paid API request or changes the existing native source/license, installer, container-isolation, same-SHA or release-publication gates.
 
 ## Transcript review and repair
 

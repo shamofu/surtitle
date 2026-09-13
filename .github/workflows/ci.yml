@@ -16,6 +16,8 @@ jobs:
     needs: [linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    outputs:
+      receipt-sha256: ${{ steps.native-build.outputs.receipt-sha256 }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
@@ -36,9 +38,9 @@ jobs:
           key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:scripts
-      - run: node scripts/native-ci-artifact.mjs check-inputs
+      - run: node scripts/native-ci-artifact.mjs check-inputs ${{ github.sha }}
       - uses: docker/setup-buildx-action@v4.3.0
-      - name: Build the reviewed native toolchain image
+      - name: Build this commit's native toolchain image
         uses: docker/build-push-action@v7.3.0
         with:
           context: .
@@ -66,7 +68,8 @@ jobs:
             ${{ steps.native-cache.outputs.directory }}/ort-archives
           key: ${{ steps.native-cache.outputs.source-key }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ${{ steps.native-cache.outputs.source-key }}-
-      - name: Build reviewed native inputs without host dependency/output mounts
+      - name: Build committed native inputs without host dependency/output mounts
+        id: native-build
         run: bash scripts/native-ci-build.sh --prebuilt-image
         env:
           SURTITLE_NATIVE_CACHE_DIR: ${{ steps.native-cache.outputs.directory }}
@@ -130,6 +133,10 @@ jobs:
           if docker exec surtitle-ci test -f /opt/surtitle-build/verification.log; then
             docker cp surtitle-ci:/opt/surtitle-build/verification.log "$evidence_dir/linux-verification.log"
           fi
+          if docker exec surtitle-ci test -d /workspaces/surtitle/artifacts/required-rust-tests; then
+            docker exec --user vscode surtitle-ci cp -a /workspaces/surtitle/artifacts/required-rust-tests /opt/surtitle-build/evidence/required-rust-tests
+            docker cp surtitle-ci:/opt/surtitle-build/evidence/required-rust-tests "$evidence_dir/required-rust-tests"
+          fi
           if docker exec surtitle-ci test -d /workspaces/surtitle/test-results/native; then
             docker exec --user vscode surtitle-ci mkdir -p /opt/surtitle-build/evidence/native-screenshots
             docker exec --user vscode surtitle-ci cp -a /workspaces/surtitle/test-results/native/. /opt/surtitle-build/evidence/native-screenshots/
@@ -147,6 +154,8 @@ jobs:
     needs: [native-build]
     runs-on: windows-2025
     timeout-minutes: 60
+    env:
+      SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256: ${{ needs.native-build.outputs.receipt-sha256 }}
     defaults:
       run:
         shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
@@ -172,8 +181,8 @@ jobs:
         with:
           name: native-build-${{ github.sha }}
           path: work/native-ci-artifact/
-      - name: Require the native artifact built from this commit's reviewed inputs
-        run: node scripts/native-ci-artifact.mjs consume work/native-ci-artifact ${{ github.sha }}
+      - name: Require this run's native artifact and committed inputs
+        run: node scripts/native-ci-artifact.mjs consume work/native-ci-artifact ${{ github.sha }} --expected-receipt-sha256 $env:SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0
@@ -192,7 +201,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Acquire tested native runtime
         run: |
-          pwsh scripts/native-prepare.ps1
+          pwsh scripts/native-prepare.ps1 -WithDevModel
           pwsh scripts/native-smoke.ps1
       - name: Prepare native WebDriver and generated media
         run: |
@@ -204,10 +213,10 @@ jobs:
           cargo run -p surtitle-core --example seed_fixture -- "$PWD/work/e2e-windows" "$PWD/test-results/fixtures/日本語 & sample.mp4"
       - name: Build actual Windows native E2E binary
         run: cargo build -p surtitle --features e2e-test,custom-protocol --locked
-      - name: Verify extracted audio against source-clock waveform references
+      - name: Require all six FFmpeg, libmpv and Silero regressions
         run: |
           $env:SURTITLE_TEST_FFMPEG = (Get-Command ffmpeg -CommandType Application).Source
-          cargo test -p surtitle --lib --features e2e-test --locked installed_ffmpeg_preserves_ -- --ignored
+          node scripts/run-required-rust-tests.mjs windows-native
       - name: WebView2 and libmpv E2E
         run: pnpm test:e2e
         env:
@@ -228,6 +237,11 @@ jobs:
     needs: [linux, windows, native-build]
     runs-on: windows-2025
     timeout-minutes: 60
+    outputs:
+      receipt-sha256: ${{ needs.native-build.outputs.receipt-sha256 }}
+      release-manifest-sha256: ${{ steps.package-verify.outputs.release-manifest-sha256 }}
+    env:
+      SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256: ${{ needs.native-build.outputs.receipt-sha256 }}
     defaults:
       run:
         shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
@@ -254,7 +268,7 @@ jobs:
           name: native-build-${{ github.sha }}
           path: work/native-ci-artifact/
       - name: Use the same native payload and source tested by Windows
-        run: node scripts/native-ci-artifact.mjs consume work/native-ci-artifact ${{ github.sha }}
+        run: node scripts/native-ci-artifact.mjs consume work/native-ci-artifact ${{ github.sha }} --expected-receipt-sha256 $env:SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0
@@ -285,6 +299,7 @@ jobs:
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
           pnpm test:fixtures
       - name: Test production installer and assemble source/SBOM
+        id: package-verify
         run: pwsh scripts/package-verify.ps1
       - uses: actions/upload-artifact@v7.0.1
         with:
@@ -295,6 +310,9 @@ jobs:
     needs: [linux, windows, package]
     if: github.event_name == 'push' && github.ref == 'refs/heads/release'
     runs-on: ubuntu-24.04
+    env:
+      SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256: ${{ needs.package.outputs.receipt-sha256 }}
+      SURTITLE_EXPECTED_RELEASE_MANIFEST_SHA256: ${{ needs.package.outputs.release-manifest-sha256 }}
     permissions:
       contents: write
     steps:
