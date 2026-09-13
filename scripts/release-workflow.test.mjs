@@ -87,6 +87,11 @@ test('host package caches retain only the pnpm store with explicit runtime and l
   }
   assert.notEqual(actionStep('windows', 'Swatinem/rust-cache').match(/key: (.+)/)?.[1],
     actionStep('package', 'Swatinem/rust-cache').match(/key: (.+)/)?.[1], 'Debug and release dependency caches need separate keys');
+  const packageRust = actionStep('package', 'Swatinem/rust-cache');
+  assert.match(packageRust, /^          key: windows-2025-release-v2$/m);
+  assert.match(packageRust, /^          cache-targets: false$/m);
+  assert.match(packageRust, /^          cache-directories: \|\n            target\/debug\n            target\/release\n/m);
+  assert.doesNotMatch(packageRust, /target\/\.tauri|work\/native-installer/);
   assert.doesNotMatch(workflow, /node --test/);
   assert.match(job('native-build'), /pnpm test:scripts/);
   assert.match(job('windows'), /^      - run: pnpm test$/m);
@@ -176,6 +181,12 @@ test('package validation runs for main/release pushes and pull requests after al
     'pnpm tauri build --bundles nsis -- --locked', 'native-installer-audit.ps1', 'package-verify.ps1']) {
     assert.ok(packaging.includes(command), `Missing required package check: ${command}`);
   }
+  const notices = packaging.split(/^      - /m).find(step => step.startsWith('name: Generate distribution notices and dependency manifests\n'));
+  assert.ok(notices);
+  assert.match(notices, /cargo install cargo-about --version 0\.9\.2 --locked --features cli --bin cargo-about --root work\/package-tools/);
+  assert.match(notices, /& \.\/work\/package-tools\/bin\/cargo-about\.exe --version/);
+  assert.match(notices, /& \.\/work\/package-tools\/bin\/cargo-about\.exe generate scripts\/licenses\.hbs --output-file src-tauri\/resources\/notices\/rust\.html/);
+  assert.doesNotMatch(notices, /\bcargo about generate/);
   const verifier = readFileSync(new URL('./package-verify.ps1', import.meta.url), 'utf8');
   assert.match(verifier, /& pwsh[^\r\n]+scripts\/package-installer-smoke\.ps1/);
   assert.match(verifier, /validateRelease\("artifacts\/release", process\.env\.GITHUB_SHA/);

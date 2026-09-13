@@ -280,7 +280,11 @@ jobs:
           toolchain: 1.98.0
       - uses: Swatinem/rust-cache@v2.9.2
         with:
-          key: windows-2025-release
+          key: windows-2025-release-v2
+          cache-targets: false
+          cache-directories: |
+            target/debug
+            target/release
       - run: pnpm install --frozen-lockfile
       - run: node scripts/check-production-features.mjs
       - run: pwsh scripts/native-prepare.ps1
@@ -290,8 +294,9 @@ jobs:
           pwsh scripts/native-installer-prepare.ps1
       - name: Generate distribution notices and dependency manifests
         run: |
-          cargo install cargo-about --version 0.9.2 --locked
-          cargo about generate scripts/licenses.hbs --output-file src-tauri/resources/notices/rust.html
+          cargo install cargo-about --version 0.9.2 --locked --features cli --bin cargo-about --root work/package-tools
+          & ./work/package-tools/bin/cargo-about.exe --version
+          & ./work/package-tools/bin/cargo-about.exe generate scripts/licenses.hbs --output-file src-tauri/resources/notices/rust.html
           node scripts/audit-js-licenses.mjs
       - name: Require complete native redistribution evidence
         run: node scripts/native-audit.mjs --release
