@@ -14,7 +14,7 @@
     "test:ui": "vitest run --project ui",
     "test:scripts": "vitest run --project scripts",
     "test:browser": "playwright test",
-    "test:e2e": "wdio run ./wdio.conf.js",
+    "test:e2e": "node scripts/run-native-e2e.mjs",
     "test:fixtures": "node scripts/generate-fixtures.mjs",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri"

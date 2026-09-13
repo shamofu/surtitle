@@ -148,7 +148,7 @@ process.exitCode = 37;
 }, 30_000);
 
 for (const location of ['temp', 'workspace']) {
-test(`separate standard-user processes can create, reopen and update a WAL SQLite profile in ${location}`, async t => {
+test(`standard-user observers preserve WAL writes across nested app restarts in ${location}`, async t => {
   const parent = location === 'temp' ? tmpdir() : join(process.cwd(), 'work');
   mkdirSync(parent, { recursive: true });
   const f = fixture(t, parent), profile = join(f.root, 'fresh profile 日本語 & SQLite');
@@ -159,30 +159,64 @@ const { join } = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const [profile, phase] = process.argv.slice(2);
 if (phase === 'seed') mkdirSync(profile);
-const db = new DatabaseSync(join(profile, 'learning.sqlite'));
+const db = new DatabaseSync(join(profile, 'learning.sqlite'), { readOnly: phase === 'observe' });
 try {
-  assert.equal(db.prepare('PRAGMA journal_mode=WAL').get().journal_mode, 'wal');
-  if (phase === 'seed') {
-    db.exec('CREATE TABLE saved_state (value INTEGER NOT NULL); INSERT INTO saved_state VALUES (1);');
-  } else {
-    db.exec('BEGIN IMMEDIATE; UPDATE saved_state SET value=value+1; COMMIT;');
+  if (phase !== 'observe') {
+    assert.equal(db.prepare('PRAGMA journal_mode=WAL').get().journal_mode, 'wal');
+    if (phase === 'seed') {
+      db.exec('CREATE TABLE saved_state (value INTEGER NOT NULL); INSERT INTO saved_state VALUES (1);');
+    } else {
+      db.exec('BEGIN IMMEDIATE; UPDATE saved_state SET value=value+1; COMMIT;');
+    }
+    assert.equal(db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get().busy, 0);
+    writeFileSync(join(profile, 'last-writer.txt'), phase);
   }
-  assert.equal(db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get().busy, 0);
-  writeFileSync(join(profile, 'last-writer.txt'), phase);
   console.log(${JSON.stringify(marker)} + JSON.stringify(db.prepare('SELECT value FROM saved_state').get()));
 } finally { db.close(); }
 `);
-  // The seed must create the directory and DB under the same restricted token
-  // policy as the later app. A host-created file can be read-only to that app.
+  const nested = f.write('nested app launcher.mjs', `
+import { spawnWebDriver } from ${JSON.stringify(new URL('./webdriver-process.mjs', import.meta.url).href)};
+const child = spawnWebDriver(process.execPath, process.argv.slice(2), { stdio: 'inherit', env: process.env });
+child.once('error', error => { console.error(error); process.exitCode = 1; });
+child.once('close', code => { process.exitCode = code ?? 1; });
+`);
+  const launchApp = (root, phase) => f.launch([nested, script, root, phase]).completed;
+  // SQLite readOnly SELECT still creates WAL/SHM. The observer must share the
+  // app's permissions too. Exercise the nested launcher used by WDIO's driver.
   assert.equal(existsSync(profile), false);
-  for (const [phase, value] of [['seed', 1], ['reopen', 2], ['reopen', 3]]) {
-    const result = await f.launch([script, profile, phase]).completed;
+  for (const [phase, value] of [['seed', 1], ['observe', 1], ['reopen', 2], ['observe', 2], ['reopen', 3]]) {
+    const result = phase === 'reopen' ? await launchApp(profile, phase) : await f.launch([script, profile, phase]).completed;
     assert.equal(result.error, undefined);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.signal, null);
     assert.deepEqual(childJson(result.stdout), { value });
+    for (const suffix of ['-wal', '-shm']) {
+      assert.equal(existsSync(join(profile, `learning.sqlite${suffix}`)), phase === 'observe',
+        `Read-only observation must leave ${suffix}; closing the later writer must remove it`);
+    }
   }
-}, 30_000);
+  if (process.platform === 'win32') {
+    // Diagnostic control: reproduce the old elevated-observer boundary when the
+    // host ACL/label policy makes it fail. A host that already has medium rights
+    // can legitimately share these files; the corrected path above must pass.
+    const control = join(f.root, 'host observer control');
+    const seeded = await f.launch([script, control, 'seed']).completed;
+    assert.equal(seeded.code, 0, seeded.stderr);
+    const observed = await f.record(spawn(process.execPath, [script, control, 'observe'],
+      { cwd: f.root, env: process.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })).completed;
+    assert.equal(observed.code, 0, observed.stderr);
+    const acl = spawnSync('icacls.exe', [control, '/T'], { encoding: 'utf8', windowsHide: true });
+    assert.equal(acl.status, 0, acl.stderr);
+    const restarted = await launchApp(control, 'reopen');
+    assert.equal(restarted.error, undefined);
+    assert.equal(restarted.signal, null);
+    if (restarted.code !== 0) assert.match(restarted.stderr, /readonly database/i);
+    if (process.env.GITHUB_ACTIONS === 'true' || restarted.code !== 0) {
+      console.log(JSON.stringify({ location, hostObserverReopenExitCode: restarted.code,
+        hostObserverFileAccess: acl.stdout, reopenDiagnostic: restarted.stderr }));
+    }
+  }
+}, 60_000);
 }
 
 test.skipIf(process.platform !== 'win32')('terminating the Windows launcher ends its child and grandchild while an unrelated process continues', async t => {
