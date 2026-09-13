@@ -2,7 +2,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { spawnWebDriver } from './webdriver-process.mjs';
@@ -125,7 +125,9 @@ process.exitCode = 37;
   assert.equal(result.signal, null);
   const actual = childJson(result.stdout);
   assert.deepEqual(actual.args, args);
-  assert.equal(actual.cwd, f.root);
+  // Hosted Windows TEMP can contain an 8.3 alias (RUNNER~1); PowerShell expands
+  // it before launching the child. Compare the actual filesystem locations.
+  assert.equal(realpathSync.native(actual.cwd), realpathSync.native(f.root));
   assert.equal(actual.environment, '環境 & "literal" \\ value');
   assert.equal(actual.username, userInfo().username);
   assert.match(result.stderr, /SURTITLE_TEST_CHILD_STDERR: retained/);
