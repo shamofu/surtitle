@@ -1,12 +1,126 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, cpSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { regular, validateInstallerExtraction, validateBundledResources, validateTemplate, writableDestination, assertSourcePackageBinding, assertInstallerNoticeBinding, verifyNsisApplication } from './native-installer-audit.mjs';
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const windowsPrepareTest = { skip: process.platform !== 'win32', timeout: 20_000 };
+function prepareFixture(t, { sourceResponse, contentType = 'application/octet-stream', cachedSource } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'surtitle-installer-download 日本語 & '));
+  t.onTestFinished(() => rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  const downloads = join(root, 'work/native-installer-downloads');
+  for (const path of ['scripts', 'native', 'mock', 'target/.tauri/NSIS', 'work/native-installer-downloads']) {
+    mkdirSync(join(root, path), { recursive: true });
+  }
+  cpSync(new URL('./native-installer-prepare.ps1', import.meta.url), join(root, 'scripts/native-installer-prepare.ps1'));
+  const items = [
+    { field: 'toolArchive', file: 'nsis.zip', url: 'https://github.com/example/nsis.zip' },
+    { field: 'sourceArchive', file: 'nsis-src.tar.bz2', url: 'https://downloads.sourceforge.net/project/nsis/NSIS%203/nsis-src.tar.bz2' },
+    { field: 'cacheOnlyPlugin', file: 'plugin.dll', url: 'https://github.com/example/plugin.dll' },
+  ].map(item => ({ ...item, bytes: Buffer.from([0x50, 0x4b, 0, 0xff, ...Buffer.from(item.file)]) }));
+  writeFileSync(join(root, 'native/installer-inputs.json'), JSON.stringify(Object.fromEntries(items.map(item =>
+    [item.field, { file: item.file, url: item.url, sha256: digest(item.bytes) }]))));
+  for (const item of items) writeFileSync(join(root, 'mock', item.file), item.field === 'sourceArchive' && sourceResponse !== undefined ? sourceResponse : item.bytes);
+  if (cachedSource !== undefined) writeFileSync(join(downloads, items[1].file), cachedSource);
+  writeFileSync(join(root, 'mock/responses.json'), JSON.stringify(items.map(item => ({
+    url: item.url, file: item.file, contentType: item.field === 'sourceArchive' ? contentType : 'application/octet-stream',
+  }))));
+  const harness = join(root, 'mock-download.ps1');
+  writeFileSync(harness, String.raw`
+$ErrorActionPreference = 'Stop'
+$global:downloadMockRoot = $PSScriptRoot
+$global:downloadMockItems = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'mock/responses.json') -Raw | ConvertFrom-Json
+function Invoke-WebRequest {
+  param([string]$Uri, [string]$UserAgent, [string]$OutFile, [switch]$PassThru, [int]$TimeoutSec)
+  $item = @($global:downloadMockItems | Where-Object { $_.url -eq $Uri })
+  if ($item.Count -ne 1) { throw 'Unexpected mocked request.' }
+  @{ uri = $Uri; userAgent = $UserAgent; outFile = $OutFile; passThru = [bool]$PassThru; timeoutSec = $TimeoutSec } |
+    ConvertTo-Json -Compress | Add-Content -LiteralPath (Join-Path $global:downloadMockRoot 'requests.jsonl') -Encoding utf8
+  [IO.File]::WriteAllBytes($OutFile, [IO.File]::ReadAllBytes((Join-Path $global:downloadMockRoot ('mock/' + $item[0].file))))
+  return [pscustomobject]@{
+    StatusCode = 200
+    Headers = @{ 'Content-Type' = $item[0].contentType }
+    BaseResponse = [pscustomobject]@{ RequestMessage = [pscustomobject]@{
+      RequestUri = [Uri]'https://mirror.example.invalid/installer/source.tar.bz2?signature=must-not-be-logged'
+    } }
+  }
+}
+try {
+  & (Join-Path $PSScriptRoot 'scripts/native-installer-prepare.ps1')
+} catch {
+  Write-Output ('SURTITLE_PREPARE_ERROR:' + $_.Exception.Message)
+  exit 37
+}
+exit 0
+`);
+  const run = () => {
+    const child = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', harness],
+      { cwd: root, encoding: 'utf8', timeout: 15_000, windowsHide: true });
+    assert.ifError(child.error);
+    const output = child.stdout + child.stderr;
+    assert.equal(child.status, 37, output);
+    const errors = child.stdout.split(/\r?\n/).filter(line => line.startsWith('SURTITLE_PREPARE_ERROR:'));
+    assert.equal(errors.length, 1, output);
+    const requests = existsSync(join(root, 'requests.jsonl'))
+      ? readFileSync(join(root, 'requests.jsonl'), 'utf8').trim().split(/\r?\n/).map(line => JSON.parse(line.replace(/^\uFEFF/, ''))) : [];
+    for (const request of requests) {
+      assert.equal(request.userAgent, 'Surtitle-installer-source-audit');
+      assert.equal(request.passThru, true);
+      assert.ok(request.timeoutSec > 0);
+    }
+    assert.ok(!output.includes('signature=must-not-be-logged'), output);
+    return { output, error: errors[0].slice('SURTITLE_PREPARE_ERROR:'.length), requests };
+  };
+  return { root, downloads, items, run };
+}
+
+test('installer preparation downloads with a CLI User-Agent and promotes only all three pinned payloads', windowsPrepareTest, t => {
+  const f = prepareFixture(t);
+  const result = f.run();
+  // This existing guard is after download validation and before archive extraction or other tools.
+  assert.equal(result.error, 'Private NSIS tools already exist; audit the prepared receipt or use a fresh checkout.');
+  assert.deepEqual(result.requests.map(request => request.uri), f.items.map(item => item.url));
+  for (const item of f.items) {
+    assert.deepEqual(readFileSync(join(f.downloads, item.file)), item.bytes);
+    assert.equal(existsSync(join(f.downloads, item.file + '.partial')), false);
+    assert.ok(result.output.includes(`Verified installer input ${item.file} against its pinned SHA-256.`));
+  }
+  assert.ok(result.output.includes('final-url=https://mirror.example.invalid/installer/source.tar.bz2'));
+});
+
+for (const [name, bytes, contentType] of [
+  ['HTTP 200 HTML landing page', Buffer.from('<!doctype html><title>SourceForge download</title>'), 'text/html'],
+  ['modified binary download', Buffer.from([0x50, 0x4b, 0, 0xfe, 1, 2, 3]), 'application/octet-stream'],
+]) {
+  test(`installer preparation rejects a ${name} without promoting the unverified input`, windowsPrepareTest, t => {
+    const f = prepareFixture(t, { sourceResponse: bytes, contentType });
+    const result = f.run();
+    assert.match(result.error, /^Installer download checksum mismatch for nsis-src\.tar\.bz2:/);
+    assert.ok(result.error.includes(`expected ${digest(f.items[1].bytes)}, received ${digest(bytes)}`));
+    assert.equal(result.requests.length, 2);
+    assert.deepEqual(readFileSync(join(f.downloads, f.items[0].file)), f.items[0].bytes);
+    assert.equal(existsSync(join(f.downloads, f.items[1].file)), false);
+    assert.deepEqual(readFileSync(join(f.downloads, f.items[1].file + '.partial')), bytes);
+    assert.equal(existsSync(join(f.downloads, f.items[2].file)), false);
+    assert.ok(result.output.includes(`status=200; content-type=${contentType}`));
+  });
+}
+
+test('installer preparation rejects a modified cached input without treating it as verified', windowsPrepareTest, t => {
+  const cachedSource = Buffer.from('unverified cached source archive');
+  const f = prepareFixture(t, { cachedSource });
+  const result = f.run();
+  assert.equal(result.error, 'Installer input checksum mismatch for nsis-src.tar.bz2.');
+  assert.deepEqual(result.requests.map(request => request.uri), [f.items[0].url]);
+  assert.deepEqual(readFileSync(join(f.downloads, f.items[1].file)), cachedSource);
+  assert.equal(existsSync(join(f.downloads, f.items[2].file)), false);
+  assert.ok(!result.output.includes('Verified installer input nsis-src.tar.bz2'));
+});
+
 test('accepts only the complete-file-equivalent single Tauri UNK to NSS marker transformation', () => {
   const original = Buffer.from('MZ-prefix\0__TAURI_BUNDLE_TYPE_VAR_UNK\0unchanged executable and resources');
   const embedded = Buffer.from(original.toString().replace('_VAR_UNK', '_VAR_NSS'));
