@@ -210,7 +210,12 @@ jobs:
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
           pnpm test:fixtures
           ffmpeg -v error -f lavfi -i 'testsrc2=size=320x180:rate=12:duration=3' -c:v libaom-av1 -cpu-used 8 -crf 50 -y work/e2e-av1.mkv
-          cargo run -p surtitle-core --example seed_fixture -- "$PWD/work/e2e-windows" "$PWD/test-results/fixtures/日本語 & sample.mp4"
+          cargo build -p surtitle-core --example seed_fixture --locked
+          # Create mutable SQLite files with the same permissions as the app.
+          $seedArguments = ConvertTo-Json -Compress -InputObject @("$PWD/work/e2e-windows", "$PWD/test-results/fixtures/日本語 & sample.mp4")
+          $seedArgumentsBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($seedArguments))
+          & pwsh -NoProfile -File scripts/run-windows-standard-user.ps1 -Application "$PWD/target/debug/examples/seed_fixture.exe" -ArgumentsBase64 $seedArgumentsBase64
+          if ($LASTEXITCODE -ne 0) { throw 'Windows E2E learning fixture preparation failed.' }
       - name: Build actual Windows native E2E binary
         run: cargo build -p surtitle --features e2e-test,custom-protocol --locked
       - name: Require all six FFmpeg, libmpv and Silero regressions

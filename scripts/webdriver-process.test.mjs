@@ -2,7 +2,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { spawnWebDriver } from './webdriver-process.mjs';
@@ -22,8 +22,8 @@ async function until(condition, message, timeoutMs = 15_000) {
     await delay(25);
   }
 }
-function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'surtitle-webdriver 日本語 & '));
+function fixture(t, parent = tmpdir()) {
+  const root = mkdtempSync(join(parent, 'surtitle-webdriver 日本語 & '));
   const processes = [], ownedPids = new Set();
   t.onTestFinished(async () => {
     for (const child of processes) if (child.exitCode === null && child.signalCode === null) child.kill();
@@ -146,6 +146,44 @@ process.exitCode = 37;
       'The actual child must lack administrator membership and protected-machine write access regardless of UAC elevation metadata');
   }
 }, 30_000);
+
+for (const location of ['temp', 'workspace']) {
+test(`separate standard-user processes can create, reopen and update a WAL SQLite profile in ${location}`, async t => {
+  const parent = location === 'temp' ? tmpdir() : join(process.cwd(), 'work');
+  mkdirSync(parent, { recursive: true });
+  const f = fixture(t, parent), profile = join(f.root, 'fresh profile 日本語 & SQLite');
+  const script = f.write('profile writer.cjs', `
+const assert = require('node:assert/strict');
+const { mkdirSync, writeFileSync } = require('node:fs');
+const { join } = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
+const [profile, phase] = process.argv.slice(2);
+if (phase === 'seed') mkdirSync(profile);
+const db = new DatabaseSync(join(profile, 'learning.sqlite'));
+try {
+  assert.equal(db.prepare('PRAGMA journal_mode=WAL').get().journal_mode, 'wal');
+  if (phase === 'seed') {
+    db.exec('CREATE TABLE saved_state (value INTEGER NOT NULL); INSERT INTO saved_state VALUES (1);');
+  } else {
+    db.exec('BEGIN IMMEDIATE; UPDATE saved_state SET value=value+1; COMMIT;');
+  }
+  assert.equal(db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get().busy, 0);
+  writeFileSync(join(profile, 'last-writer.txt'), phase);
+  console.log(${JSON.stringify(marker)} + JSON.stringify(db.prepare('SELECT value FROM saved_state').get()));
+} finally { db.close(); }
+`);
+  // The seed must create the directory and DB under the same restricted token
+  // policy as the later app. A host-created file can be read-only to that app.
+  assert.equal(existsSync(profile), false);
+  for (const [phase, value] of [['seed', 1], ['reopen', 2], ['reopen', 3]]) {
+    const result = await f.launch([script, profile, phase]).completed;
+    assert.equal(result.error, undefined);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.signal, null);
+    assert.deepEqual(childJson(result.stdout), { value });
+  }
+}, 30_000);
+}
 
 test.skipIf(process.platform !== 'win32')('terminating the Windows launcher ends its child and grandchild while an unrelated process continues', async t => {
   const f = fixture(t), ownedBeat = join(f.root, 'owned-beat'), unrelatedBeat = join(f.root, 'unrelated-beat');

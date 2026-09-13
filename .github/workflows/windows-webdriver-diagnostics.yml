@@ -10,10 +10,27 @@ jobs:
   token:
     runs-on: windows-2025
     timeout-minutes: 5
+    defaults:
+      run:
+        shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
     steps:
       - uses: actions/checkout@v7.0.1
-      - name: Check the Windows runner token without launching the application
-        shell: pwsh
+      - uses: actions/setup-node@v7.0.0
+        id: node
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Install the package manager declared by this checkout
+        id: pnpm
         run: |
-          $arguments = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('["-NoLogo","-NoProfile","-NonInteractive","-Command","exit 0"]'))
-          & scripts/run-windows-standard-user.ps1 -Application (Get-Command pwsh -CommandType Application).Source -ArgumentsBase64 $arguments
+          $packageManager = (Get-Content package.json -Raw | ConvertFrom-Json).packageManager
+          npm install -g $packageManager
+          "version=$(pnpm --version)" >> $env:GITHUB_OUTPUT
+          "store=$(pnpm store path --silent)" >> $env:GITHUB_OUTPUT
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
+      - run: pnpm install --frozen-lockfile
+      - name: Verify the runner token and writable SQLite across standard-user processes
+        run: pnpm test:scripts scripts/webdriver-process.test.mjs
