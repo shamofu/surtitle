@@ -220,15 +220,57 @@ test('real process evidence preserves stdout, stderr and a nonzero status', asyn
 
 test('watchdog terminates its own child tree while an unrelated process continues', async t => {
   const f = fixture(t), ownedBeat = join(f.root, 'owned-beat'), unrelatedBeat = join(f.root, 'unrelated-beat');
-  const heartbeat = path => `const fs=require('node:fs');setInterval(()=>fs.writeFileSync(${JSON.stringify(path)},String(Date.now())),25)`;
+  const until = async (condition, message) => {
+    const deadline = Date.now() + 5000;
+    while (!condition()) {
+      assert.ok(Date.now() < deadline, message);
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+  };
+  const running = pid => {
+    try {
+      process.kill(pid, 0);
+      // A container's PID 1 may not reap an orphan immediately. Zombies have
+      // exited and cannot write heartbeats, even though kill(pid, 0) succeeds.
+      return process.platform !== 'linux' || !/\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8'));
+    } catch (error) {
+      if (error.code === 'ESRCH' || error.code === 'ENOENT') return false;
+      throw error;
+    }
+  };
+  // Overwriting briefly truncates a heartbeat to zero bytes. Append sequences
+  // so a concurrent reader can only see the same length or forward progress.
+  const heartbeat = path => `const fs=require('node:fs');let sequence=0;const beat=()=>fs.appendFileSync(${JSON.stringify(path)},String(sequence++)+'\\n');beat();setInterval(beat,25)`;
   const unrelated = spawn(process.execPath, ['-e', heartbeat(unrelatedBeat)], { windowsHide: true, stdio: 'ignore' });
-  t.onTestFinished(() => { unrelated.kill(); });
-  const source = `const{spawn}=require('node:child_process');spawn(process.execPath,['-e',${JSON.stringify(heartbeat(ownedBeat))}],{windowsHide:true,stdio:'ignore'});setInterval(()=>{},1000)`;
-  await assert.rejects(execute(process.execPath, ['-e', source], { cwd: f.root, env: process.env, timeoutMs: 1500, logPrefix: join(f.root, 'timeout'), showStdout: false }), /timed out/);
-  assert(existsSync(ownedBeat)); assert(existsSync(unrelatedBeat));
-  const lastOwned = readFileSync(ownedBeat, 'utf8'), lastUnrelated = readFileSync(unrelatedBeat, 'utf8');
-  await new Promise(resolve => setTimeout(resolve, 200));
+  const unrelatedClosed = new Promise(resolve => unrelated.once('close', resolve));
+  const ownedPids = [];
+  t.onTestFinished(async () => {
+    if (unrelated.exitCode === null && unrelated.signalCode === null) unrelated.kill();
+    for (const pid of ownedPids) if (running(pid)) process.kill(pid, 'SIGKILL');
+    await unrelatedClosed;
+    await until(() => ownedPids.every(pid => !running(pid)), 'Test cleanup must finish before removing heartbeat files');
+  });
+  const source = `const{spawn}=require('node:child_process');const child=spawn(process.execPath,['-e',${JSON.stringify(heartbeat(ownedBeat))}],{windowsHide:true,stdio:'ignore'});console.log(JSON.stringify([process.pid,child.pid]));setInterval(()=>{},1000)`;
+  await assert.rejects(execute(process.execPath, ['-e', source], { cwd: f.root, env: process.env, timeoutMs: 1500, logPrefix: join(f.root, 'timeout'), showStdout: false }), error => {
+    assert.match(error.message, /timed out/);
+    const pids = JSON.parse(error.result.stdout);
+    assert.equal(pids.length, 2);
+    assert.ok(pids.every(pid => Number.isSafeInteger(pid) && pid > 0));
+    ownedPids.push(...pids);
+    return true;
+  });
+  assert.ok(readFileSync(ownedBeat).length > 0, 'The owned grandchild must run before the watchdog fires');
+  assert.ok(readFileSync(unrelatedBeat).length > 0, 'The unrelated process must run before the watchdog fires');
+  await until(() => ownedPids.every(pid => !running(pid)), 'The watchdog must terminate both its child and grandchild');
+  const lastOwned = readFileSync(ownedBeat, 'utf8');
+  let lastUnrelated = readFileSync(unrelatedBeat).length;
+  for (let observation = 0; observation < 3; observation++) {
+    await until(() => {
+      assert.equal(readFileSync(ownedBeat, 'utf8'), lastOwned);
+      assert.ok(running(unrelated.pid), 'The watchdog must leave the unrelated process alive');
+      return readFileSync(unrelatedBeat).length > lastUnrelated;
+    }, 'The unrelated process must keep appending heartbeats after the owned tree exits');
+    lastUnrelated = readFileSync(unrelatedBeat).length;
+  }
   assert.equal(readFileSync(ownedBeat, 'utf8'), lastOwned);
-  assert.notEqual(readFileSync(unrelatedBeat, 'utf8'), lastUnrelated);
-  unrelated.kill(); await new Promise(resolve => unrelated.once('close', resolve));
 }, 20_000);
