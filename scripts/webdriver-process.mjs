@@ -6,7 +6,8 @@ const launcher = fileURLToPath(new URL('./run-windows-standard-user.ps1', import
 
 // WebView2 150+ ignores WebDriver's environment overrides in elevated hosts.
 // Keep the tested application intact and lower the entire driver process tree
-// to standard-user privileges, including for installed production binaries.
+// to restricted medium integrity, including for installed production binaries.
+// The Windows launcher checks groups and privileges, independently of UAC mode.
 export function spawnWebDriver(application, args, options = {}) {
   if (process.platform !== 'win32') return spawn(application, args, options);
   return spawn('pwsh.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', launcher,

@@ -48,7 +48,7 @@ if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notm
 $driverVersion = (& $driver --version)
 if ($LASTEXITCODE -ne 0 -or $driverVersion -notmatch ('\b' + [regex]::Escape($build) + '\.\d+\b')) { throw 'The driver major/minor/build did not match WebView2.' }
 $elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-@{ runtimeVersion=$runtime.Name; driverVersion=$version; url=$url; sha256=(Get-FileHash -LiteralPath $driver -Algorithm SHA256).Hash; verifiedPublisher=$signature.SignerCertificate.Subject; runnerElevated=$elevated; launchMode='standard-user' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $destination 'receipt.json')
-Write-Host "WebView2 runtime=$($runtime.Name) driver=$version runnerElevated=$elevated; WebDriver launches as standard user."
+@{ runtimeVersion=$runtime.Name; driverVersion=$version; url=$url; sha256=(Get-FileHash -LiteralPath $driver -Algorithm SHA256).Hash; verifiedPublisher=$signature.SignerCertificate.Subject; runnerElevated=$elevated; launchMode='restricted-medium' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $destination 'receipt.json')
+Write-Host "WebView2 runtime=$($runtime.Name) driver=$version runnerElevated=$elevated; WebDriver launches with restricted medium integrity."
 Write-Output $driver
 if ($env:GITHUB_ENV) { "SURTITLE_NATIVE_DRIVER=$driver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }

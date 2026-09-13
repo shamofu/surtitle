@@ -60,10 +60,47 @@ test('WebDriver launcher preserves literal arguments, cwd, environment, user, st
   const f = fixture(t);
   const args = ['plain', '日本語', 'spaces and & punctuation', 'a"b', '""', '', '\\',
     'C:\\spaces & 日本語\\', 'before\\\\"after', 'trailing\\\\'];
+  // Request access only: opening this protected key must fail before any write.
+  const windowsAccessProbe = String.raw`
+$ErrorActionPreference = 'Stop'
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = [Security.Principal.WindowsPrincipal]::new($identity)
+$administrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$denied = $false
+$machine = $null
+$read = $null
+$key = $null
+try {
+  $machine = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,
+    [Microsoft.Win32.RegistryView]::Registry64)
+  $path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+  $read = $machine.OpenSubKey($path, $false)
+  if ($null -eq $read) { throw 'The protected machine key must exist and be readable.' }
+  $read.Dispose()
+  $read = $null
+  try {
+    $key = $machine.OpenSubKey($path, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree,
+      [System.Security.AccessControl.RegistryRights]::SetValue)
+  } catch {
+    $exception = $_.Exception
+    while ($null -ne $exception.InnerException) { $exception = $exception.InnerException }
+    if ($exception.GetType().FullName -cne 'System.Security.SecurityException') {
+      throw "$($exception.GetType().FullName): $($exception.Message)"
+    }
+    $denied = $true
+  }
+  [pscustomobject]@{ administrator = $administrator; protectedMachineKeyReadable = $true; protectedMachineWriteAccessDenied = $denied } | ConvertTo-Json -Compress
+} finally {
+  if ($null -ne $read) { $read.Dispose() }
+  if ($null -ne $key) { $key.Dispose() }
+  if ($null -ne $machine) { $machine.Dispose() }
+  $identity.Dispose()
+}
+`;
   const script = f.write('child arguments & 日本語.cjs', `
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
-let groups = null, userSid = null;
+let groups = null, userSid = null, access = null;
 if (process.platform === 'win32') {
   const whoami = spawnSync('whoami.exe', ['/groups', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true });
   if (whoami.status !== 0) throw new Error('Cannot inspect actual child token groups: ' + whoami.stderr);
@@ -71,9 +108,13 @@ if (process.platform === 'win32') {
   const identity = spawnSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true });
   if (identity.status !== 0) throw new Error('Cannot inspect actual child user: ' + identity.stderr);
   userSid = identity.stdout.match(/S-1-5-\\d+(?:-\\d+)*/)?.[0];
+  const probe = spawnSync('pwsh.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', ${JSON.stringify(windowsAccessProbe)}],
+    { encoding: 'utf8', windowsHide: true, timeout: 10_000 });
+  if (probe.status !== 0) throw new Error('Cannot inspect actual child access: ' + (probe.error?.message ?? probe.stderr));
+  access = JSON.parse(probe.stdout);
 }
 console.log(${JSON.stringify(marker)} + JSON.stringify({ pid: process.pid, args: process.argv.slice(2), cwd: process.cwd(),
-  environment: process.env.SURTITLE_TEST_VALUE, username: os.userInfo().username, groups, userSid }));
+  environment: process.env.SURTITLE_TEST_VALUE, username: os.userInfo().username, groups, userSid, access }));
 console.error('SURTITLE_TEST_CHILD_STDERR: retained');
 process.exitCode = 37;
 `);
@@ -94,11 +135,13 @@ process.exitCode = 37;
     const expectedSid = identity.stdout.match(/S-1-5-\d+(?:-\d+)*/)?.[0];
     assert.ok(expectedSid, 'The calling process must have an inspectable user SID');
     assert.equal(actual.userSid, expectedSid, 'Lowering privileges must preserve the calling user identity');
-    const diagnostics = [...result.stderr.matchAll(/\[standard-user\] pid=(\d+) elevated=false integrity=8192 admin=false/g)];
+    const diagnostics = [...result.stderr.matchAll(/\[restricted-medium\] pid=(\d+) elevated=(?:true|false) integrity=8192 admin=false elevationType=\d+ privileges=[^\r\n]*/g)];
     assert.deepEqual(diagnostics.map(match => Number(match[1])), [actual.pid], 'The launcher must verify the actual child token before resuming it');
     // Inspect the actual child's inherited token, independently of launcher logs.
     assert.match(actual.groups, /S-1-16-8192\b/, 'The launched process must have medium integrity');
     assert.doesNotMatch(actual.groups, /S-1-16-(?:12288|16384)\b/, 'The launched process must not retain high or system integrity');
+    assert.deepEqual(actual.access, { administrator: false, protectedMachineKeyReadable: true, protectedMachineWriteAccessDenied: true },
+      'The actual child must lack administrator membership and protected-machine write access regardless of UAC elevation metadata');
   }
 }, 30_000);
 

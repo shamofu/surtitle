@@ -34,11 +34,13 @@ public static class SurtitleWindowsStandardUser
             int session = TokenInteger(currentToken, 12); // TokenSessionId
             uint parentIntegrity = TokenIntegrity(currentToken);
             bool elevated = TokenInteger(currentToken, 20) != 0; // TokenElevation
-            bool administrator = TokenHasEnabledAdministrators(currentToken);
+            bool privilegedGroup = TokenHasPrivilegedGroups(currentToken);
+            string unexpectedParentPrivilege;
+            TokenPrivilegeSummary(currentToken, out unexpectedParentPrivilege);
             if (parentIntegrity < MediumIntegrity)
                 throw new InvalidOperationException("The launcher cannot raise a low-integrity process to medium integrity.");
 
-            bool restrict = elevated || administrator || parentIntegrity != MediumIntegrity;
+            bool restrict = elevated || privilegedGroup || parentIntegrity != MediumIntegrity || unexpectedParentPrivilege != null;
             if (restrict)
             {
                 // NORMALUSER removes administrator privileges even when UAC is disabled.
@@ -86,9 +88,10 @@ public static class SurtitleWindowsStandardUser
 
             IntPtr childToken;
             Check(OpenProcessToken(process.hProcess, TokenQuery, out childToken), "Open child process token");
-            try { VerifyToken(childToken, user, session, "suspended child"); }
+            string childSecurity;
+            try { childSecurity = VerifyToken(childToken, user, session, "suspended child"); }
             finally { CloseHandle(childToken); }
-            Console.Error.WriteLine("[standard-user] pid={0} elevated=false integrity=8192 admin=false", process.dwProcessId);
+            Console.Error.WriteLine("[restricted-medium] pid={0} {1}", process.dwProcessId, childSecurity);
             Check(ResumeThread(process.hThread) != Infinite, "Resume verified standard-user process");
             Check(WaitForSingleObject(process.hProcess, Infinite) == 0, "Wait for standard-user process");
             uint exitCode;
@@ -132,17 +135,78 @@ public static class SurtitleWindowsStandardUser
         return quoted.Append('\\', backslashes * 2).Append('"').ToString();
     }
 
-    static void VerifyToken(IntPtr token, string user, int session, string phase)
+    static string VerifyToken(IntPtr token, string user, int session, string phase)
     {
         int elevation = TokenInteger(token, 20), elevationType = TokenInteger(token, 18);
         uint integrity = TokenIntegrity(token);
-        bool administrator = TokenHasEnabledAdministrators(token);
-        if (elevation != 0 || integrity != MediumIntegrity || administrator)
+        bool privilegedGroup = TokenHasPrivilegedGroups(token);
+        // UAC-disabled administrators have no split token. SAFER can retain their
+        // UAC elevation metadata even after removing administrative permissions.
+        // Enforce effective integrity, groups and privileges; report UAC truthfully.
+        if (integrity != MediumIntegrity || privilegedGroup)
             throw new InvalidOperationException(String.Format(
-                "{0}: expected non-elevated medium token without enabled Administrators; elevation={1} elevationType={2} integrity={3} admin={4}",
-                phase, elevation, elevationType, integrity, administrator));
+                "{0}: expected medium token with Administrators and Power Users absent or deny-only; elevation={1} elevationType={2} integrity={3} privilegedGroup={4}",
+                phase, elevation, elevationType, integrity, privilegedGroup));
         if (TokenUser(token) != user || TokenInteger(token, 12) != session)
             throw new InvalidOperationException("The child token must preserve the caller's user and session.");
+        string unexpectedPrivilege;
+        string privileges = TokenPrivilegeSummary(token, out unexpectedPrivilege);
+        if (unexpectedPrivilege != null)
+            throw new InvalidOperationException(String.Format(
+                "{0}: token retains a privilege outside the standard-user allowlist: {1}", phase, unexpectedPrivilege));
+        return String.Format("elevated={0} integrity={1} admin=false elevationType={2} privileges={3} powerUser=false",
+            (elevation != 0).ToString().ToLowerInvariant(), integrity, elevationType, privileges);
+    }
+
+    static string TokenPrivilegeSummary(IntPtr token, out string unexpectedPrivilege)
+    {
+        unexpectedPrivilege = null;
+        IntPtr buffer = TokenInformation(token, 3); // TokenPrivileges
+        try
+        {
+            uint count = unchecked((uint)Marshal.ReadInt32(buffer));
+            int size = Marshal.SizeOf(typeof(LUID_AND_ATTRIBUTES));
+            var names = new StringBuilder();
+            for (uint index = 0; index < count; index++)
+            {
+                // LUID uses DWORD/LONG members, so TOKEN_PRIVILEGES entries align at 4.
+                IntPtr entry = IntPtr.Add(buffer, sizeof(uint) + checked((int)index * size));
+                var privilege = Marshal.PtrToStructure<LUID_AND_ATTRIBUTES>(entry);
+                string name = PrivilegeName(privilege.Luid);
+                // Check every privilege, including disabled ones: a process can
+                // re-enable a privilege still present in its token.
+                // Microsoft's filtered-token privilege set (Figure 5):
+                // https://learn.microsoft.com/en-us/archive/msdn-magazine/2007/january/teach-your-apps-to-work-with-windows-vista-user-account-control
+                switch (name)
+                {
+                    case "SeChangeNotifyPrivilege":
+                    case "SeShutdownPrivilege":
+                    case "SeUndockPrivilege":
+                    case "SeIncreaseWorkingSetPrivilege":
+                    case "SeTimeZonePrivilege":
+                        break;
+                    default:
+                        if (unexpectedPrivilege == null)
+                            unexpectedPrivilege = String.Format("{0} attributes=0x{1:X8}", name, privilege.Attributes);
+                        break;
+                }
+                if (names.Length != 0) names.Append(',');
+                names.Append(name);
+            }
+            return names.Length == 0 ? "none" : names.ToString();
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    static string PrivilegeName(LUID luid)
+    {
+        uint length = 0;
+        LookupPrivilegeNameW(null, ref luid, null, ref length);
+        if (length == 0) ThrowLastError("Size token privilege name");
+        var name = new StringBuilder(checked((int)length + 1));
+        length = (uint)name.Capacity;
+        Check(LookupPrivilegeNameW(null, ref luid, name, ref length), "Read token privilege name");
+        return name.ToString();
     }
 
     static IntPtr TokenInformation(IntPtr token, int informationClass)
@@ -195,7 +259,7 @@ public static class SurtitleWindowsStandardUser
         finally { Marshal.FreeHGlobal(buffer); }
     }
 
-    static bool TokenHasEnabledAdministrators(IntPtr token)
+    static bool TokenHasPrivilegedGroups(IntPtr token)
     {
         IntPtr buffer = TokenInformation(token, 2);
         try
@@ -207,8 +271,12 @@ public static class SurtitleWindowsStandardUser
                 // TOKEN_GROUPS aligns its first SID_AND_ATTRIBUTES after the count.
                 IntPtr entry = IntPtr.Add(buffer, IntPtr.Size + checked((int)index * size));
                 var group = Marshal.PtrToStructure<SID_AND_ATTRIBUTES>(entry);
-                if ((group.Attributes & 0x4) != 0 && (group.Attributes & 0x10) == 0 &&
-                    SidString(group.Sid) == "S-1-5-32-544") return true;
+                // Disabled groups can be re-enabled; deny-only groups cannot.
+                if ((group.Attributes & 0x10) == 0)
+                {
+                    string sid = SidString(group.Sid);
+                    if (sid == "S-1-5-32-544" || sid == "S-1-5-32-547") return true;
+                }
             }
             return false;
         }
@@ -252,6 +320,8 @@ public static class SurtitleWindowsStandardUser
     static void ThrowLastError(string operation) { throw new Win32Exception(Marshal.GetLastWin32Error(), operation); }
 
     [StructLayout(LayoutKind.Sequential)] struct SID_AND_ATTRIBUTES { public IntPtr Sid; public uint Attributes; }
+    [StructLayout(LayoutKind.Sequential)] struct LUID { public uint LowPart; public int HighPart; }
+    [StructLayout(LayoutKind.Sequential)] struct LUID_AND_ATTRIBUTES { public LUID Luid; public uint Attributes; }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct STARTUPINFO
     {
         public uint cb;
@@ -286,6 +356,7 @@ public static class SurtitleWindowsStandardUser
     [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr memory);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr token, int type, IntPtr buffer, uint size, out uint required);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool LookupPrivilegeNameW(string system, ref LUID luid, StringBuilder name, ref uint length);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool SetTokenInformation(IntPtr token, int type, ref SID_AND_ATTRIBUTES information, uint length);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool SaferCreateLevel(uint scope, uint level, uint flags, out IntPtr handle, IntPtr reserved);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool SaferComputeTokenFromLevel(IntPtr level, IntPtr input, out IntPtr output, uint flags, IntPtr reserved);
