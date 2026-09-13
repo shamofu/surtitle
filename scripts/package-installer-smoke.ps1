@@ -11,7 +11,7 @@ Set-Location -LiteralPath $workspace
 if (-not $IsWindows) { throw 'NSIS verification requires Windows.' }
 if ($env:CI -ne 'true' -and -not $DisposableProfile) { throw 'Use an isolated CI runner or explicitly supply -DisposableProfile in a disposable Windows user profile.' }
 $installerPath = (Resolve-Path -LiteralPath $Installer).Path
-$installRoot = [IO.Path]::GetFullPath((Join-Path $workspace $InstallDirectory))
+$installRoot = [IO.Path]::GetFullPath($InstallDirectory, $workspace)
 if (-not $installRoot.StartsWith($workspace + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Test install path must stay inside the repository.' }
 if (Test-Path -LiteralPath $installRoot) { throw 'Test install directory must be fresh.' }
 $config = Get-Content -LiteralPath 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json
