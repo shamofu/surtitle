@@ -46,7 +46,7 @@ public static class SurtitleWindowsStandardUser
                 // Flags deliberately remain zero: MAKE_INERT would bypass policy checks.
                 Check(SaferComputeTokenFromLevel(saferLevel, currentToken, out restrictedToken, 0, IntPtr.Zero), "Compute SAFER normal-user token");
                 SetMediumIntegrity(restrictedToken);
-                VerifyToken(restrictedToken, user, session);
+                VerifyToken(restrictedToken, user, session, "SAFER candidate");
             }
 
             job = CreateJobObjectW(IntPtr.Zero, null);
@@ -86,7 +86,7 @@ public static class SurtitleWindowsStandardUser
 
             IntPtr childToken;
             Check(OpenProcessToken(process.hProcess, TokenQuery, out childToken), "Open child process token");
-            try { VerifyToken(childToken, user, session); }
+            try { VerifyToken(childToken, user, session, "suspended child"); }
             finally { CloseHandle(childToken); }
             Console.Error.WriteLine("[standard-user] pid={0} elevated=false integrity=8192 admin=false", process.dwProcessId);
             Check(ResumeThread(process.hThread) != Infinite, "Resume verified standard-user process");
@@ -132,10 +132,15 @@ public static class SurtitleWindowsStandardUser
         return quoted.Append('\\', backslashes * 2).Append('"').ToString();
     }
 
-    static void VerifyToken(IntPtr token, string user, int session)
+    static void VerifyToken(IntPtr token, string user, int session, string phase)
     {
-        if (TokenInteger(token, 20) != 0 || TokenIntegrity(token) != MediumIntegrity || TokenHasEnabledAdministrators(token))
-            throw new InvalidOperationException("The child token must be non-elevated, medium-integrity and without an enabled Administrators group.");
+        int elevation = TokenInteger(token, 20), elevationType = TokenInteger(token, 18);
+        uint integrity = TokenIntegrity(token);
+        bool administrator = TokenHasEnabledAdministrators(token);
+        if (elevation != 0 || integrity != MediumIntegrity || administrator)
+            throw new InvalidOperationException(String.Format(
+                "{0}: expected non-elevated medium token without enabled Administrators; elevation={1} elevationType={2} integrity={3} admin={4}",
+                phase, elevation, elevationType, integrity, administrator));
         if (TokenUser(token) != user || TokenInteger(token, 12) != session)
             throw new InvalidOperationException("The child token must preserve the caller's user and session.");
     }
