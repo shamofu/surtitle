@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 // These assertions intentionally cover the checked-in workflow's explicit YAML
 // shape. Changing its layout requires reviewing the event and permission policy.
@@ -217,7 +217,7 @@ test('short native regressions are required after preparing the fixed runtime an
 });
 
 test('long audio acceptance is manual, serial, source-built and uses a separate optimized Rust cache', () => {
-  const manual = readFileSync(new URL('../.github/workflows/native-acceptance.yml', import.meta.url), 'utf8');
+  const manual = readFileSync(new URL('../.github/workflows/native-acceptance.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   assert.match(manual, /^on:\r?\n  workflow_dispatch:$/m);
   assert.doesNotMatch(manual, /^  schedule:|contents: write|scripts\/release\.mjs|windows-spoken/m);
   assert.match(manual, /group: Test and release-\$\{\{ github\.ref \}\}/);
