@@ -233,6 +233,7 @@ jobs:
           path: |
             artifacts/
             test-results/
+            work/webdriver/receipt.json
   package:
     needs: [linux, windows, native-build]
     runs-on: windows-2025
@@ -301,6 +302,14 @@ jobs:
       - name: Test production installer and assemble source/SBOM
         id: package-verify
         run: pwsh scripts/package-verify.ps1
+      - name: Preserve package verification diagnostics
+        uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: package-evidence-${{ github.sha }}
+          path: |
+            artifacts/*.json
+            work/webdriver/receipt.json
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: release-${{ github.sha }}

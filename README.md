@@ -73,6 +73,8 @@ Development stays on main; do not commit until the owner permits it. GitHub Acti
 
 CI queues runs for each branch or PR without canceling the active run (`queue: max`, up to 100 pending runs). Jobs execute in order: Linux checks, native build, Windows 2025 checks, packaging, then release-branch publication. Docker environment layers use separate development/native caches; host pnpm stores and job-specific Rust dependency outputs are also cached. Native builds reuse checksum-verified source downloads and matching C/C++ compiler results through ccache, with no host mounts. Configuration, linking, source audits and final artifact generation run for every commit. Each native payload is verified for its commit and transferred as an artifact from the same run. Cache hits never skip required tests or artifact validation.
 
+Windows WebDriver runs with standard-user privileges, including the installed production smoke test. [WebView2 ignores environment overrides in elevated hosts](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/security#for-an-elevated-host-app-use-appropriate-override-flags), which otherwise prevents EdgeDriver from opening its debugging connection on administrator CI runners. The test launcher preserves the runner's identity, profile, environment and working directory, verifies the child token before starting it, and owns a Windows job that cleans up the driver and application processes. Runtime/driver versions and runner elevation are retained with CI evidence.
+
 The initial Windows NSIS installer is unsigned. Application auto-update and distribution for other operating systems are outside the initial scope.
 
 ## License

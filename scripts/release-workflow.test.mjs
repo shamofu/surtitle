@@ -161,7 +161,17 @@ test('package validation runs for main/release pushes and pull requests after al
   const packaging = job('package');
   assert.match(packaging, /^    needs: \[linux, windows, native-build\]$/m);
   assert.match(packaging, /^    runs-on: windows-2025$/m);
-  assert.doesNotMatch(packaging, /^\s+if:|continue-on-error:/m);
+  assert.doesNotMatch(packaging, /^    if:|continue-on-error:/m);
+  for (const step of packaging.split(/^      - /m).slice(1)) {
+    if (step.startsWith('name: Preserve package verification diagnostics\n')) {
+      assert.match(step, /^        if: always\(\)$/m);
+      assert.match(step, /uses: actions\/upload-artifact@/);
+      assert.match(step, /name: package-evidence-\$\{\{ github\.sha \}\}/);
+      assert.doesNotMatch(step, /^        run:/m);
+    } else {
+      assert.doesNotMatch(step, /^\s+if:/m, 'Required package checks and release artifacts cannot be conditional');
+    }
+  }
   for (const command of ['nsis-plugin-build.ps1', 'native-installer-prepare.ps1', 'native-audit.mjs --release',
     'pnpm tauri build --bundles nsis -- --locked', 'native-installer-audit.ps1', 'package-verify.ps1']) {
     assert.ok(packaging.includes(command), `Missing required package check: ${command}`);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { spawn } from 'node:child_process';
+import { spawnWebDriver } from './scripts/webdriver-process.mjs';
 import { existsSync, mkdirSync } from 'node:fs';
 import { resolve, isAbsolute } from 'node:path';
 import { createConnection } from 'node:net';
@@ -44,7 +44,7 @@ export const config = {
   async beforeSession() {
     const args = ['--port', String(port)];
     if (process.env.SURTITLE_NATIVE_DRIVER) args.push('--native-driver', process.env.SURTITLE_NATIVE_DRIVER);
-    driver = spawn(process.env.SURTITLE_TAURI_DRIVER || 'tauri-driver', args, { stdio: 'inherit', windowsHide: true, env: process.env });
+    driver = spawnWebDriver(process.env.SURTITLE_TAURI_DRIVER || 'tauri-driver', args, { stdio: 'inherit', windowsHide: true, env: process.env });
     let launchError;
     driver.once('error', error => { launchError = error; });
     process.once('exit', stopDriver);

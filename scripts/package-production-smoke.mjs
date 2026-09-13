@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Production-only WebDriver probe. The installer caller owns disposable-profile seeding.
-import { spawn, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
+import { spawnWebDriver } from './webdriver-process.mjs';
 import { createConnection, createServer } from 'node:net';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
@@ -142,7 +143,7 @@ export async function runProductionProbe(options) {
   const driverPath = plainPath(options.driver, true), nativeDriver = plainPath(options['native-driver'], true);
   const port = await freePort();
   const environment = sanitizedEnvironment(process.env);
-  const driver = spawn(driverPath, ['--port', String(port), '--native-driver', nativeDriver], { windowsHide: true, env: environment, stdio: ['ignore', 'pipe', 'pipe'] });
+  const driver = spawnWebDriver(driverPath, ['--port', String(port), '--native-driver', nativeDriver], { windowsHide: true, env: environment, stdio: ['ignore', 'pipe', 'pipe'] });
   let launchError;
   driver.once('error', error => { launchError = error; });
   // Discard transport logs: a failure report never copies arbitrary process or page text.
