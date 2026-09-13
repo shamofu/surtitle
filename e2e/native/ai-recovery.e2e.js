@@ -22,7 +22,15 @@ async function ready() {
 }
 async function settings() {
   await browser.execute(() => { window.history.pushState({}, '', '/settings'); window.dispatchEvent(new PopStateEvent('popstate')); });
-  await $('button=Review saved translations').waitForDisplayed();
+  const review = $('button=Review saved translations');
+  await review.waitForDisplayed();
+  // Settings scrolls inside a smooth-scrolling panel. Native click auto-scroll
+  // can stop at the footer before the animation finishes, especially in WebKit.
+  // Position the real control first; the tests still click through WebDriver.
+  await browser.execute(node => node.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }), await review);
+  await review.waitForDisplayed({ withinViewport: true });
+  await review.waitForStable();
+  await review.waitForClickable();
 }
 
 (process.env.SURTITLE_E2E_AI_RECOVERY === 'translation' ? describe : describe.skip)('saved AI translation recovery in the actual desktop', () => {
