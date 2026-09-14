@@ -102,7 +102,7 @@ The NSIS utility has its own lockfile and repository-local i686 sysroot recipe:
 ```powershell
 pwsh scripts/nsis-plugin-build.ps1
 pwsh scripts/native-installer-prepare.ps1
-pnpm tauri build --bundles nsis -- --locked
+pnpm tauri build --bundles nsis '--' --locked
 pwsh scripts/native-installer-audit.ps1 -Installer (Get-ChildItem target/release/bundle/nsis/*.exe).FullName
 ```
 

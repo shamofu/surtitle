@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -178,7 +180,7 @@ test('package validation runs for main/release pushes and pull requests after al
     }
   }
   for (const command of ['nsis-plugin-build.ps1', 'native-installer-prepare.ps1', 'native-audit.mjs --release',
-    'pnpm tauri build --bundles nsis -- --locked', 'native-installer-audit.ps1', 'package-verify.ps1']) {
+    "pnpm tauri build --bundles nsis '--' --locked", 'native-installer-audit.ps1', 'package-verify.ps1']) {
     assert.ok(packaging.includes(command), `Missing required package check: ${command}`);
   }
   const notices = packaging.split(/^      - /m).find(step => step.startsWith('name: Generate distribution notices and dependency manifests\n'));
@@ -191,6 +193,40 @@ test('package validation runs for main/release pushes and pull requests after al
   assert.match(verifier, /& pwsh[^\r\n]+scripts\/package-installer-smoke\.ps1/);
   assert.match(verifier, /validateRelease\("artifacts\/release", process\.env\.GITHUB_SHA/);
   assert.doesNotMatch(verifier, /scripts\/release\.mjs|gh release/);
+});
+
+test.skipIf(process.platform !== 'win32')('package command preserves the Cargo separator through the runner PowerShell shim', t => {
+  const command = job('package').match(/^      - run: (pnpm tauri build[^\n]*)$/m)?.[1];
+  assert.ok(command);
+  assert.ok(readFileSync(new URL('../native/SOURCE-REBUILD.md', import.meta.url), 'utf8').includes(command));
+  const directory = realpathSync.native(mkdtempSync(join(tmpdir(), 'surtitle pnpm shim 日本語 & ')));
+  t.onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
+  const probe = join(directory, 'argv.cjs'), shim = join(directory, 'pnpm.ps1');
+  writeFileSync(probe, 'console.log(JSON.stringify(process.argv.slice(2)));\n');
+  // Match npm's generated pnpm.ps1 forwarding boundary, without building anything.
+  writeFileSync(shim, '& $env:SURTITLE_ARGV_NODE $env:SURTITLE_ARGV_PROBE $args\nexit $LASTEXITCODE\n');
+  const invoke = line => {
+    const script = `
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $true
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$env:PATH = $env:SURTITLE_ARGV_DIRECTORY + [IO.Path]::PathSeparator + $env:PATH
+$resolved = Get-Command pnpm -ErrorAction Stop
+if ($resolved.CommandType -ne 'ExternalScript' -or $resolved.Source -ne $env:SURTITLE_ARGV_SHIM) { throw 'The argument probe must resolve to its own PowerShell shim' }
+${line}
+`;
+    const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+      cwd: root, encoding: 'utf8', windowsHide: true, timeout: 10_000,
+      env: { ...process.env, SURTITLE_ARGV_DIRECTORY: directory, SURTITLE_ARGV_SHIM: shim,
+        SURTITLE_ARGV_NODE: process.execPath, SURTITLE_ARGV_PROBE: probe },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  assert.deepEqual(invoke('pnpm tauri build --bundles nsis -- --locked'),
+    ['tauri', 'build', '--bundles', 'nsis', '--locked'], 'Bare -- is consumed before pnpm receives it');
+  assert.deepEqual(invoke(command), ['tauri', 'build', '--bundles', 'nsis', '--', '--locked']);
 });
 
 test('native and package artifacts are consumed only from the current run and SHA', () => {

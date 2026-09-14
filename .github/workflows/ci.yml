@@ -300,7 +300,8 @@ jobs:
           node scripts/audit-js-licenses.mjs
       - name: Require complete native redistribution evidence
         run: node scripts/native-audit.mjs --release
-      - run: pnpm tauri build --bundles nsis -- --locked
+      # pnpm resolves to pnpm.ps1 on this runner; quote the Cargo separator.
+      - run: pnpm tauri build --bundles nsis '--' --locked
       - name: Verify the source-backed plugin inside the exact installer
         run: pwsh scripts/native-installer-audit.ps1 -Installer (Get-ChildItem target/release/bundle/nsis/*.exe).FullName
       - name: Prepare exact production WebDriver and generated media
