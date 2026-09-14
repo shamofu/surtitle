@@ -2,10 +2,10 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -59,7 +59,8 @@ $results | ConvertTo-Json -Compress
 });
 
 test.skipIf(process.platform !== 'win32')('installer retention requires unchanged database WAL and rollback journals while allowing SHM regeneration', t => {
-  const root = mkdtempSync(join(tmpdir(), 'surtitle-retention 日本語 & '));
+  // Node's TEMP may use RUNNER~1 while PowerShell enumerates the long user name.
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'surtitle-retention 日本語 & ')));
   t.onTestFinished(() => rmSync(root, { recursive: true, force: true }));
   const retained = [
     'local/learning.sqlite', 'local/learning.sqlite-wal', 'local/learning.sqlite-journal',
@@ -88,29 +89,57 @@ foreach ($name in @('Snapshot-Data', 'Assert-Data')) {
     if ($functions.Count -ne 1) { throw "Expected exactly one real $name function" }
     . ([ScriptBlock]::Create($functions[0].Extent.Text))
 }
-$root = $env:SURTITLE_RETENTION_TEST_ROOT
-$dataRoots = @((Join-Path $root 'local'), (Join-Path $root 'roaming'))
-$before = Snapshot-Data
-Assert-Data $before
-$unchangedPassed = $true
-[IO.File]::WriteAllText((Join-Path $root 'local/learning.sqlite-shm'), 'regenerated index')
-Remove-Item -LiteralPath (Join-Path $root 'roaming/nested/archive.db-shm')
-Assert-Data $before
-$shmChangesPassed = $true
-$mutations = foreach ($name in @('local/learning.sqlite-wal', 'local/learning.sqlite-journal', 'roaming/nested/archive.db-wal', 'roaming/nested/archive.db-journal')) {
-    $path = Join-Path $root $name
-    $original = [IO.File]::ReadAllBytes($path)
-    foreach ($change in @('modified', 'deleted')) {
-        if ($change -eq 'modified') { [IO.File]::WriteAllText($path, 'changed synthetic journal pages') }
-        else { Remove-Item -LiteralPath $path }
-        $message = $null
-        try { Assert-Data $before } catch { $message = $_.Exception.Message }
-        finally { [IO.File]::WriteAllBytes($path, $original) }
-        @{ name=$name; change=$change; message=$message }
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class RetentionPathAlias {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern uint GetShortPathNameW(string path, StringBuilder output, uint capacity);
+    public static string Get(string path) {
+        var output = new StringBuilder(32768);
+        uint length = GetShortPathNameW(path, output, (uint)output.Capacity);
+        if (length == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (length >= output.Capacity) throw new InvalidOperationException("Short path exceeded the fixture path buffer");
+        return output.ToString();
     }
 }
-Assert-Data $before
-@{ retained=@($before.Keys | ForEach-Object { [IO.Path]::GetRelativePath($root, $_).Replace('\', '/') }); unchangedPassed=$unchangedPassed; shmChangesPassed=$shmChangesPassed; mutations=@($mutations) } | ConvertTo-Json -Depth 5 -Compress
+'@
+$longRoot = $env:SURTITLE_RETENTION_TEST_ROOT
+$shortRoot = [RetentionPathAlias]::Get($longRoot)
+# Filesystems without short names return the original path; never change their settings.
+$shortPathAvailable = -not [string]::Equals($longRoot, $shortRoot, [StringComparison]::OrdinalIgnoreCase)
+$pathForms = @($longRoot)
+if ($shortPathAvailable) { $pathForms += $shortRoot }
+$observations = foreach ($root in $pathForms) {
+    $dataRoots = @((Join-Path $root 'local'), (Join-Path $root 'roaming'))
+    foreach ($name in @('local/learning.sqlite-shm', 'roaming/nested/archive.db-shm')) {
+        [IO.File]::WriteAllText((Join-Path $root $name), 'synthetic shared memory index')
+    }
+    $before = Snapshot-Data
+    Assert-Data $before
+    $unchangedPassed = $true
+    [IO.File]::WriteAllText((Join-Path $root 'local/learning.sqlite-shm'), 'regenerated index')
+    Remove-Item -LiteralPath (Join-Path $root 'roaming/nested/archive.db-shm')
+    Assert-Data $before
+    $shmChangesPassed = $true
+    $mutations = foreach ($name in @('local/learning.sqlite-wal', 'local/learning.sqlite-journal', 'roaming/nested/archive.db-wal', 'roaming/nested/archive.db-journal')) {
+        $path = Join-Path $root $name
+        $original = [IO.File]::ReadAllBytes($path)
+        foreach ($change in @('modified', 'deleted')) {
+            if ($change -eq 'modified') { [IO.File]::WriteAllText($path, 'changed synthetic journal pages') }
+            else { Remove-Item -LiteralPath $path }
+            $message = $null
+            try { Assert-Data $before } catch { $message = $_.Exception.Message }
+            finally { [IO.File]::WriteAllBytes($path, $original) }
+            @{ name=$name; change=$change; message=$message }
+        }
+    }
+    Assert-Data $before
+    @{ inputRoot=$root; retained=@($before.Keys); unchangedPassed=$unchangedPassed; shmChangesPassed=$shmChangesPassed; mutations=@($mutations) }
+}
+@{ shortPathAvailable=$shortPathAvailable; observations=@($observations) } | ConvertTo-Json -Depth 6 -Compress
 `;
   const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')], {
     cwd: workspace, encoding: 'utf8', windowsHide: true, timeout: 15_000,
@@ -118,13 +147,31 @@ Assert-Data $before
   });
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stderr);
-  const observation = JSON.parse(result.stdout);
-  assert.deepEqual(observation.retained.sort(), retained.sort());
-  assert.equal(observation.unchangedPassed, true);
-  assert.equal(observation.shmChangesPassed, true);
-  assert.equal(observation.mutations.length, 8);
-  for (const mutation of observation.mutations) {
-    assert.equal(mutation.message, 'Installer changed retained learning data: ' + join(root, mutation.name),
-      `A ${mutation.change} ${mutation.name} must fail even when the main database is unchanged`);
+  const { shortPathAvailable, observations } = JSON.parse(result.stdout);
+  assert.equal(observations.length, shortPathAvailable ? 2 : 1);
+  const expectedMutations = retained.filter(name => /-(wal|journal)$/.test(name))
+    .flatMap(name => ['modified', 'deleted'].map(change => `${change}:${name}`)).sort();
+  const errorPrefix = 'Installer changed retained learning data: ';
+  let aliasErrorPaths = 0;
+  for (const observation of observations) {
+    assert.equal(realpathSync.native(observation.inputRoot), root);
+    assert.deepEqual(observation.retained.map(path => realpathSync.native(path)).sort(),
+      retained.map(name => realpathSync.native(join(root, name))).sort());
+    assert.equal(observation.unchangedPassed, true);
+    assert.equal(observation.shmChangesPassed, true);
+    assert.equal(observation.mutations.length, 8);
+    assert.deepEqual(observation.mutations.map(({ change, name }) => `${change}:${name}`).sort(), expectedMutations);
+    for (const mutation of observation.mutations) {
+      const message = `A ${mutation.change} ${mutation.name} must fail even when the main database is unchanged`;
+      assert.equal(typeof mutation.message, 'string', message);
+      assert.ok(mutation.message.startsWith(errorPrefix), message);
+      const reportedPath = mutation.message.slice(errorPrefix.length);
+      assert.ok(isAbsolute(reportedPath), message);
+      // Every file is restored in finally, so even deletion errors can be checked
+      // against the exact expected file rather than accepting a matching suffix.
+      assert.equal(realpathSync.native(reportedPath), realpathSync.native(join(root, mutation.name)), message);
+      if (reportedPath !== join(observation.inputRoot, mutation.name)) aliasErrorPaths++;
+    }
   }
+  console.log(`Installer retention: ${observations.length} path form(s), ${observations.length * 8} mutation checks, short alias ${shortPathAvailable ? 'available' : 'unavailable'}, ${aliasErrorPaths} normalized error path(s)`);
 });

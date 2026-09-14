@@ -25,7 +25,7 @@ export default defineConfig({
           name: 'scripts',
           include: ['scripts/**/*.test.mjs', '.devcontainer/**/*.test.mjs'],
           environment: 'node',
-          setupFiles: [],
+          setupFiles: './scripts/test-setup.mjs',
           pool: 'forks',
           isolate: true,
         },
