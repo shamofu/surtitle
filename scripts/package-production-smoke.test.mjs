@@ -1,7 +1,8 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { parseOptions, sanitizedEnvironment, validateSnapshot, validateMetadata, validateSeededProfile } from './package-production-smoke.mjs';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { parseOptions, sanitizedEnvironment, validateSnapshot, validateMetadata, validateSeededProfile, playerDiagnostics, createProductionDiagnostics } from './package-production-smoke.mjs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, cpSync, rmSync } from 'node:fs';
 import { join, toNamespacedPath } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -83,4 +84,90 @@ test('fresh profile guard rejects prior app/credential state before any applicat
   }
   mkdirSync(roaming);
   assert.throws(() => validateSeededProfile(root, roaming), /roaming application profile/);
+});
+
+test('production player diagnostics retain timing and native flags without page, track or error text', () => {
+  const secret = 'PRIVATE KEY or user subtitle';
+  const state = { positionMs: 1800, durationMs: 12000, paused: true, ready: true, surfaceVisible: false,
+    videoWidth: 640, videoHeight: 360, rate: 1, volume: 0, sentencePause: false, error: secret,
+    path: secret, pageText: secret, settings: { credentials: secret },
+    tracks: [{ id: 1, kind: 'audio', ffIndex: 2, selected: true, external: false, title: secret, language: secret }] };
+  assert.deepEqual(playerDiagnostics(state), {
+    errorPresent: true, positionMs: 1800, durationMs: 12000, videoWidth: 640, videoHeight: 360, rate: 1, volume: 0,
+    ready: true, paused: true, surfaceVisible: false, sentencePause: false,
+    tracks: [{ kind: 'audio', id: 1, ffIndex: 2, selected: true, external: false }],
+  });
+  const invalid = playerDiagnostics({ positionMs: secret, durationMs: Infinity, ready: secret,
+    tracks: [{ kind: secret, id: secret, ffIndex: secret, selected: secret }] });
+  assert.ok(!JSON.stringify(invalid).includes(secret));
+  assert.equal(invalid.tracks[0].kind, 'unknown');
+  assert.equal(playerDiagnostics({ tracks: Array.from({ length: 100 }, () => ({})) }).tracks.length, 64);
+});
+
+test('production failure evidence is fresh, redacted and cannot replace success evidence', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'surtitle-production-diagnostics-'));
+  t.onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
+  const success = join(directory, 'production-smoke.json');
+  writeFileSync(success, 'existing success evidence must not be touched');
+  const diagnostic = createProductionDiagnostics(directory);
+  diagnostic.stage('driver-ready');
+  const secret = 'PRIVATE KEY in page, process or exception';
+  diagnostic.driver({ pid: 321, exitCode: 23, signalCode: secret, stderr: secret }, Object.assign(new Error(secret), { code: 'ENOENT' }));
+  diagnostic.player({ positionMs: 1800, paused: true, error: secret });
+  diagnostic.stage('interval-stop');
+  diagnostic.captureFailure(Object.assign(new Error(secret), { code: 'ETIMEDOUT' }));
+  // Cleanup and later exceptions must not erase the original failure or driver exit.
+  diagnostic.driver({ pid: 321, exitCode: null, signalCode: 'SIGTERM' });
+  const report = await diagnostic.writeFailure(new Error('cleanup ' + secret));
+  const failurePath = join(directory, 'production-smoke-failure.json');
+  const written = readFileSync(failurePath, 'utf8');
+  assert.deepEqual(JSON.parse(written), report);
+  assert.equal(report.kind, 'production-smoke-failure');
+  assert.equal(report.passed, false);
+  assert.equal(report.stage, 'interval-stop');
+  assert.deepEqual(report.error, { category: 'Error', code: 'ETIMEDOUT' });
+  assert.equal(report.driver.exitCode, 23);
+  assert.equal(report.driver.signal, null);
+  assert.deepEqual(report.driver.launchError, { category: 'Error', code: 'ENOENT' });
+  assert.deepEqual(report.completedStages.map(value => value.stage), ['arguments', 'driver-ready']);
+  assert.ok(Number.isInteger(report.elapsedMs) && report.elapsedMs >= report.stageElapsedMs);
+  assert.ok(report.completedStages.every(value => Number.isInteger(value.elapsedMs) && value.elapsedMs >= 0));
+  assert.ok(!written.includes(secret));
+  assert.equal(Object.hasOwn(report, 'normalBuild'), false);
+  assert.equal(readFileSync(success, 'utf8'), 'existing success evidence must not be touched');
+  await assert.rejects(diagnostic.writeFailure(new Error('replacement')), { code: 'EEXIST' });
+  assert.equal(readFileSync(failurePath, 'utf8'), written);
+  assert.throws(() => diagnostic.stage(secret), /Unknown production diagnostic stage/);
+});
+
+test('unknown production exception names and codes never enter failure evidence', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'surtitle-production-unknown-error-'));
+  t.onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
+  const report = await createProductionDiagnostics(directory).writeFailure({
+    name: 'credential text', code: 'private endpoint', message: 'page body', stack: 'private stack', cause: 'nested credential',
+  });
+  assert.deepEqual(report.error, { category: 'UnknownError', code: null });
+  assert.equal(report.lastPlayerState, null);
+  assert.equal(report.driver, null);
+  assert.equal(report.passed, false);
+});
+
+test('production CLI records a failed argument stage and exits nonzero without launching an app', { timeout: 10_000 }, t => {
+  const root = mkdtempSync(join(tmpdir(), 'surtitle-production-cli-'));
+  t.onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'scripts'));
+  for (const name of ['package-production-smoke.mjs', 'webdriver-process.mjs']) {
+    cpSync(new URL(name, import.meta.url), join(root, 'scripts', name));
+  }
+  const secret = 'private-page-content';
+  const result = spawnSync(process.execPath, [join(root, 'scripts/package-production-smoke.mjs'), '--' + secret],
+    { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 5000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 1);
+  const report = readFileSync(join(root, 'artifacts/production-smoke-failure.json'), 'utf8');
+  assert.equal(JSON.parse(report).stage, 'arguments');
+  assert.equal(JSON.parse(report).passed, false);
+  assert.equal(JSON.parse(report).error.code, 'ERR_PRODUCTION_CHECK');
+  assert.ok(![report, result.stdout, result.stderr].some(text => text.includes(secret)));
+  assert.equal(existsSync(join(root, 'artifacts/production-smoke.json')), false);
 });

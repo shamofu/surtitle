@@ -88,7 +88,12 @@ function Probe-Production {
 function Snapshot-Data {
     $values = @{}
     foreach ($dataRoot in $dataRoots) {
-        Get-ChildItem -LiteralPath $dataRoot -Recurse -File | Where-Object { $_.Name -eq 'installer-retention-sentinel.json' -or $_.Extension -in @('.sqlite','.db','.wav') } | ForEach-Object {
+        # WAL can contain committed pages absent from the main database; rollback
+        # journals can be needed for recovery. The rebuildable SHM index is excluded.
+        Get-ChildItem -LiteralPath $dataRoot -Recurse -File | Where-Object {
+            $_.Name -eq 'installer-retention-sentinel.json' -or $_.Extension -eq '.wav' -or
+            $_.Name -match '\.(sqlite|db)(-(wal|journal))?$'
+        } | ForEach-Object {
             $values[$_.FullName] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         }
     }
