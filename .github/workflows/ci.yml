@@ -253,6 +253,10 @@ jobs:
         shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
     steps:
       - uses: actions/checkout@v7.0.1
+      - name: Verify the system VC runtime before building the installer
+        run: |
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File native/vc-prerequisite.ps1 -CheckOnly
+          if ($LASTEXITCODE -ne 0) { throw 'The package runner failed the VC runtime prerequisite check.' }
       - uses: actions/setup-node@v7.0.0
         id: node
         with:

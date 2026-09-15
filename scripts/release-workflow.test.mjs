@@ -169,6 +169,11 @@ test('package validation runs for main/release pushes and pull requests after al
   assert.match(packaging, /^    needs: \[linux, windows, native-build\]$/m);
   assert.match(packaging, /^    runs-on: windows-2025$/m);
   assert.doesNotMatch(packaging, /^    if:|continue-on-error:/m);
+  const prerequisite = packaging.split(/^      - /m).find(step => step.startsWith('name: Verify the system VC runtime before building the installer\n'));
+  assert.ok(prerequisite);
+  assert.match(prerequisite, /System32\\WindowsPowerShell\\v1\.0\\powershell\.exe.*-File native\/vc-prerequisite\.ps1 -CheckOnly/);
+  assert.doesNotMatch(prerequisite, /InstallWithConsent/);
+  assert.ok(packaging.indexOf(prerequisite) < packaging.indexOf('uses: actions/setup-node@'));
   for (const step of packaging.split(/^      - /m).slice(1)) {
     if (step.startsWith('name: Preserve package verification diagnostics\n')) {
       assert.match(step, /^        if: always\(\)$/m);
