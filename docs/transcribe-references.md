@@ -12,7 +12,7 @@ node scripts/ai-tests/transcribe-references.mjs \
   --plan work/transcribe-production-20260912/pilot-validation-plan.json \
   --sources work/transcribe-production-20260912/source-materials/source-manifest-independent.json \
   --output work/transcribe-production-20260912/references-v2
-node --test scripts/ai-tests/*.test.mjs
+pnpm test:scripts scripts/ai-tests
 ```
 
 The illustrated output directory already exists. A new run must choose another

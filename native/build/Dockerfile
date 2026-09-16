@@ -5,7 +5,11 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /workspace
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends llvm-18 \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends llvm-18 ccache \
+    && rm -rf /var/lib/apt/lists/* \
+    && printf '%s\n' 'compiler_check = content' 'hard_link = false' 'max_size = 2Gi' \
+       'sloppiness =' 'remote_storage =' > /etc/surtitle-ccache.conf
+ENV CCACHE_CONFIGPATH=/etc/surtitle-ccache.conf \
+    CCACHE_DIR=/build/compiler-cache
 COPY native/build/ /workspace/native/build/
 COPY scripts/native-build.sh scripts/native-source-inputs.py scripts/native-build-evidence.py /workspace/scripts/

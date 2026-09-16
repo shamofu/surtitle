@@ -1,8 +1,10 @@
 # Development container
 
-Use Ubuntu 24.04, Node 24 and Rust 1.98.0 for React, shared Rust and real Tauri Linux E2E tests. Windows libmpv rendering, DPAPI and NSIS require separate Windows verification.
+Use Ubuntu 24.04, Node 24.21.0 LTS from `.node-version` and Rust 1.98.0 for React, shared Rust and real Tauri Linux E2E tests. Windows libmpv rendering, DPAPI and NSIS require separate Windows verification.
 
 The repository is a read/write bind mount at `/workspaces/surtitle`. Source, `.git` and lockfile edits are immediately visible on the host. Do not add host credentials, SSH agents, Docker sockets or GUI sockets to this container.
+
+On native Linux, the launcher starts with the non-root host UID and primary GID, then aligns the `vscode` account before running source-write probes. Only `/home/vscode` and `/opt/surtitle-build` ownership changes inside the container; source permissions and ownership stay unchanged. An existing target group is reused, while a UID owned by another account is rejected. Launch as a non-root host user. Windows and `--wsl` keep the image's named account, and `updateRemoteUserUID` remains disabled because the launcher performs Linux alignment explicitly.
 
 Dependencies and generated outputs never use host binds or named volumes. Temporary filesystems mask `node_modules`, `target`, `dist`, `work`, `artifacts`, `test-results`, `playwright-report`, `src-tauri/gen`, `src-tauri/resources/native` and `src-tauri/resources/notices`. Existing Windows dependencies at those host paths are hidden. Large Cargo outputs and caches use the container writable layer at `/opt/surtitle-build`. Tmpfs data disappears when the container stops or restarts; writable-layer caches disappear when the container is removed. Initialize and install dependencies again after restarting. Ordinary Docker image layers remain cached. [Docker tmpfs documentation](https://docs.docker.com/engine/storage/tmpfs/)
 
@@ -34,7 +36,15 @@ has no shared host GUI socket, so plain `pnpm tauri dev` has no display to open.
 Use the native E2E suite for headless interaction; visible Windows playback
 development remains on the Windows host.
 
-The full check sequence is `.devcontainer/verify.sh`. Isolation evidence is written to both temporary `artifacts/container-isolation.json` and writable-layer `/opt/surtitle-build/evidence/container-isolation.json`; the full log is `/opt/surtitle-build/verification.log`. Read it with `docker exec surtitle-dev tail -n 80 /opt/surtitle-build/verification.log`. The verification helper never automatically copies dependency trees, executables or build outputs to the host. CI separately exports only selected JSON reports, the verification log and native E2E screenshots for artifact retention.
+The full check sequence is `.devcontainer/verify.sh`. The launcher announces build, startup, account alignment and isolation checks. Verification streams stdout and stderr live, with UTC timestamps identifying each major step, while retaining the same output in `/opt/surtitle-build/verification.log`. A failed command or log write still fails verification. Isolation evidence is written to both temporary `artifacts/container-isolation.json` and writable-layer `/opt/surtitle-build/evidence/container-isolation.json`. To follow the log from another terminal, use `docker exec surtitle-dev tail -f /opt/surtitle-build/verification.log`. The helper never automatically copies dependency trees, executables or build outputs to the host. CI separately exports only selected JSON reports, the verification log and native E2E screenshots for artifact retention.
+
+The image includes the pinned `cargo-deny` license-audit tool so Docker image caching also retains its installation. Verification installs that version only when using an older image where the tool is absent.
+
+During headless E2E, `AT-SPI ... org.a11y.Bus` reports that the optional accessibility bus is absent; WebDriver tests do not verify screen-reader integration. `libEGL ... DRI3` reports an unavailable accelerated rendering path in the virtual display; Mesa can fall back to software rendering. These messages alone do not mean the E2E suite failed, and a passing Linux run does not certify GPU rendering. See the [AT-SPI bus description](https://github.com/GNOME/at-spi2-core/blob/main/bus/README.md) and [Mesa EGL fallback documentation](https://docs.mesa3d.org/egl.html).
+
+Check the final spec results and process exit code. WebDriver command errors need separate investigation: an interaction error may recover after WebdriverIO waits for the element, but an expected application rejection must assert the actual application error. Capture that rejection inside the webview and serialize it explicitly so a driver transport error cannot accidentally satisfy the test.
+
+`pnpm test` runs both the Vitest UI and Node script projects. Select `pnpm test:ui` or `pnpm test:scripts` for focused checks; `pnpm test:watch` watches both. CI builds this image with Buildx and a dedicated GitHub Actions layer cache, then uses the same `start` and `verify` commands above. The native toolchain image has a separate cache scope. These image caches do not persist runtime pnpm/Cargo stores or build directories, and do not add container mounts.
 
 Every full verification allocates a fresh `work/e2e-linux.XXXXXXXX` profile with
 `mktemp`. The SQLite seeder and Tauri E2E process use that same directory, so

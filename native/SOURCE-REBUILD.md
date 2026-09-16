@@ -102,7 +102,7 @@ The NSIS utility has its own lockfile and repository-local i686 sysroot recipe:
 ```powershell
 pwsh scripts/nsis-plugin-build.ps1
 pwsh scripts/native-installer-prepare.ps1
-pnpm tauri build --bundles nsis -- --locked
+pnpm tauri build --bundles nsis '--' --locked
 pwsh scripts/native-installer-audit.ps1 -Installer (Get-ChildItem target/release/bundle/nsis/*.exe).FullName
 ```
 
@@ -115,5 +115,8 @@ separately installed runtime described in [native-runtime.md](../docs/native-run
 
 The local rebuild remains ineligible for the project's automated release until
 its source/notice review, fresh Windows tests and isolated installer lifecycle
-are complete. Do not alter reviewed-input hashes or insert a synthetic Git SHA
-to make a release gate pass.
+are complete. Do not change pinned dependency hashes to match unexpected output,
+or insert a synthetic Git SHA/Actions run identity to make a release gate pass.
+The CI verifier reads original inputs from a separate checkout at the selected
+commit. An extracted source ZIP does not need its own `.git` or a generated
+review ledger to build a local candidate.

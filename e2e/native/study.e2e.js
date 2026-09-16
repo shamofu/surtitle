@@ -13,9 +13,24 @@ async function snapshot() { return invoke('get_app_snapshot'); }
 async function navigate(path) {
   await browser.execute(nextPath => { window.history.pushState({}, '', nextPath); window.dispatchEvent(new PopStateEvent('popstate')); }, path);
 }
+async function clickInView(selector) {
+  const element = $(selector);
+  await element.waitForDisplayed();
+  // These controls live inside the scrolling page, above a fixed app footer.
+  await browser.execute(node => node.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }), await element);
+  await element.waitForClickable();
+  await element.click();
+}
+async function expectPageTop(path) {
+  await browser.waitUntil(async () => browser.execute(expected =>
+    window.location.pathname === expected && document.querySelector('.page-content')?.scrollTop === 0, path),
+  { timeoutMsg: `Navigation to ${path} retained the previous page's scroll position` });
+}
 describe('real native learning workflow (no cloud requests)', () => {
   before(async () => {
     await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__), { timeoutMsg: 'Native IPC was not available' });
+    // Exercise the same compact layout as the hosted Windows desktop.
+    if (process.platform === 'win32') await browser.setWindowSize(1028, 750);
     const initial = await snapshot();
     await invoke('update_settings', { settings: { ...initial.settings, locale: 'en', dailyBudgetUsd: 0 } });
     await browser.refresh();
@@ -45,12 +60,12 @@ describe('real native learning workflow (no cloud requests)', () => {
     await expect($('button=Follow playback')).toBeDisplayed();
     await $('[aria-label="Search transcript"]').setValue('19999');
     await browser.waitUntil(async () => (await $$('.transcript-row')).length <= 2);
-    await $('button=Follow playback').click();
+    await clickInView('button=Follow playback');
     await expect($('[aria-label="Search transcript"]')).toHaveValue('');
     await expect($('button=Following playback')).toBeDisplayed();
     await browser.saveScreenshot(resolve('test-results/native/study.png'));
   });
-  it('checks tool update information without installing tools or changing AI usage', async () => {
+  it('checks tool updates without changing AI usage and resets page scroll through normal navigation', async () => {
     const before = await snapshot();
     assert.equal(before.settings.credentialConfigured, false, 'Expected the disposable profile without credentials');
     assert.equal(before.budget.spentUsd, 0);
@@ -67,9 +82,12 @@ describe('real native learning workflow (no cloud requests)', () => {
     };
     assertNoManagedCli(before.tools);
     try {
-      await navigate('/settings');
+      await $('.settings-link[href="/settings"]').waitForClickable();
+      await $('.settings-link[href="/settings"]').click();
       await $('button=Check updates').waitForEnabled();
-      await $('button=Check updates').click();
+      await clickInView('button=Check updates');
+      assert((await browser.execute(() => document.querySelector('.page-content').scrollTop)) > 0,
+        'The update check must exercise navigation away from a scrolled settings page');
       const success = $('button.toast.success');
       await expect(success).toBeDisplayed();
       await expect(success).toHaveText('Update information checked.');
@@ -80,8 +98,12 @@ describe('real native learning workflow (no cloud requests)', () => {
       assert.deepEqual(after.budget, before.budget, 'Checking metadata must leave AI usage and reservations unchanged');
       assert.deepEqual(after.jobs, before.jobs, 'Checking metadata must not create, send, or change AI jobs');
     } finally {
-      await navigate(`/study/${mediaId}`);
+      await $('.main-nav a[href="/"]').waitForClickable();
+      await $('.main-nav a[href="/"]').click();
+      await expectPageTop('/');
+      await clickInView(`.media-card[href="/study/${encodeURIComponent(mediaId)}"]`);
       await $('[aria-label="Subtitle list"]').waitForDisplayed();
+      await expectPageTop(`/study/${mediaId}`);
     }
   });
   it('plays one selected interval, pauses at its end, changes speed, and hides the surface for a modal', async function () {
@@ -186,8 +208,8 @@ describe('real native learning workflow (no cloud requests)', () => {
     await navigate('/review');
     await $('.review-card').waitForDisplayed();
     await expect($('.rating-button.good')).toBeDisabled();
-    await $('button*=Reveal meaning').click();
-    await $('.rating-button.good').click();
+    await clickInView('button*=Reveal meaning');
+    await clickInView('.rating-button.good');
     await browser.waitUntil(async () => (await snapshot()).cards.find(card => card.id === cardId).reviewCount === before.reviewCount + 1);
     await browser.refresh();
     const after = (await snapshot()).cards.find(card => card.id === cardId);

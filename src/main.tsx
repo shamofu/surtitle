@@ -17,7 +17,12 @@ const studyRoute = createRoute({ getParentRoute: () => rootRoute, path: '/study/
 const cardsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/cards', component: CardsPage });
 const reviewRoute = createRoute({ getParentRoute: () => rootRoute, path: '/review', component: ReviewPage });
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage });
-const router = createRouter({ routeTree: rootRoute.addChildren([indexRoute, studyRoute, cardsRoute, reviewRoute, settingsRoute]) });
+const router = createRouter({
+  routeTree: rootRoute.addChildren([indexRoute, studyRoute, cardsRoute, reviewRoute, settingsRoute]),
+  // The shell scrolls this element, not the window. Start each new page above
+  // its native player instead of inheriting the previous page's scroll offset.
+  scrollToTopSelectors: ['.page-content'],
+});
 declare module '@tanstack/react-router' { interface Register { router: typeof router } }
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, staleTime: 2000 } } });
 

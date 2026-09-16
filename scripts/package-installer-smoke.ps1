@@ -11,7 +11,7 @@ Set-Location -LiteralPath $workspace
 if (-not $IsWindows) { throw 'NSIS verification requires Windows.' }
 if ($env:CI -ne 'true' -and -not $DisposableProfile) { throw 'Use an isolated CI runner or explicitly supply -DisposableProfile in a disposable Windows user profile.' }
 $installerPath = (Resolve-Path -LiteralPath $Installer).Path
-$installRoot = [IO.Path]::GetFullPath((Join-Path $workspace $InstallDirectory))
+$installRoot = [IO.Path]::GetFullPath($InstallDirectory, $workspace)
 if (-not $installRoot.StartsWith($workspace + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Test install path must stay inside the repository.' }
 if (Test-Path -LiteralPath $installRoot) { throw 'Test install directory must be fresh.' }
 $config = Get-Content -LiteralPath 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json
@@ -67,7 +67,13 @@ function Probe-Production {
     $fixture = Join-Path $workspace 'test-results/fixtures/日本語 & sample.mp4'
     $localData = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) $config.identifier
     if (-not (Test-Path -LiteralPath $fixture -PathType Leaf)) { throw 'Generate the local 12-second media fixture before production verification.' }
-    & cargo run -p surtitle-core --locked --example seed_fixture -- $localData $fixture
+    & cargo build -p surtitle-core --example seed_fixture --locked
+    if ($LASTEXITCODE -ne 0) { throw 'Disposable production learning fixture build failed.' }
+    # Create the profile and SQLite files with the same restricted token as the app.
+    $seedApplication = Join-Path $workspace 'target/debug/examples/seed_fixture.exe'
+    $seedArguments = ConvertTo-Json -InputObject @($localData, $fixture) -Compress
+    $seedArgumentsBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($seedArguments))
+    & pwsh -NoProfile -File scripts/run-windows-standard-user.ps1 -Application $seedApplication -ArgumentsBase64 $seedArgumentsBase64
     if ($LASTEXITCODE -ne 0) { throw 'Disposable production learning fixture preparation failed.' }
     $expected = $embeddedApplicationHash
     $arguments = @('scripts/package-production-smoke.mjs', '--application', $binary,
@@ -82,7 +88,12 @@ function Probe-Production {
 function Snapshot-Data {
     $values = @{}
     foreach ($dataRoot in $dataRoots) {
-        Get-ChildItem -LiteralPath $dataRoot -Recurse -File | Where-Object { $_.Name -eq 'installer-retention-sentinel.json' -or $_.Extension -in @('.sqlite','.db','.wav') } | ForEach-Object {
+        # WAL can contain committed pages absent from the main database; rollback
+        # journals can be needed for recovery. The rebuildable SHM index is excluded.
+        Get-ChildItem -LiteralPath $dataRoot -Recurse -File | Where-Object {
+            $_.Name -eq 'installer-retention-sentinel.json' -or $_.Extension -eq '.wav' -or
+            $_.Name -match '\.(sqlite|db)(-(wal|journal))?$'
+        } | ForEach-Object {
             $values[$_.FullName] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         }
     }

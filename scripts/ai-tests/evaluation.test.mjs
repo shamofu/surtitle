@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -215,20 +215,22 @@ test('provider label alone cannot qualify unreviewed references or unlock a mode
 
 test('CLI writes hash-bound incomplete report and review template without overwriting', t => {
   const temp = mkdtempSync(join(tmpdir(), 'surtitle 評価 & '));
-  t.after(() => rmSync(temp, { recursive: true, force: true }));
+  t.onTestFinished(() => rmSync(temp, { recursive: true, force: true }));
   const { results } = translationFixture(), input = join(temp, 'results.json'), output = join(temp, 'report.json'), template = join(temp, 'review.json');
   writeFileSync(input, JSON.stringify(results));
   const args = [fileURLToPath(new URL('./evaluate.mjs', import.meta.url)), '--manifest', fileURLToPath(new URL('../../crates/ai/tests/fixtures/evaluation/text-corpus.json', import.meta.url)), '--results', input, '--case-id', reference.id, '--output', output, '--rubric-template', template];
-  const child = spawnSync(process.execPath, args, { encoding: 'utf8', windowsHide: true });
+  const child = spawnSync(process.execPath, args, { encoding: 'utf8', windowsHide: true, timeout: 10_000 });
+  assert.ifError(child.error);
   assert.equal(child.status, 2, child.stderr);
   assert.equal(JSON.parse(readFileSync(template)).resultsSha256, sha256(readFileSync(input)));
   assert.equal(JSON.parse(readFileSync(template)).reviewMethod, 'ai-review');
   assert.equal(JSON.parse(readFileSync(template)).referenceReview.independentOfModelOutput, false);
   assert.equal(JSON.parse(readFileSync(template)).referenceReview.referencesSha256, sha256(readFileSync(new URL('../../crates/ai/tests/fixtures/evaluation/text-corpus.json', import.meta.url))));
   assert.equal(JSON.parse(readFileSync(output)).evidence.modelQualified, false);
-  const rerun = spawnSync(process.execPath, args, { encoding: 'utf8', windowsHide: true });
+  const rerun = spawnSync(process.execPath, args, { encoding: 'utf8', windowsHide: true, timeout: 10_000 });
+  assert.ifError(rerun.error);
   assert.equal(rerun.status, 1); assert.match(rerun.stderr, /EEXIST/);
-});
+}, 25_000); // Two local CLI invocations, each bounded at ten seconds.
 
 test('AI review binds both evidence files and never claims human confirmation', () => {
   const { results, rubric: legacy } = translationFixture();

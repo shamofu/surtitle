@@ -22,7 +22,15 @@ async function ready() {
 }
 async function settings() {
   await browser.execute(() => { window.history.pushState({}, '', '/settings'); window.dispatchEvent(new PopStateEvent('popstate')); });
-  await $('button=Review saved translations').waitForDisplayed();
+  const review = $('button=Review saved translations');
+  await review.waitForDisplayed();
+  // Settings scrolls inside a smooth-scrolling panel. Native click auto-scroll
+  // can stop at the footer before the animation finishes, especially in WebKit.
+  // Position the real control first; the tests still click through WebDriver.
+  await browser.execute(node => node.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }), await review);
+  await review.waitForDisplayed({ withinViewport: true });
+  await review.waitForStable();
+  await review.waitForClickable();
 }
 
 (process.env.SURTITLE_E2E_AI_RECOVERY === 'translation' ? describe : describe.skip)('saved AI translation recovery in the actual desktop', () => {
@@ -54,7 +62,20 @@ async function settings() {
     await invoke('edit_segment', { segment: { ...source, text: 'An edited source.' } });
     const stale = await invoke('list_saved_ai_results', { jobId });
     assert.equal(stale[0].canApply, false);
-    await assert.rejects(invoke('apply_saved_ai_result', { jobId, ordinal: 0 }));
+    // Serialize the application's rejection inside the webview: a WebDriver
+    // transport/serialization failure must fail this test, not satisfy it.
+    const application = JSON.parse(await browser.execute(async id => {
+      try {
+        await window.__TAURI_INTERNALS__.invoke('apply_saved_ai_result', { jobId: id, ordinal: 0 });
+        return JSON.stringify({ succeeded: true });
+      } catch (error) {
+        return JSON.stringify({ succeeded: false, reason: String(error?.message ?? error) });
+      }
+    }, jobId));
+    assert.deepEqual(application, {
+      succeeded: false,
+      reason: 'approved source subtitles changed; output was retained for review and further sending stopped',
+    });
     assert.equal((await segments())[0].translation, null);
     await invoke('edit_segment', { segment: source });
     assert.equal((await invoke('list_saved_ai_results', { jobId }))[0].canApply, true);

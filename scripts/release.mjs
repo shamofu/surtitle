@@ -1,12 +1,16 @@
 // This only runs after the same workflow's required jobs.
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { validateRelease } from './release-contract.mjs';
+import { validateReleaseForPublish } from './release-contract.mjs';
 const version = JSON.parse(readFileSync('package.json')).version;
 const sha = process.env.GITHUB_SHA;
 const repo = process.env.GITHUB_REPOSITORY;
 if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || process.env.GITHUB_REF !== 'refs/heads/release' || process.env.GITHUB_EVENT_NAME !== 'push') throw new Error('Only a release branch push can publish.');
-const files = validateRelease('artifacts/release', sha, version);
+const files = validateReleaseForPublish('artifacts/release', sha, version, {
+  expectedRunId: process.env.GITHUB_RUN_ID,
+  expectedReceiptSha256: process.env.SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256,
+  expectedReleaseManifestSha256: process.env.SURTITLE_EXPECTED_RELEASE_MANIFEST_SHA256,
+});
 const tag = `v${version}`;
 function gh(args, input) {
   const result = spawnSync('gh', args, { input, encoding: 'utf8', shell: false, maxBuffer: 16 * 1024 * 1024 });

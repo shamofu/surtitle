@@ -20,11 +20,21 @@ foreach ($item in @($inputs.toolArchive, $inputs.sourceArchive, $inputs.cacheOnl
     if (-not (Test-Path -LiteralPath $file)) {
         $uri = [Uri]$item.url
         if ($uri.Scheme -ne 'https' -or $uri.Host -notin @('github.com','downloads.sourceforge.net')) { throw 'Unexpected installer input origin.' }
-        Invoke-WebRequest -Uri $item.url -OutFile ($file + '.partial') -TimeoutSec 300
-        if ((Get-FileHash -LiteralPath ($file + '.partial') -Algorithm SHA256).Hash -ne $item.sha256) { throw 'Installer download checksum mismatch.' }
+        Write-Host "Downloading installer input $($item.file) from $($item.url)"
+        # SourceForge sends a browser landing page for PowerShell's default
+        # Mozilla User-Agent. Identify this command-line downloader explicitly.
+        $response = Invoke-WebRequest -Uri $item.url -UserAgent 'Surtitle-installer-source-audit' -OutFile ($file + '.partial') -PassThru -TimeoutSec 300
+        $actualHash = (Get-FileHash -LiteralPath ($file + '.partial') -Algorithm SHA256).Hash.ToLowerInvariant()
+        $bytes = (Get-Item -LiteralPath ($file + '.partial')).Length
+        $contentType = $response.Headers['Content-Type'] -join ', '
+        # Redirect query strings may contain short-lived credentials; log the path only.
+        $finalUrl = $response.BaseResponse.RequestMessage.RequestUri.GetLeftPart([UriPartial]::Path)
+        Write-Host "Installer response: file=$($item.file); status=$($response.StatusCode); content-type=$contentType; bytes=$bytes; sha256=$actualHash; final-url=$finalUrl"
+        if ($actualHash -ne $item.sha256) { throw "Installer download checksum mismatch for $($item.file): expected $($item.sha256), received $actualHash ($bytes bytes; $contentType)." }
         Move-Item -LiteralPath ($file + '.partial') -Destination $file
     }
-    if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $item.sha256) { throw 'Installer input checksum mismatch.' }
+    if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $item.sha256) { throw "Installer input checksum mismatch for $($item.file)." }
+    Write-Host "Verified installer input $($item.file) against its pinned SHA-256."
 }
 $nsis = Join-Path $tools 'NSIS'
 if (Test-Path -LiteralPath $nsis) { throw 'Private NSIS tools already exist; audit the prepared receipt or use a fresh checkout.' }

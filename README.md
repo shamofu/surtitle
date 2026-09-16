@@ -12,7 +12,7 @@ The subsequent [Transcribe English dialogue comparison](docs/transcribe-en-dialo
 
 ## Development
 
-Windows development requires Windows 11 x64, Visual Studio C++ Build Tools, WebView2 Runtime, Node.js 24, pnpm 12.3.4, Rust 1.98, PowerShell 7, and 7-Zip.
+Windows development requires Windows 11 x64, Visual Studio C++ Build Tools, WebView2 Runtime, Node.js 24.21.0 LTS (specified in `.node-version`), pnpm 12.3.4, Rust 1.98, PowerShell 7, and 7-Zip.
 
 The Ubuntu 24.04 [Dev Container](.devcontainer/README.md) supports frontend development, common Rust tests, and real Linux Tauri E2E tests. Windows rendering, DPAPI, and installers require Windows verification.
 
@@ -36,9 +36,12 @@ pnpm test
 pnpm build
 cargo test --workspace --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-node --test scripts/*.test.mjs scripts/ai-tests/*.test.mjs .devcontainer/isolation.test.mjs
 node scripts/check-production-features.mjs
 ```
+
+`pnpm test` runs both Vitest projects: React tests in jsdom and script/container contract tests in Node. Use `pnpm test:ui` or `pnpm test:scripts` to run one project, and `pnpm test:watch` to watch both. Native WebDriver and Playwright tests keep their separate commands.
+
+On Windows, the two projects share at most two Vitest workers to leave capacity for their PowerShell, C# and nested process checks. Tests that launch external processes have explicit deadlines for each child and an overall budget for their sequential steps; ordinary UI and script tests keep Vitest's default timeout.
 
 See the [E2E guide](e2e/README.md) for native test setup. Basic playback and metadata use libmpv without FFmpeg. Bundled DLLs are never resolved through PATH; their hashes, dependency closure, licenses, and source are checked separately. See [native runtime management](docs/native-runtime.md).
 
@@ -69,6 +72,10 @@ FFmpeg/ffprobe, yt-dlp, and Deno can each use an application-managed installatio
 ## Branches and releases
 
 Development stays on main; do not commit until the owner permits it. GitHub Actions checks pushes to main and release, and PRs targeting either branch. A push to release publishes only artifacts whose required checks passed for the same SHA. Versions are changed explicitly on main; CI does not create commits or replace published artifacts.
+
+CI queues runs for each branch or PR without canceling the active run (`queue: max`, up to 100 pending runs). Jobs execute in order: Linux checks, native build, Windows 2025 checks, packaging, then release-branch publication. Docker environment layers use separate development/native caches; host pnpm stores and job-specific Rust dependency outputs are also cached. Native builds reuse checksum-verified source downloads and matching C/C++ compiler results through ccache, with no host mounts. Configuration, linking, source audits and final artifact generation run for every commit. Each native payload is verified for its commit and transferred as an artifact from the same run. Cache hits never skip required tests or artifact validation.
+
+Windows WebDriver runs with restricted medium integrity, including the installed production smoke test. [WebView2 ignores environment overrides in high-integrity hosts](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/security#for-an-elevated-host-app-use-appropriate-override-flags), which otherwise prevents EdgeDriver from opening its debugging connection on administrator CI runners. Before starting the child, the test launcher verifies medium integrity, Administrators and Power Users absent or deny-only, only allowlisted user privileges, and the same user and session. It preserves the runner's profile, environment and working directory and owns a Windows job that cleans up the driver and application processes. UAC-disabled runners can retain their elevation flag after permission restriction; diagnostics report that flag separately from the verified effective permissions. Runtime/driver versions and runner elevation are retained with CI evidence.
 
 The initial Windows NSIS installer is unsigned. Application auto-update and distribution for other operating systems are outside the initial scope.
 

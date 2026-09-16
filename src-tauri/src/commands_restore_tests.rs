@@ -278,7 +278,7 @@ fn zip_preview_tokens_are_single_use_and_restore_independent_audio_and_reviews()
 fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
     use std::sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     };
     use std::time::{Duration, Instant};
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -291,18 +291,32 @@ fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
             }
         }
     }
-    fn wait(state: &AppState, predicate: impl Fn(&PlayerState) -> bool) -> PlayerState {
-        let deadline = Instant::now() + Duration::from_secs(10);
+    fn wait(
+        state: &AppState,
+        stage: &str,
+        predicate: impl Fn(&PlayerState) -> bool,
+    ) -> PlayerState {
+        let started = Instant::now();
+        let deadline = started + Duration::from_secs(10);
+        let mut max_poll = Duration::ZERO;
         loop {
             pump();
+            let poll_started = Instant::now();
             let current = state.player_state().unwrap();
-            assert!(current.error.is_none(), "{:?}", current.error);
+            max_poll = max_poll.max(poll_started.elapsed());
+            assert!(current.error.is_none(), "{stage}: {:?}", current.error);
             if predicate(&current) {
+                eprintln!(
+                    "{stage}: reached after {:?}; max poll {max_poll:?}; position={}ms paused={}",
+                    started.elapsed(),
+                    current.position_ms,
+                    current.paused
+                );
                 return current;
             }
             assert!(
                 Instant::now() < deadline,
-                "player did not reach expected state: {current:?}"
+                "{stage}: player did not reach expected state; max poll {max_poll:?}: {current:?}"
             );
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -333,12 +347,61 @@ fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
     }
     struct Ticker {
         stop: Arc<AtomicBool>,
-        handle: Option<std::thread::JoinHandle<()>>,
+        completed: Arc<AtomicU64>,
+        handle: Option<std::thread::JoinHandle<Vec<Duration>>>,
+    }
+    impl Ticker {
+        fn start(state: &AppState) -> Self {
+            let stop = Arc::new(AtomicBool::new(false));
+            let completed = Arc::new(AtomicU64::new(0));
+            let worker_stop = stop.clone();
+            let worker_completed = completed.clone();
+            let worker_state = state.clone();
+            let ticker = Self {
+                stop,
+                completed,
+                handle: Some(std::thread::spawn(move || {
+                    let mut timings = Vec::new();
+                    while !worker_stop.load(Ordering::Acquire) {
+                        let started = Instant::now();
+                        worker_state.playback_tick(true).unwrap();
+                        timings.push(started.elapsed());
+                        worker_completed.fetch_add(1, Ordering::Release);
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    timings
+                })),
+            };
+            ticker.wait_for_ticks("start restore stress");
+            ticker
+        }
+        fn wait_for_ticks(&self, stage: &str) {
+            // One tick may already be in flight at this checkpoint. Requiring
+            // two completions also proves a tick started after the checkpoint.
+            let target = self.completed.load(Ordering::Acquire) + 2;
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while self.completed.load(Ordering::Acquire) < target {
+                pump();
+                assert!(
+                    Instant::now() < deadline,
+                    "{stage}: persisted ticks stalled"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
     }
     impl Drop for Ticker {
         fn drop(&mut self) {
             self.stop.store(true, Ordering::Release);
-            self.handle.take().unwrap().join().unwrap();
+            let mut timings = self.handle.take().unwrap().join().unwrap();
+            timings.sort_unstable();
+            eprintln!(
+                "restore stress: {} persisted ticks; p50={:?} p95={:?} max={:?}",
+                timings.len(),
+                timings.get(timings.len() / 2),
+                timings.get(timings.len() * 95 / 100),
+                timings.last()
+            );
         }
     }
     let temporary = tempfile::tempdir().unwrap();
@@ -439,7 +502,7 @@ fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
         drop(db);
         load_media_locked(&state, "restore-media").unwrap();
     }
-    let old = wait(&state, |current| {
+    let old = wait(&state, "load pre-restore media", |current| {
         current.ready && current.position_ms >= 2100
     });
     assert_eq!(
@@ -449,20 +512,9 @@ fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
             .and_then(|track| track.ff_index),
         Some(2)
     );
-    let stop = Arc::new(AtomicBool::new(false));
-    let worker_stop = stop.clone();
-    let worker_state = state.clone();
-    let ticker = Ticker {
-        stop,
-        handle: Some(std::thread::spawn(move || {
-            while !worker_stop.load(Ordering::Acquire) {
-                worker_state.playback_tick(true).unwrap();
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        })),
-    };
+    let ticker = Ticker::start(&state);
     restore_learning_archive(&state, &archive).unwrap();
-    let restored = wait(&state, |current| {
+    let restored = wait(&state, "restore resume and audio", |current| {
         current.ready && (500..=800).contains(&current.position_ms)
     });
     assert!(restored.paused);
@@ -474,7 +526,7 @@ fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
             .and_then(|track| track.ff_index),
         Some(1)
     );
-    wait(&state, |_| {
+    wait(&state, "restore subtitle text", |_| {
         lock(&state.player)
             .unwrap()
             .as_ref()
@@ -488,6 +540,12 @@ fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
         state.playback_tick(true).unwrap();
         std::thread::sleep(Duration::from_millis(5));
     }
+    ticker.wait_for_ticks("persist restored resume");
+    // The 1ms worker stresses restore/persistence ordering while paused. Join
+    // it before testing the real decoder clock: each FULL SQLite commit holds
+    // the playback coordinator and can delay every poll on a busy disk.
+    // Production persists about once a second, not on every stress tick.
+    drop(ticker);
     assert!(
         (500..=800).contains(
             &lock(&state.db)
@@ -498,7 +556,7 @@ fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
         )
     );
     action(&state, "play");
-    wait(&state, |current| {
+    wait(&state, "pause at restored sentence end", |current| {
         current.paused && (1000..=1300).contains(&current.position_ms)
     });
     assert_eq!(
@@ -516,7 +574,9 @@ fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
         .join("missing.mkv")
         .to_string_lossy()
         .into_owned();
+    let ticker = Ticker::start(&state);
     restore_learning_archive(&state, &missing).unwrap();
+    ticker.wait_for_ticks("persist after missing-source restore");
     let stopped = state.playback_tick(true).unwrap();
     assert!(!stopped.ready && stopped.paused && !stopped.surface_visible);
     assert!(lock(&state.playing).unwrap().is_none());
@@ -533,14 +593,17 @@ fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
         let _playback = lock(&state.playback).unwrap();
         load_media_locked(&state, "restore-media").unwrap();
     }
-    wait(&state, |current| current.ready);
+    wait(&state, "reload after missing source", |current| {
+        current.ready
+    });
     let mut removed = archive;
     removed.media.clear();
     removed.segments.clear();
     restore_learning_archive(&state, &removed).unwrap();
+    ticker.wait_for_ticks("persist after removed-media restore");
+    drop(ticker);
     assert!(lock(&state.playing).unwrap().is_none());
     assert!(!state.playback_tick(true).unwrap().ready);
     assert!(lock(&state.db).unwrap().list_media().unwrap().is_empty());
-    drop(ticker);
     lock(&state.player).unwrap().take();
 }

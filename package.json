@@ -11,8 +11,10 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:ui": "vitest run --project ui",
+    "test:scripts": "vitest run --project scripts",
     "test:browser": "playwright test",
-    "test:e2e": "wdio run ./wdio.conf.js",
+    "test:e2e": "node scripts/run-native-e2e.mjs",
     "test:fixtures": "node scripts/generate-fixtures.mjs",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri"
@@ -33,7 +35,7 @@
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.0",
-    "@types/node": "^22.15.0",
+    "@types/node": "^24.13.4",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.7.0",
@@ -44,7 +46,7 @@
     "jsdom": "^26.1.0",
     "typescript": "~5.8.3",
     "vite": "^6.3.0",
-    "vitest": "^3.2.0",
+    "vitest": "3.2.7",
     "webdriverio": "^9.31.6"
   }
 }

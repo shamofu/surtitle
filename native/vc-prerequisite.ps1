@@ -1,6 +1,10 @@
 [CmdletBinding()]
 param([switch]$CheckOnly, [switch]$InstallWithConsent)
 $ErrorActionPreference = 'Stop'
+# NSIS can inherit PowerShell 7's module paths before starting Windows PowerShell.
+# This checker uses only inbox cmdlets; resolve them against its own host version.
+$env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
+
 $minimum = [Version]'14.44.35211.0'
 $downloadUrl = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
 if (-not [Environment]::Is64BitOperatingSystem -or -not [Environment]::Is64BitProcess) {

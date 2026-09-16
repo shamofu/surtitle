@@ -7,6 +7,15 @@ export const maskedDirectories = ['node_modules', 'target', 'dist', 'work', 'art
   'playwright-report', 'src-tauri/gen', 'src-tauri/resources/native', 'src-tauri/resources/notices'];
 export const maskTargets = maskedDirectories.map(path => workspace + '/' + path);
 
+export function runtimeUserForHost({ platform, viaWsl = false, remoteUser, uid, gid }) {
+  if (platform !== 'linux' || viaWsl) return { user: remoteUser };
+  if (!Number.isInteger(uid) || uid <= 0 || !Number.isInteger(gid) || gid <= 0) {
+    throw new Error('Start the Linux development container as a non-root host user with a non-root primary group');
+  }
+  if (!/^[a-z_][a-z0-9_-]*$/.test(remoteUser)) throw new Error('Invalid development container user');
+  return { user: `${uid}:${gid}`, uid, gid, home: `/home/${remoteUser}` };
+}
+
 export function assertDefinition(config, dockerfiles, ignore) {
   if (config.workspaceMount !== 'source=$' + '{localWorkspaceFolder},target=' + workspace + ',type=bind' || config.workspaceFolder !== workspace) {
     throw new Error('Exactly one read/write source workspace bind is required');

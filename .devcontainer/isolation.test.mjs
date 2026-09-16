@@ -1,13 +1,95 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { assertContainer, assertDefinition, maskTargets, workspace } from './isolation.mjs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { assertContainer, assertDefinition, maskTargets, runtimeUserForHost, workspace } from './isolation.mjs';
 
 const definition = JSON.parse(readFileSync(new URL('./devcontainer.json', import.meta.url), 'utf8'));
 const dockerfiles = [readFileSync(new URL('./Dockerfile', import.meta.url), 'utf8'), readFileSync(new URL('../native/build/Dockerfile', import.meta.url), 'utf8')];
 const ignore = readFileSync(new URL('../.dockerignore', import.meta.url), 'utf8');
 const inspection = () => [{ Mounts: [{ Type: 'bind', Source: '/repo', Destination: workspace, RW: true }, ...maskTargets.map(Destination => ({ Type: 'tmpfs', Destination }))], HostConfig: { Binds: [], Privileged: false } }];
 test('repository source is shared while every dependency/output location is masked', () => assertDefinition(definition, dockerfiles, ignore));
+
+test('native Linux uses host IDs while Windows and WSL retain the image account', () => {
+  for (const uid of [1000, 1001]) {
+    assert.deepEqual(runtimeUserForHost({ platform: 'linux', remoteUser: 'vscode', uid, gid: 1001 }),
+      { user: `${uid}:1001`, uid, gid: 1001, home: '/home/vscode' });
+  }
+  for (const context of [{ platform: 'win32' }, { platform: 'linux', viaWsl: true }, { platform: 'darwin' }]) {
+    assert.deepEqual(runtimeUserForHost({ ...context, remoteUser: 'vscode' }), { user: 'vscode' });
+  }
+  for (const [uid, gid] of [[0, 1000], [1000, 0], [-1, 1000], [1000, undefined]]) {
+    assert.throws(() => runtimeUserForHost({ platform: 'linux', remoteUser: 'vscode', uid, gid }), /non-root/);
+  }
+});
+
+test('Linux account alignment preserves source ownership and completes before write probes', () => {
+  const launcher = readFileSync(new URL('./container.mjs', import.meta.url), 'utf8');
+  const start = launcher.slice(launcher.indexOf("case 'start':"), launcher.indexOf("case 'check':"));
+  assert.match(start, /'--user', runtimeUser\.user/);
+  assert.match(start, /'HOME=' \+ runtimeUser\.home/);
+  const alignment = start.indexOf("'/.devcontainer/align-user.sh'");
+  assert.ok(alignment >= 0 && alignment < start.indexOf('probe();'));
+  const align = readFileSync(new URL('./align-user.sh', import.meta.url), 'utf8');
+  assert.match(align, /Host UID \$uid belongs to another container account/);
+  assert.match(align, /if ! getent group "\$gid"/);
+  assert.match(align, /chown -R --no-dereference "\$uid:\$gid" "\$user_home" \/opt\/surtitle-build/);
+  assert.doesNotMatch(align, /chmod|\/workspaces\/|\$workspace/);
+  assert.equal(definition.updateRemoteUserUID, false);
+});
+
+test('live verification output is retained and producer or tee failures stay nonzero', t => {
+  const childTimeoutMs = 10_000;
+  const launcher = readFileSync(new URL('./container.mjs', import.meta.url), 'utf8');
+  const invocation = launcher.match(/'bash', '-o', '(pipefail)', '(-lc)', '([^']+)'/);
+  assert.ok(invocation, 'Verification must explicitly preserve the status of the tee pipeline');
+  assert.match(invocation[3], /^bash \.devcontainer\/verify\.sh 2>&1 \| tee \/opt\/surtitle-build\/verification\.log$/);
+  assert.doesNotMatch(launcher, /'tail', '-n', '80'/);
+  let bash = 'bash';
+  if (process.platform === 'win32') {
+    const git = spawnSync('git', ['--exec-path'], { encoding: 'utf8', timeout: childTimeoutMs, windowsHide: true });
+    assert.equal(git.error, undefined);
+    bash = resolve(git.stdout?.trim() ?? '', '../../../bin/bash.exe');
+    if (git.status !== 0 || !existsSync(bash)) {
+      t.skip('Git Bash is needed to execute the Linux streaming pipeline on Windows');
+      return;
+    }
+  }
+  const directory = mkdtempSync(join(tmpdir(), 'surtitle verification stream 日本語 & '));
+  t.onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
+  for (const exitCode of [0, 23]) {
+    const log = join(directory, `verification-${exitCode}.log`);
+    const pipeline = invocation[3]
+      .replace('bash .devcontainer/verify.sh', `(printf 'stdout marker\\n'; printf 'stderr marker\\n' >&2; exit ${exitCode})`)
+      .replace('/opt/surtitle-build/verification.log', '"$1"');
+    const result = spawnSync(bash, ['--noprofile', '--norc', '-o', invocation[1], invocation[2], pipeline, 'verification-stream-test', log.replaceAll('\\', '/')], {
+      encoding: 'utf8', timeout: childTimeoutMs, windowsHide: true,
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, exitCode, result.stderr);
+    assert.equal(result.stdout, 'stdout marker\nstderr marker\n');
+    assert.equal(readFileSync(log, 'utf8'), result.stdout);
+  }
+  const failingLog = join(directory, 'missing-directory', 'verification.log').replaceAll('\\', '/');
+  const pipeline = invocation[3].replace('bash .devcontainer/verify.sh', "printf 'stdout marker\\n'").replace('/opt/surtitle-build/verification.log', '"$1"');
+  const result = spawnSync(bash, ['--noprofile', '--norc', '-o', invocation[1], invocation[2], pipeline, 'verification-stream-test', failingLog], { encoding: 'utf8', timeout: childTimeoutMs, windowsHide: true });
+  assert.equal(result.error, undefined);
+  assert.notEqual(result.status, 0, 'An unwritable log must not silently lose verification evidence');
+}, 45_000); // Up to four sequential children, each bounded at ten seconds.
+
+test('verification labels long-running phases without printing the environment', () => {
+  const script = readFileSync(new URL('./verify.sh', import.meta.url), 'utf8');
+  assert.match(script, /date -u \+'%Y-%m-%dT%H:%M:%SZ'/);
+  for (const command of ['cargo test --workspace', 'cargo clippy --workspace', 'cargo deny check', 'pnpm test:fixtures', 'dbus-run-session -- xvfb-run']) {
+    const position = script.indexOf(command);
+    const precedingLine = script.slice(0, position).trimEnd().split(/\r?\n/).at(-1);
+    assert.match(precedingLine, /^step '/, `${command} must identify the active phase`);
+  }
+  assert.match(script, /if ! command -v cargo-deny[^\n]+\n\s+step 'Installing cargo-deny/);
+  assert.doesNotMatch(script, /set -x|set -o xtrace|^\s*(?:env|printenv)\s*$/m);
+});
 
 test('each full verification seeds and launches one fresh profile inside the work mask', () => {
   const script = readFileSync(new URL('./verify.sh', import.meta.url), 'utf8');

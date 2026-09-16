@@ -23,6 +23,7 @@
 !package.json
 !pnpm-lock.yaml
 !pnpm-workspace.yaml
+!.node-version
 !Cargo.toml
 !Cargo.lock
 !about.toml
@@ -36,6 +37,7 @@
 !wdio.conf.js
 src-tauri/resources/native/**
 src-tauri/resources/notices/**
+!src-tauri/resources/notices/README.txt
 **/node_modules/**
 **/target/**
 **/.env*

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { spawnWebDriver } from './scripts/webdriver-process.mjs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, isAbsolute } from 'node:path';
 import { createConnection } from 'node:net';
 
@@ -44,7 +44,7 @@ export const config = {
   async beforeSession() {
     const args = ['--port', String(port)];
     if (process.env.SURTITLE_NATIVE_DRIVER) args.push('--native-driver', process.env.SURTITLE_NATIVE_DRIVER);
-    driver = spawn(process.env.SURTITLE_TAURI_DRIVER || 'tauri-driver', args, { stdio: 'inherit', windowsHide: true, env: process.env });
+    driver = spawnWebDriver(process.env.SURTITLE_TAURI_DRIVER || 'tauri-driver', args, { stdio: 'inherit', windowsHide: true, env: process.env });
     let launchError;
     driver.once('error', error => { launchError = error; });
     process.once('exit', stopDriver);
@@ -54,6 +54,51 @@ export const config = {
   afterSession: stopDriver,
   onComplete: stopDriver,
   async afterTest(test, _context, result) {
-    if (!result.passed) await browser.saveScreenshot(resolve('test-results/native', `${test.title.replace(/[^a-z0-9]+/gi, '-')}.png`));
+    if (result.passed) return;
+    const artifact = resolve('test-results/native', test.title.replace(/[^a-z0-9]+/gi, '-'));
+    const diagnostics = { capturedAt: new Date().toISOString() };
+    const reportError = (stage, error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[native failure diagnostics] ${stage}: ${message}`);
+      return message;
+    };
+    try { await browser.saveScreenshot(`${artifact}.png`); }
+    catch (error) { diagnostics.screenshotError = reportError('screenshot capture failed', error); }
+    try {
+      diagnostics.page = await browser.execute(() => {
+        const rectangle = element => {
+          if (!element) return null;
+          const { x, y, top, right, bottom, left, width, height } = element.getBoundingClientRect();
+          return { x, y, top, right, bottom, left, width, height };
+        };
+        const content = document.querySelector('.page-content');
+        return {
+          pathname: location.pathname,
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+          hidden: document.hidden,
+          pageContent: content ? { scrollTop: content.scrollTop, rect: rectangle(content) } : null,
+          nativePlayerViewport: rectangle(document.querySelector('[data-testid="native-player-viewport"]')),
+          dialogPresent: !!document.querySelector('[role="dialog"], dialog[open], [aria-modal="true"]'),
+        };
+      });
+    } catch (error) { diagnostics.pageError = reportError('page capture failed', error); }
+    try {
+      diagnostics.playerState = await browser.execute(async () => {
+        let timer;
+        try {
+          const state = await Promise.race([
+            window.__TAURI_INTERNALS__.invoke('get_player_state'),
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('get_player_state exceeded the 5-second diagnostic limit')), 5000); }),
+          ]);
+          return { state };
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : String(error) };
+        } finally { clearTimeout(timer); }
+      });
+      if (diagnostics.playerState.error) reportError('player state capture failed', diagnostics.playerState.error);
+    } catch (error) { diagnostics.playerState = { error: reportError('player state capture failed', error) }; }
+    try { writeFileSync(`${artifact}.json`, `${JSON.stringify(diagnostics, null, 2)}\n`, 'utf8'); }
+    catch (error) { reportError('JSON evidence write failed', error); }
   },
 };

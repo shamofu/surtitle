@@ -266,7 +266,7 @@ requests. `transcribe-timestamp-contract-v1.json` uses authored replacement word
 and only the numeric failure shapes; it redistributes neither corpus excerpts nor
 provider responses. Quantized point anchors remain points.
 
-Run `node --test scripts/ai-tests/*.test.mjs` in the development container. The new
+Run `pnpm test:scripts scripts/ai-tests` in the development container. The new
 tests cover exact sample accounting, identical paired input ranges, context/hash
 tampering, reference deficits, rejected temporal holdouts, fixed repeats, preserved
 historical gates, review-required boundaries, 95/100 playback, missing Japanese
