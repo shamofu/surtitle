@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, copyFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
 import { nativeDigest, nativeRecipePaths, ortRecipePaths } from './native-ci-git.mjs';
 import { nativeArtifactFiles, effectiveNativeManifest, validateNativeArtifact, assertEffectiveManifestInSource } from './native-ci-contract.mjs';
@@ -37,14 +36,14 @@ export function fixture(t) {
   t.onTestFinished(() => rmSync(root, { recursive: true, force: true }));
   const directory = join(root, 'artifact'), workspace = join(root, 'workspace'), source = join(root, 'source');
   for (const path of [directory, workspace, source]) mkdirSync(path);
-  const ortCommit = 'b'.repeat(40), runId = '1234', runAttempt = '1';
+  const ortCommit = 'b'.repeat(40), sha = 'a'.repeat(40);
   const sources = [
     { id: 'mpv', file: 'mpv.tar.gz', sha256: digest('original mpv source'), license: 'GPL-2.0-or-later' },
     { id: 'ffmpeg', file: 'ffmpeg.tar.gz', sha256: digest('original FFmpeg source'), license: 'GPL-3.0-or-later' },
   ];
-  for (const path of [...nativeRecipePaths, ...ortRecipePaths]) write(join(workspace, path), `committed recipe ${path}`);
+  for (const path of [...nativeRecipePaths, ...ortRecipePaths]) write(join(workspace, path), `checkout recipe ${path}`);
   for (const path of ['scripts/native-ci-build.sh', 'scripts/native-ci-inputs.py', 'scripts/native-ci-build-inside.sh', 'native/onnxruntime-LICENSE', 'native/onnxruntime-ThirdPartyNotices.txt']) {
-    write(join(workspace, path), `committed build input ${path}`);
+    write(join(workspace, path), `checkout build input ${path}`);
   }
   write(join(workspace, '.gitattributes'), '* -text\n');
   write(join(workspace, 'native/build/sources.json'), { schemaVersion: 1, sources });
@@ -75,16 +74,7 @@ export function fixture(t) {
       redistribution: { status: 'complete', reviewEvidence: { path: 'native/reviews/onnxruntime.json', sha256: fileHash(join(workspace, 'native/reviews/onnxruntime.json')) } } },
   ], prerequisites: [{ id: 'microsoft-vc-runtime-x64', bundled: false }] };
   write(join(workspace, 'native/runtime-windows-x64.json'), originalManifest);
-  const git = args => {
-    const result = spawnSync('git', ['-c', 'core.autocrlf=false', '-c', 'commit.gpgsign=false', '-c', 'user.name=Native test', '-c', 'user.email=native-test@example.invalid', ...args],
-      { cwd: workspace, encoding: 'utf8', windowsHide: true });
-    assert.equal(result.status, 0, result.stderr);
-    return result.stdout.trim();
-  };
-  git(['init', '--quiet']); git(['add', '.']); git(['commit', '--quiet', '-m', 'isolated test inputs']);
-  const sha = git(['rev-parse', 'HEAD']);
   const recipe = nativeRecipePaths.map(path => ({ path, sha256: fileHash(join(workspace, path)) }));
-  const baseManifestSha256 = fileHash(join(workspace, 'native/runtime-windows-x64.json'));
   const mpvEntries = [
     ...nativeRecipePaths.map(path => [`recipe/${path}`, readFileSync(join(workspace, path))]),
     ['archives/mpv.tar.gz', 'original mpv source'], ['archives/ffmpeg.tar.gz', 'original FFmpeg source'],
@@ -102,27 +92,26 @@ export function fixture(t) {
   write(join(directory, 'libmpv-build-evidence.json'), evidence);
   write(join(directory, 'toolchain-packages.tsv'), 'gcc-mingw-w64-x86-64\t13.2.0\tamd64\ncmake\t3.28.3\tamd64\n');
   write(join(directory, 'container-image.json'), [{ Id: `sha256:${digest('actual image')}`, Os: 'linux', Architecture: 'amd64' }]);
-  const receipt = { schemaVersion: 2, sha, runId, runAttempt, baseManifestSha256, files: {} };
+  const receipt = { schemaVersion: 3, sha, files: {} };
   for (const name of nativeArtifactFiles.filter(name => name !== 'effective-native-manifest.json')) receipt.files[name] = fileHash(join(directory, name));
-  const committed = { originalManifest, ortIdentity };
-  const manifest = effectiveNativeManifest(committed, receipt);
+  const inputs = { originalManifest, ortIdentity };
+  const manifest = effectiveNativeManifest(inputs, receipt);
   write(join(directory, 'effective-native-manifest.json'), manifest);
   receipt.files['effective-native-manifest.json'] = fileHash(join(directory, 'effective-native-manifest.json'));
   write(join(directory, 'native-build-artifact.json'), receipt);
-  const expectations = { expectedReceiptSha256: fileHash(join(directory, 'native-build-artifact.json')), expectedRunId: runId, referenceWorkspace: workspace };
-  const context = { root, directory, workspace, source, sha, runId, runAttempt, originalManifest, ort, receipt, manifest, expectations, git, mpvEntries, ortEntries };
-  context.validate = () => validateNativeArtifact(directory, workspace, sha, expectations);
-  context.validateSource = () => assertEffectiveManifestInSource(source, directory, sha, expectations);
+  const sourceOptions = { referenceWorkspace: workspace };
+  const context = { root, directory, workspace, source, sha, originalManifest, ort, receipt, manifest, sourceOptions, mpvEntries, ortEntries };
+  context.validate = () => validateNativeArtifact(directory, workspace);
+  context.validateSource = () => assertEffectiveManifestInSource(source, directory, sourceOptions);
   context.mutate = (name, change) => { const value = read(join(directory, name)); change(value); write(join(directory, name), value); };
-  context.reseal = ({ authorizeProducer = true, rebuildManifest = false } = {}) => {
+  context.reseal = ({ rebuildManifest = false } = {}) => {
     const receipt = read(join(directory, 'native-build-artifact.json'));
     receipt.files = Object.fromEntries(nativeArtifactFiles.map(name => [name, fileHash(join(directory, name))]));
     if (rebuildManifest) {
-      write(join(directory, 'effective-native-manifest.json'), effectiveNativeManifest(committed, receipt));
+      write(join(directory, 'effective-native-manifest.json'), effectiveNativeManifest(inputs, receipt));
       receipt.files['effective-native-manifest.json'] = fileHash(join(directory, 'effective-native-manifest.json'));
     }
     write(join(directory, 'native-build-artifact.json'), receipt);
-    if (authorizeProducer) expectations.expectedReceiptSha256 = fileHash(join(directory, 'native-build-artifact.json'));
   };
   context.copySource = () => {
     for (const path of nativeRecipePaths) { mkdirSync(dirname(join(source, path)), { recursive: true }); copyFileSync(join(workspace, path), join(source, path)); }

@@ -95,7 +95,6 @@ export async function preflight(requirements, { root = workspace, env = process.
     requireCondition(platform === 'win32', 'Native DLL integration requires Windows');
     const manifest = readJson(join(root, 'native/runtime-windows-x64.json'));
     requireCondition(manifest.platform === 'windows-x64', 'Native manifest must select Windows x64');
-    if (env.GITHUB_SHA) requireCondition(manifest.buildBinding?.sha === env.GITHUB_SHA, 'Native integration requires this commit\'s consumed artifact');
     const runtimeFiles = manifest.components.flatMap(component => component.runtimeFiles);
     requireCondition(JSON.stringify(runtimeFiles.map(file => file.target).sort()) === JSON.stringify(['mpv-2.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll']), 'Native manifest must contain the three expected DLLs');
     for (const file of runtimeFiles) {

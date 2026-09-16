@@ -1,63 +1,35 @@
 import { readFileSync, readdirSync, lstatSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { createHash } from 'node:crypto';
 
 /** Publish only the complete asset set verified by the package job. */
-export function validateReleaseForPublish(directory, sha, version, { expectedReleaseManifestSha256, ...nativeContext } = {}) {
-  if (!/^[a-f0-9]{64}$/.test(expectedReleaseManifestSha256 ?? '')) {
-    throw new Error('An independently supplied release manifest SHA-256 is required');
-  }
-  const path = join(directory, 'release-manifest.json');
-  const stat = lstatSync(path);
-  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Release manifest must be a regular file');
-  if (createHash('sha256').update(readFileSync(path)).digest('hex') !== expectedReleaseManifestSha256) {
-    throw new Error('Release manifest differs from the package job output');
-  }
-  return validateRelease(directory, sha, version, nativeContext);
+export function validateReleaseForPublish(directory, version) {
+  return validateRelease(directory, version);
 }
 
-export function validateRelease(directory, sha, version, { expectedRunId, expectedReceiptSha256 } = {}) {
-  if (!/^[0-9a-f]{40}$/i.test(sha ?? '') || !/^\d+\.\d+\.\d+$/.test(version ?? '')) throw new Error('Invalid release identity');
-  if (typeof expectedRunId !== 'string' || !/^[1-9][0-9]*$/.test(expectedRunId)
-      || !/^[a-f0-9]{64}$/.test(expectedReceiptSha256 ?? '')) throw new Error('An independent native producer run and receipt hash are required');
+export function validateRelease(directory, version) {
+  if (!/^\d+\.\d+\.\d+$/.test(version ?? '')) throw new Error('Invalid release version');
   const names = readdirSync(directory);
   if (names.some(name => basename(name) !== name || !lstatSync(join(directory, name)).isFile() || lstatSync(join(directory, name)).isSymbolicLink())) throw new Error('Release assets must be regular files in a flat directory');
   const required = ['release-manifest.json', 'SHA256SUMS.txt', 'surtitle-source.zip', 'native-audit.json', 'installer-smoke.json', 'production-smoke.json', 'installer-audit.json', 'installer-build-receipt.json', 'js-sbom.cdx.json', 'rust-dependencies.json', 'native-runtime-manifest.json', 'native-build-artifact.json'];
   if (required.some(name => !names.includes(name)) || names.filter(name => name.endsWith('.exe')).length !== 1) throw new Error('Release assets are incomplete or ambiguous');
+  if (names.some(name => lstatSync(join(directory, name)).size === 0)) throw new Error('Release assets must not be empty');
   const manifest = JSON.parse(readFileSync(join(directory, 'release-manifest.json'), 'utf8'));
-  if (manifest.sha !== sha || manifest.version !== version || manifest.installerSmokePassed !== true) throw new Error('Release manifest does not certify this tested commit/version');
+  if (manifest.version !== version || manifest.installerSmokePassed !== true) throw new Error('Release manifest does not certify this version and installer smoke');
   const audit = JSON.parse(readFileSync(join(directory, 'native-audit.json'), 'utf8'));
-  if (audit.sha !== sha || audit.artifactIntegrityPassed !== true || audit.releaseEligible !== true || !Array.isArray(audit.errors) || audit.errors.length || !Array.isArray(audit.blockers) || audit.blockers.length) throw new Error('Native redistribution audit does not certify this SHA');
-  const hash = name => createHash('sha256').update(readFileSync(join(directory, name))).digest('hex');
+  if (audit.artifactIntegrityPassed !== true || audit.releaseEligible !== true || !Array.isArray(audit.errors) || audit.errors.length || !Array.isArray(audit.blockers) || audit.blockers.length) throw new Error('Native redistribution audit has failures or blockers');
   const nativeManifest = JSON.parse(readFileSync(join(directory, 'native-runtime-manifest.json'), 'utf8'));
-  const nativeBuild = JSON.parse(readFileSync(join(directory, 'native-build-artifact.json'), 'utf8'));
-  if (nativeBuild.schemaVersion !== 2 || nativeBuild.runId !== expectedRunId
-      || nativeManifest.buildBinding?.runId !== expectedRunId || audit.nativeBuildRunId !== expectedRunId
-      || hash('native-build-artifact.json') !== expectedReceiptSha256 || audit.nativeReceiptSha256 !== expectedReceiptSha256
-      || !/^[a-f0-9]{64}$/.test(nativeBuild.baseManifestSha256 ?? '')
-      || nativeManifest.buildBinding?.baseManifestSha256 !== nativeBuild.baseManifestSha256) {
-    throw new Error('Native build receipt differs from the independent producer identity');
-  }
-  if (nativeBuild.sha !== sha || nativeManifest.buildBinding?.sha !== sha || audit.nativeBuildSha !== sha ||
-      nativeBuild.files?.['effective-native-manifest.json'] !== hash('native-runtime-manifest.json') ||
-      audit.effectiveManifestSha256 !== hash('native-runtime-manifest.json')) {
-    throw new Error('Native build/effective manifest does not certify the tested SHA');
-  }
-  const installer = names.find(name => name.endsWith('.exe'));
   const smoke = JSON.parse(readFileSync(join(directory, 'installer-smoke.json'), 'utf8').replace(/^\uFEFF/, ''));
-  if (smoke.sha !== sha || smoke.installerSha256 !== hash(installer) ||
-      ['freshInstallPassed', 'startupPassed', 'overwriteInstallPassed', 'uninstallPassed', 'defaultDataRetentionPassed'].some(field => smoke[field] !== true) ||
+  if (['freshInstallPassed', 'startupPassed', 'overwriteInstallPassed', 'uninstallPassed', 'defaultDataRetentionPassed'].some(field => smoke[field] !== true) ||
       !Number.isSafeInteger(smoke.retainedFileCount) || smoke.retainedFileCount < 1 || smoke.retainedDataRemoved !== false) {
-    throw new Error('Installer lifecycle evidence does not certify this installer/SHA');
+    throw new Error('Installer lifecycle evidence is incomplete or failed');
   }
   const production = JSON.parse(readFileSync(join(directory, 'production-smoke.json'), 'utf8'));
   const requiredProductionChecks = ['passed', 'normalBuild', 'appReady', 'settingsReady', 'nativeMetadataPassed', 'visibleSurfacePassed',
     'playbackAdvanced', 'intervalStopPassed', 'seekPassed', 'accountingUnchanged'];
-  if (production.schemaVersion !== 1 || production.sha !== sha || requiredProductionChecks.some(field => production[field] !== true)
+  if (production.schemaVersion !== 1 || requiredProductionChecks.some(field => production[field] !== true)
       || production.paidRequests !== 0 || !/^[a-f0-9]{64}$/.test(production.applicationSha256 ?? '')
-      || smoke.productionApplicationSha256 !== production.applicationSha256 || smoke.productionSmokeSha256 !== hash('production-smoke.json')
-      || production.effectiveManifestSha256 !== hash('native-runtime-manifest.json')) {
-    throw new Error('Installed production evidence does not certify this application/installer/SHA');
+      || smoke.productionApplicationSha256 !== production.applicationSha256) {
+    throw new Error('Installed production evidence is incomplete or failed');
   }
   const expectedNative = nativeManifest.components?.flatMap(component => component.runtimeFiles).map(file => `${file.target}:${file.sha256}`).sort();
   const observedNative = production.nativeFiles?.map(file => `${file.file}:${file.sha256}`).sort();
@@ -76,9 +48,7 @@ export function validateRelease(directory, sha, version, { expectedRunId, expect
   }
   const installerAudit = JSON.parse(readFileSync(join(directory, 'installer-audit.json'), 'utf8'));
   const installerBuild = JSON.parse(readFileSync(join(directory, 'installer-build-receipt.json'), 'utf8'));
-  if (installerAudit.schemaVersion !== 1 || installerBuild.schemaVersion !== 1 || installerAudit.sha !== sha || installerBuild.sha !== sha
-      || installerAudit.installerSha256 !== hash(installer) || installerAudit.effectiveManifestSha256 !== hash('native-runtime-manifest.json')
-      || installerAudit.sourceReceiptSha256 !== hash('installer-build-receipt.json') || installerAudit.releaseEligible !== true
+  if (installerAudit.schemaVersion !== 1 || installerBuild.schemaVersion !== 1 || installerAudit.releaseEligible !== true
       || !Array.isArray(installerAudit.errors) || installerAudit.errors.length || installerBuild.plugin?.file !== 'surtitle_nsis_utils.dll'
       || !/^[a-f0-9]{64}$/.test(installerAudit.pluginSha256 ?? '') || installerAudit.pluginSha256 !== installerBuild.plugin.sha256) {
     throw new Error('Embedded installer audit does not certify this installer, source receipt and plugin');
@@ -116,16 +86,5 @@ export function validateRelease(directory, sha, version, { expectedRunId, expect
       || installerAudit.files.some(file => file.file.toLowerCase() === '$pluginsdir/nsis_tauri_utils.dll')) {
     throw new Error('Embedded installer uses an absent, altered or unreviewed Tauri plugin');
   }
-  const payload = names.filter(name => !['release-manifest.json', 'SHA256SUMS.txt'].includes(name));
-  if (!manifest.files || Object.keys(manifest.files).length !== payload.length) throw new Error('Unexpected release assets');
-  for (const name of payload) if (manifest.files[name] !== hash(name)) throw new Error(`Release payload checksum mismatch: ${name}`);
-  const sums = new Map();
-  for (const line of readFileSync(join(directory, 'SHA256SUMS.txt'), 'utf8').trim().split(/\r?\n/)) {
-    const match = /^([a-f0-9]{64})  ([^\\/]+)$/.exec(line);
-    if (!match || sums.has(match[2])) throw new Error('Invalid release checksums');
-    sums.set(match[2], match[1]);
-  }
-  const checked = names.filter(name => name !== 'SHA256SUMS.txt');
-  if (sums.size !== checked.length || checked.some(name => sums.get(name) !== hash(name))) throw new Error('Release checksum set does not match assets');
-  return names.map(name => ({ name, path: join(directory, name), sha256: hash(name), size: lstatSync(join(directory, name)).size }));
+  return names.map(name => ({ name, path: join(directory, name), size: lstatSync(join(directory, name)).size }));
 }

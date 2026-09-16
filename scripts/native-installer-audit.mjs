@@ -250,7 +250,6 @@ function prepared() {
   assert(receipt.inputsSha256 === hash(join(workspace, 'native/installer-inputs.json'))
     && receipt.pluginInputsSha256 === hash(join(workspace, 'native/nsis-plugin/inputs.json'))
     && receipt.templateSha256 === hash(join(workspace, 'native/installer.nsi')), 'Prepared installer inputs changed');
-  assert(receipt.sha === (process.env.GITHUB_SHA ?? null), 'Installer build receipt belongs to another commit');
   const evidence = validatePluginBuild(resolve(workspace, receipt.sourcePluginDirectory));
   assert(evidence.runtime.sha256 === receipt.plugin.sha256 && receipt.plugin.file === alias, 'Prepared plugin identity changed');
   assertSourcePackageBinding(receipt, inputs, evidence, resolve(workspace, receipt.sourcePluginDirectory));

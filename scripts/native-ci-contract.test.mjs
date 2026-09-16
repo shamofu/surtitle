@@ -3,81 +3,48 @@ import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, readdirSync, rmSync, copyFileSync, symlinkSync, linkSync } from 'node:fs';
 import { join } from 'node:path';
 import { nativeArtifactFiles, validateNativeArtifact, assertEffectiveManifestInSource } from './native-ci-contract.mjs';
-import { nativeCommitInputs } from './native-ci-git.mjs';
+import { nativeCheckoutInputs } from './native-ci-git.mjs';
 import { consumeNativeArtifact, sealNativeArtifact } from './native-ci-artifact.mjs';
 import { fixture, digest, fileHash, write, read, tarGzip } from './native-ci-fixture.mjs';
 
-// These integration checks spawn Git and Python against real source archives.
+// These integration checks inspect real source archives with Python.
 const test = (name, run) => registerTest(name, run, 20_000);
 
-test('accepts the exact commit/run with distinct output bytes and no hand-maintained input ledger', t => {
+test('validates runtime and source evidence without Git or workflow identity expectations', t => {
   const f = fixture(t), result = f.validate();
   assert.equal(result.files.length, 8);
   assert.notEqual(result.manifest.components[0].runtimeFiles[0].sha256, f.originalManifest.components[0].runtimeFiles[0].sha256);
-  assert.equal(result.receipt.schemaVersion, 2);
-  assert.equal(Object.hasOwn(result.receipt, 'reviewedInputs'), false);
+  assert.equal(result.receipt.schemaVersion, 3);
+  assert.deepEqual(result.manifest.buildBinding, { artifactManifestPath: 'work/native-ci-artifact/native-build-artifact.json' });
   assert.equal(read(join(f.directory, 'libmpv-build-evidence.json')).releaseEligible, false);
+  f.mutate('native-build-artifact.json', receipt => { receipt.sha = null; receipt.files = {}; });
+  f.validate();
 });
 
-test('requires independent receipt and run expectations and the exact commit', t => {
-  const f = fixture(t);
-  assert.throws(() => validateNativeArtifact(f.directory, f.workspace, f.sha), /independently supplied/);
-  assert.throws(() => validateNativeArtifact(f.directory, f.workspace, f.sha, { ...f.expectations, expectedRunId: undefined }), /run ID/);
-  assert.throws(() => validateNativeArtifact(f.directory, f.workspace, 'b'.repeat(40), f.expectations), /commit/);
-  assert.throws(() => validateNativeArtifact(f.directory, f.workspace, f.sha, { ...f.expectations, expectedRunId: '9999' }), /run identity/);
-  f.mutate('native-build-artifact.json', receipt => { receipt.schemaVersion = 1; });
-  f.reseal();
-  assert.throws(f.validate, /schema/);
-});
-
-test('rejects every missing, extra or modified transport payload', t => {
+test('rejects missing, extra or empty native payloads', t => {
   const f = fixture(t);
   for (const name of nativeArtifactFiles) {
     const bytes = readFileSync(join(f.directory, name));
     rmSync(join(f.directory, name)); assert.throws(f.validate, /missing native artifact files/);
-    write(join(f.directory, name), Buffer.concat([bytes, Buffer.from('tamper')])); assert.throws(f.validate, /checksum/);
+    write(join(f.directory, name), ''); assert.throws(f.validate, /Empty native artifact file/);
     write(join(f.directory, name), bytes);
   }
   write(join(f.directory, 'extra.dll'), 'unexpected'); assert.throws(f.validate, /native artifact files/);
-  rmSync(join(f.directory, 'extra.dll'));
-  f.mutate('native-build-artifact.json', value => { delete value.files['effective-native-manifest.json']; });
-  f.expectations.expectedReceiptSha256 = fileHash(join(f.directory, 'native-build-artifact.json'));
-  assert.throws(f.validate, /hash entries/);
 });
 
-test('rejects complete transport resealing against the independent producer digest', t => {
-  const f = fixture(t);
-  write(join(f.directory, 'mpv-2.dll'), 'replacement DLL');
-  f.mutate('libmpv-build-evidence.json', value => { value.runtime.sha256 = fileHash(join(f.directory, 'mpv-2.dll')); value.runtime.bytes = 15; });
-  f.reseal({ authorizeProducer: false, rebuildManifest: true });
-  assert.throws(f.validate, /producer job output/);
-});
-
-test('binds required recipe and native metadata to Git bytes without hashing unrelated scripts', t => {
-  const f = fixture(t);
-  write(join(f.workspace, 'scripts/unrelated-test.mjs'), 'a new unrelated local test');
-  f.validate();
-  for (const path of ['native/build/Dockerfile', 'native/build/sources.json', 'native/reviews/onnxruntime-dependencies.json',
-    'scripts/native-ci-build.sh', 'scripts/native-ci-inputs.py', 'scripts/native-ci-build-inside.sh', 'native/onnxruntime-LICENSE']) {
-    const original = readFileSync(join(f.workspace, path));
-    write(join(f.workspace, path), 'changed at the same commit');
-    assert.throws(f.validate, /differ(?:s)? from the selected commit/);
-    write(join(f.workspace, path), original);
-  }
-});
-
-test('rejects untracked files and directories copied by the native build', t => {
+test('uses checkout recipe bytes while ignoring unrelated files and directories', t => {
   const f = fixture(t);
   for (const path of ['native/build/extra.cmake', 'native/upstream-evidence/extra.json', 'scripts/native-ort-untracked.py']) {
-    write(join(f.workspace, path), 'untracked build input');
-    assert.throws(f.validate, /differ(?:s)? from the selected commit/);
-    rmSync(join(f.workspace, path));
+    write(join(f.workspace, path), 'unrelated file');
   }
   mkdirSync(join(f.workspace, 'native/upstream-evidence/untracked-directory'));
-  assert.throws(f.validate, /Untracked native input directory/);
+  f.validate();
+  write(join(f.workspace, 'native/build/Dockerfile'), 'updated checkout recipe');
+  assert.equal(nativeCheckoutInputs(f.workspace).recipe[0].sha256, digest('updated checkout recipe'));
+  assert.throws(f.validate, /Build recipe evidence differs from checkout inputs/);
 });
 
-test('rejects changed source metadata and recipe evidence even with an authorized new transport digest', t => {
+test('rejects source metadata and recipe evidence inconsistent with the checkout', t => {
   const f = fixture(t), original = readFileSync(join(f.directory, 'libmpv-build-evidence.json'));
   for (const change of [
     value => { value.recipe[0].sha256 = digest('changed recipe'); },
@@ -86,7 +53,7 @@ test('rejects changed source metadata and recipe evidence even with an authorize
     value => { value.sources[0].retainedNotices = []; },
   ]) {
     f.mutate('libmpv-build-evidence.json', change); f.reseal();
-    assert.throws(f.validate, /committed inputs|retained notices/);
+    assert.throws(f.validate, /checkout inputs|retained notices/);
     write(join(f.directory, 'libmpv-build-evidence.json'), original);
   }
 });
@@ -109,7 +76,6 @@ test('rejects unapproved effective manifest changes including the ORT archive fo
     value => { value.components[1].runtimeFiles[0].sha256 = digest('other DLL'); },
     value => { delete value.components[1].format; },
     value => { value.prerequisites[0].bundled = true; },
-    value => { value.buildBinding.sha = 'b'.repeat(40); },
   ]) {
     f.mutate('effective-native-manifest.json', change); f.reseal();
     assert.throws(f.validate, /Effective runtime manifest/);
@@ -155,20 +121,6 @@ test('checks ORT archive contents and its embedded inventory against the externa
   assert.throws(f.validate, /source archive verification failed/);
 });
 
-test('rejects missing base identity, unexpected receipt fields and unsafe member keys', t => {
-  const f = fixture(t), original = readFileSync(join(f.directory, 'native-build-artifact.json'));
-  for (const change of [
-    value => { value.baseManifestSha256 = digest('other base'); },
-    value => { value.reviewedInputs = []; },
-    value => { value.files['../escape'] = digest('escape'); },
-  ]) {
-    f.mutate('native-build-artifact.json', change);
-    f.expectations.expectedReceiptSha256 = fileHash(join(f.directory, 'native-build-artifact.json'));
-    assert.throws(f.validate, /base manifest|receipt fields|hash entries/);
-    write(join(f.directory, 'native-build-artifact.json'), original);
-  }
-});
-
 test('requires populated observed image and toolchain package evidence', t => {
   const f = fixture(t);
   f.mutate('container-image.json', value => { value[0].Id = `sha256:${digest('another image')}`; });
@@ -178,34 +130,21 @@ test('requires populated observed image and toolchain package evidence', t => {
   write(join(f.directory, 'toolchain-packages.tsv'), '\n'); f.reseal(); assert.throws(f.validate, /toolchain package/);
 });
 
-test('sealing emits a producer digest only after validation and supports consume then revalidation', t => {
-  const f = fixture(t), output = join(f.root, 'github-output');
-  const sealed = sealNativeArtifact(f.directory, f.workspace, f.sha, { runId: f.runId, runAttempt: f.runAttempt, githubOutput: output });
-  assert.equal(readFileSync(output, 'utf8'), `receipt-sha256=${sealed.receiptSha256}\n`);
-  f.expectations.expectedReceiptSha256 = sealed.receiptSha256;
-  consumeNativeArtifact(f.directory, f.workspace, f.sha, f.expectations);
-  f.validate();
-  assert.deepEqual(nativeCommitInputs(f.workspace, f.sha).originalManifest, f.originalManifest);
-  assert.throws(() => nativeCommitInputs(f.workspace, f.sha, { requireOriginalManifest: true }), /differs from the selected commit/);
-  assert.throws(() => sealNativeArtifact(f.directory, f.workspace, f.sha, { runId: f.runId, runAttempt: '2' }), /differs from the selected commit/);
-});
-
-test('failed sealing never emits a producer digest', t => {
-  const f = fixture(t), output = join(f.root, 'github-output');
-  write(output, 'prior output\n');
-  write(join(f.directory, 'mpv-2.dll'), 'changed');
-  assert.throws(() => sealNativeArtifact(f.directory, f.workspace, f.sha, { runId: f.runId, runAttempt: f.runAttempt, githubOutput: output }), /evidence does not match/);
-  assert.equal(readFileSync(output, 'utf8'), 'prior output\n');
-});
-
-test('consume refuses to overwrite an unrelated dirty working manifest', t => {
+test('sealing generates the manifest and supports consume then revalidation', t => {
   const f = fixture(t);
-  const changed = structuredClone(f.originalManifest);
-  changed.components[1].runtimeFiles[0].sha256 = digest('unrelated local edit');
-  write(join(f.workspace, 'native/runtime-windows-x64.json'), changed);
-  assert.throws(f.validate, /neither the committed base/);
-  assert.throws(() => consumeNativeArtifact(f.directory, f.workspace, f.sha, f.expectations), /neither the committed base/);
-  assert.deepEqual(read(join(f.workspace, 'native/runtime-windows-x64.json')), changed);
+  const sealed = sealNativeArtifact(f.directory, f.workspace, { sha: f.sha });
+  assert.equal(sealed.receipt.sha, f.sha);
+  assert.equal(sealed.receipt.files['mpv-2.dll'], fileHash(join(f.directory, 'mpv-2.dll')));
+  consumeNativeArtifact(f.directory, f.workspace);
+  f.validate();
+  assert.deepEqual(nativeCheckoutInputs(f.workspace).originalManifest, sealed.manifest);
+  assert.deepEqual(sealNativeArtifact(f.directory, f.workspace).manifest, sealed.manifest);
+});
+
+test('sealing rejects runtime bytes inconsistent with build evidence', t => {
+  const f = fixture(t);
+  write(join(f.directory, 'mpv-2.dll'), 'changed');
+  assert.throws(() => sealNativeArtifact(f.directory, f.workspace), /evidence does not match/);
 });
 
 test('sealing rejects linked output leaves before writing and preserves external bytes', t => {
@@ -217,7 +156,7 @@ test('sealing rejects linked output leaves before writing and preserves external
       if (process.platform !== 'win32' || !['EPERM', 'EACCES'].includes(error.code)) throw error;
       linkSync(external, output);
     }
-    assert.throws(() => sealNativeArtifact(f.directory, f.workspace, f.sha, { runId: f.runId, runAttempt: f.runAttempt }), /symlink|hard-linked/);
+    assert.throws(() => sealNativeArtifact(f.directory, f.workspace), /symlink|hard-linked/);
     assert.equal(readFileSync(external, 'utf8'), 'external sentinel');
     rmSync(output); write(output, original);
   }
@@ -226,7 +165,7 @@ test('sealing rejects linked output leaves before writing and preserves external
 test('consume rejects a linked destination ancestor before copying outside the workspace', t => {
   const f = fixture(t), outside = join(f.root, 'outside-work'); mkdirSync(outside);
   symlinkSync(outside, join(f.workspace, 'work'), process.platform === 'win32' ? 'junction' : 'dir');
-  assert.throws(() => consumeNativeArtifact(f.directory, f.workspace, f.sha, f.expectations), /symlink ancestor/);
+  assert.throws(() => consumeNativeArtifact(f.directory, f.workspace), /symlink ancestor/);
   assert.deepEqual(readdirSync(outside), []);
   assert.deepEqual(read(join(f.workspace, 'native/runtime-windows-x64.json')), f.originalManifest);
 });
@@ -234,7 +173,7 @@ test('consume rejects a linked destination ancestor before copying outside the w
 test('consume refuses a hard-linked original manifest even when its bytes are correct', t => {
   const f = fixture(t), manifest = join(f.workspace, 'native/runtime-windows-x64.json'), external = join(f.root, 'outside-manifest.json');
   copyFileSync(manifest, external); rmSync(manifest); linkSync(external, manifest);
-  assert.throws(() => consumeNativeArtifact(f.directory, f.workspace, f.sha, f.expectations), /must not be hard-linked/);
+  assert.throws(() => consumeNativeArtifact(f.directory, f.workspace), /must not be hard-linked/);
   assert.deepEqual(read(external), f.originalManifest);
 });
 
@@ -248,17 +187,17 @@ test('checks extracted source recipes and every native evidence copy using a sep
   assert.throws(f.validateSource, /evidence changed/);
   f.copySource(); write(join(f.source, 'native-sources/onnxruntime/extra.dll'), 'unexpected');
   assert.throws(f.validateSource, /source evidence files/);
-  assert.throws(() => assertEffectiveManifestInSource(f.source, f.directory, f.sha, { ...f.expectations, referenceWorkspace: undefined }), /reference checkout/);
+  assert.throws(() => assertEffectiveManifestInSource(f.source, f.directory), /reference checkout/);
 });
 
 test('rejects symlinked artifact roots, source ancestry and native input ancestry', t => {
   const f = fixture(t), linked = join(f.root, 'linked-artifact');
   symlinkSync(f.directory, linked, process.platform === 'win32' ? 'junction' : 'dir');
-  assert.throws(() => validateNativeArtifact(linked, f.workspace, f.sha, f.expectations), /symlink ancestor/);
+  assert.throws(() => validateNativeArtifact(linked, f.workspace), /symlink ancestor/);
   f.copySource();
   const extracted = join(f.root, 'extracted'); mkdirSync(extracted);
   symlinkSync(join(f.source, 'native'), join(extracted, 'native'), process.platform === 'win32' ? 'junction' : 'dir');
-  assert.throws(() => assertEffectiveManifestInSource(extracted, f.directory, f.sha, f.expectations), /symlink/);
+  assert.throws(() => assertEffectiveManifestInSource(extracted, f.directory, f.sourceOptions), /symlink/);
   const scripts = join(f.workspace, 'scripts'), outside = join(f.root, 'outside-scripts'); mkdirSync(outside);
   for (const name of ['native-build.sh', 'native-source-inputs.py', 'native-build-evidence.py']) copyFileSync(join(scripts, name), join(outside, name));
   rmSync(scripts, { recursive: true }); symlinkSync(outside, scripts, process.platform === 'win32' ? 'junction' : 'dir');

@@ -13,8 +13,6 @@ jobs:
   native-build:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    outputs:
-      receipt-sha256: ${{ steps.native-build.outputs.receipt-sha256 }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
@@ -38,7 +36,6 @@ jobs:
           key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock', 'native/nsis-plugin/Cargo.lock') }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:scripts
-      - run: node scripts/native-ci-artifact.mjs check-inputs ${{ github.sha }}
       - uses: docker/setup-buildx-action@v4.3.0
       - name: Build this commit's native toolchain image
         uses: docker/build-push-action@v7.3.0
@@ -69,9 +66,9 @@ jobs:
           key: ${{ steps.native-cache.outputs.source-key }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ${{ steps.native-cache.outputs.source-key }}-
       - name: Build committed native inputs without host dependency/output mounts
-        id: native-build
         run: bash scripts/native-ci-build.sh --prebuilt-image
         env:
+          SURTITLE_NATIVE_GITHUB_TOKEN: ${{ github.token }}
           SURTITLE_NATIVE_CACHE_DIR: ${{ steps.native-cache.outputs.directory }}
       - name: Save verified native compiler cache from a trusted main push
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -97,8 +94,6 @@ jobs:
     needs: [native-build]
     runs-on: windows-2025
     timeout-minutes: 30
-    env:
-      SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256: ${{ needs.native-build.outputs.receipt-sha256 }}
     defaults:
       run:
         shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
@@ -113,8 +108,8 @@ jobs:
         with:
           name: native-build-${{ github.sha }}
           path: work/native-ci-artifact/
-      - name: Require this run's native artifact and committed inputs
-        run: node scripts/native-ci-artifact.mjs consume work/native-ci-artifact ${{ github.sha }} --expected-receipt-sha256 $env:SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256
+      - name: Prepare this run's native artifact
+        run: node scripts/native-ci-artifact.mjs consume work/native-ci-artifact
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0

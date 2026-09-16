@@ -2,9 +2,8 @@
 
 The source ZIP intentionally has no `.git` directory. Its effective native
 manifest describes the binaries in that release. The steps below build a new
-local candidate without inventing a commit or requiring those old binary hashes.
-The separate same-commit release workflow still requires a real Git checkout and
-all release tests; these instructions do not grant release approval.
+local candidate with newly recorded output hashes. Release publication follows
+the workflow's Linux, Windows and package jobs and their source/installer checks.
 
 Use Linux with Docker and an x86_64 Windows development environment with Rust
 1.98.0, MSVC/Windows SDK, Node 24, pnpm 12.4.2 and PowerShell 7. Install Rust before
@@ -123,8 +122,7 @@ separately installed runtime described in [native-runtime.md](../docs/native-run
 
 The local rebuild remains ineligible for the project's automated release until
 its source/notice review, fresh Windows tests and isolated installer lifecycle
-are complete. Do not change pinned dependency hashes to match unexpected output,
-or insert a synthetic Git SHA/Actions run identity to make a release gate pass.
-The CI verifier reads original inputs from a separate checkout at the selected
-commit. An extracted source ZIP does not need its own `.git` or a generated
-review ledger to build a local candidate.
+are complete. Keep the fixed upstream dependency checksums from the source
+catalog and reviews. Source/artifact audits operate on the supplied files; an
+extracted ZIP needs no Git metadata, Actions run identity or generated review
+ledger to build and inspect a local candidate.

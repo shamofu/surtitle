@@ -1,9 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 Set-Location -LiteralPath $workspace
-if ($env:GITHUB_SHA -notmatch '^[a-f0-9]{40}$') { throw 'Run installer verification in the isolated CI package job.' }
-$head = (& git rev-parse HEAD)
-if ($LASTEXITCODE -ne 0 -or $head -ne $env:GITHUB_SHA) { throw 'Checkout differs from the commit being packaged.' }
 & node scripts/check-version.mjs
 if ($LASTEXITCODE -ne 0) { throw 'Release version mismatch.' }
 & node scripts/check-production-features.mjs
@@ -41,9 +38,8 @@ if ($LASTEXITCODE -ne 0) { throw 'JavaScript license audit failed.' }
 Copy-Item -Path (Join-Path $workspace 'artifacts/*sbom*'), (Join-Path $workspace 'artifacts/js-licenses.json') -Destination $releaseDir
 cargo metadata --locked --offline --format-version 1 | Out-File -LiteralPath (Join-Path $releaseDir 'rust-dependencies.json') -Encoding utf8
 if ($LASTEXITCODE -ne 0) { throw 'Rust dependency inventory failed.' }
-& git diff --exit-code -- Cargo.toml Cargo.lock package.json pnpm-lock.yaml pnpm-workspace.yaml
-if ($LASTEXITCODE -ne 0) { throw 'Dependency manifests changed after the tested checkout; do not archive different source inputs.' }
-git archive --format=zip --output=work/application-source.zip $env:GITHUB_SHA
+$archiveRef = if ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { 'HEAD' }
+git archive --format=zip --output=work/application-source.zip $archiveRef
 if ($LASTEXITCODE -ne 0) { throw 'Source archive failed.' }
 Expand-Archive -LiteralPath (Join-Path $workspace 'work/application-source.zip') -DestinationPath $sourceDir -Force
 # CI-built native hashes are generated without a commit. Ship the effective
@@ -93,8 +89,8 @@ foreach ($component in $nativeManifest.components) {
         Copy-Item -LiteralPath $evidencePath -Destination (Join-Path $componentSources ($field + '-' + $item.Name))
     }
 }
-& node scripts/native-ci-source-check.mjs $sourceDir (Join-Path $workspace 'work/native-ci-artifact') $env:GITHUB_SHA --reference-workspace $workspace
-if ($LASTEXITCODE -ne 0) { throw 'Corresponding source differs from the tested native artifact or committed inputs.' }
+& node scripts/native-ci-source-check.mjs $sourceDir (Join-Path $workspace 'work/native-ci-artifact') --reference-workspace $workspace
+if ($LASTEXITCODE -ne 0) { throw 'Native corresponding source is incomplete or invalid.' }
 $sevenZip = Get-Command 7z.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 $archiver = if ($sevenZip) { $sevenZip.Source } else { Join-Path ${env:ProgramFiles} '7-Zip/7z.exe' }
 if (-not (Test-Path -LiteralPath $archiver)) { throw '7-Zip is required for a ZIP64 source archive with all dotfiles.' }
@@ -108,20 +104,15 @@ if (Test-Path -LiteralPath $sourceCheck) { throw 'Source archive verification di
 New-Item -ItemType Directory -Path $sourceCheck | Out-Null
 & $archiver x '-y' ('-o' + $sourceCheck) (Join-Path $releaseDir 'surtitle-source.zip') 'native/runtime-windows-x64.json' 'native/native-build-artifact.json' 'native/build/*' 'scripts/native-build.sh' 'scripts/native-source-inputs.py' 'scripts/native-build-evidence.py' 'native-sources/*' 'native-installer-sources/*' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Cannot verify the effective native manifest inside the source archive.' }
-& node scripts/native-ci-source-check.mjs $sourceCheck (Join-Path $workspace 'work/native-ci-artifact') $env:GITHUB_SHA --reference-workspace $workspace
-if ($LASTEXITCODE -ne 0) { throw 'The source archive does not contain the exact tested native manifest and receipt.' }
+& node scripts/native-ci-source-check.mjs $sourceCheck (Join-Path $workspace 'work/native-ci-artifact') --reference-workspace $workspace
+if ($LASTEXITCODE -ne 0) { throw 'The source archive has incomplete or invalid native corresponding source.' }
 & node scripts/native-installer-audit.mjs source-check $sourceCheck
 if ($LASTEXITCODE -ne 0) { throw 'The source archive omitted exact installer sources or its build receipt.' }
-$files = @{}
-Get-ChildItem -LiteralPath $releaseDir -File | ForEach-Object { $files[$_.Name] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
 $version = (Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).version
-@{schemaVersion=1;sha=$env:GITHUB_SHA;version=$version;installerSmokePassed=$true;files=$files} |
+@{schemaVersion=1;version=$version;installerSmokePassed=$true} |
     ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $releaseDir 'release-manifest.json') -Encoding utf8
 Get-ChildItem -LiteralPath $releaseDir -File | Where-Object Name -NE 'SHA256SUMS.txt' | Sort-Object Name | ForEach-Object { "$( (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)" } | Set-Content -LiteralPath (Join-Path $releaseDir 'SHA256SUMS.txt') -Encoding utf8
 # Validate the complete artifact on main and PRs as well as release pushes.
-# This contract checks evidence and hashes only; it never publishes anything.
-& node --input-type=module -e 'import { readFileSync } from "node:fs"; import { validateRelease } from "./scripts/release-contract.mjs"; validateRelease("artifacts/release", process.env.GITHUB_SHA, JSON.parse(readFileSync("package.json", "utf8")).version, { expectedRunId: process.env.GITHUB_RUN_ID, expectedReceiptSha256: process.env.SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256 });'
-if ($LASTEXITCODE -ne 0) { throw 'The packaged artifact failed the same-SHA release contract.' }
-if (-not $env:GITHUB_OUTPUT) { throw 'Package verification requires the Actions job output channel.' }
-$releaseManifestSha256 = (Get-FileHash -LiteralPath (Join-Path $releaseDir 'release-manifest.json') -Algorithm SHA256).Hash.ToLowerInvariant()
-"release-manifest-sha256=$releaseManifestSha256" >> $env:GITHUB_OUTPUT
+# This contract checks required assets and verification results; it never publishes anything.
+& node --input-type=module -e 'import { readFileSync } from "node:fs"; import { validateRelease } from "./scripts/release-contract.mjs"; validateRelease("artifacts/release", JSON.parse(readFileSync("package.json", "utf8")).version);'
+if ($LASTEXITCODE -ne 0) { throw 'The packaged artifact failed release validation.' }

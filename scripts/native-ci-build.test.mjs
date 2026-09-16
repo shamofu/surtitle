@@ -62,6 +62,11 @@ docker() {
       ;;
     inspect) printf '[]\n' ;;
     exec)
+      if [[ "${'$'}{2:-}" == --env && "${'$'}{3:-}" == SURTITLE_NATIVE_GITHUB_TOKEN ]]; then
+        [[ -n "${'$'}{SURTITLE_NATIVE_GITHUB_TOKEN:-}" ]] || return 92
+        [[ "${'$'}{5:-}" == python3 ]] || return 93
+        return "${'$'}{SURTITLE_TEST_ACQUIRE_STATUS:-0}"
+      fi
       if [[ "${'$'}{3:-}" == python3 ]]; then return "${'$'}{SURTITLE_TEST_ACQUIRE_STATUS:-0}"; fi
       if [[ "${'$'}{3:-}" == bash ]]; then return "${'$'}{SURTITLE_TEST_BUILD_STATUS:-0}"; fi
       ;;
@@ -76,11 +81,13 @@ docker() {
 }
 export -f mock_log git node docker
 `);
-  const run = ({ cacheRelative = 'cache', disable, sealStatus = '0', acquireStatus = '0', buildStatus = '0' } = {}) => {
+  const run = ({ cacheRelative = 'cache', disable, githubToken, sealStatus = '0', acquireStatus = '0', buildStatus = '0' } = {}) => {
     const env = { ...process.env, GITHUB_SHA: sha, SURTITLE_TEST_SEAL_STATUS: sealStatus,
       SURTITLE_TEST_ACQUIRE_STATUS: acquireStatus, SURTITLE_TEST_BUILD_STATUS: buildStatus };
     delete env.CCACHE_DISABLE;
     delete env.SURTITLE_NATIVE_CACHE_DIR;
+    delete env.SURTITLE_NATIVE_GITHUB_TOKEN;
+    if (githubToken !== undefined) env.SURTITLE_NATIVE_GITHUB_TOKEN = githubToken;
     if (disable !== undefined) env.CCACHE_DISABLE = disable;
     if (cacheRelative !== null) env.SURTITLE_TEST_CACHE_RELATIVE = cacheRelative;
     else delete env.SURTITLE_TEST_CACHE_RELATIVE;
@@ -106,6 +113,21 @@ exec bash scripts/native-ci-build.sh --prebuilt-image
 const imports = commands => commands.filter(args => args[0] === 'docker' && args[1] === 'cp' && /\/cache\/(compiler|source-cache|ort-archives)\/\.$/.test(args[2]));
 const exports = commands => commands.filter(args => args[0] === 'docker' && args[1] === 'cp' && args[2].includes(':/build/'));
 const noContainer = result => assert.equal(result.commands.some(args => args[0] === 'docker' && ['create', 'exec'].includes(args[1])), false);
+
+test('the GitHub token is forwarded by name only to acquisition, never container creation, compilation or logs', t => {
+  const token = 'ghs_fixture_secret_do_not_log';
+  const result = fixture(t).run({ githubToken: token });
+  assert.equal(result.status, 0, result.stderr);
+  const forwarded = result.commands.filter(args => args.includes('SURTITLE_NATIVE_GITHUB_TOKEN'));
+  assert.equal(forwarded.length, 1);
+  assert.deepEqual(forwarded[0], ['docker', 'exec', '--env', 'SURTITLE_NATIVE_GITHUB_TOKEN',
+    `surtitle-native-ci-${sha.slice(0, 12)}`, 'python3', '/workspace/scripts/native-ci-inputs.py', '/workspace', '/build']);
+  assert.ok(!JSON.stringify(result.commands).includes(token));
+  assert.ok(!(result.stdout + result.stderr).includes(token));
+  const failed = fixture(t).run({ githubToken: token, acquireStatus: '21' });
+  assert.equal(failed.status, 21, failed.stderr);
+  assert.equal(failed.commands.some(args => args.includes('/workspace/scripts/native-ci-build-inside.sh')), false);
+}, testBudget(2));
 
 test('native wrapper imports only three reusable caches before acquisition and exports replacements after a successful seal', t => {
   const f = fixture(t);

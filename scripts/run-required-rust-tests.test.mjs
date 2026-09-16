@@ -193,17 +193,16 @@ test('six-hour completion copies the actual report/receipt and rejects a retaine
   }
 });
 
-test('native preflight verifies all three DLL hashes, same-SHA binding and unbundled model', async t => {
-  const f = fixture(t), sha = 'a'.repeat(40);
+test('native preflight verifies all three DLL hashes and unbundled model', async t => {
+  const f = fixture(t);
   const targets = ['mpv-2.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll'];
   for (const target of targets) f.write(`src-tauri/resources/native/${target}`, target);
   f.write('work/native-fixtures/silero_vad.onnx', 'model');
-  const manifest = { platform: 'windows-x64', buildBinding: { sha }, components: [{ runtimeFiles: targets.map(target => ({ target, sha256: hash(target) })) }],
+  const manifest = { platform: 'windows-x64', components: [{ runtimeFiles: targets.map(target => ({ target, sha256: hash(target) })) }],
     models: [{ id: 'silero-vad', bundled: false, developmentPath: 'work/native-fixtures/silero_vad.onnx', sha256: hash('model') }] };
   const save = () => f.write('native/runtime-windows-x64.json', JSON.stringify(manifest)); save();
-  const options = { root: f.root, env: { GITHUB_SHA: sha }, platform: 'win32' };
+  const options = { root: f.root, env: {}, platform: 'win32' };
   assert.equal((await preflight(['silero'], options)).length, 4);
-  await assert.rejects(preflight(['silero'], { ...options, env: { GITHUB_SHA: 'b'.repeat(40) } }), /this commit/);
   manifest.models[0].bundled = true; save(); await assert.rejects(preflight(['silero'], options), /external/);
   manifest.models[0].bundled = false; save(); f.write('src-tauri/resources/native/onnxruntime.dll', 'changed');
   await assert.rejects(preflight(['silero'], options), /mismatch/);

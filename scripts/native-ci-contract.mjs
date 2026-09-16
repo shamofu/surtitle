@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { join, parse, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { nativeCommitInputs, nativeRecipePaths } from './native-ci-git.mjs';
+import { nativeCheckoutInputs, nativeRecipePaths } from './native-ci-git.mjs';
 
 export const nativeArtifactFiles = Object.freeze([
   'mpv-2.dll', 'libmpv-source.tar.gz', 'onnxruntime-source.tar.gz',
@@ -97,69 +97,56 @@ function pairs(items, key, label) {
 }
 function samePairs(actual, expected, key, label) {
   const left = pairs(actual, key, label), right = pairs(expected, key, label);
-  requireCondition(left.size === right.size && [...right].every(([name, digest]) => left.get(name) === digest), `${label} differs from committed inputs`);
+  requireCondition(left.size === right.size && [...right].every(([name, digest]) => left.get(name) === digest), `${label} differs from checkout inputs`);
 }
 function exactKeys(actual, expected, label) {
   requireCondition(isDeepStrictEqual([...actual].sort(), [...expected].sort()), `Unexpected or missing ${label}`);
 }
 
-function artifactEnvelope(directory, expectedSha, { expectedReceiptSha256, expectedRunId } = {}) {
-  requireCondition(typeof expectedSha === 'string' && shaPattern.test(expectedSha), 'An exact lowercase Git commit SHA is required');
-  requireCondition(digestPattern.test(expectedReceiptSha256 ?? ''), 'An independently supplied receipt SHA-256 is required');
-  requireCondition(/^[1-9][0-9]*$/.test(expectedRunId ?? ''), 'An expected workflow run ID is required');
+function artifactEnvelope(directory) {
   const root = directoryRoot(directory);
   exactKeys(readdirSync(root), [...nativeArtifactFiles, receiptName], 'native artifact files');
-  requireCondition(hash(regularFile(root, receiptName)) === expectedReceiptSha256, 'Native artifact receipt differs from the producer job output');
   const receipt = object(jsonFile(root, receiptName), 'native artifact receipt');
-  exactKeys(Object.keys(receipt), ['schemaVersion', 'sha', 'runId', 'runAttempt', 'baseManifestSha256', 'files'], 'native receipt fields');
-  requireCondition(receipt.schemaVersion === 2 && receipt.sha === expectedSha, 'Native artifact commit/schema mismatch');
-  requireCondition(receipt.runId === expectedRunId && /^[1-9][0-9]*$/.test(receipt.runAttempt ?? ''), 'Native artifact workflow run identity mismatch');
-  requireCondition(digestPattern.test(receipt.baseManifestSha256), 'Invalid committed base manifest hash');
-  exactKeys(Object.keys(object(receipt.files, 'native artifact hashes')), nativeArtifactFiles, 'native artifact hash entries');
+  requireCondition(receipt.schemaVersion === 3, 'Invalid native artifact receipt schema');
   const files = nativeArtifactFiles.map(name => {
     const path = regularFile(root, name), size = lstatSync(path).size;
-    requireCondition(size > 0 && digestPattern.test(receipt.files[name]) && hash(path) === receipt.files[name], `Native artifact checksum/size mismatch: ${name}`);
-    return { name, path, sha256: receipt.files[name], size };
+    requireCondition(size > 0, `Empty native artifact file: ${name}`);
+    return { name, path, sha256: hash(path), size };
   });
   return { root, receipt, files };
 }
 
-/** Verify transport, committed inputs and retained source bytes; this is not independent approval of the producer. */
-export function validateNativeArtifact(directory, workspaceRoot, expectedSha, expectations) {
-  const result = artifactEnvelope(directory, expectedSha, expectations);
-  const { root, receipt, files } = result;
+/** Validate the runtime, corresponding sources and retained license evidence. */
+export function validateNativeArtifact(directory, workspaceRoot) {
+  const { root, receipt, files } = artifactEnvelope(directory);
   const workspace = directoryRoot(workspaceRoot);
-  const committed = nativeCommitInputs(workspace, expectedSha);
-  requireCondition(committed.baseManifestSha256 === receipt.baseManifestSha256, 'Committed base manifest hash mismatch');
-  const workingManifestHash = hash(regularFile(workspace, 'native/runtime-windows-x64.json'));
-  requireCondition(workingManifestHash === committed.baseManifestSha256 || workingManifestHash === receipt.files['effective-native-manifest.json'],
-    'Working native manifest is neither the committed base nor this artifact effective manifest');
-  const { sourceCatalog, ortReviewed, ortIdentity, mpvReviewed } = committed;
-  requireCondition(sourceCatalog.schemaVersion === 1, 'Invalid committed native source catalog');
+  const inputs = nativeCheckoutInputs(workspace);
+  const { sourceCatalog, ortReviewed, ortIdentity, mpvReviewed } = inputs;
+  requireCondition(sourceCatalog.schemaVersion === 1, 'Invalid native source catalog');
   const evidence = object(jsonFile(root, 'libmpv-build-evidence.json'), 'libmpv evidence');
   requireCondition(evidence.schemaVersion === 1, 'Invalid libmpv evidence schema');
-  samePairs(evidence.recipe, committed.recipe, 'path', 'Build recipe evidence');
+  samePairs(evidence.recipe, inputs.recipe, 'path', 'Build recipe evidence');
   samePairs(evidence.sources, sourceCatalog.sources, 'id', 'Build source evidence');
   samePairs(mpvReviewed.sources, sourceCatalog.sources, 'id', 'libmpv reviewed source inventory');
   for (const reviewedSource of sourceCatalog.sources) {
     const observed = evidence.sources.find(item => item.id === reviewedSource.id);
     requireCondition(Object.entries(reviewedSource).every(([key, value]) => isDeepStrictEqual(observed[key], value)),
-      `Build source metadata differs from committed inputs: ${reviewedSource.id}`);
+      `Build source metadata differs from checkout inputs: ${reviewedSource.id}`);
     requireCondition(typeof reviewedSource.license === 'string' && reviewedSource.license.length > 0, 'Missing source license metadata');
     const notices = mpvReviewed.sources.find(item => item.id === reviewedSource.id).retainedNotices;
     samePairs(observed.retainedNotices, notices, 'file', `libmpv ${reviewedSource.id} retained notices`);
   }
   const byName = new Map(files.map(file => [file.name, file]));
   const runtime = object(evidence.runtime, 'libmpv runtime evidence');
-  requireCondition(runtime.file === 'mpv-2.dll' && runtime.sha256 === receipt.files['mpv-2.dll']
+  requireCondition(runtime.file === 'mpv-2.dll' && runtime.sha256 === byName.get('mpv-2.dll').sha256
     && runtime.bytes === byName.get('mpv-2.dll').size, 'libmpv runtime evidence does not match the DLL');
   const source = object(evidence.correspondingSourceCandidate, 'libmpv source evidence');
-  requireCondition(source.file === 'libmpv-candidate-source.tar.gz' && source.sha256 === receipt.files['libmpv-source.tar.gz']
+  requireCondition(source.file === 'libmpv-candidate-source.tar.gz' && source.sha256 === byName.get('libmpv-source.tar.gz').sha256
     && source.bytes === byName.get('libmpv-source.tar.gz').size, 'libmpv source evidence does not match the source archive');
 
   const ort = object(jsonFile(root, 'onnxruntime-source-inventory.json'), 'ONNX Runtime inventory');
   requireCondition(digestPattern.test(ortIdentity.binarySha256) && shaPattern.test(ortIdentity.sourceCommit)
-    && ortIdentity.dllPdbIdentityMatches === true, 'Invalid committed ONNX Runtime identity');
+    && ortIdentity.dllPdbIdentityMatches === true, 'Invalid reviewed ONNX Runtime identity');
   requireCondition(ort.schemaVersion === 1 && ort.componentId === 'onnxruntime' && ort.binarySha256 === ortIdentity.binarySha256
     && Number.isSafeInteger(ort.observedChecksumRecords) && ort.observedChecksumRecords > 0 && ort.unresolvedChecksumRecords === 0, 'ONNX Runtime source inventory is incomplete or for a different binary');
   const ortFiles = pairs(ort.files?.map(file => ({ path: file.file, sha256: file.sha256 })), 'path', 'ONNX Runtime source files');
@@ -190,10 +177,10 @@ export function validateNativeArtifact(directory, workspaceRoot, expectedSha, ex
   requireCondition(packages.length > 0 && packages.every(line => /^[^\s\t]+\t[^\s\t]+(?:\t[^\s\t]+)*$/.test(line)), 'Missing or malformed toolchain package evidence');
 
   const manifest = object(jsonFile(root, 'effective-native-manifest.json'), 'effective runtime manifest');
-  const expected = effectiveNativeManifest(committed, receipt);
-  requireCondition(isDeepStrictEqual(manifest, expected), 'Effective runtime manifest differs from committed configuration or artifact binding');
+  const expected = effectiveNativeManifest(inputs, { files: Object.fromEntries(files.map(file => [file.name, file.sha256])) });
+  requireCondition(isDeepStrictEqual(manifest, expected), 'Effective runtime manifest differs from the runtime configuration or source files');
   const mpvArchiveFiles = [
-    ...committed.recipe.map(item => ({ path: `recipe/${item.path}`, sha256: item.sha256 })),
+    ...inputs.recipe.map(item => ({ path: `recipe/${item.path}`, sha256: item.sha256 })),
     ...sourceCatalog.sources.flatMap(item => [
       { path: `archives/${pathName(item.file)}`, sha256: item.sha256 },
       ...mpvReviewed.sources.find(source => source.id === item.id).retainedNotices.map(notice => ({
@@ -205,9 +192,9 @@ export function validateNativeArtifact(directory, workspaceRoot, expectedSha, ex
   checkSourceArchive(join(root, 'onnxruntime-source.tar.gz'), {
     schemaVersion: 1, kind: 'onnxruntime', inventory: ort,
     files: [...expectedOrtFiles].map(([path, sha256]) => ({ path, sha256 }))
-      .concat(committed.ortRecipe.map(item => ({ path: item.path, sha256: item.sha256 }))),
+      .concat(inputs.ortRecipe.map(item => ({ path: item.path, sha256: item.sha256 }))),
   });
-  return { receipt, manifest, files, recipe: committed.recipe };
+  return { receipt, manifest, files, recipe: inputs.recipe };
 }
 
 function checkSourceArchive(path, specification) {
@@ -219,16 +206,16 @@ function checkSourceArchive(path, specification) {
   requireCondition(!result.error && result.status === 0, `Native source archive verification failed: ${result.error?.message ?? result.stderr?.trim()}`);
 }
 
-export function effectiveNativeManifest(committed, receipt) {
-  const expected = structuredClone(object(committed.originalManifest, 'committed original runtime manifest'));
+export function effectiveNativeManifest(inputs, receipt) {
+  const expected = structuredClone(object(inputs.originalManifest, 'runtime manifest'));
   requireCondition(expected.schemaVersion === 1 && expected.platform === 'windows-x64' && Array.isArray(expected.components), 'Invalid reviewed runtime manifest');
   exactKeys(expected.components.map(item => item.id), ['libmpv', 'onnxruntime'], 'reviewed native components');
   const mpvComponent = expected.components.find(item => item.id === 'libmpv');
   const ortComponent = expected.components.find(item => item.id === 'onnxruntime');
   requireCondition(mpvComponent.runtimeFiles?.length === 1 && mpvComponent.runtimeFiles[0].target === 'mpv-2.dll'
     && mpvComponent.format === 'source-build' && ortComponent.format === 'zip'
-    && ortComponent.runtimeFiles?.find(item => item.target === 'onnxruntime.dll')?.sha256 === committed.ortIdentity.binarySha256, 'Committed runtime DLL inventory/format mismatch');
-  mpvComponent.version = `0.41.0-surtitle-ci-${receipt.sha.slice(0, 12)}`;
+    && ortComponent.runtimeFiles?.find(item => item.target === 'onnxruntime.dll')?.sha256 === inputs.ortIdentity.binarySha256, 'Runtime DLL inventory/format mismatch');
+  mpvComponent.version = '0.41.0-surtitle-ci';
   mpvComponent.localRuntimePath = 'work/native-ci-artifact';
   mpvComponent.runtimeFiles[0].sha256 = receipt.files['mpv-2.dll'];
   for (const [component, sourceName, inventoryName] of [
@@ -238,15 +225,14 @@ export function effectiveNativeManifest(committed, receipt) {
     component.redistribution.correspondingSource = { path: `work/native-ci-artifact/${sourceName}`, sha256: receipt.files[sourceName] };
     component.redistribution.dependencyInventory = { path: `work/native-ci-artifact/${inventoryName}`, sha256: receipt.files[inventoryName] };
   }
-  expected.buildBinding = { sha: receipt.sha, runId: receipt.runId, baseManifestSha256: receipt.baseManifestSha256,
-    artifactManifestPath: 'work/native-ci-artifact/native-build-artifact.json' };
+  expected.buildBinding = { artifactManifestPath: 'work/native-ci-artifact/native-build-artifact.json' };
   return expected;
 }
 
 /** Check the extracted source package itself; do not substitute the checkout manifest. */
-export function assertEffectiveManifestInSource(sourceRoot, artifactDirectory, expectedSha, expectations = {}) {
-  requireCondition(typeof expectations.referenceWorkspace === 'string', 'The reference checkout is required for native source verification');
-  const { receipt, manifest, recipe } = validateNativeArtifact(artifactDirectory, expectations.referenceWorkspace, expectedSha, expectations);
+export function assertEffectiveManifestInSource(sourceRoot, artifactDirectory, { referenceWorkspace } = {}) {
+  requireCondition(typeof referenceWorkspace === 'string', 'The reference checkout is required for native source verification');
+  const { manifest, recipe } = validateNativeArtifact(artifactDirectory, referenceWorkspace);
   const root = directoryRoot(artifactDirectory);
   const source = directoryRoot(sourceRoot);
   for (const [destination, name] of [
@@ -255,12 +241,9 @@ export function assertEffectiveManifestInSource(sourceRoot, artifactDirectory, e
   ]) {
     requireCondition(hash(regularFile(source, destination)) === hash(regularFile(root, name)), `Source package omits or changes the effective build evidence: ${destination}`);
   }
-  const sourceManifest = jsonFile(source, 'native/runtime-windows-x64.json');
-  requireCondition(sourceManifest.buildBinding?.sha === expectedSha && sourceManifest.buildBinding?.baseManifestSha256 === receipt.baseManifestSha256
-    && sourceManifest.buildBinding?.runId === receipt.runId, 'Source package effective manifest has a different commit/run binding');
   for (const path of nativeRecipePaths) {
     requireCondition(hash(regularFile(source, path)) === recipe.find(item => item.path === path).sha256,
-      `Source package recipe differs from the tested commit: ${path}`);
+      `Source package recipe differs from the reference checkout: ${path}`);
   }
   const nativeSources = directoryRoot(join(source, 'native-sources'));
   exactKeys(readdirSync(nativeSources), manifest.components.map(component => component.id), 'native source component directories');

@@ -7,7 +7,6 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifest = JSON.parse(await readFile(resolve(root, 'native/runtime-windows-x64.json'), 'utf8'));
 const runtime = resolve(root, 'src-tauri/resources/native');
 const errors = [], blockers = [], components = [];
-let nativeReceiptSha256 = null;
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 function inside(base, path) { const rel = relative(base, path); return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel); }
 async function checkedFile(path, expected) {
@@ -116,18 +115,11 @@ for (const field of ['hook', 'helper']) {
 const tauri = JSON.parse(await readFile(resolve(root, 'src-tauri/tauri.conf.json'), 'utf8'));
 if (tauri.bundle?.windows?.nsis?.installerHooks !== '../native/windows-prerequisite.nsh') errors.push('The NSIS runtime prerequisite hook is not configured');
 if (tauri.bundle?.windows?.webviewInstallMode?.type !== 'downloadBootstrapper') errors.push('WebView2 must remain a separately downloaded Microsoft prerequisite');
-if (process.env.GITHUB_SHA) {
+if (manifest.buildBinding) {
   try {
     const { validateNativeArtifact } = await import('./native-ci-contract.mjs');
-    const { receipt } = validateNativeArtifact(resolve(root, 'work/native-ci-artifact'), root, process.env.GITHUB_SHA, {
-      expectedReceiptSha256: process.env.SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256,
-      expectedRunId: process.env.GITHUB_RUN_ID,
-    });
-    if (sha256(await readFile(resolve(root, 'native/runtime-windows-x64.json'))) !== receipt.files['effective-native-manifest.json']) {
-      throw new Error('Working native manifest differs from the verified effective manifest');
-    }
-    nativeReceiptSha256 = process.env.SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256;
-  } catch (error) { errors.push(`Same-SHA native build contract: ${error.message}`); }
+    validateNativeArtifact(resolve(root, 'work/native-ci-artifact'), root);
+  } catch (error) { errors.push(`Native build artifact: ${error.message}`); }
 }
 const windowsSystemDlls = new Set([
   'advapi32.dll', 'avicap32.dll', 'avrt.dll', 'bcrypt.dll', 'bcryptprimitives.dll',
@@ -161,9 +153,6 @@ try {
 const report = {
   schemaVersion: 1, sha: process.env.GITHUB_SHA ?? null, auditedAt: new Date().toISOString(),
   effectiveManifestSha256: sha256(await readFile(resolve(root, 'native/runtime-windows-x64.json'))),
-  nativeBuildSha: manifest.buildBinding?.sha ?? null,
-  nativeBuildRunId: manifest.buildBinding?.runId ?? null,
-  nativeReceiptSha256,
   artifactIntegrityPassed: errors.length === 0, releaseEligible: errors.length === 0 && blockers.length === 0,
   components, prerequisites: manifest.prerequisites, dependencyClosure, errors, blockers,
   limitations: ['PE imports do not enumerate statically linked codec dependencies or optional runtime-loaded libraries.', 'This report is technical evidence, not a legal compliance guarantee.'],

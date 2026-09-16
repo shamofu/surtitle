@@ -37,7 +37,7 @@ foreach ($component in $manifest.components) {
     if ($component.format -eq 'source-build') {
         $staging = Resolve-RepoPath $component.localRuntimePath
         $sourceBundle = Resolve-RepoPath $component.redistribution.correspondingSource.path
-        if (-not (Test-Path -LiteralPath $sourceBundle)) { throw 'The reviewed source-built runtime and source bundle are missing. Acquire the same-SHA native-build CI artifact or build the recorded native recipe; an upstream substitute is not permitted.' }
+        if (-not (Test-Path -LiteralPath $sourceBundle)) { throw 'The reviewed source-built runtime and source bundle are missing. Acquire the native-build CI artifact or build the recorded native recipe; an upstream substitute is not permitted.' }
         Assert-Hash $sourceBundle $component.redistribution.correspondingSource.sha256
     } else {
         if ($component.format -ne 'zip') { throw "Unsupported native archive format: $($component.format)" }

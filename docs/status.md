@@ -1,6 +1,6 @@
 # Implementation and verification status
 
-Updated 2026-09-13. Development is on main; the owner has authorized the initial source commit. No push, tag, or release has been created. This document distinguishes implemented behavior, observed tests, and unfinished release requirements.
+CI guidance updated 2026-09-17. Development is on main. Dated verification records below retain their original measurements and context. This document distinguishes implemented behavior, observed tests, and unfinished release requirements.
 
 Following the user's approval to proceed with the [product redesign](transcribe-product-reconsideration-2026-09-12.md), [Study a draft](draft-study.md) now supports available ranges, source-block text, contextual replay, local bookmarks and confirmed excerpts with immutable audio cards. A whole-track problem does not block unrelated study. Original warnings, responses and cost reservations remain intact. The [verification record](draft-study-verification-2026-09-12.md) distinguishes fixed-response tests, saved real responses, package checks and remaining observations. New recognition mechanisms remain hypotheses; historical quality results below are unchanged.
 
@@ -32,7 +32,7 @@ The [September 12 quality work](quality-improvement-2026-09-12.md) adds bounded 
 - Background download progress, targeted cancellation, explicit retry, incomplete-file cleanup, and library refresh after a successful download.
 - Development-only validation CLI, independent result/reference hashes, automated metrics and AI-review rubric, and offline production-engine transcript stitching.
 - Shared-source Dev Container with container-only dependencies/build outputs and no named or anonymous volumes. Development documents and inline comments use English; localization and language fixtures retain their intended languages.
-- CI definitions for main/release pushes and PRs, including Linux/Windows native testing, license checks, and package verification on each event. Publication is restricted to release-branch pushes and the matching-SHA artifact set. Version changes are explicit; CI does not create commits.
+- CI definitions for main/release pushes and PRs, including Linux/Windows native testing, license checks, and package verification on each event. Linux checks and native builds run concurrently; Windows checks and packaging run concurrently after the native build. Publication is restricted to release-branch pushes after those jobs succeed and consumes the packaged artifact from that workflow run. Internal Git-SHA/receipt provenance gates and workflow structure assertions have been removed; fixed upstream checksums and source/artifact audits remain. Version changes are explicit; CI does not create commits.
 
 ## Observed checks
 
@@ -100,6 +100,6 @@ The current evaluation uses only the requested Transcribe and Flash 3.8 IDs. The
 
 1. Complete the contextual learning observations in the [accepted redesign](transcribe-product-reconsideration-2026-09-12.md), starting with the frozen ten-task saved-response set: actual listening, correctness of the saved item and human correction effort. These observations remain unset after automated transport checks. The [review-assisted Transcribe campaign](transcribe-production.md) retains its original recognition/timing thresholds and unverified conditions for those quality claims; the local draft workflow does not convert failed measurements into passes. Further paid comparison or recognition-mechanism experiments need a concrete separately approved scope. Vocabulary and explanation quality remains experimental.
 2. Execute the final install/overwrite/uninstall checks in a disposable Windows profile or CI runner, including the missing-prerequisite and UAC paths. The libmpv, ORT, and installer utility payloads have reviewed dependency/license/source evidence; VC and WebView2 runtimes are separate Microsoft prerequisites. Final local package checks passed, as recorded in [native runtime status](native-runtime.md), but do not establish successful installation.
-3. Run the actual same-SHA GitHub Actions workflow after a remote is configured and the owner authorizes a branch push. The initial source commit is authorized; pushing and publication remain separate actions. Local builds and contract tests cannot establish hosted CI or publication success.
+3. Complete the hosted GitHub Actions workflow with successful Linux, Windows and package jobs. Local builds and tests do not establish hosted CI or publication success; publication remains a separate release-branch action.
 
 No test, hash check, or API response by itself establishes GPL redistribution compliance or permits publishing. The application still requires clear documentation of unsupported conditions and measured limitations before a finished release can be claimed.
