@@ -10,10 +10,10 @@ ENV PATH="/home/vscode/.cargo/bin:${PATH}"
 RUN rustup component add rustfmt clippy
 RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 COPY .node-version /tmp/surtitle-node-version
-RUN bash -lc '. "$HOME/.nvm/nvm.sh" && nvm install "$(cat /tmp/surtitle-node-version)" && npm install -g pnpm@12.3.4 && mkdir -p /home/vscode/.local/bin && ln -s "$(which node)" /home/vscode/.local/bin/node && ln -s "$(which pnpm)" /home/vscode/.local/bin/pnpm'
+COPY --chown=vscode:vscode package.json /tmp/surtitle-bootstrap/package.json
+RUN bash -lc '. "$HOME/.nvm/nvm.sh" && nvm install "$(cat /tmp/surtitle-node-version)" && npm install -g "$(node -p "require(\"/tmp/surtitle-bootstrap/package.json\").packageManager")" && mkdir -p /home/vscode/.local/bin && ln -s "$(which node)" /home/vscode/.local/bin/node && ln -s "$(which pnpm)" /home/vscode/.local/bin/pnpm'
 ENV PATH="/home/vscode/.local/bin:${PATH}"
-RUN cargo install tauri-driver --version 2.0.6 --locked
-RUN cargo install cargo-deny --version 0.20.2 --locked
+RUN PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=never pnpm --dir /tmp/surtitle-bootstrap setup:rust-tools
 WORKDIR /workspaces/surtitle
 USER root
 RUN mkdir -p /opt/surtitle-build/tmp /opt/surtitle-notices-seed && chown -R vscode:vscode /opt/surtitle-build

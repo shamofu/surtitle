@@ -20,6 +20,9 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
       - name: Install the package manager declared by this checkout
         id: pnpm
         run: |
@@ -30,7 +33,7 @@ jobs:
       - uses: actions/cache@v6.1.0
         with:
           path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock', 'native/nsis-plugin/Cargo.lock') }}
       - run: pnpm install --frozen-lockfile
       - name: Verify the runner token and writable SQLite across standard-user processes
         run: pnpm test:scripts scripts/webdriver-process.test.mjs

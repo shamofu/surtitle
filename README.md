@@ -12,11 +12,11 @@ The subsequent [Transcribe English dialogue comparison](docs/transcribe-en-dialo
 
 ## Development
 
-Windows development requires Windows 11 x64, Visual Studio C++ Build Tools, WebView2 Runtime, Node.js 24.21.0 LTS (specified in `.node-version`), pnpm 12.3.4, Rust 1.98, PowerShell 7, and 7-Zip.
+Windows development requires Windows 11 x64, Visual Studio C++ Build Tools, WebView2 Runtime, Node.js 24.21.0 LTS (specified in `.node-version`), pnpm 12.4.2, Rust 1.98, PowerShell 7, and 7-Zip. Install Rust before running pnpm: Cargo remains the compiler/build backend used by the pnpm commands.
 
 The Ubuntu 24.04 [Dev Container](.devcontainer/README.md) supports frontend development, common Rust tests, and real Linux Tauri E2E tests. Windows rendering, DPAPI, and installers require Windows verification.
 
-Repository source and lockfiles are shared read/write with the host. Dependencies, caches, and build outputs stay inside the container; source-relative output directories are masked with `tmpfs`. No named volumes are used. Temporary mounts are lost when the container stops, and container-layer caches are lost when it is removed. The container guide includes runtime mount inspection and bidirectional source/output isolation checks. Keep service-account keys outside the repository and container.
+Repository source and lockfiles are shared read/write with the host. Dependencies, caches, and build outputs stay inside the container; source-relative output directories, including pnpm's Rust sources in `.pnpm` and generated Cargo configuration in `.cargo`, are masked with `tmpfs`. No named volumes are used. Temporary mounts are lost when the container stops, and container-layer caches are lost when it is removed. The container guide includes runtime mount inspection and bidirectional source/output isolation checks. Keep service-account keys outside the repository and container.
 
 Development documentation and inline comments are written in English. Localized application strings and language-learning fixtures retain their intended languages.
 
@@ -34,10 +34,34 @@ pnpm tauri dev
 ```powershell
 pnpm test
 pnpm build
-cargo test --workspace --all-features --locked
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+pnpm test:rust
+pnpm lint:rust
+pnpm fmt:rust:check
 node scripts/check-production-features.mjs
 ```
+
+`pnpm install --frozen-lockfile` acquires both JavaScript and Rust dependencies, using `pnpm-lock.yaml` and the existing `Cargo.lock`. The workspace enables pnpm's Cargo integration and excludes temporary copies, external sources and generated output. Generated `.pnpm` sources and `.cargo/config.toml` are local outputs, not committed files. The separate NSIS plugin build acquires its locked Rust dependencies through its own pnpm workspace.
+
+Use pnpm for Rust operations and tool setup:
+
+| Command | Purpose |
+| --- | --- |
+| `pnpm test:rust` | Test the locked Rust workspace with all features |
+| `pnpm test:rust:no-default-features` | Test `surtitle-ai` without default features using its lockfile |
+| `pnpm lint:rust` | Run Clippy for all targets and features, rejecting warnings |
+| `pnpm fmt:rust:check` | Check Rust formatting |
+| `pnpm audit:rust` | Check Rust licenses, dependencies and sources |
+| `pnpm build:native:e2e` | Build the desktop with `e2e-test,custom-protocol` features |
+| `pnpm build:fixtures` | Build the Rust fixture seeder |
+| `pnpm seed:fixtures <data-dir> <media-path>` | Seed an isolated native-test profile |
+| `pnpm test:rust:required <suite>` | Run the required ignored integration suite |
+| `pnpm build:nsis-plugin` | Acquire, build and verify the installer utility |
+| `pnpm package:app` | Build the NSIS installer with locked Rust dependencies |
+| `pnpm setup:rust-tools` | Install the Rust dependency checker and Tauri test driver |
+| `pnpm setup:driver` | Install the Tauri test driver under `work/driver` |
+| `pnpm setup:licenses` | Install the license-notice generator under `work/package-tools` |
+
+For individual Rust commands, use `pnpm rust <subcommand> ...`. In PowerShell, quote a forwarded argument separator as `'--'`, for example `pnpm rust test -p surtitle-core --locked '--' --nocapture`. `pnpm package:app` already includes the locked-build separator. `pnpm dev`, `pnpm build` and `pnpm test` keep their frontend meanings; use `pnpm tauri dev` for the desktop application.
 
 `pnpm test` runs both Vitest projects: React tests in jsdom and script/container contract tests in Node. Use `pnpm test:ui` or `pnpm test:scripts` to run one project, and `pnpm test:watch` to watch both. Native WebDriver and Playwright tests keep their separate commands.
 

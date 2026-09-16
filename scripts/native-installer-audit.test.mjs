@@ -5,9 +5,34 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { regular, validateInstallerExtraction, validateBundledResources, validateTemplate, writableDestination, assertSourcePackageBinding, assertInstallerNoticeBinding, verifyNsisApplication } from './native-installer-audit.mjs';
+import { regular, validateInstallerExtraction, validateBundledResources, validateTemplate, writableDestination, assertSourcePackageBinding, assertInstallerNoticeBinding, verifyNsisApplication, validateDependencyAcquisition } from './native-installer-audit.mjs';
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const acquisitionEvidence = () => ({
+  dependencyAcquisition: {
+    packageManager: 'pnpm@12.4.2', pnpmVersion: '12.4.2',
+    settings: { packages: ['.'], cargo: { enabled: true } },
+    workspaceConfigSha256: digest("packages:\n  - '.'\ncargo:\n  enabled: true\n"),
+    installArguments: ['install', '--frozen-lockfile', '--ignore-scripts'],
+    vendorArguments: ['vendor', '--respect-source-config', '--locked', '--offline', '--versioned-dirs'],
+  }, dependencyInstallLogSha256: digest('pnpm install log'),
+});
+test('plugin audit requires the pinned pnpm and frozen Cargo-enabled acquisition with offline vendoring', () => {
+  validateDependencyAcquisition(acquisitionEvidence(), 'pnpm@12.4.2');
+  for (const mutate of [
+    evidence => { evidence.dependencyAcquisition.pnpmVersion = '12.3.4'; },
+    evidence => { evidence.dependencyAcquisition.settings.cargo.enabled = false; },
+    evidence => { evidence.dependencyAcquisition.installArguments = ['install']; },
+    evidence => { evidence.dependencyAcquisition.vendorArguments.splice(1, 1); },
+    evidence => { evidence.dependencyAcquisition.workspaceConfigSha256 = digest('changed'); },
+    evidence => { delete evidence.dependencyInstallLogSha256; },
+  ]) {
+    const evidence = acquisitionEvidence();
+    mutate(evidence);
+    assert.throws(() => validateDependencyAcquisition(evidence, 'pnpm@12.4.2'), /dependency acquisition/);
+  }
+  assert.throws(() => validateDependencyAcquisition(acquisitionEvidence(), 'pnpm@12.4.3'), /different pnpm/);
+});
 const windowsPrepareTest = { skip: process.platform !== 'win32', timeout: 20_000 };
 function prepareFixture(t, { sourceResponse, contentType = 'application/octet-stream', cachedSource } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'surtitle-installer-download 日本語 & '));

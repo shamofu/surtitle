@@ -115,13 +115,13 @@ job leases. Opt-in tests exercise real operations:
 $env:SURTITLE_TEST_FFMPEG = 'C:\path\ffmpeg.exe'
 $env:SURTITLE_TEST_YTDLP = 'C:\path\yt-dlp.exe'
 $env:SURTITLE_TEST_DENO = 'C:\path\deno.exe'
-cargo test -p surtitle-tools installed_tools_probe_and_extract -- --ignored
+pnpm rust test -p surtitle-tools --locked installed_tools_probe_and_extract '--' --ignored
 
 # Uses only SURTITLE_TEST_FFMPEG; distinguishes two generated audio frequencies.
-cargo test -p surtitle-tools multitrack_extraction_preserves_selected_stream -- --ignored
+pnpm rust test -p surtitle-tools --locked multitrack_extraction_preserves_selected_stream '--' --ignored
 
 $env:SURTITLE_TEST_UPDATE = 'yt-dlp' # or deno / ffmpeg
-cargo test -p surtitle-tools live_rolling_update -- --ignored
+pnpm rust test -p surtitle-tools --locked live_rolling_update '--' --ignored
 ```
 
 The installed-tools test probes selected tools and verifies an actual 16 kHz

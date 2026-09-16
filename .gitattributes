@@ -1,4 +1,5 @@
 # Byte-bound inputs retain original bytes on all hosts.
+/package.json -text
 /.node-version -text
 /crates/tools/src/ytdlp-checksums.fixture -text
 /crates/tools/src/ytdlp-checksums.fixture.sig -text

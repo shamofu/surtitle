@@ -23,7 +23,7 @@
     "TMPDIR": "/opt/surtitle-build/tmp",
     "WEBKIT_DISABLE_COMPOSITING_MODE": "1"
   },
-  "postCreateCommand": "bash .devcontainer/initialize.sh && pnpm install --frozen-lockfile --store-dir /opt/surtitle-build/pnpm-store && cargo fetch --locked",
+  "postCreateCommand": "bash .devcontainer/initialize.sh && pnpm install --frozen-lockfile --store-dir /opt/surtitle-build/pnpm-store",
   "customizations": {
     "vscode": {
       "extensions": [
@@ -34,6 +34,10 @@
     }
   },
   "runArgs": [
+    "--tmpfs",
+    "/workspaces/surtitle/.pnpm:rw,exec,nosuid,nodev,mode=1777",
+    "--tmpfs",
+    "/workspaces/surtitle/.cargo:rw,exec,nosuid,nodev,mode=1777",
     "--tmpfs",
     "/workspaces/surtitle/node_modules:rw,exec,nosuid,nodev,mode=1777",
     "--tmpfs",

@@ -96,11 +96,11 @@ This synthetic silence test measures local processing, not speech accuracy, sent
 pwsh -File scripts/native-prepare.ps1 -WithDevModel
 $env:SURTITLE_TEST_FFMPEG = 'C:\Tools\ffmpeg\ffmpeg.exe' # Select an existing executable.
 $env:SURTITLE_LONG_AUDIO_FILE = Join-Path (Get-Location) 'work/native-fixtures/six-hour-silence.flac'
-cargo test -p surtitle-ai six_hour_streaming_acceptance --offline `
+pnpm rust test -p surtitle-ai --locked six_hour_streaming_acceptance --offline `
   --config 'profile.test.package.sha2.opt-level=3' `
   --config 'profile.test.package.surtitle-tools.opt-level=3' `
   --config 'profile.test.package.surtitle-ai.opt-level=1' `
-  -- --ignored --nocapture
+  '--' --ignored --nocapture
 ```
 
 Generate the specified silent fixture first if it does not exist. The original report is under the ignored work/ai-six-hour-acceptance directory. Native manifests and each receipt record actual DLL/model/tool hashes. Development model placement is not included in the application bundle.

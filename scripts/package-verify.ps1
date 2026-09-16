@@ -39,7 +39,7 @@ Copy-Item -LiteralPath (Join-Path $workspace 'work/native-ci-artifact/native-bui
 node scripts/audit-js-licenses.mjs
 if ($LASTEXITCODE -ne 0) { throw 'JavaScript license audit failed.' }
 Copy-Item -Path (Join-Path $workspace 'artifacts/*sbom*'), (Join-Path $workspace 'artifacts/js-licenses.json') -Destination $releaseDir
-cargo metadata --locked --format-version 1 | Out-File -LiteralPath (Join-Path $releaseDir 'rust-dependencies.json') -Encoding utf8
+cargo metadata --locked --offline --format-version 1 | Out-File -LiteralPath (Join-Path $releaseDir 'rust-dependencies.json') -Encoding utf8
 if ($LASTEXITCODE -ne 0) { throw 'Rust dependency inventory failed.' }
 & git diff --exit-code -- Cargo.toml Cargo.lock package.json pnpm-lock.yaml pnpm-workspace.yaml
 if ($LASTEXITCODE -ne 0) { throw 'Dependency manifests changed after the tested checkout; do not archive different source inputs.' }
@@ -53,8 +53,13 @@ Copy-Item -LiteralPath (Join-Path $workspace 'work/native-ci-artifact/native-bui
 Push-Location -LiteralPath $sourceDir
 try {
     # Keep the emitted source replacement portable after extracting the ZIP.
-    cargo vendor --locked vendor | Out-File -LiteralPath 'vendor-config.toml' -Encoding utf8
+    $vendorConfiguration = @(cargo vendor --respect-source-config --locked --offline vendor)
     if ($LASTEXITCODE -ne 0) { throw 'Rust corresponding source could not be vendored.' }
+    # A later pnpm install can replace this portable mapping without duplicate tables.
+    $portableConfiguration = "# >>> pnpm-managed cargo sources >>>`n" + ($vendorConfiguration -join "`n") + "`n# <<< pnpm-managed cargo sources <<<`n"
+    [IO.File]::WriteAllText((Join-Path $sourceDir 'vendor-config.toml'), $portableConfiguration, [Text.UTF8Encoding]::new($false))
+    New-Item -ItemType Directory -Path '.cargo' -Force | Out-Null
+    Copy-Item -LiteralPath 'vendor-config.toml' -Destination '.cargo/config.toml'
 } finally { Pop-Location }
 # Complete installed JavaScript packages retain the license/source files needed
 # to reconstruct the exact renderer dependency tree; lockfiles identify versions.

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "packageManager": "pnpm@12.3.4",
+  "packageManager": "pnpm@12.4.2",
   "license": "GPL-3.0-or-later",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -17,7 +17,23 @@
     "test:e2e": "node scripts/run-native-e2e.mjs",
     "test:fixtures": "node scripts/generate-fixtures.mjs",
     "typecheck": "tsc --noEmit",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "rust": "cargo",
+    "test:rust": "cargo test --workspace --all-features --locked",
+    "test:rust:no-default-features": "cargo test -p surtitle-ai --no-default-features --locked",
+    "test:rust:required": "node scripts/run-required-rust-tests.mjs",
+    "lint:rust": "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings",
+    "fmt:rust:check": "cargo fmt --all -- --check",
+    "audit:rust": "cargo deny check licenses bans sources",
+    "build:native:e2e": "cargo build -p surtitle --features e2e-test,custom-protocol --locked",
+    "build:fixtures": "cargo build -p surtitle-core --example seed_fixture --locked",
+    "seed:fixtures": "cargo run -p surtitle-core --example seed_fixture --locked --",
+    "build:nsis-plugin": "pwsh -NoProfile -File scripts/nsis-plugin-build.ps1",
+    "package:app": "tauri build --bundles nsis -- --locked",
+    "setup:rust-tools": "cargo install tauri-driver --version 2.0.6 --locked && cargo install cargo-deny --version 0.20.2 --locked",
+    "setup:driver": "cargo install tauri-driver --version 2.0.6 --locked --root work/driver",
+    "setup:licenses": "cargo install cargo-about --version 0.9.2 --locked --features cli --bin cargo-about --root work/package-tools",
+    "container": "node .devcontainer/container.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.0",

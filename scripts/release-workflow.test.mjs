@@ -79,7 +79,7 @@ test('host package caches retain only the pnpm store with explicit runtime and l
     assert.match(node, /^          package-manager-cache: false$/m);
     const cache = actionStep(name, 'actions/cache');
     assert.match(cache, /^          path: \$\{\{ steps\.pnpm\.outputs\.store \}\}$/m);
-    for (const key of ['runner.os', 'runner.arch', 'steps.node.outputs.node-version', 'steps.pnpm.outputs.version', "hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml')"]) {
+    for (const key of ['runner.os', 'runner.arch', 'steps.node.outputs.node-version', 'steps.pnpm.outputs.version', "hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock', 'native/nsis-plugin/Cargo.lock')"]) {
       assert.ok(cache.includes(`\${{ ${key} }}`), `Cache key omits ${key} in ${name}`);
     }
     assert.match(job(name), /^        id: pnpm$/m);
@@ -97,6 +97,25 @@ test('host package caches retain only the pnpm store with explicit runtime and l
   assert.doesNotMatch(workflow, /node --test/);
   assert.match(job('native-build'), /pnpm test:scripts/);
   assert.match(job('windows'), /^      - run: pnpm test$/m);
+});
+
+test('every host dependency install prepares pinned Rust and caches both Cargo locks', () => {
+  for (const name of ['ci.yml', 'native-acceptance.yml', 'windows-webdriver-diagnostics.yml']) {
+    const contents = readFileSync(new URL('../.github/workflows/' + name, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+    for (const section of contents.split(/^  [a-z][a-z-]*:\n/m).slice(1)) {
+      const install = section.indexOf('pnpm install --frozen-lockfile');
+      if (install < 0) continue;
+      const toolchain = section.indexOf('uses: dtolnay/rust-toolchain@');
+      const managerSetup = section.indexOf('name: Install the package manager declared by this checkout');
+      assert.ok(toolchain >= 0 && toolchain < managerSetup && managerSetup < install,
+        name + ' must configure Rust before preparing pnpm and installing Cargo dependencies');
+      assert.match(section.slice(toolchain, install), /toolchain: 1\.98\.0/);
+      assert.ok(section.includes("hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock', 'native/nsis-plugin/Cargo.lock')"));
+    }
+    assert.doesNotMatch(contents, /^\s*(?:- run:|run:)?\s*cargo (?:test|build|clippy|install)\b/m);
+  }
+  const manual = readFileSync(new URL('../.github/workflows/native-acceptance.yml', import.meta.url), 'utf8');
+  assert.match(manual.slice(manual.indexOf('\n  windows:')), /pnpm install --frozen-lockfile/);
 });
 
 test('native caches restore by content and save improved entries only after validation on trusted main pushes', () => {
@@ -184,13 +203,13 @@ test('package validation runs for main/release pushes and pull requests after al
       assert.doesNotMatch(step, /^\s+if:/m, 'Required package checks and release artifacts cannot be conditional');
     }
   }
-  for (const command of ['nsis-plugin-build.ps1', 'native-installer-prepare.ps1', 'native-audit.mjs --release',
-    "pnpm tauri build --bundles nsis '--' --locked", 'native-installer-audit.ps1', 'package-verify.ps1']) {
+  for (const command of ['pnpm build:nsis-plugin', 'native-installer-prepare.ps1', 'native-audit.mjs --release',
+    'pnpm package:app', 'native-installer-audit.ps1', 'package-verify.ps1']) {
     assert.ok(packaging.includes(command), `Missing required package check: ${command}`);
   }
   const notices = packaging.split(/^      - /m).find(step => step.startsWith('name: Generate distribution notices and dependency manifests\n'));
   assert.ok(notices);
-  assert.match(notices, /cargo install cargo-about --version 0\.9\.2 --locked --features cli --bin cargo-about --root work\/package-tools/);
+  assert.match(notices, /pnpm setup:licenses/);
   assert.match(notices, /& \.\/work\/package-tools\/bin\/cargo-about\.exe --version/);
   assert.match(notices, /& \.\/work\/package-tools\/bin\/cargo-about\.exe generate scripts\/licenses\.hbs --output-file src-tauri\/resources\/notices\/rust\.html/);
   assert.doesNotMatch(notices, /\bcargo about generate/);
@@ -200,10 +219,12 @@ test('package validation runs for main/release pushes and pull requests after al
   assert.doesNotMatch(verifier, /scripts\/release\.mjs|gh release/);
 });
 
-test.skipIf(process.platform !== 'win32')('package command preserves the Cargo separator through the runner PowerShell shim', t => {
-  const command = job('package').match(/^      - run: (pnpm tauri build[^\n]*)$/m)?.[1];
+test.skipIf(process.platform !== 'win32')('package script owns the Cargo separator after the runner PowerShell shim', t => {
+  const command = job('package').match(/^      - run: (pnpm package:app)$/m)?.[1];
   assert.ok(command);
   assert.ok(readFileSync(new URL('../native/SOURCE-REBUILD.md', import.meta.url), 'utf8').includes(command));
+  const packageScript = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).scripts['package:app'];
+  assert.equal(packageScript, 'tauri build --bundles nsis -- --locked');
   const directory = realpathSync.native(mkdtempSync(join(tmpdir(), 'surtitle pnpm shim 日本語 & ')));
   t.onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
   const probe = join(directory, 'argv.cjs'), shim = join(directory, 'pnpm.ps1');
@@ -229,10 +250,16 @@ ${line}
     assert.equal(result.status, 0, result.stderr);
     return JSON.parse(result.stdout);
   };
-  assert.deepEqual(invoke('pnpm tauri build --bundles nsis -- --locked'),
-    ['tauri', 'build', '--bundles', 'nsis', '--locked'], 'Bare -- is consumed before pnpm receives it');
-  assert.deepEqual(invoke(command), ['tauri', 'build', '--bundles', 'nsis', '--', '--locked']);
-}, 25_000); // Two PowerShell children, each bounded at ten seconds.
+  assert.deepEqual(invoke(command), ['package:app']);
+  writeFileSync(join(directory, 'tauri.cmd'), '@"%SURTITLE_ARGV_NODE%" "%~dp0argv.cjs" %*\r\n');
+  const result = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', packageScript], {
+    cwd: directory, encoding: 'utf8', windowsHide: true, timeout: 10_000,
+    env: { ...process.env, SURTITLE_ARGV_NODE: process.execPath },
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), ['build', '--bundles', 'nsis', '--', '--locked']);
+}, 25_000); // PowerShell and script-shell children, each bounded at ten seconds.
 
 test('native and package artifacts are consumed only from the current run and SHA', () => {
   const packaging = job('package');
@@ -269,12 +296,12 @@ test('independent producer digests bind native consumers and the final publisher
 test('short native regressions are required after preparing the fixed runtime and development model', () => {
   const windows = job('windows');
   assert.match(windows, /native-prepare\.ps1 -WithDevModel/);
-  assert.ok(windows.indexOf('native-prepare.ps1 -WithDevModel') < windows.indexOf('run-required-rust-tests.mjs windows-native'));
-  const required = windows.split(/^      - /m).find(step => step.includes('run-required-rust-tests.mjs windows-native'));
+  assert.ok(windows.indexOf('native-prepare.ps1 -WithDevModel') < windows.indexOf('pnpm test:rust:required windows-native'));
+  const required = windows.split(/^      - /m).find(step => step.includes('pnpm test:rust:required windows-native'));
   assert.ok(required);
   assert.doesNotMatch(required, /if:|continue-on-error:|\|\|/);
   const linux = readFileSync(new URL('../.devcontainer/verify.sh', import.meta.url), 'utf8');
-  assert.match(linux, /SURTITLE_TEST_FFMPEG="\$\(command -v ffmpeg\)" node scripts\/run-required-rust-tests\.mjs linux-ffmpeg/);
+  assert.match(linux, /SURTITLE_TEST_FFMPEG="\$\(command -v ffmpeg\)" pnpm test:rust:required linux-ffmpeg/);
   assert.match(job('linux'), /cp -a \/workspaces\/surtitle\/artifacts\/required-rust-tests \/opt\/surtitle-build\/evidence\/required-rust-tests/);
 });
 
@@ -290,7 +317,7 @@ test('long audio acceptance is manual, serial, source-built and uses a separate 
   assert.match(manual, /SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256: \$\{\{ needs\.native-build\.outputs\.receipt-sha256 \}\}/);
   assert.match(manual, /native-prepare\.ps1 -WithDevModel/);
   assert.match(manual, /key: windows-2025-native-acceptance-optimized-v1/);
-  assert.match(manual, /node scripts\/run-required-rust-tests\.mjs windows-six-hour/);
+  assert.match(manual, /pnpm test:rust:required windows-six-hour/);
   assert.match(manual, /timeout-minutes: 15/);
   assert.match(manual, /if: always\(\)/);
 });

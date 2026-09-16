@@ -45,7 +45,7 @@ Transcript review shows pending chunks, original responses, boundary alternative
 Run from the repository root. Select a new validation directory rather than normal application data.
 
 ```powershell
-cargo build -p surtitle-ai-validation --locked
+pnpm rust build -p surtitle-ai-validation --locked
 $validator = Join-Path (Get-Location) 'target\debug\surtitle-ai-validation.exe'
 $validationRoot = Join-Path (Get-Location) 'work\vertex-validation'
 New-Item -ItemType Directory -Path (Split-Path $validationRoot) -Force | Out-Null

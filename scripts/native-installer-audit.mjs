@@ -69,15 +69,16 @@ function copy(source, target) { writableDestination(target); mkdirSync(dirname(t
 export function validatePluginBuild(directory, root = workspace) {
   const policy = json(regular(root, 'native/nsis-plugin/inputs.json'));
   const evidence = json(regular(directory, 'build-evidence.json'));
-  assert(evidence.schemaVersion === 1 && evidence.component === 'nsis-tauri-utils'
+  assert(evidence.schemaVersion === 2 && evidence.component === 'nsis-tauri-utils'
     && evidence.version === policy.pluginVersion && evidence.sourceCommit === policy.sourceCommit
     && isDeepStrictEqual(evidence.inputs, policy), 'Plugin build does not match reviewed inputs');
   assert(evidence.cargoLockSha256 === hash(regular(root, 'native/nsis-plugin/Cargo.lock'))
     && evidence.cargoLockSha256 === policy.cargoLockSha256, 'Plugin dependency lock differs');
-  const expected = ['scripts/nsis-plugin-build.py', 'scripts/nsis-plugin-build.ps1', 'scripts/nsis-plugin-smoke.ps1', 'native/nsis-plugin/inputs.json', 'native/nsis-plugin/Cargo.lock', 'native/nsis-plugin/README.md'];
+  const expected = ['scripts/nsis-plugin-build.py', 'scripts/nsis-plugin-build.ps1', 'scripts/nsis-plugin-smoke.ps1', 'native/nsis-plugin/inputs.json', 'native/nsis-plugin/Cargo.lock', 'native/nsis-plugin/README.md', 'package.json'];
   assert(Array.isArray(evidence.recipe) && evidence.recipe.length === expected.length
     && expected.every(path => evidence.recipe.filter(item => item.path === path).length === 1), 'Incomplete plugin recipe');
   for (const item of evidence.recipe) checked(root, item);
+  validateDependencyAcquisition(evidence, json(regular(root, 'package.json')).packageManager);
   assert(evidence.runtime?.file === 'nsis_tauri_utils.dll', 'Unexpected plugin runtime');
   const runtime = checked(directory, evidence.runtime);
   assert(lstatSync(runtime).size === evidence.runtime.bytes && evidence.smoke?.passed === true
@@ -90,6 +91,18 @@ export function validatePluginBuild(directory, root = workspace) {
     for (const item of evidence[field]) checked(join(directory, folder), item);
   }
   return evidence;
+}
+
+export function validateDependencyAcquisition(evidence, packageManager) {
+  const acquisition = evidence.dependencyAcquisition;
+  assert(/^pnpm@\d+\.\d+\.\d+$/.test(packageManager)
+    && acquisition?.packageManager === packageManager
+    && 'pnpm@' + acquisition?.pnpmVersion === packageManager, 'Plugin dependency acquisition used a different pnpm version');
+  assert(isDeepStrictEqual(acquisition.settings, { packages: ['.'], cargo: { enabled: true } })
+    && acquisition.workspaceConfigSha256 === createHash('sha256').update("packages:\n  - '.'\ncargo:\n  enabled: true\n").digest('hex')
+    && isDeepStrictEqual(acquisition.installArguments, ['install', '--frozen-lockfile', '--ignore-scripts'])
+    && isDeepStrictEqual(acquisition.vendorArguments, ['vendor', '--respect-source-config', '--locked', '--offline', '--versioned-dirs'])
+    && /^[a-f0-9]{64}$/.test(evidence.dependencyInstallLogSha256), 'Incomplete pnpm dependency acquisition evidence');
 }
 
 export function validateTemplate(root, inputs) {

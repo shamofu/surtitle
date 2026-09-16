@@ -1,4 +1,6 @@
 /node_modules/
+/.pnpm/
+/.cargo/config.toml
 /dist/
 /target/
 /work/

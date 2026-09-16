@@ -5,7 +5,8 @@ The plugin source is the unmodified upstream 0.5.3 commit named in `inputs.json`
 target globally or replace the user's Tauri/NSIS cache.
 
 Use Windows x64, Python 3.12 or newer, Rust 1.98.0 for x86_64 MSVC, and the Visual
-Studio C++ build tools/Windows SDK. The usual Rust toolchain installation is a
+Studio C++ build tools/Windows SDK, plus the exact pnpm version pinned in the
+repository's `package.json` (currently 12.4.2). The usual Rust toolchain installation is a
 prerequisite; the script itself adds no global components.
 
 ```powershell
@@ -15,8 +16,13 @@ pwsh -NoProfile -File scripts/nsis-plugin-build.ps1 -WorkDirectory work/nsis-plu
 The build directory must be a fresh child of this repository's `work` directory.
 It acquires hash-pinned source/standard-library archives, verifies the installed
 x86_64 standard library against the official release component, and prepares an
-i686 sysroot only inside the build directory. Cargo acquires the locked dependencies
-into a private Cargo home; compilation runs with `--frozen`. Source code is not
+i686 sysroot only inside the build directory. A disposable `dependency-acquisition/`
+copy has its own Cargo-enabled `pnpm-workspace.yaml`; `pnpm install --frozen-lockfile
+--ignore-scripts` acquires its dependencies without a Node package manifest.
+The reviewed source tree and `Cargo.lock` stay unchanged. Cargo then copies pnpm's
+prepared sources into `vendor/` with `--respect-source-config --locked --offline
+--versioned-dirs`. Compilation runs from the build directory, where `.cargo/config.toml`
+selects that vendor directory, and uses `--frozen`. Source code is not
 downloaded during compilation. No host network interface is disabled.
 
 The actual i686 DLL smoke uses 32-bit PowerShell to load the exact DLL, verify its
@@ -35,10 +41,13 @@ do not assert that every listed standard-library component is linked into every
 application.
 
 The plugin source package retains the original archive, prepared source, Cargo.lock,
-vendored dependency source/checksums, recipe, metadata, logs, notices, and Rust
+vendored dependency source/checksums, recipe (including the pnpm pin and acquisition
+settings), metadata, logs, notices, and Rust
 runtime source package. Build-tool binaries, standard-library binaries, dependency
 caches and global configuration are excluded. To rebuild without fetching crate
-sources, use the vendored source and Cargo's source replacement configuration;
+sources, extract the archive and run Cargo from its root with
+`--manifest-path source/Cargo.toml`; the included `.cargo/config.toml` selects the
+portable `vendor/` directory. The acquisition copy and pnpm store are excluded;
 the pinned compiler, official target standard-library component, MSVC linker and
 Windows SDK remain build prerequisites.
 

@@ -1,5 +1,25 @@
 packages:
   - '.'
+  - '!work/**'
+  - '!native/**'
+  - '!artifacts/**'
+  - '!target/**'
+  - '!dist/**'
+  - '!node_modules/**'
+  - '!.pnpm/**'
+  - '!.git/**'
+  - '!test-results/**'
+  - '!playwright-report/**'
+  - '!src-tauri/gen/**'
+  - '!src-tauri/resources/**'
+  - '!vendor/**'
+  - '!javascript-packages/**'
+  - '!native-sources/**'
+  - '!native-installer-sources/**'
+cargo:
+  enabled: true
+# Preserve native Windows arguments containing backslashes, spaces and symbols.
+shellEmulator: true
 allowBuilds:
   edgedriver: false
   esbuild: true

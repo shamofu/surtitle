@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const workspace = '/workspaces/surtitle';
-export const maskedDirectories = ['node_modules', 'target', 'dist', 'work', 'artifacts', 'test-results',
+export const maskedDirectories = ['.pnpm', '.cargo', 'node_modules', 'target', 'dist', 'work', 'artifacts', 'test-results',
   'playwright-report', 'src-tauri/gen', 'src-tauri/resources/native', 'src-tauri/resources/notices'];
 export const maskTargets = maskedDirectories.map(path => workspace + '/' + path);
 
@@ -33,8 +33,9 @@ export function assertDefinition(config, dockerfiles, ignore) {
     if (/^\s*VOLUME\b/im.test(dockerfile) || /--mount\s*=/.test(dockerfile)) throw new Error('Dockerfile volume/cache/bind mounts are forbidden');
   }
   if (ignore.split(/\r?\n/).filter(line => line.trim() && !line.startsWith('#'))[0] !== '*') throw new Error('Docker context must start with a source allowlist');
-  for (const directory of ['node_modules', 'target', 'work', 'artifacts', 'dist', '.git']) {
-    if (new RegExp('^!/?' + directory + '(?:/|$)', 'm').test(ignore)) throw new Error('Host ' + directory + ' must not enter the build context');
+  for (const directory of ['.pnpm', '.cargo', 'node_modules', 'target', 'work', 'artifacts', 'dist', '.git']) {
+    const escaped = directory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp('^!/?' + escaped + '(?:/|$)', 'm').test(ignore)) throw new Error('Host ' + directory + ' must not enter the build context');
   }
 }
 

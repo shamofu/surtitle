@@ -47,11 +47,11 @@ Native E2E verifies SQLite and IPC through real WebView2/libmpv on Windows and W
 
 ### Required integration suites
 
-`scripts/run-required-rust-tests.mjs` makes selected ignored regressions mandatory. It compiles each selected Rust test target once, obtains its executable from Cargo's JSON output, and lists each complete test name with `--ignored --exact`. Each listing must contain exactly that one test. Execution requires its success line, exactly one pass, and zero ignored tests; a successful process that runs zero tests is a failure. Tests run sequentially with `--test-threads=1`. Success output is retained with `--show-output`; stdout, stderr, command arguments, durations, input paths/hashes and the suite report are written below `artifacts/required-rust-tests/<suite>/`. An existing evidence directory is rejected; use `--evidence-dir` for another fresh local run.
+`pnpm test:rust:required <suite>` invokes `scripts/run-required-rust-tests.mjs` to make selected ignored regressions mandatory. It compiles each selected Rust test target once, obtains its executable from the internal Cargo command's JSON output, and lists each complete test name with `--ignored --exact`. Each listing must contain exactly that one test. Execution requires its success line, exactly one pass, and zero ignored tests; a successful process that runs zero tests is a failure. Tests run sequentially with `--test-threads=1`. Success output is retained with `--show-output`; stdout, stderr, command arguments, durations, input paths/hashes and the suite report are written below `artifacts/required-rust-tests/<suite>/`. An existing evidence directory is rejected; use `--evidence-dir` for another fresh local run.
 
 The ordinary Linux verification runs `linux-ffmpeg` (three tests). The ordinary Windows job runs `windows-native` (six tests) after consuming its same-run/SHA native artifact, preparing/smoke-checking the DLLs and development model, and making FFmpeg available. The two card-audio tests were already explicitly executed by both jobs; this replaces their permissive prefix invocation and adds the selected-stream test, without duplicating card coverage. `windows-ffmpeg` is the same three-test subset for local Windows checks that do not have native DLLs/model prepared.
 
-The following inventory accounts for all 12 ignored declarations. Ordinary `cargo test --workspace --all-features` still leaves explicit integration tests ignored. Child helpers are deliberately invoked only by their parent tests.
+The following inventory accounts for all 12 ignored declarations. Ordinary `pnpm test:rust` still leaves explicit integration tests ignored. Child helpers are deliberately invoked only by their parent tests.
 
 | Complete Rust test name | Execution and dependency |
 | --- | --- |
@@ -75,25 +75,25 @@ The upstream workflow and its separate live integration target were removed from
 Local commands, after preparing the relevant dependencies:
 
 ```sh
-SURTITLE_TEST_FFMPEG="$(command -v ffmpeg)" node scripts/run-required-rust-tests.mjs linux-ffmpeg
+SURTITLE_TEST_FFMPEG="$(command -v ffmpeg)" pnpm test:rust:required linux-ffmpeg
 ```
 
 ```powershell
 $env:SURTITLE_TEST_FFMPEG = 'C:\Tools\ffmpeg\ffmpeg.exe'
-node scripts/run-required-rust-tests.mjs windows-ffmpeg
+pnpm test:rust:required windows-ffmpeg
 
 # Requires an already selected source-built native payload; the model remains a development fixture.
 pwsh scripts/native-prepare.ps1 -WithDevModel
 pwsh scripts/native-smoke.ps1
-node scripts/run-required-rust-tests.mjs windows-native
+pnpm test:rust:required windows-native
 
 # Authored silence is generated locally; no speech recording is downloaded.
-node scripts/generate-fixtures.mjs
+pnpm test:fixtures
 $env:SURTITLE_LONG_AUDIO_FILE = Join-Path $PWD 'test-results/fixtures/six-hour-silence.flac'
-node scripts/run-required-rust-tests.mjs windows-six-hour
+pnpm test:rust:required windows-six-hour
 
 $env:SURTITLE_SPOKEN_FIXTURES = 'C:\existing\reviewed-librispeech-fixtures'
-node scripts/run-required-rust-tests.mjs windows-spoken
+pnpm test:rust:required windows-spoken
 ```
 
 The optional existing-tool diagnostic can be invoked separately after setting all three executable paths; it does not use the required-suite runner:
@@ -101,7 +101,7 @@ The optional existing-tool diagnostic can be invoked separately after setting al
 ```powershell
 $env:SURTITLE_TEST_YTDLP = 'C:\Tools\yt-dlp.exe'
 $env:SURTITLE_TEST_DENO = 'C:\Tools\deno.exe'
-cargo test -p surtitle-tools --lib --locked command::tests::installed_tools_probe_and_extract -- --ignored --exact --test-threads=1 --show-output
+pnpm rust test -p surtitle-tools --lib --locked command::tests::installed_tools_probe_and_extract '--' --ignored --exact --test-threads=1 --show-output
 ```
 
 Silero is fetched by `native-prepare.ps1 -WithDevModel` from the commit-fixed URL in `native/runtime-windows-x64.json` and checked against its SHA-256. It is MIT-licensed and stays under `work/native-fixtures`, outside bundled resources. The runner checks the manifest's three DLL hashes and model hash before native execution; in CI it also requires the effective manifest's current SHA. The AI integration tests retain their independently fixed ORT DLL/model expectations. A deliberate ORT/model version change must update the corresponding tests and evidence together.

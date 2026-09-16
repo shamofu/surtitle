@@ -7,7 +7,8 @@ The separate same-commit release workflow still requires a real Git checkout and
 all release tests; these instructions do not grant release approval.
 
 Use Linux with Docker and an x86_64 Windows development environment with Rust
-1.98.0, MSVC/Windows SDK, Node 24, pnpm 12.3.4 and PowerShell 7. Building the Docker
+1.98.0, MSVC/Windows SDK, Node 24, pnpm 12.4.2 and PowerShell 7. Install Rust before
+running pnpm; its commands use Cargo as their internal build backend. Building the Docker
 image acquires the compiler packages from Ubuntu; the subsequent native build
 uses the source archives supplied in the ZIP. No host dependency/build directory
 or named volume is mounted into the native builder.
@@ -88,9 +89,15 @@ and CMake instructions; an independently built ORT DLL requires new native
 hashes, import checks and VAD/application tests.
 
 The top-level `vendor/` and `vendor-config.toml` contain the application's locked
-Rust dependency sources. Copy the source replacement configuration into a local
-`.cargo/config.toml` in this extracted copy to build with the supplied Rust
-sources. `javascript-packages/` retains the exact JavaScript dependency sources;
+Rust dependency sources. The archive also includes a ready-to-use
+`.cargo/config.toml` with the same portable source replacement, so Rust can
+resolve the supplied sources offline immediately after extraction. Normal
+`pnpm install --frozen-lockfile` acquires both JavaScript and Rust dependencies
+and replaces the marked source configuration. Copy `vendor-config.toml` over
+`.cargo/config.toml` when returning to the supplied vendor sources; do not append
+it. The relative vendor path remains usable when this copy is moved, and the
+markers let later pnpm installs replace it without duplicate TOML tables.
+`javascript-packages/` retains the exact JavaScript dependency sources;
 the lockfile controls normal pnpm dependency acquisition. The source ZIP also
 includes the exact Rust standard-library source and notices in
 `native-installer-sources/rust-runtime-source.tar.gz`.
@@ -100,13 +107,14 @@ includes the exact Rust standard-library source and notices in
 The NSIS utility has its own lockfile and repository-local i686 sysroot recipe:
 
 ```powershell
-pwsh scripts/nsis-plugin-build.ps1
+pnpm build:nsis-plugin
 pwsh scripts/native-installer-prepare.ps1
-pnpm tauri build --bundles nsis '--' --locked
+pnpm package:app
 pwsh scripts/native-installer-audit.ps1 -Installer (Get-ChildItem target/release/bundle/nsis/*.exe).FullName
 ```
 
-The utility recipe reacquires pinned compiler/source inputs and locked crates;
+The utility recipe reacquires pinned compiler/source inputs and uses a separate
+pnpm workspace to acquire its locked crates without changing the upstream tree;
 `native-installer-sources/nsis-plugin-source.tar.gz` includes its original source,
 complete vendor tree, lockfile and recipes for offline crate rebuilding. The
 exact NSIS 3.11 source archive is supplied alongside it. The official NSIS tools

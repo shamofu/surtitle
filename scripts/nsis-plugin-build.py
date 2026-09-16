@@ -4,6 +4,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import tarfile
@@ -16,7 +17,10 @@ POLICY = WORKSPACE / 'native/nsis-plugin/inputs.json'
 LOCK = WORKSPACE / 'native/nsis-plugin/Cargo.lock'
 RECIPE = ['scripts/nsis-plugin-build.py', 'scripts/nsis-plugin-build.ps1',
           'scripts/nsis-plugin-smoke.ps1', 'native/nsis-plugin/inputs.json', 'native/nsis-plugin/Cargo.lock',
-          'native/nsis-plugin/README.md']
+          'native/nsis-plugin/README.md', 'package.json']
+ACQUISITION_CONFIG = "packages:\n  - '.'\ncargo:\n  enabled: true\n"
+ACQUISITION_ARGS = ['install', '--frozen-lockfile', '--ignore-scripts']
+VENDOR_ARGS = ['vendor', '--respect-source-config', '--locked', '--offline', '--versioned-dirs']
 
 def digest(path):
     with path.open('rb') as stream:
@@ -74,7 +78,40 @@ def validate_source(root, receipt):
     if current != receipt['sourceFiles']:
         raise RuntimeError('Prepared source tree changed during the build')
 
-def prepare(root, toolchain, policy):
+def prepare_acquisition(root, pnpm_version):
+    package_manager = json.loads((WORKSPACE / 'package.json').read_text())['packageManager']
+    if not re.fullmatch(r'pnpm@\d+\.\d+\.\d+', package_manager) or package_manager != 'pnpm@' + pnpm_version:
+        raise RuntimeError('pnpm differs from the repository packageManager pin')
+    source = root / 'source'
+    for name in ['pnpm-workspace.yaml', 'package.json', '.cargo/config']:
+        if (source / name).exists():
+            raise RuntimeError('Unexpected upstream acquisition configuration: ' + name)
+    acquisition = root / 'dependency-acquisition'
+    shutil.copytree(source, acquisition)
+    (acquisition / 'pnpm-workspace.yaml').write_bytes(ACQUISITION_CONFIG.encode('utf-8'))
+    return {'packageManager': package_manager, 'pnpmVersion': pnpm_version,
+            'settings': {'packages': ['.'], 'cargo': {'enabled': True}},
+            'workspaceConfigSha256': digest(acquisition / 'pnpm-workspace.yaml'),
+            'installArguments': ACQUISITION_ARGS, 'vendorArguments': VENDOR_ARGS}
+
+def validate_acquisition(root, receipt):
+    validate_source(root, receipt)
+    acquisition = root / 'dependency-acquisition'
+    if digest(regular(acquisition / 'pnpm-workspace.yaml')) != receipt['dependencyAcquisition']['workspaceConfigSha256']:
+        raise RuntimeError('Dependency acquisition settings changed')
+    for item in receipt['sourceFiles']:
+        if item['file'] == '.cargo/config.toml':
+            # pnpm preserves upstream settings and adds its marked sources block.
+            current = regular(acquisition / item['file']).read_text()
+            current = re.sub(r'(?ms)^# >>> pnpm-managed cargo sources >>>\n.*?^# <<< pnpm-managed cargo sources <<<\n?', '', current)
+            original = (root / 'source' / item['file']).read_text()
+            if current.rstrip('\n') != original.rstrip('\n'):
+                raise RuntimeError('Dependency acquisition changed upstream Cargo settings')
+            continue
+        if digest(regular(acquisition / item['file'])) != item['sha256']:
+            raise RuntimeError('Dependency acquisition changed locked upstream source: ' + item['file'])
+
+def prepare(root, toolchain, policy, pnpm_version):
     root.mkdir(parents=True, exist_ok=False)
     archives = root / 'archives'
     archives.mkdir()
@@ -109,13 +146,14 @@ def prepare(root, toolchain, policy):
     shutil.copyfile(rust_library / 'compiler-builtins/LICENSE.txt', runtime_notices / 'compiler-builtins-LICENSE.txt')
     (root / 'cargo-home').mkdir()
     (root / 'logs').mkdir()
-    receipt = {'schemaVersion': 1, 'inputsSha256': digest(POLICY), 'cargoLockSha256': digest(LOCK),
+    acquisition = prepare_acquisition(root, pnpm_version)
+    receipt = {'schemaVersion': 2, 'inputsSha256': digest(POLICY), 'cargoLockSha256': digest(LOCK),
                'rustcVersion': version, 'rustcSha256': digest(toolchain / 'bin/rustc.exe'),
                'cargoVersion': subprocess.check_output([str(toolchain / 'bin/cargo.exe'), '-V'], text=True).strip(),
                'cargoSha256': digest(toolchain / 'bin/cargo.exe'), 'sourceFiles': inventory(root / 'source'),
                'verifiedHostStandardLibraryFiles': host_files,
                'i686StandardLibraryFiles': inventory(root / 'sysroot'),
-               'runtimeNotices': inventory(runtime_notices)}
+               'runtimeNotices': inventory(runtime_notices), 'dependencyAcquisition': acquisition}
     write_json(root / 'preparation.json', receipt)
     print('Pinned sources, local i686 sysroot and exact host runtime notices are prepared.', flush=True)
 
@@ -136,7 +174,7 @@ def package(root, policy):
     receipt = json.loads((root / 'preparation.json').read_text())
     if receipt['inputsSha256'] != digest(POLICY) or receipt['cargoLockSha256'] != digest(LOCK):
         raise RuntimeError('Reviewed preparation inputs changed')
-    validate_source(root, receipt)
+    validate_acquisition(root, receipt)
     output = root / 'output'
     output.mkdir(exist_ok=False)
     dll = root / 'target' / policy['target'] / 'release/nsis_tauri_utils.dll'
@@ -180,6 +218,10 @@ def package(root, policy):
         source_entries.extend((path, directory + '/' + path.relative_to(root / directory).as_posix()) for path in sorted((root / directory).rglob('*')) if path.is_file())
     source_entries.extend((WORKSPACE / name, 'recipe/' + name) for name in RECIPE)
     source_entries.append((root / 'vendor-config.toml', 'vendor-config.toml'))
+    source_entries.append((root / '.cargo/config.toml', '.cargo/config.toml'))
+    source_entries.append((root / 'dependency-acquisition/pnpm-workspace.yaml', 'recipe/dependency-acquisition/pnpm-workspace.yaml'))
+    write_json(root / 'dependency-acquisition.json', receipt['dependencyAcquisition'])
+    source_entries.append((root / 'dependency-acquisition.json', 'dependency-acquisition.json'))
     runtime_evidence = {'schemaVersion': 1, 'rustVersion': policy['rustVersion'], 'rustCommit': policy['rustCommit'],
                         'target': policy['target'], 'host': policy['host'],
                         'source': policy['rustSource'], 'targetComponent': policy['rustStd'], 'hostComponent': policy['rustHostStd'],
@@ -195,10 +237,12 @@ def package(root, policy):
     source_entries.extend((path, 'notices/' + path.relative_to(notices).as_posix()) for path in sorted(notices.rglob('*')) if path.is_file())
     source_entries.append((output / 'rust-runtime-source.tar.gz', 'rust-runtime-source.tar.gz'))
     source_package = package_tar(output / 'nsis-plugin-source.tar.gz', source_entries)
-    evidence = {'schemaVersion': 1, 'component': 'nsis-tauri-utils', 'version': policy['pluginVersion'],
+    evidence = {'schemaVersion': 2, 'component': 'nsis-tauri-utils', 'version': policy['pluginVersion'],
                 'sourceCommit': policy['sourceCommit'], 'runtime': {'file': dll.name, 'sha256': digest(dll), 'bytes': dll.stat().st_size},
                 'cargoLockSha256': digest(LOCK), 'inputs': policy, 'recipe': [{'path': name, 'sha256': digest(WORKSPACE / name)} for name in RECIPE],
-                'toolchain': {key: value for key, value in receipt.items() if key not in ['sourceFiles', 'schemaVersion', 'inputsSha256', 'cargoLockSha256']},
+                'toolchain': {key: value for key, value in receipt.items() if key not in ['sourceFiles', 'schemaVersion', 'inputsSha256', 'cargoLockSha256', 'dependencyAcquisition']},
+                'dependencyAcquisition': receipt['dependencyAcquisition'],
+                'dependencyInstallLogSha256': digest(root / 'logs/pnpm-install.log'),
                 'dependencies': dependencies, 'sourcePackage': source_package, 'rustRuntimeSourcePackage': runtime_package,
                 'notices': inventory(notices), 'runtimeNotices': inventory(output / 'rust-runtime-notices'),
                 'smoke': smoke, 'buildMode': 'cargo build --release --frozen; repository-local target sysroot; no global target installation',
@@ -209,15 +253,18 @@ def package(root, policy):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['prepare', 'package'])
+    parser.add_argument('command', choices=['prepare', 'verify-dependencies', 'package'])
     parser.add_argument('work_directory')
     parser.add_argument('--toolchain')
+    parser.add_argument('--pnpm-version')
     arguments = parser.parse_args()
     build_root = bounded_work(arguments.work_directory)
     settings = json.loads(POLICY.read_text())
     if arguments.command == 'prepare':
-        if not arguments.toolchain:
-            parser.error('--toolchain is required for preparation')
-        prepare(build_root, Path(arguments.toolchain).resolve(), settings)
+        if not arguments.toolchain or not arguments.pnpm_version:
+            parser.error('--toolchain and --pnpm-version are required for preparation')
+        prepare(build_root, Path(arguments.toolchain).resolve(), settings, arguments.pnpm_version)
+    elif arguments.command == 'verify-dependencies':
+        validate_acquisition(build_root, json.loads((build_root / 'preparation.json').read_text()))
     else:
         package(build_root, settings)
