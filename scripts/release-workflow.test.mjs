@@ -25,23 +25,21 @@ function actionStep(name, action) {
   return step;
 }
 
-test('same-ref runs queue without cancellation and every verification job runs serially', () => {
+test('same-ref runs queue without cancellation while independent verification jobs run concurrently', () => {
   assert.match(workflow, /^  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}$/m);
   assert.match(workflow, /^  cancel-in-progress: false$/m);
   assert.match(workflow, /^  queue: max$/m);
-  const order = ['linux', 'native-build', 'windows', 'package', 'publish'];
-  const ancestors = new Map();
-  for (const name of order) {
+  const expected = {
+    linux: [],
+    'native-build': [],
+    windows: ['native-build'],
+    package: ['native-build'],
+    publish: ['linux', 'windows', 'package'],
+  };
+  for (const [name, required] of Object.entries(expected)) {
     const dependencies = job(name).match(/^    needs: \[([^\]]+)\]$/m)?.[1].split(', ') ?? [];
-    const reachable = new Set(dependencies);
-    for (const dependency of dependencies) {
-      assert.ok(ancestors.has(dependency), `${name} depends on an unknown or later job: ${dependency}`);
-      for (const ancestor of ancestors.get(dependency)) reachable.add(ancestor);
-    }
-    for (const earlier of order.slice(0, order.indexOf(name))) {
-      assert.ok(reachable.has(earlier), `${name} can run before ${earlier} completes`);
-    }
-    ancestors.set(name, reachable);
+    assert.deepEqual(dependencies, required,
+      `${name} must wait only for its native artifact or the required publication checks`);
   }
 });
 
@@ -179,13 +177,13 @@ test('prebuilt native images still require this commit, committed inputs and unm
   assert.doesNotMatch(script, /docker (?:create|run)[^\n]+(?:--mount|--volume| -v )/);
 });
 
-test('package validation runs for main/release pushes and pull requests after all native checks', () => {
+test('package validation runs for main/release pushes and pull requests once its native artifact is ready', () => {
   const events = workflow.slice(0, workflow.indexOf('\npermissions:'));
   assert.match(events, /^  push:\r?\n    branches: \[main, release\]$/m);
   assert.match(events, /^  pull_request:\r?\n    branches: \[main, release\]$/m);
   assert.doesNotMatch(events, /pull_request_target|paths(?:-ignore)?:/);
   const packaging = job('package');
-  assert.match(packaging, /^    needs: \[linux, windows, native-build\]$/m);
+  assert.match(packaging, /^    needs: \[native-build\]$/m);
   assert.match(packaging, /^    runs-on: windows-2025$/m);
   assert.doesNotMatch(packaging, /^    if:|continue-on-error:/m);
   const prerequisite = packaging.split(/^      - /m).find(step => step.startsWith('name: Verify the system VC runtime before building the installer\n'));
@@ -312,7 +310,7 @@ test('long audio acceptance is manual, serial, source-built and uses a separate 
   assert.match(manual, /group: Test and release-\$\{\{ github\.ref \}\}/);
   assert.match(manual, /cancel-in-progress: false\r?\n  queue: max/);
   const native = manual.match(/^  native-build:\r?\n([\s\S]*?)(?=^  [a-z][a-z-]*:\r?$)/m)?.[1];
-  assert.equal(native, job('native-build').replace(/^    needs: \[linux\]\r?\n/m, ''));
+  assert.equal(native, job('native-build'));
   assert.match(manual, /needs: \[native-build\]/);
   assert.match(manual, /SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256: \$\{\{ needs\.native-build\.outputs\.receipt-sha256 \}\}/);
   assert.match(manual, /native-prepare\.ps1 -WithDevModel/);

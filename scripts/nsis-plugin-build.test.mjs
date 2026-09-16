@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { validateDependencyAcquisition } from './native-installer-audit.mjs';
 
 test('isolated NSIS acquisition preserves source and locks, rejecting source/config changes and the wrong pnpm', () => {
-  const child = spawnSync('python', ['-c', String.raw`
+  const child = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', String.raw`
 import importlib.util, json, tempfile
 from pathlib import Path
 import sys

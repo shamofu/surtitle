@@ -13,7 +13,6 @@ concurrency:
 
 jobs:
   native-build:
-    needs: [linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     outputs:
@@ -243,7 +242,7 @@ jobs:
             test-results/
             work/webdriver/receipt.json
   package:
-    needs: [linux, windows, native-build]
+    needs: [native-build]
     runs-on: windows-2025
     timeout-minutes: 60
     outputs:
@@ -283,7 +282,7 @@ jobs:
         with:
           name: native-build-${{ github.sha }}
           path: work/native-ci-artifact/
-      - name: Use the same native payload and source tested by Windows
+      - name: Use this run's native payload and source for packaging
         run: node scripts/native-ci-artifact.mjs consume work/native-ci-artifact ${{ github.sha }} --expected-receipt-sha256 $env:SURTITLE_EXPECTED_NATIVE_RECEIPT_SHA256
       - uses: Swatinem/rust-cache@v2.9.2
         with:
