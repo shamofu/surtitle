@@ -1,97 +1,62 @@
-# Native runtime and redistribution
+# Native runtime and packaging
 
-The intended Windows x64 payload contains the source-built `mpv-2.dll` and official CPU ONNX Runtime 1.29.0 (`onnxruntime.dll` and `onnxruntime_providers_shared.dll`). Microsoft VC runtime DLLs and the unused Vulkan loader are excluded. `native/runtime-windows-x64.json` identifies the exact payload, notices, corresponding sources and prerequisite checks. CLI FFmpeg/ffprobe, yt-dlp and Deno remain separate first-use downloads or user-selected PATH tools. Silero VAD is also a first-use download.
+The Windows x64 payload contains source-built `mpv-2.dll` and the official CPU ONNX Runtime DLLs, `onnxruntime.dll` and `onnxruntime_providers_shared.dll`. `native/runtime-windows-x64.json` identifies their hashes, notices, sources and prerequisites. CLI FFmpeg/ffprobe, yt-dlp, Deno and the Silero model remain separate managed downloads or explicit existing tools; they are not bundled into these DLL resources.
 
-## Source and license evidence
+## Build and prepare native inputs
 
-The libmpv build uses fixed source archives for mpv 0.41.0, FFmpeg 8.1.2 libraries, dav1d and their subtitle/rendering/build dependencies. Twenty upstream archives, complete build recipes/configuration, notices and the actual compiler-package inventory are retained. FFmpeg programs, network acquisition, Vulkan and OpenGL are disabled; D3D11, WASAPI and CPU AV1 decoding remain available. The combined library is distributed under GPL-3.0-or-later. FreeType attribution and component notices are included in `native/libmpv-ThirdPartyNotices.txt`.
+The libmpv recipe builds mpv, FFmpeg libraries, dav1d and the selected rendering/subtitle dependencies. FFmpeg programs, network protocols, Vulkan and OpenGL are disabled; Windows D3D11/WASAPI and CPU AV1 decoding remain available. ORT uses the pinned official CPU release; its source package retains upstream archives, patches, notices and the observed PDB/source comparison. See [source rebuild instructions](../native/SOURCE-REBUILD.md) and `native/reviews/` for dependency details.
 
-The local candidate DLL SHA-256 is `6d52b35d9c014b9df432b171523880505a73c3f0425226cf939e64570379be06`; its corresponding-source archive is `faef56ae474043a4d8edc5ce2bcdef7691e078d3df337a4c52990ee09c02dc0a`. The exact candidate passed six Windows application cases, including a visible D3D11 surface and CPU AV1 playback/seek. These results identify the local candidate; a later CI build must pass its own Windows tests.
+```sh
+bash scripts/native-ci-build.sh
+```
 
-The official ORT DLL and unstripped PDB have matching CodeView GUID/age. All 1,181 observed dependency source/header checksum records match the selected 13 vcpkg sources and exact patches: 1,176 original source files and five installed/generated-header reconstructions. Abseil requires its upstream C++20 ABI pinning and CRLF output; ONNX headers match protobuf 3.21.12 ML/lite generation. The full original ORT archive and Eigen MPL-2.0 sources are included. The canonical source package is 320,694,687 bytes, SHA-256 `1daba056b30e7d4b639ef2c44ab8d8dd59af8bbb79388ea1780b4ac8488c851d`; all 144 packaged file records were rehashed after export. Fresh staging includes only the selected overlay recipes. PDB coverage is evidence of observed inputs, not a claim that a PDB enumerates every build input.
+The wrapper uses the multi-stage Dockerfile's `export` target and writes a fresh `work/native-ci-artifact/` directory. It exports six files: `mpv-2.dll`, `libmpv-source.tar.gz`, `onnxruntime-source.tar.gz`, `libmpv-build-evidence.json`, `onnxruntime-source-inventory.json` and `SHA256SUMS.txt`. Optional Buildx flags, such as `--no-cache`, can be passed to the wrapper.
 
-See `native/reviews/`, `native/upstream-evidence/onnxruntime-source-comparison.json` and `native/onnxruntime-ActualDependencyNotices.txt`. Generic upstream ORT notices are retained separately; mentioning an optional component in that upstream document does not establish that the CPU DLL links it.
+Docker caches completed native build/source-audit stages using their native source/configuration/script inputs. Frontend and documentation edits reuse those completed outputs. Native input changes invalidate the relevant stages. CI restores and saves the cache within GitHub's branch/ref scope. There is no separate ccache/source-copy protocol, commit-identity receipt or effective-manifest artifact. If acquisition needs a GitHub token, the optional BuildKit secret uses the `SURTITLE_NATIVE_GITHUB_TOKEN` environment variable; it is not a build argument or an image layer.
 
-The compiler package notices retain the GCC Runtime Library Exception and MinGW notices. The recipe uses ordinary GCC compilation without proprietary compiler plugins. The exception applies to eligible compiled combinations, while independently distributed GCC libraries would have their own source obligations. [FSF exception explanation](https://www.gnu.org/licenses/gcc-exception-3.1-faq.en.html)
+CI downloads the native output before Windows checks and packaging. For a local checkout, obtain the same output or build it above, then run:
+
+```powershell
+node scripts/native-ci-artifact.mjs verify work/native-ci-artifact
+node scripts/native-ci-artifact.mjs consume work/native-ci-artifact
+pwsh -File scripts/native-prepare.ps1
+pwsh -File scripts/native-smoke.ps1
+```
+
+Verification checks the file set and hashes. Consumption updates this checkout's runtime manifest to the selected DLL/source paths and hashes; preparation stages the DLLs/notices and downloads the pinned official ORT archive. The native smoke test loads the selected DLLs and initializes mpv/ORT. `native-prepare.ps1 -WithDevModel` also installs the development Silero fixture for the explicit integration suites.
+
+`node scripts/native-audit.mjs --release` checks actual DLLs/notices/source evidence and PE dependency closure. Output integrity and Windows application tests still run even when compilation comes from cache. A cache hit does not establish current app playback or installer behavior.
 
 ## Microsoft prerequisites
 
-The app executable itself imports `VCRUNTIME140.dll` and `VCRUNTIME140_1.dll`, so VC runtime checks run before installation/startup rather than waiting for VAD. ORT additionally needs `MSVCP140.dll` and `MSVCP140_1.dll`. These four files must come from a separately installed Microsoft x64 VC Runtime. The configured required minimum is 14.44.35211.0; the actual local check used 14.51.36247.0. They are never copied into the Surtitle package.
+The app and ORT require Microsoft x64 VC Runtime, including `VCRUNTIME140.dll`, `VCRUNTIME140_1.dll`, `MSVCP140.dll` and `MSVCP140_1.dll`. They are system prerequisites, not copied into the package. `native/windows-prerequisite.nsh` and `native/vc-prerequisite.ps1` check the installation registry, files, minimum version and Microsoft signatures.
 
-Microsoft's 2022 Build Tools terms permit specified third-party open-source dependency compilation but do not by themselves establish runtime redistribution rights. The applicable Visual Studio Community terms contain a separate redistribution grant; no license entitlement is inferred from the presence of Build Tools. The FSF's Windows runtime guidance permits dynamic linking as a system-library use and advises against distributing those runtime DLLs with the GPL application. The separate prerequisite avoids relying on a publisher entitlement assertion to waive that issue. [Microsoft runtime redistribution](https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution), [FSF Windows runtime guidance](https://www.gnu.org/licenses/gpl-faq.en.html#WindowsRuntimeAndGPL)
+Interactive setup asks before downloading/opening Microsoft's installer and does not perform a quiet installation or automatic restart. Silent setup fails with code 1603 if the prerequisite is missing. An already installed valid runtime supports offline setup. WebView2 uses Tauri's interactive `downloadBootstrapper` mode; its fixed runtime/bootstrapper is not embedded in the Surtitle installer.
 
-`native/windows-prerequisite.nsh` and `native/vc-prerequisite.ps1` implement the prerequisite:
+See [Microsoft runtime redistribution](https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution), [installer behavior](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files), and the retained component notices. Historical local prerequisite checks did not exercise missing-runtime installation or UAC branches.
 
-- Check the 64-bit Microsoft installation registry and the four System32 files, their versions and valid Microsoft Authenticode signatures.
-- If missing, interactive NSIS displays Japanese/English consent with No selected by default. Only after Yes does the helper download the x64 installer directly from Microsoft's HTTPS endpoint, verify Microsoft signature/version, and open Microsoft's interactive installer with its terms and UAC prompt. Surtitle does not mirror or embed that installer.
-- No quiet Microsoft installation, automatic restart, app-managed runtime update or uninstall is performed. A requested restart stops Surtitle Setup and asks the user to retry afterward.
-- Silent setup never installs the prerequisite; it fails with code 1603 when unavailable. Offline setup works when the verified runtime is already installed; otherwise the user installs Microsoft's runtime separately before retrying.
+## Standard Tauri installer
 
-The local check-only probe passed with Microsoft-installed version 14.51.36247.0. The hook compiled with warnings treated as errors in the same include-before-language order used by Tauri. The system-install, missing-runtime and UAC branches have not been executed on this workstation. [Microsoft installer behavior](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files)
-
-WebView2 explicitly uses Tauri's `downloadBootstrapper` mode with interactive installation. Its bootstrapper/runtime is downloaded from Microsoft on the end user's machine when needed; the NSIS package does not embed a fixed WebView2 runtime or bootstrapper. Windows application tests use the existing system WebView2 runtime.
-
-## Auditing and local preparation
-
-`node scripts/native-audit.mjs --release` hashes payload/notices/source/review evidence, rejects extra DLLs/models, and checks ordinary and delayed PE imports. Windows platform files and the separately installed VC prerequisite have distinct classifications. The hook/helper hashes and explicit NSIS/WebView2 configuration are checked. In CI it also validates the downloaded native payload and corresponding-source artifact. The local intended payload passed this audit on 2026-09-09; that does not mean a release was published or the installer lifecycle completed.
-
-`pwsh scripts/native-prepare.ps1` consumes the selected source-built runtime and downloads the fixed official ORT archive. It rejects absent source-build artifacts instead of substituting an unrelated upstream binary. `pwsh scripts/native-smoke.ps1` checks the existing Microsoft prerequisite without installing it, then loads the three exact DLL paths with app-directory/System32-only search and initializes mpv/ORT. Rendering and Silero inference require separate application tests.
-
-For a fresh checkout, download the native build artifact from the workflow run into `work/native-ci-artifact/`. On Windows, consume and prepare it explicitly:
+The application uses Tauri's standard NSIS template and official `nsis_tauri_utils.dll`, with its application-specific VC prerequisite hook. There is no custom plugin alias, private i686 Rust sysroot or rewritten upstream installer template.
 
 ```powershell
-node scripts/native-ci-artifact.mjs consume work/native-ci-artifact
-pwsh scripts/native-prepare.ps1
-pwsh scripts/native-smoke.ps1
-pnpm tauri dev
+python scripts/native-installer-prepare.py
+pnpm setup:licenses
+& ./work/package-tools/bin/cargo-about.exe generate scripts/licenses.hbs --output-file src-tauri/resources/notices/rust.html
+node scripts/audit-js-licenses.mjs
+pnpm package:app
+# Run only in a new disposable Windows profile (CI does not need this switch):
+pwsh -File scripts/package-verify.ps1 -DisposableProfile
 ```
 
-The consumer validates the supplied payload and source archives, then applies their effective native manifest. It does not download a prepublished libmpv binary. For a local candidate build or a published source ZIP, use the [source rebuild instructions](../native/SOURCE-REBUILD.md).
+Preparation collects the pinned NSIS/plugin source, the plugin's locked source crates and the application's Rust runtime source under `work/installer-sources`, and stages installer notices. JavaScript/Rust notices are generated before every package build; these generated resources are not tracked in Git. `pnpm package:app` performs the locked standard Tauri build; Tauri downloads and caches its normal NSIS tools and official plugin.
 
-## Native CI build
+Package verification extracts the completed installer once, checks its embedded application, DLLs and notices, and tests that same installer in a disposable profile. The lifecycle covers fresh install, installed-production UI/playback readiness, overwrite, uninstall and default learning-data/card-audio retention. Production smoke uses the normal installed binary; broader E2E uses a separate fixture-enabled build.
 
-`scripts/native-ci-build.sh` builds the reviewed recipe in a fresh Docker container with no mounts or named volumes. CI restores download archives and ccache data into a dedicated runner temporary directory and copies only those trees into the container. Every source archive is checked again before fresh extraction. Configuration, linking, source audits and final payload generation run on every invocation; extracted sources, build trees, installed libraries and final DLLs are never restored. Network access is disconnected after source acquisition. The selected DLL, corresponding source and evidence are exported as a workflow artifact.
+The source ZIP contains the application, Rust and JavaScript dependency sources, native source archives and installer sources/notices. Verification extracts the source ZIP and checks the actual included source hashes. Publication validates the complete asset set, checksums and tested installer identity after the required Linux, Windows and package jobs succeed.
 
-The acquisition step can use the workflow's GitHub token for the fixed Microsoft/vcpkg API tree and blob requests. It forwards the token by environment-variable name only to that container command. Archive downloads remain anonymous, redirects do not receive the token, and compilation runs without it.
+Historical local audits and exact old artifact identities are in [verification history](verification-history.md#last-recorded-local-package). They do not certify a new installer, establish completed installation or authorize publication. Initial releases are unsigned.
 
-Compiler-cache keys bind the actual toolchain binaries, package versions, trusted ccache configuration and native build recipes. Source-cache keys bind the acquisition recipes and source catalog. A commit label, frontend edit or documentation change does not invalidate otherwise identical native compilation inputs. The ccache configuration lives outside the restored cache, disables hard links and remote storage, and limits its size to 2 GiB. Hit/miss statistics are printed for every build. Set `CCACHE_DISABLE=1` to verify a build without compiler-cache reuse.
+## Local development versus CI
 
-After a successful build and artifact validation, only ccache data and verified download archives are copied back for caching. Restored paths must contain regular files and directories; links, special files and incomplete downloads are rejected. GitHub cache saves are limited to successful `main` push builds. Pull requests can restore eligible caches but do not save them.
-
-The source catalog supplies all 20 libmpv inputs, and the existing ORT review supplies the 91 fixed source/port/notice records. The older ORT acquisition metadata is not used as a replacement review inventory: it retains historical patch entries and omits the ORT/vcpkg root archives. External archive, DLL, model and notice checksums remain in the source catalog, runtime manifest and dependency reviews. Changing those dependencies requires updating their source/license evidence.
-
-`seal DIRECTORY` writes the native artifact inventory and effective manifest after validating the output. `consume DIRECTORY` validates those files and applies the effective manifest. These commands use the current source and artifact audits without Git-tree, run-ID or independently supplied receipt-digest gates. The manually maintained input ledger and CI workflow structure assertions have been removed.
-
-The archive checker streams source tar files without extraction. It verifies the fixed upstream sources and retained component notices against the source catalog and dependency reviews, and rejects missing files, duplicate entries, links and unsafe paths. `.gitattributes` preserves bytes for retained native source/license evidence. Compiler/image observations do not claim bit-for-bit reproduction of the earlier candidate DLL.
-
-The corresponding application-source ZIP contains the effective `native/runtime-windows-x64.json`, `native/native-build-artifact.json` and native source/review evidence. Packaging extracts and checks the final ZIP's source contents, then validates the release asset set and installer test results. An extracted source ZIP needs no `.git` directory. PE closure, Windows playback including AV1, actual installer lifecycle and production smoke tests remain required.
-
-Every configured push to `main` or `release`, and every pull request targeting either branch, starts Linux checks and the native build concurrently. Windows checks and packaging run concurrently after the native build. They download its artifact from the same workflow run. Packaging builds and audits the installer plugin, exercises installation/overwrite/uninstall in the runner's fresh profile, and assembles source/notices/SBOM. Successful package jobs upload an internal Actions artifact. Only a push to `release` can enter publication, after Linux, Windows and package jobs succeed; publication consumes that run's packaged artifact and validates it before publishing. Artifact names can include the workflow commit identifier for navigation, without making it a separate content-validation gate.
-
-The complete native recipe was also replayed locally from empty object directories with no host mounts; ORT source reconstruction again matched all 1,181 records. Its new libmpv hash differs from the independently Windows-tested local candidate and was retained as recipe-validation output. Local contract and build results do not certify a hosted Actions run.
-
-## Installer sources and exact embedded plugin
-
-NSIS 3.11's standard plugins, wizard image and LZMA stub are bound to the official tools archive. The original NSIS source archive, COPYING, Modern UI and NSISdl notices are supplied. LZMA uses CPL-1.0 with NSIS's linking exception; the original module source and explicit source-location notice remain included. [NSIS licensing](https://nsis.sourceforge.io/Docs/AppendixI.html)
-
-`pnpm build:nsis-plugin` invokes `scripts/nsis-plugin-build.ps1` to build the unmodified Tauri utility 0.5.3 source with its reviewed lockfile and a repository-local i686 Rust sysroot. A separate pnpm workspace acquires the locked crates from an acquisition copy, preserving the original upstream source tree. The recipe retains the pnpm version and acquisition settings alongside seven exact dependency sources, notices, Rust 1.98.0 runtime sources and the compiler/runtime inventory. Four actual i686 DLL tests passed in the earlier local build. That build's DLL SHA-256 was `41099f82a25154cf45c45f8f12a832197a1e5328ae148ef17d8e5cec06a28e31`; its source archive was `209e6f60d8e45838d713d481750bb4d516a6c536925f37a6f19248989a334dfa`. New build evidence records the resulting hashes. The reusable Rust runtime source/notices also cover the exact verified x64 standard-library release used by the application. See [the plugin recipe](../native/nsis-plugin/README.md).
-
-`scripts/native-installer-prepare.ps1` prepares NSIS under `target/.tauri` and stages the built DLL as `surtitle_nsis_utils.dll`. The custom template is checked against the exact upstream Tauri 2.11.4 template with only the added plugin directory, helper include routing and renamed utility calls. Tauri can validate its normal cache-only plugin, but that plugin is never referenced by the custom template. `scripts/native-installer-audit.ps1` extracts the final NSIS without executing it, requires the built alias, rejects an embedded upstream utility, and checks every standard plugin, helper and notice. The resulting receipt binds those bytes and all corresponding-source packages to the exact installer hash.
-
-Fresh installer downloads identify the command-line client explicitly: PowerShell's default browser User-Agent can make SourceForge return an HTML download page with HTTP 200. Every new or cached input must still match its pinned SHA-256. Download logs identify the file, response type, byte count, actual hash and final URL path, without redirect query credentials. Validate download changes in a fresh checkout with empty `work/native-installer-downloads` and `target/.tauri`; checking an existing prepared tool tree does not exercise retrieval. [SourceForge command-line downloads](https://sourceforge.net/p/forge/documentation/Downloading%20files%20via%20the%20command%20line/)
-
-The package job caches only Cargo's `target/debug` and `target/release` directories, leaving private NSIS tools under `target/.tauri` fresh on every run. It uses `pnpm setup:licenses` to install `cargo-about 0.9.2` with its required `cli` feature into `work/package-tools` and invokes that executable explicitly for notice generation. Package preflight checks must install the tool in an empty directory; a previously installed global CLI can hide missing installation features. `pnpm package:app` builds the NSIS installer with the locked-dependency option fixed in the script.
-
-The source ZIP contains `native-installer-sources/` with unchanged NSIS source, the locked utility source/vendor tree, Rust runtime source, and the exact installer build receipt. Packaging extracts and rehashes those entries before publication. The separate production probe launches the installed optimized application, checks real UI/IPC/SQLite readiness and native playback/stop/seek, and records executable/DLL hashes plus unchanged zero AI accounting. It complements the broader development-feature E2E suite; their application binaries are not described as identical.
-
-Tauri changes its single 27-byte bundle marker from `__TAURI_BUNDLE_TYPE_VAR_UNK` to `__TAURI_BUNDLE_TYPE_VAR_NSS` while packaging and then restores the original build executable. The installer audit retains both hashes and requires that exact unique marker change, with every other byte equal. The installed-production probe uses the verified embedded hash. No other PE, resource, timestamp or signing changes are accepted by this unsigned-release gate. The exact upstream implementation is retained in `native/upstream-evidence/tauri-bundle-2.11.4.rs`. [Tauri bundle implementation](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.4/crates/tauri-bundler/src/bundle.rs)
-
-## Dev Container and installer lifecycle
-
-See the [Dev Container instructions](../.devcontainer/README.md) for source read/write sharing and the temporary output masks, including `.pnpm` and `.cargo` for pnpm's Rust integration. Dependencies/build outputs stay in tmpfs or the container writable layer; no named or anonymous volume is used. The earlier local Linux sequence passed with 69 UI tests, 90 Node tests and Rust/Clippy/license checks. A new test selector initially failed; after its correction, all five real Tauri E2E specs completed with 17 passing cases and 8 Windows-only skips. Each invocation uses a fresh profile within the work mask. Selected evidence, including the initial failure and corrected rerun, is retained under `artifacts/devcontainer/completion-gaps-20260909-0714/`; see [implementation status](status.md) for the current verification record. Editor attachment remains a separate untested path and unexpected editor-managed mounts are rejected.
-
-`scripts/package-installer-smoke.ps1` requires a fresh isolated CI runner or explicitly disposable Windows profile and refuses existing Surtitle data/installations. It tests fresh installation, the production application probe, same-version overwrite, and silent uninstall with default database/generated-card-audio retention in a Japanese/space/ampersand path. It also rejects bundled VC/Vulkan/WebView2 payloads. The selected NSIS artifact has been built and inspected locally, but its install/overwrite/uninstall lifecycle has not been executed against this workstation's existing profile. No existing user data is removed to make the test pass.
-
-Read-only inspection on 2026-09-09 found Windows 11 Home, build 26200, with WSL2 Linux environments but no available Windows Sandbox, Hyper-V management tools, or known VirtualBox/VMware/QEMU executable. Windows Home does not support Windows Sandbox or the Hyper-V role. The optional-feature detail query required administrator elevation and was not completed; no features were enabled and no users or guest systems were created. This workstation therefore has no verified disposable Windows environment for the installer lifecycle. The remaining execution requires a fresh Windows CI runner or a separately provisioned disposable Windows VM, preserving the existing profile and its credentials. [Windows Sandbox requirements](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/), [Hyper-V requirements](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/get-started/install-hyper-v)
-
-Release publication requires successful Linux, Windows and package jobs in the workflow run, complete source/notices/SBOM, a successful Windows installer lifecycle, immutable version tags and verified release assets.
+The optional [Dev Container](../.devcontainer/README.md) shares source with temporary output masks and private build dependencies. Its mount policy applies to that development container. Linux CI runs on the Ubuntu host, while the separate native Docker build uses BuildKit caching/secrets. Windows WebDriver uses restricted medium-integrity processes so the real app and its SQLite/WAL observers share the required execution environment.

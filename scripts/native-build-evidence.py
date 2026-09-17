@@ -11,6 +11,9 @@ from pathlib import Path
 
 workspace, build_root, output = map(Path, sys.argv[1:4])
 sources = json.loads((workspace / 'native/build/sources.json').read_text())
+reviewed = json.loads((workspace / 'native/reviews/libmpv-dependencies.json').read_text())
+if {item['id']: item['sha256'] for item in sources['sources']} != {item['id']: item['sha256'] for item in reviewed['sources']}:
+    raise SystemExit('Native sources differ from the reviewed catalog')
 runtime = output / 'runtime/mpv-2.dll'
 if not runtime.is_file():
     raise SystemExit('A completed candidate DLL is required')
@@ -21,7 +24,8 @@ def digest(path):
 
 recipe_paths = ['native/build/Dockerfile', 'native/build/sources.json', 'native/build/cross-win64.ini',
                 'native/build/toolchain-win64.cmake', 'scripts/native-build.sh',
-                'scripts/native-source-inputs.py', 'scripts/native-build-evidence.py']
+                'scripts/native-source-inputs.py', 'scripts/native-build-evidence.py',
+                'scripts/native-source-archive-check.py', 'native/reviews/libmpv-dependencies.json']
 bundle_inputs = [(workspace / path, 'recipe/' + path) for path in recipe_paths]
 inventory = []
 for source in sources['sources']:
@@ -39,8 +43,11 @@ for source in sources['sources']:
         notices.extend(path for path in (directory / 'LICENSES').iterdir() if path.is_file())
     for notice in sorted(notices):
         bundle_inputs.append((notice, 'notices/' + source['id'] + '/' + notice.name))
-    inventory.append({**source, 'archiveBytes': archive.stat().st_size,
-                      'retainedNotices': [{'file': path.name, 'sha256': digest(path)} for path in sorted(notices)]})
+    retained = [{'file': path.name, 'sha256': digest(path)} for path in sorted(notices)]
+    expected_notices = next(item['retainedNotices'] for item in reviewed['sources'] if item['id'] == source['id'])
+    if retained != expected_notices:
+        raise SystemExit('Changed or missing component notices: ' + source['id'])
+    inventory.append({**source, 'archiveBytes': archive.stat().st_size, 'retainedNotices': retained})
 
 for directory in ['logs', 'toolchain-notices']:
     for path in sorted((output / directory).rglob('*')):
@@ -61,6 +68,12 @@ with source_bundle.open('wb') as raw, gzip.GzipFile(filename='', fileobj=raw, mo
         info.mode = 0o644
         with path.open('rb') as stream:
             archive.addfile(info, stream)
+
+expected = {'schemaVersion': 1, 'kind': 'libmpv', 'files': [
+    {'path': name, 'sha256': digest(path), 'bytes': path.stat().st_size}
+    for path, name in bundle_inputs if not name.startswith('evidence/')]}
+subprocess.run([sys.executable, str(workspace / 'scripts/native-source-archive-check.py'), str(source_bundle)],
+               input=json.dumps(expected), text=True, check=True)
 
 report = {
     'schemaVersion': 1, 'status': 'candidate-needs-review',

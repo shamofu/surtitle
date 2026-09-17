@@ -13,8 +13,13 @@ concurrency:
 
 jobs:
   native-build:
+    uses: ./.github/workflows/native-build.yml
+  linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: 4
+      WEBKIT_DISABLE_COMPOSITING_MODE: 1
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
@@ -25,130 +30,63 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0
+          components: rustfmt, clippy
       - name: Install the package manager declared by this checkout
         id: pnpm
         run: |
-          package_manager=$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync('package.json', 'utf8')).packageManager)")
-          npm install -g "$package_manager"
+          npm install -g "$(node -p 'require("./package.json").packageManager')"
           echo "version=$(pnpm --version)" >> "$GITHUB_OUTPUT"
           echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v6.1.0
         with:
           path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock', 'native/nsis-plugin/Cargo.lock') }}
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test:scripts
-      - uses: docker/setup-buildx-action@v4.3.0
-      - name: Build this commit's native toolchain image
-        uses: docker/build-push-action@v7.3.0
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
+      - uses: Swatinem/rust-cache@v2.9.2
         with:
-          context: .
-          file: native/build/Dockerfile
-          load: true
-          push: false
-          tags: surtitle-native-ci:${{ github.sha }}
-          labels: org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha,scope=native-toolchain-linux-amd64-v1
-          cache-to: type=gha,scope=native-toolchain-linux-amd64-v1,mode=max
-      - name: Fingerprint the prepared toolchain and create fresh cache staging
-        id: native-cache
-        run: node scripts/native-ci-cache.mjs prepare surtitle-native-ci:${{ github.sha }}
-      - name: Restore native compiler results for these exact tools and flags
-        uses: actions/cache/restore@v6.1.0
-        with:
-          path: ${{ steps.native-cache.outputs.directory }}/compiler
-          key: ${{ steps.native-cache.outputs.compiler-key }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: ${{ steps.native-cache.outputs.compiler-key }}-
-      - name: Restore source archives for checksum verification before extraction
-        uses: actions/cache/restore@v6.1.0
-        with:
-          path: |
-            ${{ steps.native-cache.outputs.directory }}/source-cache
-            ${{ steps.native-cache.outputs.directory }}/ort-archives
-          key: ${{ steps.native-cache.outputs.source-key }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: ${{ steps.native-cache.outputs.source-key }}-
-      - name: Build committed native inputs without host dependency/output mounts
-        run: bash scripts/native-ci-build.sh --prebuilt-image
-        env:
-          SURTITLE_NATIVE_GITHUB_TOKEN: ${{ github.token }}
-          SURTITLE_NATIVE_CACHE_DIR: ${{ steps.native-cache.outputs.directory }}
-      - name: Save verified native compiler cache from a trusted main push
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: ${{ steps.native-cache.outputs.directory }}/compiler
-          key: ${{ steps.native-cache.outputs.compiler-key }}-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Save verified source archives from a trusted main push
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: |
-            ${{ steps.native-cache.outputs.directory }}/source-cache
-            ${{ steps.native-cache.outputs.directory }}/ort-archives
-          key: ${{ steps.native-cache.outputs.source-key }}-${{ github.run_id }}-${{ github.run_attempt }}
-      - uses: actions/upload-artifact@v7.0.1
-        with:
-          name: native-build-${{ github.sha }}
-          path: work/native-ci-artifact/
-          compression-level: 0
-          if-no-files-found: error
-  linux:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.0.0
-        id: node
-        with:
-          node-version-file: .node-version
-          package-manager-cache: false
-      - uses: docker/setup-buildx-action@v4.3.0
-      - name: Build the development container
-        uses: docker/build-push-action@v7.3.0
-        with:
-          context: .
-          file: .devcontainer/Dockerfile
-          load: true
-          push: false
-          tags: surtitle-devcontainer:local-check
-          cache-from: type=gha,scope=devcontainer-linux-amd64-v1
-          cache-to: type=gha,scope=devcontainer-linux-amd64-v1,mode=max
-      - name: Share sources and verify temporary dependency/output masks
-        run: node .devcontainer/container.mjs start surtitle-ci
-      - name: Linux checks and actual headless Tauri E2E
-        run: node .devcontainer/container.mjs verify surtitle-ci
-      - name: Export selected verification evidence (never dependency/build trees)
-        id: evidence
-        if: always()
+          key: ubuntu-24.04-debug
+      - name: Install Linux desktop and test dependencies
         run: |
-          evidence_dir="$(mktemp -d "$RUNNER_TEMP/surtitle-linux-evidence.XXXXXXXX")"
-          printf 'directory=%s\n' "$evidence_dir" >> "$GITHUB_OUTPUT"
-          for report in container-isolation.json js-licenses.json js-sbom.cdx.json; do
-            if docker exec surtitle-ci test -f /workspaces/surtitle/artifacts/$report; then
-              docker exec --user vscode surtitle-ci cp "/workspaces/surtitle/artifacts/$report" "/opt/surtitle-build/evidence/$report"
-              docker cp "surtitle-ci:/opt/surtitle-build/evidence/$report" "$evidence_dir/$report"
-            fi
-          done
-          if docker exec surtitle-ci test -f /opt/surtitle-build/verification.log; then
-            docker cp surtitle-ci:/opt/surtitle-build/verification.log "$evidence_dir/linux-verification.log"
-          fi
-          if docker exec surtitle-ci test -d /workspaces/surtitle/artifacts/required-rust-tests; then
-            docker exec --user vscode surtitle-ci cp -a /workspaces/surtitle/artifacts/required-rust-tests /opt/surtitle-build/evidence/required-rust-tests
-            docker cp surtitle-ci:/opt/surtitle-build/evidence/required-rust-tests "$evidence_dir/required-rust-tests"
-          fi
-          if docker exec surtitle-ci test -d /workspaces/surtitle/test-results/native; then
-            docker exec --user vscode surtitle-ci mkdir -p /opt/surtitle-build/evidence/native-screenshots
-            docker exec --user vscode surtitle-ci cp -a /workspaces/surtitle/test-results/native/. /opt/surtitle-build/evidence/native-screenshots/
-            docker cp surtitle-ci:/opt/surtitle-build/evidence/native-screenshots "$evidence_dir/native-screenshots"
-          fi
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake perl pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf xvfb dbus-x11 webkit2gtk-driver ffmpeg libmpv-dev fonts-noto-cjk
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm setup:rust-tools
+      - name: Frontend and script checks
+        run: |
+          node scripts/check-version.mjs
+          node scripts/check-production-features.mjs
+          pnpm test
+          pnpm build
+      - name: Rust checks
+        run: |
+          pnpm fmt:rust:check
+          pnpm test:rust
+          pnpm test:rust:no-default-features
+          pnpm lint:rust
+          pnpm audit:rust
+          node scripts/audit-js-licenses.mjs
+      - name: Required FFmpeg integration tests
+        run: SURTITLE_TEST_FFMPEG="$(command -v ffmpeg)" pnpm test:rust:required linux-ffmpeg
+      - name: Build and seed the native Linux application
+        run: |
+          pnpm build:native:e2e
+          pnpm test:fixtures
+          mkdir -p work
+          data_dir="$(mktemp -d "$PWD/work/e2e-linux.XXXXXXXX")"
+          pnpm seed:fixtures "$data_dir" "$PWD/test-results/fixtures/日本語 & sample.mp4"
+          echo "SURTITLE_E2E_DATA_DIR=$data_dir" >> "$GITHUB_ENV"
+      - name: WebKitGTK and native Tauri E2E
+        run: dbus-run-session -- xvfb-run -a pnpm test:e2e
+        env:
+          SURTITLE_E2E_BINARY: ${{ github.workspace }}/target/debug/surtitle
+          SURTITLE_E2E_AI_RECOVERY: translation
+          SURTITLE_E2E_TRANSCRIPT_REVIEW: boundary
       - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
           name: linux-evidence-${{ github.sha }}
-          path: ${{ steps.evidence.outputs.directory }}
-      - name: Remove this job's container writable layer
-        if: always()
-        run: docker rm --force surtitle-ci
+          path: |
+            artifacts/
+            test-results/
   windows:
     needs: [native-build]
     runs-on: windows-2025
@@ -177,7 +115,7 @@ jobs:
       - uses: actions/cache@v6.1.0
         with:
           path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock', 'native/nsis-plugin/Cargo.lock') }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
       - uses: actions/download-artifact@v8.0.1
         with:
           name: native-build-${{ github.sha }}
@@ -190,7 +128,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: node scripts/check-version.mjs
       - run: node scripts/check-production-features.mjs
-      - run: pnpm test
+      - name: Windows process, profile and distribution script tests
+        run: >
+          pnpm test:scripts
+          scripts/webdriver-process.test.mjs
+          scripts/run-required-rust-tests.test.mjs
+          scripts/vc-prerequisite.test.mjs
+          scripts/package-installer-smoke.test.mjs
+          scripts/package-production-smoke.test.mjs
+          scripts/native-ci-artifact.test.mjs
+          scripts/native-installer-audit.test.mjs
+          scripts/native-installer-prepare.test.mjs
       - run: pnpm build
       - run: pnpm test:rust
       - name: Verify ordinary builds cannot bypass evaluation accounting
@@ -215,7 +163,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Windows E2E learning fixture preparation failed.' }
       - name: Build actual Windows native E2E binary
         run: pnpm build:native:e2e
-      - name: Require all six FFmpeg, libmpv and Silero regressions
+      - name: Required FFmpeg, libmpv and Silero regressions
         run: |
           $env:SURTITLE_TEST_FFMPEG = (Get-Command ffmpeg -CommandType Application).Source
           pnpm test:rust:required windows-native
@@ -267,7 +215,7 @@ jobs:
       - uses: actions/cache@v6.1.0
         with:
           path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock', 'native/nsis-plugin/Cargo.lock') }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
       - uses: actions/download-artifact@v8.0.1
         with:
           name: native-build-${{ github.sha }}
@@ -282,24 +230,17 @@ jobs:
             target/debug
             target/release
       - run: pnpm install --frozen-lockfile
-      - run: node scripts/check-production-features.mjs
       - run: pwsh scripts/native-prepare.ps1
-      - name: Build the locked installer plugin without installing a global Rust target
-        run: |
-          pnpm build:nsis-plugin
-          pwsh scripts/native-installer-prepare.ps1
+      - name: Prepare standard installer sources and runtime notices
+        run: python scripts/native-installer-prepare.py
       - name: Generate distribution notices and dependency manifests
         run: |
           pnpm setup:licenses
           & ./work/package-tools/bin/cargo-about.exe --version
           & ./work/package-tools/bin/cargo-about.exe generate scripts/licenses.hbs --output-file src-tauri/resources/notices/rust.html
           node scripts/audit-js-licenses.mjs
-      - name: Require complete native redistribution evidence
-        run: node scripts/native-audit.mjs --release
       # The package script owns the Cargo separator before PowerShell can consume it.
       - run: pnpm package:app
-      - name: Verify the source-backed plugin inside the exact installer
-        run: pwsh scripts/native-installer-audit.ps1 -Installer (Get-ChildItem target/release/bundle/nsis/*.exe).FullName
       - name: Prepare exact production WebDriver and generated media
         run: |
           pnpm setup:driver

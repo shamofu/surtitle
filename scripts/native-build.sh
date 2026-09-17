@@ -34,7 +34,6 @@ cmake_build() {
   local output="$build_root/objects/$name"
   cmake -S "$source_root/$name" -B "$output" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$toolchain" -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
     -DCMAKE_INSTALL_PREFIX="$prefix" -DCMAKE_INSTALL_LIBDIR=lib \
     -DCMAKE_FIND_ROOT_PATH="$prefix" "$@" 2>&1 | tee "$logs/$name-configure.log"
   cmake --build "$output" --parallel "$jobs" 2>&1 | tee "$logs/$name-build.log"
@@ -47,9 +46,9 @@ mkdir -p "$ffmpeg_output"
 if [[ ! -f "$ffmpeg_output/ffbuild/config.mak" ]] || ! grep -q '^CONFIG_LIBDAV1D=yes' "$ffmpeg_output/ffbuild/config.mak"; then
   (cd "$ffmpeg_output" && "$source_root/ffmpeg/configure" \
     --prefix="$prefix" --arch=x86_64 --target-os=mingw32 --enable-cross-compile \
-    --cross-prefix=x86_64-w64-mingw32- --cc='ccache x86_64-w64-mingw32-gcc-posix' \
+    --cross-prefix=x86_64-w64-mingw32- --cc=x86_64-w64-mingw32-gcc-posix \
     --pkg-config=pkg-config --pkg-config-flags=--static \
-    --cxx='ccache x86_64-w64-mingw32-g++-posix' --enable-gpl --enable-version3 \
+    --cxx=x86_64-w64-mingw32-g++-posix --enable-gpl --enable-version3 \
     --enable-static --disable-shared --disable-autodetect --disable-programs \
     --disable-doc --disable-debug --disable-network --disable-avdevice \
     --disable-encoders --disable-muxers --enable-w32threads --enable-libdav1d \

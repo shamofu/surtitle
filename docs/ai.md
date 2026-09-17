@@ -69,38 +69,14 @@ Cards use a consistent snapshot of the cited source text, complete source transl
 
 The development-only validation binary uses a separate data root and is excluded from application distribution. Every preparation explicitly supplies a model, location, and output cap. Audio requires a complete mono 16 kHz PCM16 WAV and an explicit maximum duration from 1 to 240 seconds. Each job contains one request; cumulative ceilings are 120 attempts, 90 minutes of audio, and the explicitly configured monetary budget for priced jobs.
 
-The offline review-audio utility checks prepared audio hashes and saved results, rebases them, and runs the production stitching/review engine. It needs no credential or ledger and never sends a request. See [CLI instructions](vertex-verification.md) and [evaluation tools](../scripts/ai-tests/README.md).
+The offline review-audio utility checks prepared audio hashes and saved results, rebases them, and runs the production stitching/review engine. It needs no credential or ledger and never sends a request. See [CLI instructions](vertex-verification.md).
 
 Fixed tests cover zero budgets, unpriced approval, immutable body/digest binding, changed settings, concurrent reservations, cancellation during authentication, crash recovery, double settlement, replay rejection, DPAPI, malformed usage, invalid structured output, and transcript warnings. A valid usage record can settle a response whose content is rejected; malformed content is not made usable merely because it was charged.
 
 Transcribe's STOP response may omit output-token count only when explicit input and total counts agree and other related counts are absent or zero. This narrow compatibility rule does not convert arbitrary missing/invalid usage to zero, nor turn unknown content into silence.
 
-## Six-hour local processing evidence
+## Local integration evidence
 
-A Windows x64 test processed a real 21,600-second mono 16 kHz silent FLAC through FFmpeg, Silero, FLAC encoding, hashing, and receipt creation on 2026-09-08. It sent zero cloud requests.
+The [required Rust suites](ai-test-plan.md#explicit-rust-integration-suites) exercise real FFmpeg extraction, libmpv restore and Silero preparation. Six-hour acceptance is optional and measures streaming preparation; its historical performance and memory scope are recorded in [verification history](verification-history.md#six-hour-preparation--8-september-2026).
 
-| Measurement | Observed value |
-| --- | --- |
-| Preparation elapsed time | 122.2166538 seconds |
-| Chunks | 180 |
-| Core samples | 345,600,000; no gaps or duplicate core coverage |
-| Submitted samples including context | 362,784,000 |
-| Additional context | 1,074 seconds |
-| Rust test process peak working set | 51,228,672 bytes |
-| Finished audio and receipt | 5,850,165 bytes |
-| Temporary PCM | Removed on successful completion |
-
-This synthetic silence test measures local processing, not speech accuracy, sentence boundaries, general codec speed, or total application memory. The working set excludes external FFmpeg processes and OS cache. Test-only optimization enabled sha2/surtitle-tools at level 3 and surtitle-ai at level 1 without disabling hashing. A 360-second watchdog requests cancellation; it does not guarantee termination by that deadline.
-
-```powershell
-pwsh -File scripts/native-prepare.ps1 -WithDevModel
-$env:SURTITLE_TEST_FFMPEG = 'C:\Tools\ffmpeg\ffmpeg.exe' # Select an existing executable.
-$env:SURTITLE_LONG_AUDIO_FILE = Join-Path (Get-Location) 'work/native-fixtures/six-hour-silence.flac'
-pnpm rust test -p surtitle-ai --locked six_hour_streaming_acceptance --offline `
-  --config 'profile.test.package.sha2.opt-level=3' `
-  --config 'profile.test.package.surtitle-tools.opt-level=3' `
-  --config 'profile.test.package.surtitle-ai.opt-level=1' `
-  '--' --ignored --nocapture
-```
-
-Generate the specified silent fixture first if it does not exist. The original report is under the ignored work/ai-six-hour-acceptance directory. Native manifests and each receipt record actual DLL/model/tool hashes. Development model placement is not included in the application bundle.
+The separate Node model-scoring/campaign pipeline has been removed. Historical quality failures and costs remain in [AI evaluation history](ai-evaluation-history.md); product parser/worker/ledger tests and the development validation CLI remain.

@@ -6,6 +6,14 @@ job is incomplete or disputed. This does not replace the active subtitle track.
 Existing embedded captions and SRT/VTT imports remain available without cloud
 transcription. Imported captions are source material, not proof of correctness.
 
+## Product rationale
+
+The accepted September 2026 design prioritizes learning a useful excerpt over obtaining a perfect full transcript. Preserve text, timing provenance and local review state separately; an unrelated disputed range should not block playback or a reviewed card. Supplied captions remain a useful starting point without being assumed correct. Untimed text has only its source audio block until an explicit range is available; VAD does not supply word alignment.
+
+Selections bind source identity, text/timing revisions and relevant boundary decisions. Later responses cannot overwrite manual work, approved input or saved cards. Local editing and postponement do not send requests or release unknown holds. The original product proposal is retained at [transcribe-product-reconsideration-2026-09-12.md](https://github.com/shamofu/surtitle/blob/d2b0b80a7bc8e4a8958b9c4078870ee3fc29aca0/docs/transcribe-product-reconsideration-2026-09-12.md) in [source commit d2b0b80a](https://github.com/shamofu/surtitle/tree/d2b0b80a7bc8e4a8958b9c4078870ee3fc29aca0).
+
+Actual listening, saved-item correctness and human correction effort remain open evaluation questions. New recognition/aligner mechanisms are hypotheses, not new defaults; see [evaluation guidance](transcribe-production.md).
+
 ## Learning workflow
 
 1. Open media, then **Study a draft**, and select a transcription job.
@@ -74,7 +82,7 @@ backup detachment and source changes. Renderer tests cover a 20,000-cue draft,
 bounded paging, failed replay, local confirmation and explicit quote approval.
 Real application checks use disposable profiles and no service-account key.
 
-The [12 September verification record](draft-study-verification-2026-09-12.md)
+The [12 September verification record](verification-history.md#draft-study--1213-september-2026)
 distinguishes the complete Windows run, the focused Linux rerun and the checks
 against saved real responses. The frozen [ten-task replay set](draft-study-task-set.json)
 binds exact source text and timing anchors before the saved-response run. Its
@@ -82,7 +90,7 @@ observations record native playback transport and restart persistence, with
 human listening and editing effort left unset.
 
 Recognition accuracy is unchanged by this workflow. The historical English
-dialogue WER/timing results remain in [the pilot report](transcribe-en-dialogue-2026-09-12.md).
+dialogue WER/timing results remain in [the pilot report](ai-evaluation-history.md#english-dialogue-partial-pilot--12-september-2026).
 The product does not claim that an automated player-state check constitutes
 listening, validates semantic corrections or measures human editing effort.
 Independent Japanese timing references and contextual listening assessments are

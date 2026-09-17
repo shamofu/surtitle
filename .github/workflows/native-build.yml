@@ -1,0 +1,36 @@
+name: Native dependencies
+on:
+  workflow_call:
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: docker/setup-buildx-action@v4.3.0
+      - name: Build or restore native dependencies
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: .
+          file: native/build/Dockerfile
+          target: export
+          outputs: type=local,dest=work/native-ci-artifact
+          cache-from: type=gha,scope=native-dependencies-linux-amd64-v2
+          cache-to: type=gha,scope=native-dependencies-linux-amd64-v2,mode=max
+          secrets: |
+            github_token=${{ github.token }}
+      - name: Verify exported files
+        run: node scripts/native-ci-artifact.mjs verify work/native-ci-artifact
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: native-build-${{ github.sha }}
+          path: work/native-ci-artifact/
+          compression-level: 0
+          if-no-files-found: error

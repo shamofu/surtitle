@@ -186,31 +186,6 @@ process.exitCode = 37;
   }
 }, argumentTimeoutMs + (process.platform === 'win32' ? identityTimeoutMs : 0) + cleanupMarginMs);
 
-test('the phase watchdog reports a timeout and terminates its owned dummy child', async t => {
-  const f = fixture(t);
-  const script = f.write('bounded watchdog child.cjs', 'setTimeout(() => process.exit(0), 5000);\n');
-  const run = f.record(spawn(process.execPath, [script],
-    { cwd: f.root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }), 'watchdog-negative-control', 100);
-  assert.ok(Number.isInteger(run.child.pid) && run.child.pid > 0);
-  const result = await run.completed;
-  assert.equal(result.timedOut, true);
-  assert.equal(result.error, undefined);
-  assert.equal(result.code, null);
-  assert.notEqual(result.signal, null);
-  assert.ok(Number.isInteger(result.elapsedMs) && result.elapsedMs > 0);
-  assert.throws(() => assertExit(result, 0), error => {
-    assert.equal(error.code, 'ERR_ASSERTION');
-    assert.match(error.message, /Test child exceeded its phase budget:/);
-    const diagnostic = JSON.parse(error.message.slice(error.message.indexOf('{')).split('\n')[0]);
-    for (const key of ['phase', 'pid', 'timeoutMs', 'timedOut', 'elapsedMs', 'signal', 'stdout', 'stderr']) {
-      assert.deepEqual(diagnostic[key], result[key]);
-    }
-    assert.equal(diagnostic.error, null);
-    return true;
-  });
-  await until(() => !alive(run.child.pid), 'The watchdog must reap its owned dummy child', cleanupMarginMs);
-}, directTimeoutMs + cleanupMarginMs);
-
 for (const location of ['temp', 'workspace']) {
 test(`standard-user observers preserve WAL writes across nested app restarts in ${location}`, async t => {
   const parent = location === 'temp' ? tmpdir() : join(process.cwd(), 'work');

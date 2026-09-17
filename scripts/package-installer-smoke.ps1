@@ -28,13 +28,10 @@ foreach ($hive in @('HKCU:', 'HKLM:')) {
 }
 $manifest = Get-Content -LiteralPath 'native/runtime-windows-x64.json' -Raw | ConvertFrom-Json
 $installerAudit = Get-Content -LiteralPath 'artifacts/installer-audit.json' -Raw | ConvertFrom-Json
-$originalApplicationHash = (Get-FileHash -LiteralPath 'target/release/surtitle.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($installerAudit.releaseEligible -ne $true -or $installerAudit.errors.Count -ne 0 -or
+if ($installerAudit.passed -ne $true -or
     $installerAudit.installerSha256 -ne (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant() -or
-    $installerAudit.application.originalSha256 -ne $originalApplicationHash -or
-    $installerAudit.application.transformation -ne 'tauri-nsis-bundle-marker' -or
-    $installerAudit.application.embeddedSha256 -notmatch '^[a-f0-9]{64}$') { throw 'The exact installer application transformation has not passed its audit.' }
-$embeddedApplicationHash = $installerAudit.application.embeddedSha256
+    $installerAudit.applicationSha256 -notmatch '^[a-f0-9]{64}$') { throw 'The exact installer payload has not passed its audit.' }
+$embeddedApplicationHash = $installerAudit.applicationSha256
 $binary = Join-Path $installRoot 'surtitle.exe'
 function Run-Installer([string]$path, [string[]]$arguments) {
     $process = Start-Process -FilePath $path -ArgumentList $arguments -PassThru -WindowStyle Hidden
@@ -135,7 +132,6 @@ $report = @{
     installerSha256=(Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
     productionSmokeSha256=(Get-FileHash -LiteralPath 'artifacts/production-smoke.json' -Algorithm SHA256).Hash.ToLowerInvariant()
     productionApplicationSha256=$embeddedApplicationHash
-    originalApplicationSha256=$originalApplicationHash
     freshInstallPassed=$true; startupPassed=$true; overwriteInstallPassed=$true
     uninstallPassed=$true; defaultDataRetentionPassed=$true; retainedFileCount=$before.Count
     nonAsciiSpaceAmpersandInstallPath=$true; retainedDataRemoved=$false

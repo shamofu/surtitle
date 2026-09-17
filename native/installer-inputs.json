@@ -1,127 +1,123 @@
 {
   "schemaVersion": 1,
   "nsisVersion": "3.11",
-  "toolArchive": {
-    "file": "nsis-3.11.zip",
-    "url": "https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.11/nsis-3.11.zip",
-    "sha256": "c7d27f780ddb6cffb4730138cd1591e841f4b7edb155856901cdf5f214394fa1"
-  },
   "sourceArchive": {
     "file": "nsis-3.11-src.tar.bz2",
     "url": "https://downloads.sourceforge.net/project/nsis/NSIS%203/3.11/nsis-3.11-src.tar.bz2",
     "sha256": "19e72062676ebdc67c11dc032ba80b979cdbffd3886c60b04bb442cdd401ff4b"
   },
-  "cacheOnlyPlugin": {
-    "file": "nsis_tauri_utils.dll",
-    "url": "https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.5.3/nsis_tauri_utils.dll",
-    "sha256": "5ba143b5db4a87d32d6e7802e033330aae56cbceabe0d1e3ba41948385ad4709",
-    "bundled": false
+  "plugin": {
+    "version": "0.5.3",
+    "binary": {
+      "file": "nsis_tauri_utils.dll",
+      "url": "https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.5.3/nsis_tauri_utils.dll",
+      "sha256": "5ba143b5db4a87d32d6e7802e033330aae56cbceabe0d1e3ba41948385ad4709"
+    },
+    "sourceArchive": {
+      "file": "nsis-tauri-utils-13d9edd27b69310e108d6fbd49f90992f8a05390.tar.gz",
+      "url": "https://codeload.github.com/tauri-apps/nsis-tauri-utils/tar.gz/13d9edd27b69310e108d6fbd49f90992f8a05390",
+      "sha256": "9b277f7cdec4277b48d319c32e10b5dc4303e9efce8c3b44f1db77f86a8131c7"
+    },
+    "sourceCrates": [
+      {
+        "file": "proc-macro2-1.0.107.crate",
+        "url": "https://static.crates.io/crates/proc-macro2/proc-macro2-1.0.107.crate",
+        "sha256": "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
+      },
+      {
+        "file": "quote-1.0.47.crate",
+        "url": "https://static.crates.io/crates/quote/quote-1.0.47.crate",
+        "sha256": "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
+      },
+      {
+        "file": "semver-1.0.28.crate",
+        "url": "https://static.crates.io/crates/semver/semver-1.0.28.crate",
+        "sha256": "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+      },
+      {
+        "file": "syn-2.0.119.crate",
+        "url": "https://static.crates.io/crates/syn/syn-2.0.119.crate",
+        "sha256": "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297"
+      },
+      {
+        "file": "unicode-ident-1.0.24.crate",
+        "url": "https://static.crates.io/crates/unicode-ident/unicode-ident-1.0.24.crate",
+        "sha256": "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+      },
+      {
+        "file": "windows-link-0.2.1.crate",
+        "url": "https://static.crates.io/crates/windows-link/windows-link-0.2.1.crate",
+        "sha256": "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+      },
+      {
+        "file": "windows-sys-0.61.2.crate",
+        "url": "https://static.crates.io/crates/windows-sys/windows-sys-0.61.2.crate",
+        "sha256": "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
+      }
+    ]
   },
-  "upstreamTemplate": {
-    "path": "native/upstream-evidence/tauri-installer-2.11.4.nsi",
-    "url": "https://raw.githubusercontent.com/tauri-apps/tauri/tauri-cli-v2.11.4/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi",
-    "sha256": "20f4ecc730defb71f1342eaeaec4021df13be3d843abba0effe88ea5835fa079"
+  "rust": {
+    "version": "1.98.0",
+    "sourceArchive": {
+      "file": "rust-src-1.98.0.tar.xz",
+      "url": "https://static.rust-lang.org/dist/2026-08-20/rust-src-1.98.0.tar.xz",
+      "sha256": "0e977492aed5ff137815bf9b4b796e8a85b80fb2367ed64e82d5c5839870f2bf"
+    },
+    "notices": [
+      {
+        "file": "COPYRIGHT-library.html",
+        "sha256": "68129500b616d5838629e68f55ff3aed5e096dacf60ce9eb41bbe599a563afa6"
+      },
+      {
+        "file": "licenses/Apache-2.0.txt",
+        "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+      },
+      {
+        "file": "licenses/BSD-2-Clause.txt",
+        "sha256": "f32fb3b417a194167cfad068223fc975ba96c5960513a10f66a3c28720aec1df"
+      },
+      {
+        "file": "licenses/CC-BY-SA-4.0.txt",
+        "sha256": "23ee78c8bae49cf08ea2f0c84945c66b987ebe4520881fb51b3dad4fb43d07c2"
+      },
+      {
+        "file": "licenses/GCC-exception-3.1.txt",
+        "sha256": "a3966c9410ef94a1efbfa9ec04e9c1994026a70623fbf0885ce36737bfba3b54"
+      },
+      {
+        "file": "licenses/GPL-2.0-only.txt",
+        "sha256": "54b212ba1f97f6948fa5486239ab505dd820b02e50cbfd296b4062c8609a70af"
+      },
+      {
+        "file": "licenses/GPL-3.0-or-later.txt",
+        "sha256": "05315fce6c35f79b8a35454828995fa26336f235895ac64557abc028f4ffcea2"
+      },
+      {
+        "file": "licenses/ISC.txt",
+        "sha256": "0ff61769b238634e042ab759dddfd104a8e69d091e3600ae3410e401a6164381"
+      },
+      {
+        "file": "licenses/LLVM-exception.txt",
+        "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e"
+      },
+      {
+        "file": "licenses/MIT.txt",
+        "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+      },
+      {
+        "file": "licenses/NCSA.txt",
+        "sha256": "39cb0234065c92b9e6cee3830cbb52b1aa289aa8fe9ba2e66730fec5cf05c630"
+      },
+      {
+        "file": "licenses/OFL-1.1.txt",
+        "sha256": "8eea8287e5876b539670cadb82e99f9a7afddec6f6730811be1daf25d2e9bcfd"
+      },
+      {
+        "file": "licenses/Unicode-3.0.txt",
+        "sha256": "f5062c9a188d81dfe66b56db4182dcf9e4b17c0d9b0d311a8e20b3a1b075c443"
+      }
+    ]
   },
-  "embeddedFiles": [
-    {
-      "file": "$PLUGINSDIR/System.dll",
-      "bytes": 12288,
-      "sha256": "8b4c47c4cf5e76ec57dd5a050d5acd832a0d532ee875d7b44f6cdaf68f90d37c",
-      "imports": [
-        "KERNEL32.dll",
-        "USER32.dll",
-        "ole32.dll"
-      ],
-      "license": "Zlib",
-      "source": "nsis-3.11-src.tar.bz2",
-      "sourceDirectory": "Contrib/System",
-      "upstreamBinaryArchiveMatch": true
-    },
-    {
-      "file": "$PLUGINSDIR/nsDialogs.dll",
-      "bytes": 9728,
-      "sha256": "b1350f487692057c8ffde75dcc55287a52a3272240d4d4912f24464b27551fc0",
-      "imports": [
-        "KERNEL32.dll",
-        "USER32.dll",
-        "GDI32.dll",
-        "SHELL32.dll",
-        "comdlg32.dll",
-        "ole32.dll"
-      ],
-      "license": "Zlib",
-      "source": "nsis-3.11-src.tar.bz2",
-      "sourceDirectory": "Contrib/nsDialogs",
-      "upstreamBinaryArchiveMatch": true
-    },
-    {
-      "file": "$PLUGINSDIR/StartMenu.dll",
-      "bytes": 7680,
-      "sha256": "fe330320459637d8dd2b5d84d07925c38ec264152ffd3b1760a4d44d76536caa",
-      "imports": [
-        "KERNEL32.dll",
-        "USER32.dll",
-        "GDI32.dll",
-        "SHELL32.dll",
-        "ole32.dll"
-      ],
-      "license": "Zlib",
-      "source": "nsis-3.11-src.tar.bz2",
-      "sourceDirectory": "Contrib/StartMenu",
-      "upstreamBinaryArchiveMatch": true
-    },
-    {
-      "file": "$PLUGINSDIR/LangDLL.dll",
-      "bytes": 5632,
-      "sha256": "4cf25411f28f639f72156c24b0f66ea42f5aee5973f6c137d901da6ae42d5b7e",
-      "imports": [
-        "KERNEL32.dll",
-        "USER32.dll",
-        "GDI32.dll"
-      ],
-      "license": "Zlib",
-      "source": "nsis-3.11-src.tar.bz2",
-      "sourceDirectory": "Contrib/LangDLL",
-      "upstreamBinaryArchiveMatch": true
-    },
-    {
-      "file": "$PLUGINSDIR/NSISdl.dll",
-      "bytes": 15360,
-      "sha256": "ddf40229dd9d6b268902d8dea88c8a04aacf1af218dd29f6dcd35babc54ac08d",
-      "imports": [
-        "ADVAPI32.dll",
-        "WSOCK32.dll",
-        "USER32.dll",
-        "KERNEL32.dll"
-      ],
-      "license": "Zlib",
-      "source": "nsis-3.11-src.tar.bz2",
-      "sourceDirectory": "Contrib/NSISdl",
-      "upstreamBinaryArchiveMatch": true
-    },
-    {
-      "file": "$PLUGINSDIR/nsExec.dll",
-      "bytes": 7168,
-      "sha256": "b121689861b506dbc9c3797b49bc8a90d555cb7db58cb959165cc758391c00bb",
-      "imports": [
-        "ADVAPI32.dll",
-        "USER32.dll",
-        "KERNEL32.dll"
-      ],
-      "license": "Zlib",
-      "source": "nsis-3.11-src.tar.bz2",
-      "sourceDirectory": "Contrib/nsExec",
-      "upstreamBinaryArchiveMatch": true
-    },
-    {
-      "file": "$PLUGINSDIR/modern-wizard.bmp",
-      "sha256": "3ad2dc318056d0a2024af1804ea741146cfc18cc404649a44610cbf8b2056cf2",
-      "license": "Zlib",
-      "upstreamPath": "Contrib/Graphics/Wizard/win.bmp",
-      "sourceAsset": "NSIS-3.11-win.bmp",
-      "upstreamBinaryArchiveMatch": true
-    }
-  ],
   "notices": [
     {
       "file": "NSIS-3.11-COPYING.txt",
@@ -183,11 +179,5 @@
       "file": "windows-sys-license-mit.txt",
       "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
     }
-  ],
-  "stubSha256": "a0d065b62d34be5f0aaaf7c162e101a5e25d7cd3eb10a13fdb37f91b02ebfce2",
-  "upstreamHelpers": {
-    "path": "native/upstream-evidence/tauri-utils-2.11.4.nsh",
-    "url": "https://raw.githubusercontent.com/tauri-apps/tauri/tauri-cli-v2.11.4/crates/tauri-bundler/src/bundle/windows/nsis/utils.nsh",
-    "sha256": "b27b407f886cca738e44e774f15e6b556b43ce52557a7c8891ee4eca7dd8013d"
-  }
+  ]
 }

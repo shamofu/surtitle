@@ -10,28 +10,15 @@ Keep the JSON key outside the repository, container, chat, and public CI. Import
 
 ## Application workflow
 
-For the current local build, run `target/release/surtitle.exe` in place from the
-repository. Its sibling `native` and `notices` directories provide the reviewed
-runtime files. The [build and validation record](completion-followup-2026-09-12.md)
-identifies the executable and distinguishes compilation from completed live-model
-or production-profile verification. Existing credentials remain in the normal
-application profile; check their displayed configuration before importing a key
-again.
-
-The latest [English dialogue comparison](transcribe-en-dialogue-2026-09-12.md)
-received valid subtitles from all six Transcribe requests, but found recognition
-errors and unresolved boundaries in both chunk profiles. Inspect and correct the
-result before adoption; successful execution is not a claim of transcript accuracy.
-
-The Transcribe production workflow keeps review and paid execution separate. After importing a key in Settings, choose the transcription model and a nonzero budget, import a short rights-cleared recording, select its audio track, and prepare the requested range locally. Review the exact model, global location, duplicate-inclusive audio, request count, output limit and reservation before approving. `gemini-3.5-transcribe-preview` is the current evaluation target, not an application default or an approved-model catalog.
+Build and launch the app using the [native runtime guide](native-runtime.md), or use an installed production build. Existing credentials remain in its normal profile; check their displayed configuration before importing another key. The [historical comparison](ai-evaluation-history.md) describes earlier candidates, not verification of a newly built executable.
 
 Open the saved transcription review after execution. For an invalid or missing range, select **Audio range to correct**, listen to the original, and enter subtitle text and positive-width times. **Add text from saved response** copies only text and requires new timing entries; it never repairs provider word times automatically. Deleting all rows requires a separate confirmation that the complete range contains no speech. Save the correction, resolve affected boundaries/warnings, then acknowledge and adopt the complete preview. **Return to previous result** deselects the manual correction and restores the provider result or explicitly selected local reparse. The original response remains inspectable, and saved cards remain unchanged.
 
-Even a valid empty provider response requires an explicit no-speech confirmation in its range editor before adoption. Pause an active job and wait for its in-flight request before saving a correction. An unknown cost hold does not prevent local editing, but remains fully reserved. Adoption prevents further sending from that job. Resuming or retrying is a separate paid approval, never a consequence of editing. An unreviewed result or partial timing evidence must not be described as a completed quality qualification; see the [Transcribe evaluation policy](transcribe-production.md).
+Even a valid empty provider response requires an explicit no-speech confirmation in its range editor before adoption. Pause an active job and wait for its in-flight request before saving a correction. An unknown cost hold does not prevent local editing, but remains fully reserved. Adoption prevents further sending from that job. Resuming or retrying is a separate paid approval, never a consequence of editing. An unreviewed result or partial timing evidence must not be described as a completed quality qualification; see the [transcription evaluation guidance](transcribe-production.md).
 
 1. Open Settings, import the service-account JSON, and check the project and location.
 2. Select a model separately for transcription, vocabulary, explanations, and translation. Defaults are unset. Fetch Google suggestions or enter the exact Gemini model ID. Discovery is not proof of access.
-3. Choose the transcription API mode and output/thinking settings. The current Transcribe evaluation uses `gemini-3.5-transcribe-preview` in `global`, verbatim mode, word timestamps, an 8,192-token output cap, and omitted thinking. This is the evaluation configuration, not a catalog maintained by the application. Google's model remains Preview; vocabulary and explanation features are experimental.
+3. Choose the transcription API mode and output/thinking settings. Use settings supported by the explicitly selected model. Historical Transcribe experiments used verbatim word timestamps in `global`; their success or failure is not a catalog or access guarantee. Vocabulary and explanation quality remains experimental.
 4. Fetch a price or enter independently verified rates. A failed or ambiguous lookup leaves pricing unset. An unpriced job needs explicit scope approval and cannot promise a dollar cap. For a priced job, set a small nonzero budget; the initial value is zero.
 5. Import a short source and select the exact range. Review the resulting model, location, request count, submitted audio including overlap, output limits, price, and immutable quote before approving.
 6. Inspect the result before saving a card or applying subtitles. Review, adoption, and applying an already received translation are local operations with no generation charge.
@@ -116,22 +103,20 @@ ffmpeg -nostdin -hide_banner -n -ss 0 -i 'C:\Media\owned-speech.mp4' `
 & $validator prepare --data-root $validationRoot --credential-id $credentialId `
   --case-id speech-en-01 --audio-file (Join-Path $validationRoot 'speech-15s.wav') `
   --adapter transcribe --language en --max-audio-seconds 15 `
-  --model-id gemini-3.5-transcribe-preview --location global --max-output-tokens 4096
+  --model-id EXPLICIT_TRANSCRIBE_MODEL_ID --location global --max-output-tokens 4096
 ```
 
-Review the audio, hash, Preview/global choice, measured duration, and price state before approval. For an explicit comparison, prepare a separate case with --adapter audio and the chosen general audio model, such as gemini-3.8-flash with --thinking-level LOW. Failures never trigger automatic model switching.
+Replace the model placeholder and review the audio, hash, location, measured duration and price state before approval. An explicit comparison uses a separate case and its own quote. Failures never trigger automatic model switching.
 
 ## Preserve and inspect evidence
 
 ```powershell
 & $validator report --data-root $validationRoot --output (Join-Path $validationRoot 'report-001.json')
-node scripts/ai-tests/export-subtitles.mjs --report (Join-Path $validationRoot 'report-001.json') `
-  --job-id $jobId --output (Join-Path $validationRoot 'speech-15s.srt') --format srt
 ```
 
-Reports and exports refuse to overwrite existing files; use a fresh filename. Reports include usage, cost state, holds, timestamps, parsed output, and bounded non-thought generated text/word timing. They exclude credentials, tokens, thought text, and arbitrary provider diagnostics. Generated text may contain the supplied material, so review it before sharing.
+Reports refuse to overwrite existing files; use a fresh filename. Reports include usage, cost state, holds, timestamps, parsed output, and bounded non-thought generated text/word timing. They exclude credentials, tokens, thought text, and arbitrary provider diagnostics. Generated text may contain the supplied material, so review it before sharing.
 
-Import the WAV and exported subtitles into the application to inspect segment playback. Use --offset-ms only when rebasing a clip to the original media timeline; omit it for the standalone WAV.
+Use the normal application workflow above for subtitle playback and export. The separate saved-report subtitle exporter has been removed with the research tools.
 
 The offline review-audio command verifies prepared WAVs and a saved report, then runs the same rebasing/stitching engine as the application. It requires no data root, key, or network:
 
@@ -140,7 +125,7 @@ The offline review-audio command verifies prepared WAVs and a saved report, then
   --results 'C:\Evaluation\report.json' --output 'C:\Evaluation\stitched-review.json'
 ```
 
-See the [evaluation guide](../scripts/ai-tests/README.md) for the manifest contract, WER/CER, explicit timing matches, and AI-review rubric. References and results are hashed independently. Do not claim human review from an AI rubric.
+The former scoring programs and their manifest schemas are recoverable from the source revision in [AI evaluation history](ai-evaluation-history.md). Product review-audio remains a local shared-engine diagnostic; it is not a model-quality certificate.
 
 ## Troubleshooting
 

@@ -7,6 +7,8 @@
 /artifacts/
 /src-tauri/resources/native/*
 !/src-tauri/resources/native/.gitkeep
+/src-tauri/resources/notices/*
+!/src-tauri/resources/notices/README.txt
 /src-tauri/gen/
 /.env
 *.key

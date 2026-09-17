@@ -11,85 +11,7 @@ concurrency:
 
 jobs:
   native-build:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.0.0
-        id: node
-        with:
-          node-version-file: .node-version
-          package-manager-cache: false
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.98.0
-      - name: Install the package manager declared by this checkout
-        id: pnpm
-        run: |
-          package_manager=$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync('package.json', 'utf8')).packageManager)")
-          npm install -g "$package_manager"
-          echo "version=$(pnpm --version)" >> "$GITHUB_OUTPUT"
-          echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v6.1.0
-        with:
-          path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock', 'native/nsis-plugin/Cargo.lock') }}
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test:scripts
-      - uses: docker/setup-buildx-action@v4.3.0
-      - name: Build this commit's native toolchain image
-        uses: docker/build-push-action@v7.3.0
-        with:
-          context: .
-          file: native/build/Dockerfile
-          load: true
-          push: false
-          tags: surtitle-native-ci:${{ github.sha }}
-          labels: org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha,scope=native-toolchain-linux-amd64-v1
-          cache-to: type=gha,scope=native-toolchain-linux-amd64-v1,mode=max
-      - name: Fingerprint the prepared toolchain and create fresh cache staging
-        id: native-cache
-        run: node scripts/native-ci-cache.mjs prepare surtitle-native-ci:${{ github.sha }}
-      - name: Restore native compiler results for these exact tools and flags
-        uses: actions/cache/restore@v6.1.0
-        with:
-          path: ${{ steps.native-cache.outputs.directory }}/compiler
-          key: ${{ steps.native-cache.outputs.compiler-key }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: ${{ steps.native-cache.outputs.compiler-key }}-
-      - name: Restore source archives for checksum verification before extraction
-        uses: actions/cache/restore@v6.1.0
-        with:
-          path: |
-            ${{ steps.native-cache.outputs.directory }}/source-cache
-            ${{ steps.native-cache.outputs.directory }}/ort-archives
-          key: ${{ steps.native-cache.outputs.source-key }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: ${{ steps.native-cache.outputs.source-key }}-
-      - name: Build committed native inputs without host dependency/output mounts
-        run: bash scripts/native-ci-build.sh --prebuilt-image
-        env:
-          SURTITLE_NATIVE_GITHUB_TOKEN: ${{ github.token }}
-          SURTITLE_NATIVE_CACHE_DIR: ${{ steps.native-cache.outputs.directory }}
-      - name: Save verified native compiler cache from a trusted main push
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: ${{ steps.native-cache.outputs.directory }}/compiler
-          key: ${{ steps.native-cache.outputs.compiler-key }}-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Save verified source archives from a trusted main push
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: |
-            ${{ steps.native-cache.outputs.directory }}/source-cache
-            ${{ steps.native-cache.outputs.directory }}/ort-archives
-          key: ${{ steps.native-cache.outputs.source-key }}-${{ github.run_id }}-${{ github.run_attempt }}
-      - uses: actions/upload-artifact@v7.0.1
-        with:
-          name: native-build-${{ github.sha }}
-          path: work/native-ci-artifact/
-          compression-level: 0
-          if-no-files-found: error
+    uses: ./.github/workflows/native-build.yml
   windows:
     needs: [native-build]
     runs-on: windows-2025
@@ -126,7 +48,7 @@ jobs:
       - uses: actions/cache@v6.1.0
         with:
           path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock', 'native/nsis-plugin/Cargo.lock') }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
       - run: pnpm install --frozen-lockfile
       - name: Prepare the verified native runtime and pinned development model
         run: |

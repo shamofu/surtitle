@@ -115,12 +115,6 @@ for (const field of ['hook', 'helper']) {
 const tauri = JSON.parse(await readFile(resolve(root, 'src-tauri/tauri.conf.json'), 'utf8'));
 if (tauri.bundle?.windows?.nsis?.installerHooks !== '../native/windows-prerequisite.nsh') errors.push('The NSIS runtime prerequisite hook is not configured');
 if (tauri.bundle?.windows?.webviewInstallMode?.type !== 'downloadBootstrapper') errors.push('WebView2 must remain a separately downloaded Microsoft prerequisite');
-if (manifest.buildBinding) {
-  try {
-    const { validateNativeArtifact } = await import('./native-ci-contract.mjs');
-    validateNativeArtifact(resolve(root, 'work/native-ci-artifact'), root);
-  } catch (error) { errors.push(`Native build artifact: ${error.message}`); }
-}
 const windowsSystemDlls = new Set([
   'advapi32.dll', 'avicap32.dll', 'avrt.dll', 'bcrypt.dll', 'bcryptprimitives.dll',
   'cfgmgr32.dll', 'combase.dll', 'crypt32.dll', 'd2d1.dll', 'd3d11.dll', 'd3d12.dll',

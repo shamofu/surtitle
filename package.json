@@ -28,7 +28,6 @@
     "build:native:e2e": "cargo build -p surtitle --features e2e-test,custom-protocol --locked",
     "build:fixtures": "cargo build -p surtitle-core --example seed_fixture --locked",
     "seed:fixtures": "cargo run -p surtitle-core --example seed_fixture --locked --",
-    "build:nsis-plugin": "pwsh -NoProfile -File scripts/nsis-plugin-build.ps1",
     "package:app": "tauri build --bundles nsis -- --locked",
     "setup:rust-tools": "cargo install tauri-driver --version 2.0.6 --locked && cargo install cargo-deny --version 0.20.2 --locked",
     "setup:driver": "cargo install tauri-driver --version 2.0.6 --locked --root work/driver",

@@ -1,128 +1,92 @@
 # Rebuilding from the published source ZIP
 
-The source ZIP intentionally has no `.git` directory. Its effective native
-manifest describes the binaries in that release. The steps below build a new
-local candidate with newly recorded output hashes. Release publication follows
-the workflow's Linux, Windows and package jobs and their source/installer checks.
+The source ZIP contains the application and its locked dependency sources,
+including native and installer source archives. It has no `.git` directory;
+Git metadata is not needed to build a local candidate. The included native
+manifest refers to the source files shipped in that ZIP.
 
-Use Linux with Docker and an x86_64 Windows development environment with Rust
-1.98.0, MSVC/Windows SDK, Node 24, pnpm 12.4.2 and PowerShell 7. Install Rust before
-running pnpm; its commands use Cargo as their internal build backend. Building the Docker
-image acquires the compiler packages from Ubuntu; the subsequent native build
-uses the source archives supplied in the ZIP. No host dependency/build directory
-or named volume is mounted into the native builder.
+Use Linux with Docker Buildx for native dependencies and Windows x64 with
+MSVC/Windows SDK, PowerShell 7, Python, the Rust toolchain in `package.json` and
+Node from `.node-version` for the application. Install Rust before running pnpm.
+The normal preparation commands acquire pinned upstream inputs and require
+network access on their first run. A fully offline first build is not automated.
 
-## Build libmpv from the supplied archives
+## Native dependencies
 
-From the extracted ZIP's root in Linux, run these commands. The fixed container
-name and output directory must not already exist.
+From a fresh extracted source directory, inspect the supplied source files and
+build the native artifact:
 
 ```sh
-docker build -f native/build/Dockerfile -t surtitle-source-builder .
-docker create --name surtitle-source-rebuild surtitle-source-builder sleep infinity
-docker start surtitle-source-rebuild
-docker inspect --format '{{json .Mounts}}' surtitle-source-rebuild
-# The preceding result must be []. Stop if it is not.
-docker cp native-sources/libmpv/correspondingSource-libmpv-source.tar.gz surtitle-source-rebuild:/source-kit.tar.gz
-docker exec surtitle-source-rebuild mkdir -p /source-kit /build/source-cache
-docker exec surtitle-source-rebuild tar -xzf /source-kit.tar.gz -C /source-kit
-docker exec surtitle-source-rebuild cp -r /source-kit/archives/. /build/source-cache/
-docker exec surtitle-source-rebuild python3 /workspace/scripts/native-source-inputs.py /workspace /build/sources /build/source-cache
-docker network disconnect bridge surtitle-source-rebuild
-docker exec surtitle-source-rebuild bash /workspace/scripts/native-build.sh /workspace /build
-docker exec surtitle-source-rebuild python3 /workspace/scripts/native-build-evidence.py /workspace /build /out/native-build
-mkdir -p work/source-rebuild/runtime
-docker cp surtitle-source-rebuild:/out/native-build/runtime/mpv-2.dll work/source-rebuild/runtime/mpv-2.dll
-docker cp surtitle-source-rebuild:/out/native-build/libmpv-candidate-source.tar.gz work/source-rebuild/libmpv-candidate-source.tar.gz
-docker cp surtitle-source-rebuild:/out/native-build/build-evidence.json work/source-rebuild/build-evidence.json
-docker rm --force surtitle-source-rebuild
+node scripts/native-ci-artifact.mjs verify-source .
+bash scripts/native-ci-build.sh
 ```
 
-Only the final DLL, corresponding-source archive and evidence are exported.
-Compiler packages, downloaded archives and intermediate build trees remain in
-the removed container. Compiler versions and PE timestamps can change the DLL
-hash; the resulting hash is recorded rather than compared with the old release.
+The build exports six files into a fresh `work/native-ci-artifact/` directory:
+`mpv-2.dll`, `libmpv-source.tar.gz`, `onnxruntime-source.tar.gz`,
+`libmpv-build-evidence.json`, `onnxruntime-source-inventory.json` and
+`SHA256SUMS.txt`. Docker caches complete native stages by their source and recipe
+inputs. The wrapper also accepts Buildx options, such as `--no-cache`.
 
-## Prepare the local manifest and application
+The libmpv recipe compiles the pinned source archives. Compiler packages and
+intermediate build trees remain inside Docker. Compiler versions and PE
+timestamps may change a rebuilt DLL's hash; consumption records that new hash.
+The ORT package retains the corresponding source and dependency reconstruction
+for the pinned official CPU binary; this command does not compile a replacement
+ORT runtime.
 
-Use a separate extracted working copy for this local candidate. On Windows,
-restore the effective manifest's source references to the files actually shipped
-in the ZIP, then replace only libmpv's build-derived fields:
+To inspect or adapt the supplied sources, start with the corresponding archives
+under `native-sources/libmpv/` and `native-sources/onnxruntime/`. The libmpv archive
+includes its source archives and build recipes. The ORT archive includes its
+upstream tree, dependency inputs and comparison recipes. Independently compiling
+ORT requires new runtime hashes, source evidence and application validation.
+
+## Windows application
+
+Use the same extracted working copy on Windows, including the six exported
+native files, then run:
 
 ```powershell
-$manifest = Get-Content native/runtime-windows-x64.json -Raw | ConvertFrom-Json
-function Sha256($path) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() }
-foreach ($component in $manifest.components) {
-    foreach ($field in @('correspondingSource','dependencyInventory','reviewEvidence')) {
-        $files = @(Get-ChildItem -LiteralPath ("native-sources/" + $component.id) -Filter ($field + '-*') -File)
-        if ($files.Count -ne 1) { throw "Missing or ambiguous source evidence: $($component.id)/$field" }
-        $component.redistribution.$field.path = "native-sources/$($component.id)/$($files[0].Name)"
-        $component.redistribution.$field.sha256 = Sha256 $files[0].FullName
-    }
-}
-$mpv = $manifest.components | Where-Object id -EQ 'libmpv'
-$mpv.version = '0.41.0-local-source-rebuild'
-$mpv.localRuntimePath = 'work/source-rebuild/runtime'
-$mpv.runtimeFiles[0].sha256 = Sha256 'work/source-rebuild/runtime/mpv-2.dll'
-$mpv.redistribution.correspondingSource.path = 'work/source-rebuild/libmpv-candidate-source.tar.gz'
-$mpv.redistribution.correspondingSource.sha256 = Sha256 $mpv.redistribution.correspondingSource.path
-$mpv.redistribution.dependencyInventory.path = 'work/source-rebuild/build-evidence.json'
-$mpv.redistribution.dependencyInventory.sha256 = Sha256 $mpv.redistribution.dependencyInventory.path
-$mpv.redistribution.status = 'pending'
-$mpv.redistribution.reason = 'Locally rebuilt candidate; repeat native/Windows/installer checks before redistribution.'
-$manifest.PSObject.Properties.Remove('buildBinding')
-$manifest | ConvertTo-Json -Depth 50 | Set-Content native/runtime-windows-x64.json -Encoding utf8NoBOM
-pwsh scripts/native-prepare.ps1
-pwsh scripts/native-smoke.ps1
+node scripts/native-ci-artifact.mjs consume work/native-ci-artifact
 pnpm install --frozen-lockfile
+pwsh -File scripts/native-prepare.ps1
+pwsh -File scripts/native-smoke.ps1
 pnpm tauri dev
 ```
 
-`native-prepare.ps1` downloads the fixed official ORT CPU binary identified by
-the manifest. The ZIP also supplies ORT's complete source, exact dependency
-archives/ports and comparison recipes in
-`native-sources/onnxruntime/correspondingSource-onnxruntime-source.tar.gz`. Its
-included README describes the source/header reconstruction. To rebuild ORT
-itself, start with that archive's complete upstream ORT tree and its `build.py`
-and CMake instructions; an independently built ORT DLL requires new native
-hashes, import checks and VAD/application tests.
+Consumption verifies the export and updates the local manifest's DLL and source
+paths/hashes. Preparation stages native DLLs and notices and downloads the pinned
+official ORT archive. The smoke check loads the selected DLLs and initializes
+mpv/ORT. Native and Windows application checks must be repeated for a changed
+runtime before redistribution; see [native runtime](../docs/native-runtime.md).
 
-The top-level `vendor/` and `vendor-config.toml` contain the application's locked
-Rust dependency sources. The archive also includes a ready-to-use
-`.cargo/config.toml` with the same portable source replacement, so Rust can
-resolve the supplied sources offline immediately after extraction. Normal
-`pnpm install --frozen-lockfile` acquires both JavaScript and Rust dependencies
-and replaces the marked source configuration. Copy `vendor-config.toml` over
-`.cargo/config.toml` when returning to the supplied vendor sources; do not append
-it. The relative vendor path remains usable when this copy is moved, and the
-markers let later pnpm installs replace it without duplicate TOML tables.
-`javascript-packages/` retains the exact JavaScript dependency sources;
-the lockfile controls normal pnpm dependency acquisition. The source ZIP also
-includes the exact Rust standard-library source and notices in
-`native-installer-sources/rust-runtime-source.tar.gz`.
+The top-level `vendor/` and `.cargo/config.toml` provide the locked Rust dependency
+sources and portable source replacement. Save the supplied configuration if you
+want to return to those sources after normal `pnpm install --frozen-lockfile`,
+which acquires JavaScript and Rust dependencies and replaces the marked source
+configuration. Restore that saved `.cargo/config.toml` in place; do not append it.
+`javascript-packages/` retains the exact JavaScript dependency sources.
 
-## Rebuild the installer utility and NSIS package
+## Standard Tauri installer
 
-The NSIS utility has its own lockfile and repository-local i686 sysroot recipe:
+From a fresh working copy with native resources prepared:
 
 ```powershell
-pnpm build:nsis-plugin
-pwsh scripts/native-installer-prepare.ps1
+python scripts/native-installer-prepare.py
 pnpm package:app
-pwsh scripts/native-installer-audit.ps1 -Installer (Get-ChildItem target/release/bundle/nsis/*.exe).FullName
+# Only on a fresh CI runner or disposable Windows profile:
+pwsh -File scripts/package-verify.ps1
 ```
 
-The utility recipe reacquires pinned compiler/source inputs and uses a separate
-pnpm workspace to acquire its locked crates without changing the upstream tree;
-`native-installer-sources/nsis-plugin-source.tar.gz` includes its original source,
-complete vendor tree, lockfile and recipes for offline crate rebuilding. The
-exact NSIS 3.11 source archive is supplied alongside it. The official NSIS tools
-remain a build prerequisite. No Microsoft runtime is bundled; the app uses the
-separately installed runtime described in [native-runtime.md](../docs/native-runtime.md).
+Preparation collects source archives and installer notices. Tauri obtains and
+caches its standard NSIS tools and official `nsis_tauri_utils.dll` during the
+build. `native-installer-sources/` in the published ZIP retains NSIS source,
+the official plugin's source and locked source crates, and the application's
+Rust runtime source. The app uses Tauri's standard installer
+template and its VC Runtime prerequisite hook. Microsoft runtime installation
+remains a separate prerequisite; see the [native guide](../docs/native-runtime.md#microsoft-prerequisites).
 
-The local rebuild remains ineligible for the project's automated release until
-its source/notice review, fresh Windows tests and isolated installer lifecycle
-are complete. Keep the fixed upstream dependency checksums from the source
-catalog and reviews. Source/artifact audits operate on the supplied files; an
-extracted ZIP needs no Git metadata, Actions run identity or generated review
-ledger to build and inspect a local candidate.
+Package verification extracts the installer once, checks the payload, and uses
+that same installer for fresh install, installed-app smoke, overwrite, uninstall
+and learning-data retention checks. A local build does not establish completion
+of those checks or hosted CI. Publication additionally requires the workflow's
+Linux, Windows and package jobs plus source and asset verification.

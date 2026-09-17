@@ -133,7 +133,7 @@
       "checkBeforeAppLaunch": true,
       "hookPath": "native/windows-prerequisite.nsh",
       "helperPath": "native/vc-prerequisite.ps1",
-      "hookSha256": "431816b28151c3a7db3f93b6551b95426bf21d8da92c2ea1e4bddd1cee34a323",
+      "hookSha256": "bfc380b9fccc82e618f51d21a3455735262ab44b5622f73fd58325b0363ec244",
       "helperSha256": "f86bb2eecdc069a535f019c1a125d09a7b5de1240d426bde117875bd649ddab8"
     }
   ]

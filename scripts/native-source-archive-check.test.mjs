@@ -153,7 +153,7 @@ function ortFixture(t) {
   const f = fixture(t);
   const entries = [member('sources/onnxruntime-fixed.tar.gz', 'original ORT source'),
     member('ports/abseil/fix.patch', 'reviewed patch'), member('notices/onnxruntime-LICENSE', 'retained MIT license'),
-    member('scripts/native-ort-package.py', 'script from requested Git commit'),
+    member('scripts/native-ort-package.py', 'source packaging recipe'),
     member('evidence/generated-run.json', '{"observed":true}')];
   const inventory = { schemaVersion: 1, componentId: 'onnxruntime', binarySha256: hash('fixed DLL'),
     files: expected(entries).map(({ path, ...rest }) => ({ file: path, ...rest })) };
@@ -181,14 +181,7 @@ test('rejects resealed ORT patch changes even when both claimed inventories are 
   const f = ortFixture(t);
   const changed = f.entries.map(entry => entry.path.startsWith('ports/') ? member(entry.path, 'changed patch') : entry);
   const inventory = { ...f.inventory, files: expected(changed).map(({ path, ...rest }) => ({ file: path, ...rest })) };
-  rejected(f.run(f.pack(changed, inventory), { ...f.document, inventory }), /differs from Git\/review expectations/);
-}, testBudget(1));
-
-test('rejects stale ORT build scripts against the requested Git commit even with matching inventory claims', t => {
-  const f = ortFixture(t);
-  const document = structuredClone(f.document);
-  document.files.find(entry => entry.path.startsWith('scripts/')).sha256 = hash('new script at requested commit');
-  rejected(f.run(f.pack(), document), /differs from Git\/review expectations: scripts\//);
+  rejected(f.run(f.pack(changed, inventory), { ...f.document, inventory }), /differs from reviewed expectations/);
 }, testBudget(1));
 
 test('rejects missing ORT licenses, unlisted patches and altered dynamic evidence bytes', t => {

@@ -23,44 +23,32 @@ def record(name, path, method):
     if matched:
         item['result'] = 'exact-reconstructed-installed-header'
 
-# Abseil installs options-pinned.h after resolving standard-library ABI choices.
-original = (sources['abseil'] / 'absl/base/options.h').read_text()
-for standard in [14, 17, 20]:
-    pinned = original
-    enabled = ['ANY', 'OPTIONAL', 'STRING_VIEW', 'VARIANT'] if standard >= 17 else []
-    if standard == 20:
-        enabled += ['ORDERING']
-    for feature in enabled:
-        pinned = pinned.replace(f'#define ABSL_OPTION_USE_STD_{feature} 2', f'#define ABSL_OPTION_USE_STD_{feature} 1')
-    pinned = re.sub(r'#define ABSL_OPTION_USE_STD_([^ ]*) 2', r'#define ABSL_OPTION_USE_STD_\1 0', pinned)
-    path = out / f'abseil-cxx{standard}-options.h'
-    path.write_text(pinned)
-    record('absl\\base\\options.h', path, f'Abseil CMakeLists.txt ABI pinning for C++{standard}')
-    crlf_path = out / f'abseil-cxx{standard}-options-crlf.h'
-    crlf_path.write_bytes(pinned.replace('\n', '\r\n').encode())
-    record('absl\\base\\options.h', crlf_path, f'Abseil CMakeLists.txt ABI pinning for C++{standard}, Windows CRLF output')
+# The reviewed official build uses C++20 with Windows checkout line endings.
+pinned = (sources['abseil'] / 'absl/base/options.h').read_text()
+for feature in ['ANY', 'OPTIONAL', 'STRING_VIEW', 'VARIANT', 'ORDERING']:
+    pinned = pinned.replace(f'#define ABSL_OPTION_USE_STD_{feature} 2', f'#define ABSL_OPTION_USE_STD_{feature} 1')
+pinned = re.sub(r'#define ABSL_OPTION_USE_STD_([^ ]*) 2', r'#define ABSL_OPTION_USE_STD_\1 0', pinned)
+path = out / 'abseil-cxx20-options-crlf.h'
+path.write_bytes(pinned.replace('\n', '\r\n').encode())
+record('absl\\base\\options.h', path, 'Abseil C++20 ABI pinning, Windows CRLF output')
 
 record('wil\\Resource.h', sources['wil'] / 'include/wil/resource.h', 'Windows case-insensitive filename lookup; bytes unchanged')
 protoc = root / 'protoc-build/protoc'
 version = subprocess.check_output([str(protoc), '--version'], text=True).strip()
 if version != 'libprotoc 3.21.12':
     raise SystemExit('Unexpected protobuf compiler version')
-# The ONNX port uses ONNX_ML=ON. Retain both explicit upstream lite settings;
-# only an exact official-PDB match counts as reconstructed evidence.
-for lite in [True, False]:
-    destination = out / ('onnx-lite' if lite else 'onnx-full')
-    (destination / 'onnx').mkdir(parents=True, exist_ok=True)
-    for stem in ['onnx', 'onnx-operators', 'onnx-data']:
-        command = [sys.executable, str(sources['onnx'] / 'onnx/gen_proto.py'), '-p', 'onnx',
-                   '-o', str(destination / 'onnx'), stem, '-m']
-        if lite:
-            command += ['-l']
-        subprocess.run(command, cwd=sources['onnx'], check=True, stdout=subprocess.DEVNULL)
-    for proto in sorted((destination / 'onnx').glob('*.proto')):
-        subprocess.run([str(protoc), str(proto), '-I', str(destination), '--cpp_out', str(destination)], check=True)
-    for stem in ['onnx-ml', 'onnx-operators-ml', 'onnx-data']:
-        record('onnx\\' + stem + '.pb.h', destination / 'onnx' / (stem + '.pb.h'),
-               f'ONNX gen_proto.py namespace onnx, ML enabled, lite={lite}; {version}')
+# The matching ONNX build enables ML and protobuf lite.
+destination = out / 'onnx-lite'
+(destination / 'onnx').mkdir(parents=True, exist_ok=True)
+for stem in ['onnx', 'onnx-operators', 'onnx-data']:
+    command = [sys.executable, str(sources['onnx'] / 'onnx/gen_proto.py'), '-p', 'onnx',
+               '-o', str(destination / 'onnx'), stem, '-m', '-l']
+    subprocess.run(command, cwd=sources['onnx'], check=True, stdout=subprocess.DEVNULL)
+for proto in sorted((destination / 'onnx').glob('*.proto')):
+    subprocess.run([str(protoc), str(proto), '-I', str(destination), '--cpp_out', str(destination)], check=True)
+for stem in ['onnx-ml', 'onnx-operators-ml', 'onnx-data']:
+    record('onnx\\' + stem + '.pb.h', destination / 'onnx' / (stem + '.pb.h'),
+           f'ONNX gen_proto.py namespace onnx, ML enabled, lite=True; {version}')
 
 report['counts'] = {kind: sum(i['result'] == kind for i in report['comparisons']) for kind in
                     ['exact-bytes', 'exact-after-checkout-crlf', 'exact-reconstructed-installed-header', 'mismatch', 'missing-or-generated']}

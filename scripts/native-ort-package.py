@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
 import sys
 import tarfile
 from pathlib import Path
@@ -13,8 +14,12 @@ workspace, root, destination = map(Path, sys.argv[1:4])
 destination.mkdir(parents=True, exist_ok=True)
 inputs = json.loads((root / 'source-inputs.json').read_text())
 comparison = json.loads((root / 'source-comparison-final.json').read_text())
+reviewed = json.loads((workspace / 'native/reviews/onnxruntime-dependencies.json').read_text())
 if not inputs['complete'] or comparison['counts']['mismatch'] or comparison['counts']['missing-or-generated']:
     raise SystemExit('Incomplete input or checksum evidence')
+if (comparison['binarySha256'] != reviewed['binarySha256'] or comparison['pdbSha256'] != reviewed['pdbSha256']
+        or sum(comparison['counts'].values()) != reviewed['observedChecksumRecords']):
+    raise SystemExit('ORT qualification differs from the reviewed binary and checksum inventory')
 
 def sha(path):
     with path.open('rb') as stream:
@@ -71,8 +76,15 @@ for name in ['source-inputs.json', 'source-comparison-final.json', 'protoc-build
 for path in sorted((workspace / 'native/upstream-evidence').glob('onnxruntime-*')):
     if path.is_file():
         selected[path] = 'evidence/' + path.name
-for name in ['native-ort-evidence.py', 'native-ort-source-inputs.py', 'native-ort-compare.py', 'native-ort-generated.py', 'native-ort-package.py']:
+for name in ['native-ort-evidence.py', 'native-ort-source-inputs.py', 'native-ort-compare.py', 'native-ort-generated.py', 'native-ort-package.py', 'native-source-archive-check.py']:
     selected[workspace / 'scripts' / name] = 'scripts/' + name
+selected[workspace / 'native/reviews/onnxruntime-dependencies.json'] = 'evidence/reviewed-dependencies.json'
+
+stable = lambda name: name.startswith(('sources/', 'ports/', 'notices/'))
+expected_files = {item['file']: item['sha256'] for item in reviewed['files'] if stable(item['file'])}
+observed_files = {name: sha(path) for path, name in selected.items() if stable(name)}
+if observed_files != expected_files or inventory != reviewed['components']:
+    raise SystemExit('ORT sources, patches or component notices differ from the review')
 
 readme = destination / 'README.md'
 readme.write_text('''# ONNX Runtime candidate source and notice package
@@ -132,6 +144,10 @@ with package.open('wb') as stream, gzip.GzipFile(filename='', mode='wb', fileobj
             info.mode = 0o644
             with path.open('rb') as file:
                 archive.addfile(info, file)
+subprocess.run([sys.executable, str(workspace / 'scripts/native-source-archive-check.py'), str(package)],
+               input=json.dumps({'schemaVersion': 1, 'kind': 'onnxruntime', 'inventory': manifest,
+                                 'files': [{'path': name, 'sha256': checksum} for name, checksum in expected_files.items()]}),
+               text=True, check=True)
 result = {'file': package.name, 'sha256': sha(package), 'bytes': package.stat().st_size,
           'inventorySha256': sha(manifest_path), 'releaseEligible': False}
 (destination / 'package-result.json').write_text(json.dumps(result, indent=2) + '\n')

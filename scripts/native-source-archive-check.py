@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Verify native source tar contents against caller-supplied Git/review evidence.
+"""Verify generated native source tar contents against reviewed source inputs.
 
 Usage: python native-source-archive-check.py ARCHIVE.tar.gz < expectations.json
-The caller must authenticate the outer archive and obtain expectations from the
-requested Git commit, not derive approval from the archive being checked.
+Run during dependency generation, before exporting the source archive.
 Nothing is extracted, downloaded, or written. Only regular tar members emitted
 by the native package generators are supported; extended headers fail closed.
 """
@@ -109,7 +108,7 @@ def expectations(document):
             require(path in listed, 'Inventory omits required source: ' + path)
             require(listed[path]['sha256'] == expected['sha256']
                     and (expected['bytes'] is None or listed[path]['bytes'] == expected['bytes']),
-                    'Inventory differs from Git/review expectations: ' + path)
+                    'Inventory differs from reviewed expectations: ' + path)
         required = listed
     else:
         require(inventory is None, 'Unexpected libmpv inventory')

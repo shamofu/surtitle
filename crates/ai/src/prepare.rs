@@ -746,7 +746,14 @@ mod tests {
         };
         #[cfg(not(windows))]
         let peak_bytes = 0_u64;
-        let report = serde_json::json!({"source_duration_ms":21_600_000,"wall_seconds":began.elapsed().as_secs_f64(),"peak_working_set_bytes":peak_bytes,"memory_scope":"Rust acceptance process only; external FFmpeg excluded","chunk_count":receipt.chunks.len(),"core_samples":345_600_000_u64,"sent_samples_including_context":crate::total_request_samples(&receipt.chunks).unwrap(),"retained_bytes":bytes,"temporary_pcm_removed":true,"receipt_path":receipt.directory.join("receipt.json"),"cloud_calls":0});
+        let wall_seconds = began.elapsed().as_secs_f64();
+        let sent_samples = crate::total_request_samples(&receipt.chunks).unwrap();
+        assert!(wall_seconds > 0.0 && wall_seconds <= 360.0);
+        assert!(sent_samples >= 345_600_000);
+        assert!(bytes > 0);
+        #[cfg(windows)]
+        assert!(peak_bytes > 0);
+        let report = serde_json::json!({"source_duration_ms":21_600_000,"wall_seconds":wall_seconds,"peak_working_set_bytes":peak_bytes,"memory_scope":"Rust acceptance process only; external FFmpeg excluded","chunk_count":receipt.chunks.len(),"core_samples":345_600_000_u64,"sent_samples_including_context":sent_samples,"retained_bytes":bytes,"temporary_pcm_removed":true,"receipt_path":receipt.directory.join("receipt.json"),"cloud_calls":0});
         std::fs::write(
             output.join("report.json"),
             serde_json::to_vec_pretty(&report).unwrap(),

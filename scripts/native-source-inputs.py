@@ -28,6 +28,8 @@ for source in manifest['sources']:
         partial.rename(archive)
     if len(expected) != 64 or hashlib.file_digest(archive.open('rb'), 'sha256').hexdigest() != expected:
         raise SystemExit(f"Source checksum mismatch: {source['id']}")
+    if '--download-only' in sys.argv:
+        continue
     target = destination / source['id'] if 'parent' not in source else destination / source['parent'] / source['destination']
     if not target.resolve().is_relative_to(destination):
         raise SystemExit('Source destination escapes the build directory')

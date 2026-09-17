@@ -1,8 +1,6 @@
 !include "LogicLib.nsh"
 !include "x64.nsh"
 !define SURTITLE_VC_HELPER "${__FILEDIR__}\vc-prerequisite.ps1"
-!define SURTITLE_PLUGIN_DIR "${__FILEDIR__}\..\work\native-installer-tools\plugin"
-!define SURTITLE_NATIVE_DIR "${__FILEDIR__}"
 
 ; Explicit Windows language IDs work before Tauri expands MUI_LANGUAGE.
 LangString SurtitleVcConsent 1033 "Surtitle requires Microsoft Visual C++ x64 Runtime 14.44.35211 or newer.$\r$\n$\r$\nDownload it directly from Microsoft, verify its signature, and open Microsoft's installer now? Microsoft will ask you to accept its terms and may request administrator permission. No automatic restart will occur.$\r$\n$\r$\nIf offline, install the prerequisite separately and run Setup again."

@@ -56,7 +56,7 @@ export function assertContainer(inspections, expectedSource) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
   assertDefinition(JSON.parse(readFileSync(resolve(root, '.devcontainer/devcontainer.json'), 'utf8').replace(/^\uFEFF/, '')),
-    ['.devcontainer/Dockerfile', 'native/build/Dockerfile'].map(file => readFileSync(resolve(root, file), 'utf8')),
+    [readFileSync(resolve(root, '.devcontainer/Dockerfile'), 'utf8')],
     readFileSync(resolve(root, '.dockerignore'), 'utf8'));
   const inspectFile = process.argv[2];
   if (inspectFile) assertContainer(JSON.parse(readFileSync(inspectFile, 'utf8').replace(/^\uFEFF/, '')));

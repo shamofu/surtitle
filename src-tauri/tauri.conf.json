@@ -45,14 +45,12 @@
           "English"
         ],
         "displayLanguageSelector": true,
-        "installerHooks": "../native/windows-prerequisite.nsh",
-        "template": "../native/installer.nsi"
+        "installerHooks": "../native/windows-prerequisite.nsh"
       },
       "webviewInstallMode": {
         "type": "downloadBootstrapper",
         "silent": false
       }
-    },
-    "useLocalToolsDir": true
+    }
   }
 }

@@ -1,6 +1,6 @@
 # Development container
 
-Use Ubuntu 24.04, Node 24.21.0 LTS from `.node-version` and Rust 1.98.0 for React, shared Rust and real Tauri Linux E2E tests. Windows libmpv rendering, DPAPI and NSIS require separate Windows verification.
+This optional local environment uses Ubuntu 24.04, Node 24.21.0 LTS from `.node-version` and Rust 1.98.0 for React, shared Rust and real Tauri Linux E2E tests. CI runs those checks directly on its Ubuntu host. Windows libmpv rendering, DPAPI and NSIS require separate Windows verification.
 
 The repository is a read/write bind mount at `/workspaces/surtitle`. Source, `.git` and lockfile edits are immediately visible on the host. Do not add host credentials, SSH agents, Docker sockets or GUI sockets to this container.
 
@@ -36,7 +36,7 @@ has no shared host GUI socket, so plain `pnpm tauri dev` has no display to open.
 Use the native E2E suite for headless interaction; visible Windows playback
 development remains on the Windows host.
 
-The full check sequence is `.devcontainer/verify.sh`. The launcher announces build, startup, account alignment and isolation checks. Verification streams stdout and stderr live, with UTC timestamps identifying each major step, while retaining the same output in `/opt/surtitle-build/verification.log`. A failed command or log write still fails verification. Isolation evidence is written to both temporary `artifacts/container-isolation.json` and writable-layer `/opt/surtitle-build/evidence/container-isolation.json`. To follow the log from another terminal, use `docker exec surtitle-dev tail -f /opt/surtitle-build/verification.log`. The helper never automatically copies dependency trees, executables or build outputs to the host. CI separately exports only selected JSON reports, the verification log and native E2E screenshots for artifact retention.
+The full check sequence is `.devcontainer/verify.sh`. The launcher announces build, startup, account alignment and isolation checks. Verification streams stdout and stderr live, with UTC timestamps identifying each major step, while retaining the same output in `/opt/surtitle-build/verification.log`. A failed command or log write still fails verification. Isolation evidence is written to both temporary `artifacts/container-isolation.json` and writable-layer `/opt/surtitle-build/evidence/container-isolation.json`. To follow the log from another terminal, use `docker exec surtitle-dev tail -f /opt/surtitle-build/verification.log`. The helper never automatically copies dependency trees, executables or build outputs to the host. Export any logs or screenshots you need before removing the container.
 
 The image installs the pnpm version declared by `package.json` and runs `pnpm setup:rust-tools` from a temporary copy of that manifest before the source workspace is mounted. Rustup and npm provision the initial Rust and pnpm executables. Verification uses `pnpm install --frozen-lockfile` for JavaScript and Rust dependencies, retaining both lockfiles. Generated `.pnpm` crate sources and `.cargo` source configuration stay in the temporary masks. The pinned `cargo-deny` audit tool is cached in the image; an older image installs that version through `pnpm rust install` only when it is absent.
 
@@ -44,7 +44,7 @@ During headless E2E, `AT-SPI ... org.a11y.Bus` reports that the optional accessi
 
 Check the final spec results and process exit code. WebDriver command errors need separate investigation: an interaction error may recover after WebdriverIO waits for the element, but an expected application rejection must assert the actual application error. Capture that rejection inside the webview and serialize it explicitly so a driver transport error cannot accidentally satisfy the test.
 
-`pnpm test` runs both the Vitest UI and Node script projects. Select `pnpm test:ui` or `pnpm test:scripts` for focused checks; `pnpm test:watch` watches both. CI builds this image with Buildx and a dedicated GitHub Actions layer cache, then uses the same `start` and `verify` commands above. The native toolchain image has a separate cache scope. These image caches do not persist runtime pnpm/Cargo stores or build directories, and do not add container mounts.
+`pnpm test` runs both the Vitest UI and Node script projects. Select `pnpm test:ui` or `pnpm test:scripts` for focused checks; `pnpm test:watch` watches both. CI does not build or launch this development container. Its separate [native dependency build](../docs/native-runtime.md) uses Docker layers to cache completed native outputs; that build has its own inputs and is outside this container's mount checks.
 
 Every full verification allocates a fresh `work/e2e-linux.XXXXXXXX` profile with
 `mktemp`. The SQLite seeder and Tauri E2E process use that same directory, so
@@ -59,20 +59,12 @@ Create the container with the helper, then use VS Code **Dev Containers: Attach 
 
 **Reopen in Container** can inject client-managed mounts such as a `/vscode` volume or GUI sockets. The repository configuration cannot guarantee that every client disables its own additional mounts, so that path does not share the verified helper's guarantee. The kernel mount check in `initialize.sh` rejects unexpected mounts before installing project dependencies. To satisfy the no-named-volume requirement, use explicit creation followed by attachment to that existing container. [Dev Container configuration specification](https://github.com/devcontainers/spec/blob/main/docs/specs/devcontainerjson-reference.md)
 
-Tmpfs requires `exec` for esbuild and native Node modules; `nosuid,nodev` remain enabled and privileged containers are rejected. Since source is intentionally shared, this configuration does not prevent arbitrary programs from writing to other unmasked source paths. Add any new tool's output location to the masks and contract tests before using it.
+Tmpfs requires `exec` for esbuild and native Node modules; `nosuid,nodev` remain enabled and privileged containers are rejected. Since source is intentionally shared, this configuration does not prevent arbitrary programs from writing to other unmasked source paths. Add any new tool's output location to the masks and mount checks before using it.
 
 ## Local verification record
 
-On 2026-09-09, the shared-source helper completed the full sequence against a
-fresh disposable profile: 66 UI tests, 89 Node contract tests including the
-separate workflow check, Rust workspace all-feature tests, formatting, Clippy,
-Rust/JavaScript license checks, and all five real Linux Tauri E2E spec files
-(16 passing cases; eight Windows-only cases skipped). Before/after probes
-confirmed bidirectional source sharing, all ten temporary output masks, zero
-host probe-output writes and zero named volumes. Selected logs and JSON reports
-were explicitly exported to `artifacts/devcontainer/final-20260909-0639/`;
-dependency and build trees remained inside the container. The subsequent
-fresh-profile allocation change was checked separately with two distinct paths
-under the same work mask; the full application suite was not repeated for that
-harness-only change. This record does not certify a VS Code editor launch or
+The 2026-09-09 local run exported selected evidence to
+`artifacts/devcontainer/final-20260909-0639/`. Its results and limits are recorded
+in [verification history](../docs/verification-history.md#development-container).
+It does not establish the result of today's CI or certify editor attachment and
 Windows rendering.

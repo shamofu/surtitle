@@ -3,12 +3,12 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { validateReleaseForPublish } from './release-contract.mjs';
+import { validateRelease } from './release-contract.mjs';
 export function publishRelease({ directory = 'artifacts/release', version = JSON.parse(readFileSync('package.json')).version,
   env = process.env, run = spawnSync } = {}) {
   const repo = env.GITHUB_REPOSITORY;
   if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || env.GITHUB_REF !== 'refs/heads/release' || env.GITHUB_EVENT_NAME !== 'push') throw new Error('Only a release branch push can publish.');
-  const files = validateReleaseForPublish(directory, version);
+  const files = validateRelease(directory, version);
   const target = env.GITHUB_SHA || 'release';
   const tag = `v${version}`;
   function gh(args, input) {
