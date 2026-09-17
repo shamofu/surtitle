@@ -21,6 +21,8 @@ jobs:
           context: .
           file: native/build/Dockerfile
           target: export
+          # Export only dependency files; local attestations add provenance.json.
+          provenance: false
           outputs: type=local,dest=work/native-ci-artifact
           cache-from: type=gha,scope=native-dependencies-linux-amd64-v2
           cache-to: type=gha,scope=native-dependencies-linux-amd64-v2,mode=max

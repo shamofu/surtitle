@@ -9,6 +9,6 @@ secrets=()
 if [[ -n ${SURTITLE_NATIVE_GITHUB_TOKEN:-} ]]; then
   secrets=(--secret id=github_token,env=SURTITLE_NATIVE_GITHUB_TOKEN)
 fi
-docker buildx build --file native/build/Dockerfile --target export \
+docker buildx build --file native/build/Dockerfile --target export --provenance=false \
   --output "type=local,dest=$destination" "${secrets[@]}" "$@" .
 node scripts/native-ci-artifact.mjs verify "$destination"
