@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Current corresponding-source inputs for the official ONNX Runtime release selected in native/runtime-windows-x64.json. Upstream evidence and reviews are historical snapshots, not version definitions.",
+  "sources": {
+    "onnxruntime": {
+      "repository": "microsoft/onnxruntime",
+      "commit": "2e2543fbe9fae542f921d47a72d21d5a4ef0b710",
+      "sha256": "00a7483d894037b23e5f2a7d9b18c4026e3585e2636b316cd2870b6e1bc660cb"
+    },
+    "vcpkg": {
+      "repository": "microsoft/vcpkg",
+      "commit": "18a4723aeb7adbbae84bcff0edf510883800f32f",
+      "sha256": "a0414f2f0b75673b7e7872e392e3f0598c9c5d117348d4ca3fcec8562f6b6c38"
+    }
+  },
+  "historicalPorts": {
+    "flatbuffers": {
+      "version": "23.5.26",
+      "portVersion": 0
+    }
+  }
+}

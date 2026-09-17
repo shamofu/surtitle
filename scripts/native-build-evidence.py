@@ -8,9 +8,10 @@ import subprocess
 import sys
 import tarfile
 from pathlib import Path
+from native_source_manifest import read_sources
 
 workspace, build_root, output = map(Path, sys.argv[1:4])
-sources = json.loads((workspace / 'native/build/sources.json').read_text())
+sources = read_sources(workspace)
 reviewed = json.loads((workspace / 'native/reviews/libmpv-dependencies.json').read_text())
 if {item['id']: item['sha256'] for item in sources['sources']} != {item['id']: item['sha256'] for item in reviewed['sources']}:
     raise SystemExit('Native sources differ from the reviewed catalog')
@@ -24,7 +25,7 @@ def digest(path):
 
 recipe_paths = ['native/build/Dockerfile', 'native/build/sources.json', 'native/build/cross-win64.ini',
                 'native/build/toolchain-win64.cmake', 'scripts/native-build.sh',
-                'scripts/native-source-inputs.py', 'scripts/native-build-evidence.py',
+                'scripts/native-source-inputs.py', 'scripts/native_source_manifest.py', 'scripts/native-build-evidence.py',
                 'scripts/native-source-archive-check.py', 'native/reviews/libmpv-dependencies.json']
 bundle_inputs = [(workspace / path, 'recipe/' + path) for path in recipe_paths]
 inventory = []

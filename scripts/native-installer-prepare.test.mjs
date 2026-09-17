@@ -26,10 +26,15 @@ with tempfile.TemporaryDirectory() as temp:
       'rust':{'sourceArchive':item('rust.tar.xz'),'notices':[{'file':'LICENSE-MIT','sha256':digest(b'rust notice')}]},
       'notices':[{'file':'NSIS.txt','sha256':digest(b'NSIS notice')}]}
     (root/'native/installer-inputs.json').write_text(json.dumps(inputs))
+    runtime={'prerequisites':[{'id':'microsoft-vc-runtime-x64','minimumVersion':'14.44.35211.0','downloadUrl':'https://example.invalid/vc.exe'}]}
+    (root/'native/runtime-windows-x64.json').write_text(json.dumps(runtime))
     requests=[]
     def response(request,timeout): requests.append(request.full_url); return io.BytesIO(payloads[pathlib.PurePosixPath(request.full_url).name])
     with patch.object(m.urllib.request,'urlopen',response): m.prepare(root,toolchain)
     assert len(requests)==4
+    generated=(root/'work/installer-prerequisite.nsh').read_text()
+    assert '!define SURTITLE_VC_MINIMUM_VERSION "14.44.35211"' in generated
+    assert '!define SURTITLE_VC_DOWNLOAD_URL "https://example.invalid/vc.exe"' in generated
     assert (notices/'NSIS.txt').read_bytes()==b'NSIS notice'
     with patch.object(m.urllib.request,'urlopen',response): m.prepare(root,toolchain)
     assert len(requests)==4, 'A retry must reuse verified downloads'
@@ -46,6 +51,17 @@ with tempfile.TemporaryDirectory() as temp:
         except ValueError: pass
         else: raise AssertionError('unverified download accepted')
     assert not missing.exists()
+    runtime['prerequisites'][0].update(minimumVersion='14.99.12345.1',downloadUrl='https://example.invalid/new-vc.exe')
+    (root/'native/runtime-windows-x64.json').write_text(json.dumps(runtime))
+    m.prepare_prerequisite(root)
+    generated=(root/'work/installer-prerequisite.nsh').read_text()
+    assert '14.99.12345.1' in generated and 'https://example.invalid/new-vc.exe' in generated
+    assert '14.44.35211' not in generated
+    runtime['prerequisites'][0]['downloadUrl']='https://example.invalid/$injected'
+    (root/'native/runtime-windows-x64.json').write_text(json.dumps(runtime))
+    try: m.prepare_prerequisite(root)
+    except ValueError: pass
+    else: raise AssertionError('NSIS interpolation in the prerequisite URL accepted')
 `], { cwd: new URL('..', import.meta.url), encoding: 'utf8', windowsHide: true, timeout: 15_000 });
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stdout + result.stderr);

@@ -1,17 +1,29 @@
 [CmdletBinding()]
-param([switch]$CheckOnly, [switch]$InstallWithConsent)
+param([switch]$CheckOnly, [switch]$InstallWithConsent,
+    [string]$ManifestPath = "$PSScriptRoot\runtime-windows-x64.json")
 $ErrorActionPreference = 'Stop'
 # NSIS can inherit PowerShell 7's module paths before starting Windows PowerShell.
 # This checker uses only inbox cmdlets; resolve them against its own host version.
 $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
 
-$minimum = [Version]'14.44.35211.0'
-$downloadUrl = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
 if (-not [Environment]::Is64BitOperatingSystem -or -not [Environment]::Is64BitProcess) {
     Write-Output 'The x64 Windows prerequisite checker must run in 64-bit Windows PowerShell.'
     exit 12
 }
 if ($CheckOnly -eq $InstallWithConsent) { Write-Output 'Choose check-only or explicitly consented installation.'; exit 12 }
+try {
+    $manifest = Get-Content -LiteralPath $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $prerequisites = @($manifest.prerequisites | Where-Object id -eq 'microsoft-vc-runtime-x64')
+    if ($prerequisites.Count -ne 1) { throw 'Expected one Microsoft x64 runtime prerequisite.' }
+    $prerequisite = $prerequisites[0]
+    $minimum = [Version]$prerequisite.minimumVersion
+    $minimumDisplay = if ($minimum.Revision -eq 0) { $minimum.ToString(3) } else { $minimum.ToString() }
+    $downloadUrl = [string]$prerequisite.downloadUrl
+    if ($downloadUrl -notmatch '^https://' -or $prerequisite.requiredSystemFiles.Count -eq 0) { throw 'Invalid runtime prerequisite input.' }
+} catch {
+    Write-Output ('The Microsoft runtime prerequisite input could not be read: ' + $_.Exception.Message)
+    exit 12
+}
 
 function Test-MicrosoftSignature([string]$path) {
     $signature = Get-AuthenticodeSignature -LiteralPath $path
@@ -28,7 +40,7 @@ function Test-Prerequisite {
             if ($version -lt $minimum) { return $false }
         } finally { $key.Dispose() }
     } finally { $base.Dispose() }
-    foreach ($name in @('msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')) {
+    foreach ($name in $prerequisite.requiredSystemFiles) {
         $path = Join-Path ([Environment]::GetFolderPath('System')) $name
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
         $info = [Diagnostics.FileVersionInfo]::GetVersionInfo($path)
@@ -40,7 +52,7 @@ function Test-Prerequisite {
 
 try {
     if (Test-Prerequisite) { Write-Output 'Microsoft x64 VC Runtime prerequisite is installed and verified.'; exit 0 }
-    if ($CheckOnly) { Write-Output 'Install Microsoft Visual C++ x64 Runtime 14.44.35211 or newer before starting Surtitle.'; exit 10 }
+    if ($CheckOnly) { Write-Output ('Install Microsoft Visual C++ x64 Runtime ' + $minimumDisplay + ' or newer before starting Surtitle.'); exit 10 }
     # NSIS obtains explicit consent before passing this switch. The Microsoft
     # installer remains interactive so its own terms and UAC prompt are visible.
     $temporary = Join-Path ([IO.Path]::GetTempPath()) ('surtitle-vc-' + [Guid]::NewGuid().ToString('N'))
@@ -65,6 +77,6 @@ try {
         if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
     }
 } catch {
-    Write-Output ('VC prerequisite could not be verified or installed: ' + $_.Exception.Message + ' Install it directly from https://aka.ms/vs/17/release/vc_redist.x64.exe and retry. Offline setup requires the prerequisite to be installed already.')
+    Write-Output ('VC prerequisite could not be verified or installed: ' + $_.Exception.Message + ' Install it directly from ' + $downloadUrl + ' and retry. Offline setup requires the prerequisite to be installed already.')
     exit 11
 }

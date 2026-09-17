@@ -1,12 +1,14 @@
 !include "LogicLib.nsh"
 !include "x64.nsh"
 !define SURTITLE_VC_HELPER "${__FILEDIR__}\vc-prerequisite.ps1"
+!define SURTITLE_RUNTIME_MANIFEST "${__FILEDIR__}\runtime-windows-x64.json"
+!include "${__FILEDIR__}\..\work\installer-prerequisite.nsh"
 
 ; Explicit Windows language IDs work before Tauri expands MUI_LANGUAGE.
-LangString SurtitleVcConsent 1033 "Surtitle requires Microsoft Visual C++ x64 Runtime 14.44.35211 or newer.$\r$\n$\r$\nDownload it directly from Microsoft, verify its signature, and open Microsoft's installer now? Microsoft will ask you to accept its terms and may request administrator permission. No automatic restart will occur.$\r$\n$\r$\nIf offline, install the prerequisite separately and run Setup again."
-LangString SurtitleVcConsent 1041 "Surtitleには Microsoft Visual C++ x64 Runtime 14.44.35211 以降が必要です。$\r$\n$\r$\nMicrosoftから直接ダウンロードし、署名を確認してMicrosoftのインストーラーを開きますか？ 利用規約への同意と管理者権限の確認が表示されます。自動では再起動しません。$\r$\n$\r$\nオフラインの場合は別途ランタイムを導入してから、セットアップを再実行してください。"
-LangString SurtitleVcUnavailable 1033 "Microsoft runtime prerequisite is unavailable. Install the x64 runtime from https://aka.ms/vs/17/release/vc_redist.x64.exe and retry. Silent setup never installs this system prerequisite. Offline setup requires it to be installed already."
-LangString SurtitleVcUnavailable 1041 "Microsoftランタイムを確認できません。https://aka.ms/vs/17/release/vc_redist.x64.exe からx64版を導入して再試行してください。サイレントセットアップではランタイムを導入しません。オフラインの場合は導入済みである必要があります。"
+LangString SurtitleVcConsent 1033 "Surtitle requires Microsoft Visual C++ x64 Runtime ${SURTITLE_VC_MINIMUM_VERSION} or newer.$\r$\n$\r$\nDownload it directly from Microsoft, verify its signature, and open Microsoft's installer now? Microsoft will ask you to accept its terms and may request administrator permission. No automatic restart will occur.$\r$\n$\r$\nIf offline, install the prerequisite separately and run Setup again."
+LangString SurtitleVcConsent 1041 "Surtitleには Microsoft Visual C++ x64 Runtime ${SURTITLE_VC_MINIMUM_VERSION} 以降が必要です。$\r$\n$\r$\nMicrosoftから直接ダウンロードし、署名を確認してMicrosoftのインストーラーを開きますか？ 利用規約への同意と管理者権限の確認が表示されます。自動では再起動しません。$\r$\n$\r$\nオフラインの場合は別途ランタイムを導入してから、セットアップを再実行してください。"
+LangString SurtitleVcUnavailable 1033 "Microsoft runtime prerequisite is unavailable. Install the x64 runtime from ${SURTITLE_VC_DOWNLOAD_URL} and retry. Silent setup never installs this system prerequisite. Offline setup requires it to be installed already."
+LangString SurtitleVcUnavailable 1041 "Microsoftランタイムを確認できません。${SURTITLE_VC_DOWNLOAD_URL} からx64版を導入して再試行してください。サイレントセットアップではランタイムを導入しません。オフラインの場合は導入済みである必要があります。"
 LangString SurtitleVcCancelled 1033 "Microsoft runtime installation was not approved. Setup has stopped."
 LangString SurtitleVcCancelled 1041 "Microsoftランタイムの導入が承認されなかったため、セットアップを停止しました。"
 LangString SurtitleVcFailure 1033 "Microsoft runtime installation or verification did not finish. If Microsoft requested a restart, restart Windows and run Setup again. Otherwise, install the x64 runtime separately and retry.$\r$\n$\r$\nDetails:"
@@ -15,6 +17,7 @@ LangString SurtitleVcFailure 1041 "Microsoftランタイムの導入または確
 !macro NSIS_HOOK_PREINSTALL
   InitPluginsDir
   File /oname=$PLUGINSDIR\surtitle-vc-prerequisite.ps1 "${SURTITLE_VC_HELPER}"
+  File /oname=$PLUGINSDIR\runtime-windows-x64.json "${SURTITLE_RUNTIME_MANIFEST}"
   StrCpy $R9 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
   IfFileExists "$R9" +2 0
   StrCpy $R9 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"

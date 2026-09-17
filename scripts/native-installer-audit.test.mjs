@@ -25,6 +25,7 @@ function fixture(t) {
   put('extracted/uninstall.exe', 'uninstaller');
   put('extracted/$PLUGINSDIR/nsis_tauri_utils.dll', 'plugin');
   put('extracted/$PLUGINSDIR/surtitle-vc-prerequisite.ps1', 'helper');
+  put('extracted/$PLUGINSDIR/runtime-windows-x64.json', readFileSync(join(root, 'native/runtime-windows-x64.json')));
   return { root, put, audit: () => auditInstaller(join(root, 'installer.exe'), join(root, 'extracted'), root) };
 }
 
@@ -38,7 +39,8 @@ test('records the extracted executable and verifies standard plugin, native DLLs
 
 test('rejects missing or changed DLLs/notices and an altered standard utility', t => {
   const f = fixture(t);
-  for (const file of ['native/mpv-2.dll', 'notices/installer/NSIS.txt', '$PLUGINSDIR/nsis_tauri_utils.dll']) {
+  for (const file of ['native/mpv-2.dll', 'notices/installer/NSIS.txt', '$PLUGINSDIR/nsis_tauri_utils.dll',
+    '$PLUGINSDIR/surtitle-vc-prerequisite.ps1', '$PLUGINSDIR/runtime-windows-x64.json']) {
     const path = join(f.root, 'extracted', file), original = readFileSync(path);
     rmSync(path); assert.throws(f.audit);
     writeFileSync(path, 'changed'); assert.throws(f.audit);

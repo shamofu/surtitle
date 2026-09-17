@@ -35,11 +35,16 @@ $receipts = @()
 foreach ($component in $manifest.components) {
     Write-Host "Preparing $($component.id) $($component.version) for development."
     if ($component.format -eq 'source-build') {
+        $sources = Get-Content -LiteralPath (Join-Path $repoRoot 'native/build/sources.json') -Raw | ConvertFrom-Json
+        $inputSource = @($sources.sources | Where-Object id -eq $component.sourceId)
+        if ($inputSource.Count -ne 1) { throw 'Source-built runtime must identify one pinned source input.' }
+        $sourcePage = "https://github.com/$($inputSource[0].repo)/tree/$($inputSource[0].commit)"
         $staging = Resolve-RepoPath $component.localRuntimePath
         $sourceBundle = Resolve-RepoPath $component.redistribution.correspondingSource.path
         if (-not (Test-Path -LiteralPath $sourceBundle)) { throw 'The reviewed source-built runtime and source bundle are missing. Acquire the native-build CI artifact or build the recorded native recipe; an upstream substitute is not permitted.' }
         Assert-Hash $sourceBundle $component.redistribution.correspondingSource.sha256
     } else {
+        $sourcePage = $component.sourcePage
         if ($component.format -ne 'zip') { throw "Unsupported native archive format: $($component.format)" }
         $archive = Join-Path $cache $component.archiveFile
         Get-Verified $component.archiveUrl $archive $component.archiveSha256
@@ -57,7 +62,7 @@ foreach ($component in $manifest.components) {
             Copy-Item -LiteralPath $source -Destination $target -Force
         }
         Assert-Hash $target $file.sha256
-        $receipts += @{component=$component.id;file=$file.target;sha256=$file.sha256;source=$component.sourcePage}
+        $receipts += @{component=$component.id;file=$file.target;sha256=$file.sha256;source=$sourcePage}
     }
     foreach ($notice in $component.noticeFiles) {
         $source = Resolve-RepoPath $notice.path

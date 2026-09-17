@@ -42,6 +42,10 @@ AliasesToExport = @()
   writeFileSync(join(shadow, 'Microsoft.PowerShell.Security.psm1'), "throw 'The incompatible shadow Security module must not execute'\n");
   const unsigned = join(directory, 'unsigned.ps1');
   writeFileSync(unsigned, '# An unsigned local signature fixture; never executed.\n');
+  const manifestPath = join(directory, 'runtime-windows-x64.json');
+  const prerequisite = { id: 'microsoft-vc-runtime-x64', minimumVersion: '14.99.12345.1',
+    downloadUrl: 'https://example.invalid/new-vc.exe', requiredSystemFiles: ['vcruntime_future.dll'] };
+  writeFileSync(manifestPath, JSON.stringify({ prerequisites: [prerequisite] }));
   const inheritedModules = shadowRoot + ';' + builtinModules;
   // Vitest also exports uppercase environment keys on Windows. Remove either
   // spelling so Node cannot choose the inherited value ahead of our fixture.
@@ -64,7 +68,7 @@ if ($env:SURTITLE_VC_INITIALIZE -eq '1') {
     # Execute the actual parameter/initialization/guard prefix, not a test copy.
     # Test-Prerequisite and the installer/download/registry body are never loaded.
     $source = [IO.File]::ReadAllText($env:SURTITLE_VC_HELPER)
-    . ([ScriptBlock]::Create($source.Substring(0, $functions[0].Extent.StartOffset))) -CheckOnly
+    . ([ScriptBlock]::Create($source.Substring(0, $functions[0].Extent.StartOffset))) -CheckOnly -ManifestPath $env:SURTITLE_VC_MANIFEST
 }
 . ([ScriptBlock]::Create($signatureFunctions[0].Extent.Text))
 $signatureVerified = $false
@@ -76,6 +80,7 @@ try {
 } catch { $errorId = $_.FullyQualifiedErrorId }
 $security = Get-Module -Name Microsoft.PowerShell.Security
 @{ signatureVerified=$signatureVerified; unsignedRejected=$unsignedRejected; errorId=$errorId;
+   minimumVersion=[string]$minimum; minimumDisplay=$minimumDisplay; downloadUrl=$downloadUrl; requiredSystemFiles=$prerequisite.requiredSystemFiles;
    modulePath=$env:PSModulePath; securityModulePath=$security.Path } | ConvertTo-Json -Compress
 `;
   const invoke = initialize => {
@@ -83,6 +88,7 @@ $security = Get-Module -Name Microsoft.PowerShell.Security
       encoding: 'utf8', windowsHide: true, timeout: 15_000,
       env: { ...environment, PSModulePath: inheritedModules, SURTITLE_VC_SHADOW_ROOT: shadowRoot,
         SURTITLE_VC_HELPER: fileURLToPath(new URL('../native/vc-prerequisite.ps1', import.meta.url)),
+        SURTITLE_VC_MANIFEST: manifestPath,
         SURTITLE_VC_INITIALIZE: initialize ? '1' : '0', SURTITLE_VC_SIGNED: powershell, SURTITLE_VC_UNSIGNED: unsigned },
     });
     assert.ifError(result.error);
@@ -98,6 +104,10 @@ $security = Get-Module -Name Microsoft.PowerShell.Security
   assert.equal(initialized.errorId, null);
   assert.equal(initialized.signatureVerified, true, 'The actual helper must verify a Microsoft-signed executable');
   assert.equal(initialized.unsignedRejected, true, 'An unsigned file must still fail signature verification');
+  assert.equal(initialized.minimumVersion, prerequisite.minimumVersion);
+  assert.equal(initialized.minimumDisplay, prerequisite.minimumVersion);
+  assert.equal(initialized.downloadUrl, prerequisite.downloadUrl);
+  assert.deepEqual(initialized.requiredSystemFiles, prerequisite.requiredSystemFiles);
   assert.equal(realpathSync.native(initialized.modulePath), realpathSync.native(builtinModules));
   assert.equal(realpathSync.native(initialized.securityModulePath),
     realpathSync.native(join(builtinModules, 'Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1')));

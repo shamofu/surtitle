@@ -4,6 +4,8 @@ The Windows x64 payload contains source-built `mpv-2.dll` and the official CPU O
 
 ## Build and prepare native inputs
 
+For input ownership and representative version changes, see [updating native dependencies](native-dependencies.md).
+
 The libmpv recipe builds mpv, FFmpeg libraries, dav1d and the selected rendering/subtitle dependencies. FFmpeg programs, network protocols, Vulkan and OpenGL are disabled; Windows D3D11/WASAPI and CPU AV1 decoding remain available. ORT uses the pinned official CPU release; its source package retains upstream archives, patches, notices and the observed PDB/source comparison. See [source rebuild instructions](../native/SOURCE-REBUILD.md) and `native/reviews/` for dependency details.
 
 ```sh

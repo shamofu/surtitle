@@ -12,6 +12,10 @@ import uuid
 from pathlib import Path
 
 dll, pdb, listing, destination = map(Path, sys.argv[1:5])
+workspace = Path(__file__).resolve().parent.parent
+definition = json.loads((workspace / 'native/build/onnxruntime-sources.json').read_text())
+runtime = json.loads((workspace / 'native/runtime-windows-x64.json').read_text())
+component = next(item for item in runtime['components'] if item['id'] == 'onnxruntime')
 def sha(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -78,8 +82,8 @@ for digest, name in file_records:
         compiled_sources[name] = digest.lower()
 source_roots = sorted(set(re.findall(r'([^\s`]+\.clean)', text)))
 report = {
-    'schemaVersion': 1, 'componentId': 'onnxruntime', 'version': '1.29.0',
-    'sourceCommit': '2e2543fbe9fae542f921d47a72d21d5a4ef0b710',
+    'schemaVersion': 1, 'componentId': 'onnxruntime', 'version': component['version'],
+    'sourceCommit': definition['sources']['onnxruntime']['commit'],
     'binarySha256': sha(dll), 'pdbSha256': sha(pdb),
     'codeViewGuid': pdb_identity[0], 'pdbAge': pdb_identity[1], 'dllPdbIdentityMatches': True,
     'moduleListing': {'sha256': sha(listing), 'producer': 'llvm-pdbutil-18 dump -modules -files'},
@@ -87,7 +91,7 @@ report = {
     'observedSourceRoots': source_roots,
     'vcpkgHeaderChecksums': headers,
     'compiledSourceChecksums': compiled_sources,
-    'vcpkgBaseline': '18a4723aeb7adbbae84bcff0edf510883800f32f',
+    'vcpkgBaseline': definition['sources']['vcpkg']['commit'],
     'releaseEligible': False,
     'remainingChecks': ['Collect matching vcpkg archives and overlay patches',
                         'Reconcile each compiled/header-only component with redistribution notices',

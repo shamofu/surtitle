@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verify and unpack the exact native source closure without implicit downloads."""
 import hashlib
-import json
+from native_source_manifest import read_sources
 from pathlib import Path
 import tarfile
 import sys
@@ -11,7 +11,7 @@ workspace = Path(sys.argv[1]).resolve()
 destination = Path(sys.argv[2]).resolve()
 archive_root = Path(sys.argv[3]).resolve() if len(sys.argv) > 3 else destination.parent / 'source-cache'
 archive_root.mkdir(parents=True, exist_ok=True)
-manifest = json.loads((workspace / 'native/build/sources.json').read_text(encoding='utf-8-sig'))
+manifest = read_sources(workspace)
 destination.mkdir(parents=True, exist_ok=True)
 for source in manifest['sources']:
     archive = archive_root / source['file']

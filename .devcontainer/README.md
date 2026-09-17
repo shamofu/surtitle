@@ -1,6 +1,6 @@
 # Development container
 
-This optional local environment uses Ubuntu 24.04, Node 24.21.0 LTS from `.node-version` and Rust 1.98.0 for React, shared Rust and real Tauri Linux E2E tests. CI runs those checks directly on its Ubuntu host. Windows libmpv rendering, DPAPI and NSIS require separate Windows verification.
+This optional local environment uses Ubuntu 24.04, Node from `.node-version` and Rust from `native/installer-inputs.json` for React, shared Rust and real Tauri Linux E2E tests. CI reads the same pins and runs those checks directly on its Ubuntu host. Windows libmpv rendering, DPAPI and NSIS require separate Windows verification.
 
 The repository is a read/write bind mount at `/workspaces/surtitle`. Source, `.git` and lockfile edits are immediately visible on the host. Do not add host credentials, SSH agents, Docker sockets or GUI sockets to this container.
 

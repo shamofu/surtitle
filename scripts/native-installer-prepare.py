@@ -2,6 +2,7 @@
 """Prepare the source archives and notices shipped with the standard Tauri installer."""
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import tarfile
@@ -34,7 +35,26 @@ def download(item, directory):
     return checked(path, item['sha256'])
 
 
+def prepare_prerequisite(workspace):
+    manifest = json.loads((workspace / 'native/runtime-windows-x64.json').read_text(encoding='utf-8'))
+    prerequisite, = [item for item in manifest['prerequisites'] if item['id'] == 'microsoft-vc-runtime-x64']
+    version, url = prerequisite['minimumVersion'], prerequisite['downloadUrl']
+    if not re.fullmatch(r'\d+\.\d+\.\d+\.\d+', version):
+        raise ValueError('Invalid Microsoft runtime minimum version')
+    if not url.startswith('https://') or any(character in url for character in '\r\n"$'):
+        raise ValueError('Invalid Microsoft runtime download URL')
+    # NSIS language strings need compile-time constants. The helper reads the
+    # original manifest embedded by the hook; nothing generated is committed.
+    output = workspace / 'work/installer-prerequisite.nsh'
+    output.parent.mkdir(parents=True, exist_ok=True)
+    display_version = version.removesuffix('.0')
+    output.write_text('; Generated from native/runtime-windows-x64.json.\n'
+                      f'!define SURTITLE_VC_MINIMUM_VERSION "{display_version}"\n'
+                      f'!define SURTITLE_VC_DOWNLOAD_URL "{url}"\n', encoding='utf-8')
+
+
 def prepare(workspace, toolchain, acquire=download):
+    prepare_prerequisite(workspace)
     inputs = json.loads((workspace / 'native/installer-inputs.json').read_text(encoding='utf-8'))
     downloads = workspace / 'work/native-installer-downloads'
     output = workspace / 'work/installer-sources'

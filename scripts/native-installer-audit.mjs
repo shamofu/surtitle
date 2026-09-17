@@ -84,6 +84,7 @@ export function auditInstaller(installer, directory, root = workspace) {
   assert(JSON.stringify(actual) === JSON.stringify(expected), 'Installer DLLs or notices differ from the prepared files');
   checked(directory, '$PLUGINSDIR/' + inputs.plugin.binary.file, inputs.plugin.binary.sha256);
   checked(directory, '$PLUGINSDIR/surtitle-vc-prerequisite.ps1', hash(join(root, 'native/vc-prerequisite.ps1')));
+  checked(directory, '$PLUGINSDIR/runtime-windows-x64.json', hash(join(root, 'native/runtime-windows-x64.json')));
   assert(!existsSync(join(directory, '$PLUGINSDIR/surtitle_nsis_utils.dll')), 'Unexpected custom installer utility');
   const application = regular(directory, 'surtitle.exe');
   assert(lstatSync(application).size > 0, 'Installer application is empty');

@@ -58,11 +58,9 @@ def main(workspace, root):
     root.mkdir(parents=True, exist_ok=True)
     cache = root / 'archives'
     cache.mkdir(exist_ok=True)
-    fixed = [
-        ('microsoft/onnxruntime', '2e2543fbe9fae542f921d47a72d21d5a4ef0b710', 'onnxruntime', '00a7483d894037b23e5f2a7d9b18c4026e3585e2636b316cd2870b6e1bc660cb'),
-        ('microsoft/vcpkg', '18a4723aeb7adbbae84bcff0edf510883800f32f', 'vcpkg', 'a0414f2f0b75673b7e7872e392e3f0598c9c5d117348d4ca3fcec8562f6b6c38'),
-    ]
-    for repository, commit, name, expected in fixed:
+    definition = json.loads((workspace / 'native/build/onnxruntime-sources.json').read_text())
+    for name, item in definition['sources'].items():
+        repository, commit, expected = item['repository'], item['commit'], item['sha256']
         archive = cache / f'{name}-{commit}.tar.gz'
         if not archive.exists():
             temporary = archive.with_suffix('.partial')
@@ -72,10 +70,8 @@ def main(workspace, root):
             temporary.rename(archive)
         if digest(archive) != expected:
             raise ValueError('Changed source archive: ' + name)
-    baseline = '18a4723aeb7adbbae84bcff0edf510883800f32f'
+    baseline = definition['sources']['vcpkg']['commit']
     baseline_archive = cache / ('vcpkg-' + baseline + '.tar.gz')
-    if digest(baseline_archive) != 'a0414f2f0b75673b7e7872e392e3f0598c9c5d117348d4ca3fcec8562f6b6c38':
-        raise SystemExit('Changed vcpkg baseline archive')
     with tarfile.open(baseline_archive) as archive:
         archive.extractall(root / 'registry', filter='data')
     registry = root / 'registry' / ('vcpkg-' + baseline)
@@ -96,9 +92,11 @@ def main(workspace, root):
         if (overlays / package).is_dir():
             shutil.copytree(overlays / package, port, dirs_exist_ok=True)
             origin = 'onnxruntime-overlay'
-        elif package == 'flatbuffers':
-            versions = json.loads((registry / 'versions/f-/flatbuffers.json').read_text())['versions']
-            selected = next(item for item in versions if '23.5.26' in item.values() and item.get('port-version', 0) == 0)
+        elif package in definition['historicalPorts']:
+            wanted = definition['historicalPorts'][package]
+            versions = json.loads((registry / 'versions' / (package[0] + '-') / (package + '.json')).read_text())['versions']
+            selected = next(item for item in versions if wanted['version'] in item.values()
+                            and item.get('port-version', 0) == wanted['portVersion'])
             tree_id = selected['git-tree']
             tree = json.loads(request('https://api.github.com/repos/microsoft/vcpkg/git/trees/' + tree_id))
             port.mkdir(exist_ok=True)

@@ -9,6 +9,7 @@ from pathlib import Path
 
 root = Path(sys.argv[1]).resolve()
 report = json.loads((root / 'source-comparison.json').read_text())
+inputs = json.loads((root / 'source-inputs.json').read_text())
 sources = {p.name: next(p.iterdir()) for p in (root / 'comparison-sources').iterdir()}
 out = root / 'generated-header-evidence'
 out.mkdir(exist_ok=True)
@@ -35,7 +36,8 @@ record('absl\\base\\options.h', path, 'Abseil C++20 ABI pinning, Windows CRLF ou
 record('wil\\Resource.h', sources['wil'] / 'include/wil/resource.h', 'Windows case-insensitive filename lookup; bytes unchanged')
 protoc = root / 'protoc-build/protoc'
 version = subprocess.check_output([str(protoc), '--version'], text=True).strip()
-if version != 'libprotoc 3.21.12':
+protobuf_version = next(item['version'] for item in inputs['sources'] if item['id'] == 'protobuf')
+if version != 'libprotoc ' + protobuf_version:
     raise SystemExit('Unexpected protobuf compiler version')
 # The matching ONNX build enables ML and protobuf lite.
 destination = out / 'onnx-lite'

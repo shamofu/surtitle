@@ -68,6 +68,7 @@
 /scripts/native-prepare.ps1 -text
 /scripts/native-smoke.ps1 -text
 /scripts/native-source-inputs.py -text
+/scripts/native_source_manifest.py -text
 /scripts/package-installer-smoke.ps1 -text
 /scripts/package-production-smoke.mjs -text
 /scripts/package-production-smoke.test.mjs -text

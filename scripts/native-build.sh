@@ -71,11 +71,12 @@ cmake_build spirv-cross -DSPIRV_CROSS_CLI=OFF -DSPIRV_CROSS_ENABLE_TESTS=OFF \
   -DSPIRV_CROSS_ENABLE_REFLECT=OFF
 # mpv probes this pkg-config name for its C API. Provide the same C API from
 # exact static archives, with no DLL auto-export of compiler/pthread symbols.
+spirv_cross_version=$(python3 -c 'import json,sys; print(next(s["pkgConfigVersion"] for s in json.load(open(sys.argv[1]))["sources"] if s["id"] == "spirv-cross"))' "$workspace/native/build/sources.json")
 cat > "$prefix/lib/pkgconfig/spirv-cross-c-shared.pc" <<EOF
 prefix=$prefix
 Name: spirv-cross-c-shared
 Description: SPIRV-Cross C API, statically linked by the Surtitle build recipe
-Version: 0.68.0
+Version: $spirv_cross_version
 Libs: -L$prefix/lib -lspirv-cross-c -lspirv-cross-hlsl -lspirv-cross-glsl -lspirv-cross-core -lstdc++
 Cflags: -I$prefix/include/spirv_cross
 EOF

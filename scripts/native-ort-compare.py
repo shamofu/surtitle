@@ -29,7 +29,10 @@ for item in inputs['sources']:
     children = list(destination.iterdir())
     if len(children) != 1 or not children[0].is_dir():
         raise SystemExit('Expected one archive root')
-    source = children[0]
+    # Keep build paths independent of the archive's versioned root directory.
+    source = destination / 'source'
+    if children[0] != source:
+        children[0].rename(source)
     sources[item['id']] = source
     recipe = (root / 'ports' / item['id'] / 'portfile.cmake').read_text()
     match = re.search(r'\bPATCHES\s+([\s\S]*?)\)', recipe)

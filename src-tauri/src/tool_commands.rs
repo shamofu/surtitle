@@ -461,10 +461,7 @@ pub fn statuses(state: &Services) -> Result<Vec<ToolStatus>> {
         status: if state
             .root
             .join("models")
-            .join(format!(
-                "silero-v6.2-{}.onnx",
-                surtitle_ai::SILERO_MODEL_SHA256
-            ))
+            .join(surtitle_ai::SILERO_MODEL_FILENAME)
             .is_file()
         {
             "ready"
@@ -472,7 +469,7 @@ pub fn statuses(state: &Services) -> Result<Vec<ToolStatus>> {
             "missing"
         }
         .into(),
-        version: Some("6.2".into()),
+        version: Some(surtitle_ai::SILERO_MODEL_VERSION.into()),
         path: None,
         error: None,
         can_rollback: false,

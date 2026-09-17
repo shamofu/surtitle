@@ -6,7 +6,7 @@ Git metadata is not needed to build a local candidate. The included native
 manifest refers to the source files shipped in that ZIP.
 
 Use Linux with Docker Buildx for native dependencies and Windows x64 with
-MSVC/Windows SDK, PowerShell 7, Python, the Rust toolchain in `package.json` and
+MSVC/Windows SDK, PowerShell 7, Python, the Rust toolchain in `native/installer-inputs.json` and
 Node from `.node-version` for the application. Install Rust before running pnpm.
 The normal preparation commands acquire pinned upstream inputs and require
 network access on their first run. A fully offline first build is not automated.

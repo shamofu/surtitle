@@ -101,10 +101,11 @@ for (const component of manifest.components) {
 // Windows platform DLLs and explicit separately installed prerequisites have
 // different evidence paths. A prerequisite is never a bundled or verified DLL.
 const vcPrerequisite = manifest.prerequisites?.find(item => item.id === 'microsoft-vc-runtime-x64');
-const vcNames = ['msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'];
+const vcNames = Array.isArray(vcPrerequisite?.requiredSystemFiles) ? vcPrerequisite.requiredSystemFiles : [];
 if (!vcPrerequisite || vcPrerequisite.bundled !== false || vcPrerequisite.checkBeforeAppLaunch !== true ||
-    vcPrerequisite.minimumVersion !== '14.44.35211.0' ||
-    !Array.isArray(vcPrerequisite.requiredSystemFiles) || JSON.stringify([...vcPrerequisite.requiredSystemFiles].sort()) !== JSON.stringify([...vcNames].sort())) {
+    !/^\d+\.\d+\.\d+\.\d+$/.test(vcPrerequisite.minimumVersion ?? '') ||
+    !vcPrerequisite.downloadUrl?.startsWith('https://') || !vcNames.length ||
+    vcNames.some(name => !/^(msvcp|vcruntime)[a-z0-9_.-]*\.dll$/.test(name)) || new Set(vcNames).size !== vcNames.length) {
   errors.push('Missing or invalid separately installed Microsoft VC prerequisite contract');
 }
 if (vcNames.some(name => expectedDlls.has(name))) errors.push('Microsoft VC runtime DLLs must not be bundled with the GPL application');

@@ -22,16 +22,15 @@ use std::{
 };
 use surtitle_tools::{ToolKind, ToolSnapshot};
 
-pub const SILERO_MODEL_URL: &str = "https://raw.githubusercontent.com/snakers4/silero-vad/be95df9152c0d7618fa1edfeb296fc3dae32376f/src/silero_vad/data/silero_vad.onnx";
-pub const SILERO_MODEL_SHA256: &str =
-    "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3";
+// Generated from the same manifest used to fetch the native test fixtures.
+include!(concat!(env!("OUT_DIR"), "/silero_model.rs"));
 
 /// Explicit first-use installation; downloads a pinned public model, never media.
 /// The native app chooses model_directory. No executable/runtime is downloaded here.
 pub async fn install_silero_model(model_directory: &Path) -> Result<PathBuf> {
     std::fs::create_dir_all(model_directory)?;
     let directory = model_directory.canonicalize()?;
-    let path = directory.join(format!("silero-v6.2-{SILERO_MODEL_SHA256}.onnx"));
+    let path = directory.join(SILERO_MODEL_FILENAME);
     if path.exists() && hash_file(&path)? == SILERO_MODEL_SHA256 {
         return Ok(path);
     }

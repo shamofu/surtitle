@@ -32,9 +32,13 @@ jobs:
           path: work/native-ci-artifact/
       - name: Prepare this run's native artifact
         run: node scripts/native-ci-artifact.mjs consume work/native-ci-artifact
+      - name: Read the native Rust toolchain pin
+        id: rust
+        shell: bash
+        run: echo "version=$(node -p 'require("./native/installer-inputs.json").rust.version')" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.98.0
+          toolchain: ${{ steps.rust.outputs.version }}
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           key: windows-2025-native-acceptance-optimized-v1

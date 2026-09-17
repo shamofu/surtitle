@@ -27,9 +27,13 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
+      - name: Read the native Rust toolchain pin
+        id: rust
+        shell: bash
+        run: echo "version=$(node -p 'require("./native/installer-inputs.json").rust.version')" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.98.0
+          toolchain: ${{ steps.rust.outputs.version }}
           components: rustfmt, clippy
       - name: Install the package manager declared by this checkout
         id: pnpm
@@ -101,9 +105,13 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
+      - name: Read the native Rust toolchain pin
+        id: rust
+        shell: bash
+        run: echo "version=$(node -p 'require("./native/installer-inputs.json").rust.version')" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.98.0
+          toolchain: ${{ steps.rust.outputs.version }}
           components: rustfmt, clippy
       - name: Install the package manager declared by this checkout
         id: pnpm
@@ -202,9 +210,13 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
+      - name: Read the native Rust toolchain pin
+        id: rust
+        shell: bash
+        run: echo "version=$(node -p 'require("./native/installer-inputs.json").rust.version')" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.98.0
+          toolchain: ${{ steps.rust.outputs.version }}
       - name: Install the package manager declared by this checkout
         id: pnpm
         run: |

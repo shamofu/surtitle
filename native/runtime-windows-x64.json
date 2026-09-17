@@ -7,8 +7,6 @@
       "id": "libmpv",
       "version": "0.41.0-surtitle-source-20260909",
       "provider": "Surtitle source build in isolated Linux container (MinGW x64)",
-      "sourcePage": "https://github.com/mpv-player/mpv/tree/41f6a645068483470267271e1d09966ca3b9f413",
-      "upstreamSourceCommit": "41f6a645068483470267271e1d09966ca3b9f413",
       "archiveUrl": null,
       "archiveFile": null,
       "archiveSha256": null,
@@ -46,7 +44,8 @@
         }
       },
       "format": "source-build",
-      "localRuntimePath": "work/native-candidate-av1-20260909/runtime"
+      "localRuntimePath": "work/native-candidate-av1-20260909/runtime",
+      "sourceId": "mpv"
     },
     {
       "id": "onnxruntime",
@@ -133,8 +132,8 @@
       "checkBeforeAppLaunch": true,
       "hookPath": "native/windows-prerequisite.nsh",
       "helperPath": "native/vc-prerequisite.ps1",
-      "hookSha256": "bfc380b9fccc82e618f51d21a3455735262ab44b5622f73fd58325b0363ec244",
-      "helperSha256": "f86bb2eecdc069a535f019c1a125d09a7b5de1240d426bde117875bd649ddab8"
+      "hookSha256": "919e5820e80f495e91b8208175a6d44ea278f784ee2bd3cfda407d098c41ef43",
+      "helperSha256": "319c21623b09a86e569dd0a78c0d389467da81694ebd215dd7f54d0fd95ab68f"
     }
   ]
 }

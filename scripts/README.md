@@ -1,5 +1,7 @@
 # scripts の役割
 
+依存情報の正本と編集例は [native 依存の更新手順](../docs/native-dependencies.md) を参照してください。
+
 ここには、アプリ本体ではなく、実行環境の準備・実アプリの検証・Windows 配布物の作成を置きます。各ファイルが独立した CI ジョブではありません。補助モジュールは表の入口から呼ばれます。
 
 | 用途 | ファイル | このアプリで残す理由・呼出元 |
@@ -17,7 +19,7 @@
 | 配布 | `native-installer-audit.mjs`、`native-installer-audit.ps1` | 実際の installer を展開し、埋込み EXE・resources と同梱 source 情報を確認する。`package-verify.ps1`。 |
 | 配布 | `package-verify.ps1`、`package-installer-smoke.ps1`、`package-production-smoke.mjs` | 製品 installer のインストール・上書き・起動・アンインストールと source ZIP を検証する。package CI。使い捨て Windows 環境で実行する。 |
 | 配布 | `release.mjs`、`release-contract.mjs` | 検証済みの配布ファイル集合を確認し、既存リリースを上書きせず公開する。package 検証と release ブランチの CI。 |
-| 依存更新 | `native-source-inputs.py`、`native-build.sh`、`native-build-evidence.py` | 選択した機能の libmpv DLL と対応する source / inventory を生成する。`native/build/Dockerfile` の cache miss 時。 |
+| 依存更新 | `native-source-inputs.py`、`native_source_manifest.py`、`native-build.sh`、`native-build-evidence.py` | source catalog の URL / ファイル名 / submodule 記録を導出し、libmpv DLL と対応する source / inventory を生成する。`native/build/Dockerfile` の cache miss 時。 |
 | 依存更新 | `native-ort-source-inputs.py`、`native-ort-compare.py`、`native-ort-generated.py`、`native-ort-package.py` | 採用した公式 ORT DLL に対応する source を取得・照合・梱包する。Docker の cache miss 時。 |
 | 依存更新 | `native-source-archive-check.py` | 生成した native source tar の内容を、レビュー済み入力と照合する。上記の libmpv / ORT package 生成時。 |
 | 依存更新 | `native-ort-evidence.py` | ORT を更新する際、公式 DLL / PDB の照合入力を採取する手動ツール。通常の CI では実行しない。 |
