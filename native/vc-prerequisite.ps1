@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param([switch]$CheckOnly, [switch]$InstallWithConsent,
-    [string]$ManifestPath = "$PSScriptRoot\runtime-windows-x64.json")
+    [string]$ManifestPath)
 $ErrorActionPreference = 'Stop'
 # NSIS can inherit PowerShell 7's module paths before starting Windows PowerShell.
 # This checker uses only inbox cmdlets; resolve them against its own host version.
@@ -12,6 +12,10 @@ if (-not [Environment]::Is64BitOperatingSystem -or -not [Environment]::Is64BitPr
 }
 if ($CheckOnly -eq $InstallWithConsent) { Write-Output 'Choose check-only or explicitly consented installation.'; exit 12 }
 try {
+    # Windows PowerShell 5.1 does not set PSScriptRoot in parameter defaults with -File.
+    if (-not $PSBoundParameters.ContainsKey('ManifestPath')) {
+        $ManifestPath = Join-Path $PSScriptRoot 'runtime-windows-x64.json'
+    }
     $manifest = Get-Content -LiteralPath $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $prerequisites = @($manifest.prerequisites | Where-Object id -eq 'microsoft-vc-runtime-x64')
     if ($prerequisites.Count -ne 1) { throw 'Expected one Microsoft x64 runtime prerequisite.' }

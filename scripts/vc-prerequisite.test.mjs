@@ -3,7 +3,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +20,39 @@ test('VC prerequisite manifest pins the actual hook and helper bytes', () => {
     assert.equal(prerequisite[`${field}Sha256`], actual, `VC prerequisite ${field} hash must match the committed input bytes`);
   }
 });
+
+test.skipIf(process.platform !== 'win32')('VC prerequisite resolves its adjacent manifest under Windows PowerShell -File and honors explicit paths', t => {
+  const directory = realpathSync.native(mkdtempSync(join(tmpdir(), 'surtitle VC manifest 日本語 & ')));
+  t.onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
+  const helper = join(directory, 'vc-prerequisite.ps1');
+  copyFileSync(new URL('../native/vc-prerequisite.ps1', import.meta.url), helper);
+  const cwd = join(directory, 'caller');
+  mkdirSync(cwd);
+  writeFileSync(join(cwd, 'runtime-windows-x64.json'), '{}');
+  const manifest = version => JSON.stringify({ prerequisites: [{
+    id: 'microsoft-vc-runtime-x64', minimumVersion: version,
+    downloadUrl: 'https://example.invalid/never-download.exe', requiredSystemFiles: ['vcruntime_future.dll'],
+  }] });
+  writeFileSync(join(directory, 'runtime-windows-x64.json'), manifest('65535.0.0.0'));
+  const explicit = join(directory, 'explicit.json');
+  writeFileSync(explicit, manifest('65534.0.0.0'));
+  const powershell = join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  const invoke = args => {
+    const result = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helper, '-CheckOnly', ...args], {
+      cwd, encoding: 'utf8', windowsHide: true, timeout: 15_000,
+    });
+    assert.ifError(result.error);
+    return result;
+  };
+  for (const [args, version] of [[[], '65535.0.0'], [['-ManifestPath', explicit], '65534.0.0']]) {
+    const result = invoke(args);
+    assert.equal(result.status, 10, result.stdout + result.stderr);
+    assert.ok(result.stdout.includes(`Runtime ${version} or newer`), result.stdout);
+  }
+  const missing = invoke(['-ManifestPath', join(directory, 'missing.json')]);
+  assert.equal(missing.status, 12, missing.stdout + missing.stderr);
+  assert.match(missing.stdout, /prerequisite input could not be read/);
+}, 50_000);
 
 test.skipIf(process.platform !== 'win32')('VC prerequisite uses Windows PowerShell built-ins despite an incompatible inherited Security module', t => {
   const directory = realpathSync.native(mkdtempSync(join(tmpdir(), 'surtitle VC modules 日本語 & ')));

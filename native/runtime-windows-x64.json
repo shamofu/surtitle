@@ -133,7 +133,7 @@
       "hookPath": "native/windows-prerequisite.nsh",
       "helperPath": "native/vc-prerequisite.ps1",
       "hookSha256": "919e5820e80f495e91b8208175a6d44ea278f784ee2bd3cfda407d098c41ef43",
-      "helperSha256": "319c21623b09a86e569dd0a78c0d389467da81694ebd215dd7f54d0fd95ab68f"
+      "helperSha256": "f23520f96a08c71fe76a1d6e084e0a6eea6510440c0464723393b8756e61d5d1"
     }
   ]
 }
