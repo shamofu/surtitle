@@ -1,0 +1,24 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.player-card { display: flex; flex-direction: column; flex: 1; min-height: 180px; min-width: 0; background: #000; border-radius: 8px; overflow: hidden; }
+.native-player-viewport { position: relative; flex: 1; min-height: 100px; width: 100%; overflow: hidden; background: #000; }
+.video-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; color: #C0C9D6; }
+.video-placeholder p { font-size: 13px; line-height: 1.7; max-width: 60ch; text-align: center; overflow-wrap: anywhere; }
+.player-controls { flex-shrink: 0; padding: 6px 12px 8px; background: var(--surface); }
+.seek-control { display: flex; align-items: center; height: 18px; }
+.seek-control input { width: 100%; height: 4px; border: 0; border-radius: 2px; padding: 0; appearance: none; background: linear-gradient(to right, var(--accent) var(--progress), var(--border) var(--progress)); cursor: pointer; }
+.seek-control input::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; background: var(--accent); border-radius: 50%; }
+.player-control-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; }
+.control-cluster { display: flex; align-items: center; gap: 2px; color: var(--muted); }
+.play-button { color: var(--text); }
+.player-time { font-family: inherit; font-variant-numeric: tabular-nums; font-size: 12px; white-space: nowrap; margin: 0 8px; color: var(--text); }
+.player-time > span { color: var(--muted); }
+.speed-select { position: relative; display: flex; align-items: center; }
+.speed-select select { font-size: 13px; border: 0; background: transparent; padding: 8px 20px 8px 6px; height: 40px; appearance: none; }
+.speed-select svg { position: absolute; right: 4px; pointer-events: none; }
+.volume-slider { width: 58px; height: 4px; border: 0; padding: 0; margin: 0 10px 0 6px; accent-color: var(--accent); }
+.repeat-control { color: var(--muted); }
+.repeat-control.active { color: var(--accent); background: var(--accent-soft); }
+.track-controls { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+.track-controls label { display: flex; flex-direction: column; gap: 8px; min-width: 180px; flex: 1; font-size: 14px; color: var(--muted); }
+.track-controls select { width: 100%; font-size: 15px; }
+@media (max-width: 1150px) { .player-time { margin-inline: 2px; } .volume-slider { width: 44px; margin-right: 4px; } .player-controls { padding-inline: 8px; } }

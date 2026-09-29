@@ -1,0 +1,1348 @@
+{
+  "schemaVersion": 1,
+  "id": "surtitle-draft-study-task-set-v1",
+  "kind": "frozen-local-learning-task-manifest",
+  "authoredBy": "AI-assisted task design; no human listening or quality result",
+  "frozenOn": "2026-09-12",
+  "inputs": {
+    "providerReport": {
+      "path": "work/transcribe-production-20260912/candidate-approved-run-v1/report-final.json",
+      "sha256": "da24e6fd2c7834d797dc1e9522e3f87b0e9795e4ec67a0bc167464b9b0ad620d"
+    },
+    "nativeReview": {
+      "path": "work/transcribe-production-20260912/candidate-evaluation-v1/native-review.json",
+      "sha256": "ecb27fdba4e2e45e15514a800406198f3a456d2a76a4ccbe19ed0ffcc4273606"
+    },
+    "reference": {
+      "path": "work/transcribe-production-20260912/joined-selection-candidate-v1/candidate-joined-reference.json",
+      "sha256": "85412656e19305048598b6b9963f1581b2b78d63ca514104bb6e1fb758436a6c"
+    },
+    "sourceManifest": {
+      "path": "work/transcribe-production-20260912/source-materials/source-manifest-independent.json",
+      "sha256": "601cf815842624d2bc57ee70eacd884cd219433203a7e517590f71b011313107"
+    }
+  },
+  "source": {
+    "recordingId": "AMI/ES2002a",
+    "sourceSha256": "9c76866990fcc8b84006dc32d273ad99df439090b748ebe72103bb78c3216ee7",
+    "sampleRate": 16000,
+    "startSample": 1003520,
+    "endSample": 4843520,
+    "language": "en",
+    "genre": "dialogue",
+    "license": "CC-BY-4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "sourceUrl": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/ES2002a/audio/ES2002a.Mix-Headset.wav",
+    "attribution": "AMI Consortium, manual annotation v1.6.2; individual annotation authors are not invented.",
+    "derivation": "Short transcript excerpts and original annotation IDs are copied from the frozen artifacts. Task instructions are newly authored. No audio, credentials, approvals or cost records are included."
+  },
+  "scope": {
+    "taskCount": 10,
+    "tasksPerProfile": {
+      "current120": 5,
+      "short60": 5
+    },
+    "savedResponseCount": 6,
+    "newProviderRequests": 0,
+    "heldOut": false,
+    "selectionMethod": "Purposive tasks chosen after viewing existing results. These tasks cannot estimate population accuracy or certify Japanese, lectures, or independent held-out performance."
+  },
+  "executionPolicy": {
+    "sourceClock": "All anchor times use the original full recording clock in milliseconds. Raw request-relative times remain separately recorded.",
+    "runtimeRebinding": "Draft cue IDs identify the frozen offline review. If a real profile has different IDs, match the profile, immutable source identity, exact text and start/end times; record the mapping. Missing or ambiguous matches remain blocked and must not be silently rewritten.",
+    "replayPadding": "Record actual added context in replayPaddingMs. Total extra audio before plus after the selected interval must not exceed maxReplayPaddingMs=2000; remain inside the available immutable source bounds. Padding does not repair text or word timing.",
+    "referenceUse": "Reference IDs and words support comparison only. No corrected answer, meaning, new speaker ordering or acoustic truth has been inferred. The word records have upstream annotation coordinates, not newly verified playback endpoints.",
+    "draftStatus": "A native draft cue marked confirmed only reflects the existing draft assembly state; it is not human confirmation for this task.",
+    "savePolicy": "A real listener must explicitly confirm the selected text and playback interval before quality-qualified card use. Otherwise record a bookmark or blocked/uncertain outcome. Transport-only test confirmation cannot populate humanListening or acceptance.",
+    "originalEvidence": "Preserve both boundary alternatives, repetitions and zero-width word coordinates. Do not silently fix, interpolate, drop or deduplicate disputed content.",
+    "resultRecording": "Keep this task manifest unchanged. Store actual runtime mappings, edits, playback observations, effort and outcomes in a separate result file bound to this manifest hash."
+  },
+  "tasks": [
+    {
+      "id": "ordinary-current120",
+      "profile": "current120",
+      "category": "ordinary_phrase",
+      "nativeReviewCaseId": "en-dialogue-ami-es2002a-candidate-current120",
+      "nativeReviewDraftDigest": "a35709656327181245ac95f79f5e01effe9f201a74d43e85bfd31284dabd19f7",
+      "anchors": [
+        {
+          "draftCueId": "fc54c5323c89da4c1bd177df36848102795ddc226598e4028053b424c45be98b",
+          "draftCueIndex": 2,
+          "startMs": 72820,
+          "endMs": 74520,
+          "text": "I'm Laura and I'm the project manager.",
+          "draftStatus": "confirmed"
+        }
+      ],
+      "sourceResponses": [
+        {
+          "requestId": "a1a3adc7-4618-416b-8526-152b32d333f0",
+          "caseId": "en-dialogue-ami-es2002a-candidate-current120-000",
+          "ordinal": 0,
+          "outputCueIndex": 2,
+          "requestSourceStartMs": 62720,
+          "requestSourceEndMs": 185772,
+          "requestStartMs": 10100,
+          "requestEndMs": 11800,
+          "sourceStartMs": 72820,
+          "sourceEndMs": 74520,
+          "text": "I'm Laura and I'm the project manager."
+        }
+      ],
+      "referenceRecords": [
+        {
+          "id": "ES2002a.B.words55",
+          "speakerId": "B",
+          "text": "I'm",
+          "startMs": 72790,
+          "endMs": 73030
+        },
+        {
+          "id": "ES2002a.B.words56",
+          "speakerId": "B",
+          "text": "Laura",
+          "startMs": 73030,
+          "endMs": 73280
+        },
+        {
+          "id": "ES2002a.B.words57",
+          "speakerId": "B",
+          "text": "and",
+          "startMs": 73280,
+          "endMs": 73500
+        },
+        {
+          "id": "ES2002a.B.words58",
+          "speakerId": "B",
+          "text": "I'm",
+          "startMs": 73500,
+          "endMs": 73610
+        },
+        {
+          "id": "ES2002a.B.words59",
+          "speakerId": "B",
+          "text": "the",
+          "startMs": 73610,
+          "endMs": 73690
+        },
+        {
+          "id": "ES2002a.B.words60",
+          "speakerId": "B",
+          "text": "project",
+          "startMs": 73690,
+          "endMs": 74080
+        },
+        {
+          "id": "ES2002a.B.words61",
+          "speakerId": "B",
+          "text": "manager",
+          "startMs": 74080,
+          "endMs": 74420
+        }
+      ],
+      "requestedActions": [
+        "select",
+        "replay",
+        "correct_if_needed",
+        "save_or_bookmark"
+      ],
+      "instruction": "Select this subtitle and replay its source interval. Check whether the intended project-manager phrase is included without a clipped beginning or ending. Correct text or interval only if listening establishes a need; then save an audio card or keep a bookmark. No card meaning is supplied as an answer.",
+      "maxReplayPaddingMs": 2000,
+      "replayPaddingMs": null,
+      "humanListening": null,
+      "effort": null,
+      "acceptancePending": true,
+      "observations": {
+        "runtimeSelectionId": null,
+        "runtimeCueMapping": null,
+        "finalText": null,
+        "finalReplayRange": null,
+        "cardId": null,
+        "bookmarkId": null,
+        "disposition": null
+      }
+    },
+    {
+      "id": "ordinary-short60",
+      "profile": "short60",
+      "category": "ordinary_phrase",
+      "nativeReviewCaseId": "en-dialogue-ami-es2002a-candidate-short60",
+      "nativeReviewDraftDigest": "521e44dbb68299325d2d3a6783efc9d9da749f2cda765cbcbf1ccdc49d9e30c7",
+      "anchors": [
+        {
+          "draftCueId": "f5ba22278e8b35f0021322cf6c4e14e644f426f0fdb3bad11d204af8497531be",
+          "draftCueIndex": 2,
+          "startMs": 72820,
+          "endMs": 74520,
+          "text": "I'm Laura and I'm the project manager.",
+          "draftStatus": "confirmed"
+        }
+      ],
+      "sourceResponses": [
+        {
+          "requestId": "331c5c30-e171-4d44-9d82-2ee6fb2b33fd",
+          "caseId": "en-dialogue-ami-es2002a-candidate-short60-000",
+          "ordinal": 0,
+          "outputCueIndex": 2,
+          "requestSourceStartMs": 62720,
+          "requestSourceEndMs": 125864,
+          "requestStartMs": 10100,
+          "requestEndMs": 11800,
+          "sourceStartMs": 72820,
+          "sourceEndMs": 74520,
+          "text": "I'm Laura and I'm the project manager."
+        }
+      ],
+      "referenceRecords": [
+        {
+          "id": "ES2002a.B.words55",
+          "speakerId": "B",
+          "text": "I'm",
+          "startMs": 72790,
+          "endMs": 73030
+        },
+        {
+          "id": "ES2002a.B.words56",
+          "speakerId": "B",
+          "text": "Laura",
+          "startMs": 73030,
+          "endMs": 73280
+        },
+        {
+          "id": "ES2002a.B.words57",
+          "speakerId": "B",
+          "text": "and",
+          "startMs": 73280,
+          "endMs": 73500
+        },
+        {
+          "id": "ES2002a.B.words58",
+          "speakerId": "B",
+          "text": "I'm",
+          "startMs": 73500,
+          "endMs": 73610
+        },
+        {
+          "id": "ES2002a.B.words59",
+          "speakerId": "B",
+          "text": "the",
+          "startMs": 73610,
+          "endMs": 73690
+        },
+        {
+          "id": "ES2002a.B.words60",
+          "speakerId": "B",
+          "text": "project",
+          "startMs": 73690,
+          "endMs": 74080
+        },
+        {
+          "id": "ES2002a.B.words61",
+          "speakerId": "B",
+          "text": "manager",
+          "startMs": 74080,
+          "endMs": 74420
+        }
+      ],
+      "requestedActions": [
+        "select",
+        "replay",
+        "correct_if_needed",
+        "save_or_bookmark"
+      ],
+      "instruction": "Perform the same project-manager replay and card-or-bookmark task using the short60 result. Record the outcome independently; do not copy the other profile's result or listening assessment.",
+      "maxReplayPaddingMs": 2000,
+      "replayPaddingMs": null,
+      "humanListening": null,
+      "effort": null,
+      "acceptancePending": true,
+      "observations": {
+        "runtimeSelectionId": null,
+        "runtimeCueMapping": null,
+        "finalText": null,
+        "finalReplayRange": null,
+        "cardId": null,
+        "bookmarkId": null,
+        "disposition": null
+      }
+    },
+    {
+      "id": "repetition-current120",
+      "profile": "current120",
+      "category": "fillers_and_repetition",
+      "nativeReviewCaseId": "en-dialogue-ami-es2002a-candidate-current120",
+      "nativeReviewDraftDigest": "a35709656327181245ac95f79f5e01effe9f201a74d43e85bfd31284dabd19f7",
+      "anchors": [
+        {
+          "draftCueId": "7ec340667fc91d33edefc92084d104fca0a655b00d96e3f0bd8644c7424f0f02",
+          "draftCueIndex": 17,
+          "startMs": 118220,
+          "endMs": 119920,
+          "text": "So that's kind of our our brief.",
+          "draftStatus": "confirmed"
+        }
+      ],
+      "sourceResponses": [
+        {
+          "requestId": "a1a3adc7-4618-416b-8526-152b32d333f0",
+          "caseId": "en-dialogue-ami-es2002a-candidate-current120-000",
+          "ordinal": 0,
+          "outputCueIndex": 17,
+          "requestSourceStartMs": 62720,
+          "requestSourceEndMs": 185772,
+          "requestStartMs": 55500,
+          "requestEndMs": 57200,
+          "sourceStartMs": 118220,
+          "sourceEndMs": 119920,
+          "text": "So that's kind of our our brief."
+        }
+      ],
+      "referenceRecords": [
+        {
+          "id": "ES2002a.B.words147",
+          "speakerId": "B",
+          "text": "so",
+          "startMs": 118140,
+          "endMs": 118340
+        },
+        {
+          "id": "ES2002a.B.words148",
+          "speakerId": "B",
+          "text": "that's",
+          "startMs": 118340,
+          "endMs": 118640
+        },
+        {
+          "id": "ES2002a.B.words149",
+          "speakerId": "B",
+          "text": "kind",
+          "startMs": 118640,
+          "endMs": 118930
+        },
+        {
+          "id": "ES2002a.B.words150",
+          "speakerId": "B",
+          "text": "of",
+          "startMs": 118930,
+          "endMs": 119040
+        },
+        {
+          "id": "ES2002a.B.words151",
+          "speakerId": "B",
+          "text": "our",
+          "startMs": 119040,
+          "endMs": 119250
+        },
+        {
+          "id": "ES2002a.B.words152",
+          "speakerId": "B",
+          "text": "our",
+          "startMs": 119250,
+          "endMs": 119460
+        },
+        {
+          "id": "ES2002a.B.words153",
+          "speakerId": "B",
+          "text": "brief",
+          "startMs": 119460,
+          "endMs": 120700
+        }
+      ],
+      "requestedActions": [
+        "select",
+        "replay",
+        "correct_if_needed",
+        "save_or_bookmark"
+      ],
+      "instruction": "Replay the phrase containing two our tokens and check its ending. Preserve both occurrences unless an explicit listening-based edit is made. Save the checked text and audio, or bookmark the range if unsure. The upstream record is evidence, not a new listening verdict.",
+      "maxReplayPaddingMs": 2000,
+      "replayPaddingMs": null,
+      "humanListening": null,
+      "effort": null,
+      "acceptancePending": true,
+      "observations": {
+        "runtimeSelectionId": null,
+        "runtimeCueMapping": null,
+        "finalText": null,
+        "finalReplayRange": null,
+        "cardId": null,
+        "bookmarkId": null,
+        "disposition": null
+      }
+    },
+    {
+      "id": "fillers-short60",
+      "profile": "short60",
+      "category": "fillers_and_repetition",
+      "nativeReviewCaseId": "en-dialogue-ami-es2002a-candidate-short60",
+      "nativeReviewDraftDigest": "521e44dbb68299325d2d3a6783efc9d9da749f2cda765cbcbf1ccdc49d9e30c7",
+      "anchors": [
+        {
+          "draftCueId": "0954bcabd99a5f773edb4edd3d27f195e7e1ad152f91e20717714e81f86e66ca",
+          "draftCueIndex": 53,
+          "startMs": 217096,
+          "endMs": 219296,
+          "text": "Well, basically um",
+          "draftStatus": "confirmed"
+        }
+      ],
+      "sourceResponses": [
+        {
+          "requestId": "66c55c92-39cc-4678-bb58-00ac82bb4676",
+          "caseId": "en-dialogue-ami-es2002a-candidate-short60-002",
+          "ordinal": 2,
+          "outputCueIndex": 13,
+          "requestSourceStartMs": 179796,
+          "requestSourceEndMs": 245900,
+          "requestStartMs": 37300,
+          "requestEndMs": 39500,
+          "sourceStartMs": 217096,
+          "sourceEndMs": 219296,
+          "text": "Well, basically um"
+        }
+      ],
+      "referenceRecords": [
+        {
+          "id": "ES2002a.D.words78",
+          "speakerId": "D",
+          "text": "well",
+          "startMs": 217070,
+          "endMs": 217880
+        },
+        {
+          "id": "ES2002a.D.words79",
+          "speakerId": "D",
+          "text": "basically",
+          "startMs": 217880,
+          "endMs": 218700
+        },
+        {
+          "id": "ES2002a.D.words80",
+          "speakerId": "D",
+          "text": "um",
+          "startMs": 218700,
+          "endMs": 220120
+        }
+      ],
+      "requestedActions": [
+        "select",
+        "replay",
+        "correct_if_needed",
+        "save_or_bookmark"
+      ],
+      "instruction": "Replay the phrase including its final um. Check whether the selected range captures the ending; do not automatically strip the filler or extend its word timestamp. Make any necessary local excerpt edit and save an audio card, or bookmark it.",
+      "maxReplayPaddingMs": 2000,
+      "replayPaddingMs": null,
+      "humanListening": null,
+      "effort": null,
+      "acceptancePending": true,
+      "observations": {
+        "runtimeSelectionId": null,
+        "runtimeCueMapping": null,
+        "finalText": null,
+        "finalReplayRange": null,
+        "cardId": null,
+        "bookmarkId": null,
+        "disposition": null
+      }
+    },
+    {
+      "id": "meaning-current120",
+      "profile": "current120",
+      "category": "meaning_critical_content",
+      "nativeReviewCaseId": "en-dialogue-ami-es2002a-candidate-current120",
+      "nativeReviewDraftDigest": "a35709656327181245ac95f79f5e01effe9f201a74d43e85bfd31284dabd19f7",
+      "anchors": [
+        {
+          "draftCueId": "d6ff96c896811db7d4f9a99c1c6f4f07f2d46fa072cdb09492c04b037a2fd087",
+          "draftCueIndex": 63,
+          "startMs": 268072,
+          "endMs": 271772,
+          "text": "And the small cute and furry and when planet Earth becomes real",
+          "draftStatus": "confirmed"
+        }
+      ],
+      "sourceResponses": [
+        {
+          "requestId": "324edc7d-4cb4-44f7-9cbe-8030acb3c407",
+          "caseId": "en-dialogue-ami-es2002a-candidate-current120-001",
+          "ordinal": 1,
+          "outputCueIndex": 26,
+          "requestSourceStartMs": 179772,
+          "requestSourceEndMs": 302720,
+          "requestStartMs": 88300,
+          "requestEndMs": 92000,
+          "sourceStartMs": 268072,
+          "sourceEndMs": 271772,
+          "text": "And the small cute and furry and when planet Earth becomes real"
+        }
+      ],
+      "referenceRecords": [
+        {
+          "id": "ES2002a.C.words22",
+          "speakerId": "C",
+          "text": "Then",
+          "startMs": 268000,
+          "endMs": 268830
+        },
+        {
+          "id": "ES2002a.C.words23",
+          "speakerId": "C",
+          "text": "they're",
+          "startMs": 268830,
+          "endMs": 268950
+        },
+        {
+          "id": "ES2002a.C.words24",
+          "speakerId": "C",
+          "text": "small",
+          "startMs": 268950,
+          "endMs": 269250
+        },
+        {
+          "id": "ES2002a.C.words25",
+          "speakerId": "C",
+          "text": "cute",
+          "startMs": 269250,
+          "endMs": 269490
+        },
+        {
+          "id": "ES2002a.C.words26",
+          "speakerId": "C",
+          "text": "and",
+          "startMs": 269490,
+          "endMs": 269610
+        },
+        {
+          "id": "ES2002a.C.words27",
+          "speakerId": "C",
+          "text": "furry",
+          "startMs": 269610,
+          "endMs": 270010
+        },
+        {
+          "id": "ES2002a.C.words29",
+          "speakerId": "C",
+          "text": "and",
+          "startMs": 270010,
+          "endMs": 270320
+        },
+        {
+          "id": "ES2002a.C.words30",
+          "speakerId": "C",
+          "text": "uh",
+          "startMs": 270320,
+          "endMs": 270530
+        },
+        {
+          "id": "ES2002a.C.words31",
+          "speakerId": "C",
+          "text": "when",
+          "startMs": 270530,
+          "endMs": 270670
+        },
+        {
+          "id": "ES2002a.C.words32",
+          "speakerId": "C",
+          "text": "planet",
+          "startMs": 270670,
+          "endMs": 270910
+        },
+        {
+          "id": "ES2002a.C.words33",
+          "speakerId": "C",
+          "text": "of",
+          "startMs": 270910,
+          "endMs": 270970
+        },
+        {
+          "id": "ES2002a.C.words34",
+          "speakerId": "C",
+          "text": "the",
+          "startMs": 270970,
+          "endMs": 271030
+        },
+        {
+          "id": "ES2002a.C.words35",
+          "speakerId": "C",
+          "text": "apes",
+          "startMs": 271030,
+          "endMs": 271200
+        },
+        {
+          "id": "ES2002a.C.words36",
+          "speakerId": "C",
+          "text": "becomes",
+          "startMs": 271200,
+          "endMs": 271480
+        },
+        {
+          "id": "ES2002a.C.words37",
+          "speakerId": "C",
+          "text": "real",
+          "startMs": 271480,
+          "endMs": 272570
+        }
+      ],
+      "requestedActions": [
+        "select",
+        "replay",
+        "correct_if_needed",
+        "save_or_bookmark"
+      ],
+      "instruction": "Replay this phrase and compare the displayed planet Earth wording with the separately shown upstream planet of the apes records. Determine any correction by listening rather than substituting the reference automatically. Save only a checked excerpt or bookmark it as uncertain.",
+      "maxReplayPaddingMs": 2000,
+      "replayPaddingMs": null,
+      "humanListening": null,
+      "effort": null,
+      "acceptancePending": true,
+      "observations": {
+        "runtimeSelectionId": null,
+        "runtimeCueMapping": null,
+        "finalText": null,
+        "finalReplayRange": null,
+        "cardId": null,
+        "bookmarkId": null,
+        "disposition": null
+      }
+    },
+    {
+      "id": "meaning-short60",
+      "profile": "short60",
+      "category": "meaning_critical_content",
+      "nativeReviewCaseId": "en-dialogue-ami-es2002a-candidate-short60",
+      "nativeReviewDraftDigest": "521e44dbb68299325d2d3a6783efc9d9da749f2cda765cbcbf1ccdc49d9e30c7",
+      "anchors": [
+        {
+          "draftCueId": "388a23b6515e469015cc11206e8325a424ff49ea4f3156f8b8c5652c60723c3d",
+          "draftCueIndex": 68,
+          "startMs": 270000,
+          "endMs": 271800,
+          "text": "And uh when Planet of the Apes becomes real,",
+          "draftStatus": "confirmed"
+        }
+      ],
+      "sourceResponses": [
+        {
+          "requestId": "81eedc40-9998-48d5-9f42-bbcd884e3017",
+          "caseId": "en-dialogue-ami-es2002a-candidate-short60-003",
+          "ordinal": 3,
+          "outputCueIndex": 6,
+          "requestSourceStartMs": 239900,
+          "requestSourceEndMs": 302720,
+          "requestStartMs": 30100,
+          "requestEndMs": 31900,
+          "sourceStartMs": 270000,
+          "sourceEndMs": 271800,
+          "text": "And uh when Planet of the Apes becomes real,"
+        }
+      ],
+      "referenceRecords": [
+        {
+          "id": "ES2002a.C.words29",
+          "speakerId": "C",
+          "text": "and",
+          "startMs": 270010,
+          "endMs": 270320
+        },
+        {
+          "id": "ES2002a.C.words30",
+          "speakerId": "C",
+          "text": "uh",
+          "startMs": 270320,
+          "endMs": 270530
+        },
+        {
+          "id": "ES2002a.C.words31",
+          "speakerId": "C",
+          "text": "when",
+          "startMs": 270530,
+          "endMs": 270670
+        },
+        {
+          "id": "ES2002a.C.words32",
+          "speakerId": "C",
+          "text": "planet",
+          "startMs": 270670,
+          "endMs": 270910
+        },
+        {
+          "id": "ES2002a.C.words33",
+          "speakerId": "C",
+          "text": "of",
+          "startMs": 270910,
+          "endMs": 270970
+        },
+        {
+          "id": "ES2002a.C.words34",
+          "speakerId": "C",
+          "text": "the",
+          "startMs": 270970,
+          "endMs": 271030
+        },
+        {
+          "id": "ES2002a.C.words35",
+          "speakerId": "C",
+          "text": "apes",
+          "startMs": 271030,
+          "endMs": 271200
+        },
+        {
+          "id": "ES2002a.C.words36",
+          "speakerId": "C",
+          "text": "becomes",
+          "startMs": 271200,
+          "endMs": 271480
+        },
+        {
+          "id": "ES2002a.C.words37",
+          "speakerId": "C",
+          "text": "real",
+          "startMs": 271480,
+          "endMs": 272570
+        }
+      ],
+      "requestedActions": [
+        "select",
+        "replay",
+        "correct_if_needed",
+        "save_or_bookmark"
+      ],
+      "instruction": "Replay the phrase containing Planet of the Apes and check its content and endpoint. A textual reference match alone does not establish successful playback. Save a checked card or a bookmark without importing the current120 task's judgment.",
+      "maxReplayPaddingMs": 2000,
+      "replayPaddingMs": null,
+      "humanListening": null,
+      "effort": null,
+      "acceptancePending": true,
+      "observations": {
+        "runtimeSelectionId": null,
+        "runtimeCueMapping": null,
+        "finalText": null,
+        "finalReplayRange": null,
+        "cardId": null,
+        "bookmarkId": null,
+        "disposition": null
+      }
+    },
+    {
+      "id": "boundary-current120",
+      "profile": "current120",
+      "category": "disputed_boundary",
+      "nativeReviewCaseId": "en-dialogue-ami-es2002a-candidate-current120",
+      "nativeReviewDraftDigest": "a35709656327181245ac95f79f5e01effe9f201a74d43e85bfd31284dabd19f7",
+      "anchors": [
+        {
+          "draftCueId": "b0caca49720d4abb1d2a0fd0b42fa5535f52e4cd52ed65543715364d6a4334e6",
+          "draftCueIndex": 35,
+          "startMs": 181420,
+          "endMs": 182120,
+          "text": "this one here right?",
+          "draftStatus": "provisional"
+        },
+        {
+          "draftCueId": "4deffe42ac30a077625f7d5d4da76cf6cbb18ad0a720bb24f989c5b457dea73c",
+          "draftCueIndex": 36,
+          "startMs": 183272,
+          "endMs": 183572,
+          "text": "Mhm.",
+          "draftStatus": "provisional"
+        },
+        {
+          "draftCueId": "7a7be608bf9435d1b8b27e5281ef746fb1df4d29673e3094b8bbbbf8cc57323c",
+          "draftCueIndex": 37,
+          "startMs": 183972,
+          "endMs": 185772,
+          "text": "Okay. Very nice.",
+          "draftStatus": "provisional"
+        },
+        {
+          "draftCueId": "db3581504c65d285ffa7fd0838d57ebd9df68c087580568f5c13f863f725ca4d",
+          "draftCueIndex": 38,
+          "startMs": 184020,
+          "endMs": 184220,
+          "text": "Okay.",
+          "draftStatus": "provisional"
+        },
+        {
+          "draftCueId": "726b9f3a0496f6e5e2b3de3bef3e6706be0475ab2cd6c39da0d7f21ddb11b813",
+          "draftCueIndex": 39,
+          "startMs": 185320,
+          "endMs": 185720,
+          "text": "Very nice.",
+          "draftStatus": "provisional"
+        }
+      ],
+      "sourceResponses": [
+        {
+          "requestId": "a1a3adc7-4618-416b-8526-152b32d333f0",
+          "caseId": "en-dialogue-ami-es2002a-candidate-current120-000",
+          "ordinal": 0,
+          "outputCueIndex": 35,
+          "requestSourceStartMs": 62720,
+          "requestSourceEndMs": 185772,
+          "requestStartMs": 118700,
+          "requestEndMs": 119400,
+          "sourceStartMs": 181420,
+          "sourceEndMs": 182120,
+          "text": "this one here right?"
+        },
+        {
+          "requestId": "a1a3adc7-4618-416b-8526-152b32d333f0",
+          "caseId": "en-dialogue-ami-es2002a-candidate-current120-000",
+          "ordinal": 0,
+          "outputCueIndex": 36,
+          "requestSourceStartMs": 62720,
+          "requestSourceEndMs": 185772,
+          "requestStartMs": 121300,
+          "requestEndMs": 121500,
+          "sourceStartMs": 184020,
+          "sourceEndMs": 184220,
+          "text": "Okay."
+        },
+        {
+          "requestId": "a1a3adc7-4618-416b-8526-152b32d333f0",
+          "caseId": "en-dialogue-ami-es2002a-candidate-current120-000",
+          "ordinal": 0,
+          "outputCueIndex": 37,
+          "requestSourceStartMs": 62720,
+          "requestSourceEndMs": 185772,
+          "requestStartMs": 122600,
+          "requestEndMs": 123000,
+          "sourceStartMs": 185320,
+          "sourceEndMs": 185720,
+          "text": "Very nice."
+        },
+        {
+          "requestId": "324edc7d-4cb4-44f7-9cbe-8030acb3c407",
+          "caseId": "en-dialogue-ami-es2002a-candidate-current120-001",
+          "ordinal": 1,
+          "outputCueIndex": 0,
+          "requestSourceStartMs": 179772,
+          "requestSourceEndMs": 302720,
+          "requestStartMs": 1600,
+          "requestEndMs": 2200,
+          "sourceStartMs": 181372,
+          "sourceEndMs": 181972,
+          "text": "This one here, right?"
+        },
+        {
+          "requestId": "324edc7d-4cb4-44f7-9cbe-8030acb3c407",
+          "caseId": "en-dialogue-ami-es2002a-candidate-current120-001",
+          "ordinal": 1,
+          "outputCueIndex": 1,
+          "requestSourceStartMs": 179772,
+          "requestSourceEndMs": 302720,
+          "requestStartMs": 3500,
+          "requestEndMs": 3800,
+          "sourceStartMs": 183272,
+          "sourceEndMs": 183572,
+          "text": "Mhm."
+        },
+        {
+          "requestId": "324edc7d-4cb4-44f7-9cbe-8030acb3c407",
+          "caseId": "en-dialogue-ami-es2002a-candidate-current120-001",
+          "ordinal": 1,
+          "outputCueIndex": 2,
+          "requestSourceStartMs": 179772,
+          "requestSourceEndMs": 302720,
+          "requestStartMs": 4200,
+          "requestEndMs": 6000,
+          "sourceStartMs": 183972,
+          "sourceEndMs": 185772,
+          "text": "Okay. Very nice."
+        }
+      ],
+      "referenceRecords": [
+        {
+          "id": "ES2002a.D.words39",
+          "speakerId": "D",
+          "text": "This",
+          "startMs": 181390,
+          "endMs": 181550
+        },
+        {
+          "id": "ES2002a.D.words40",
+          "speakerId": "D",
+          "text": "one",
+          "startMs": 181550,
+          "endMs": 181720
+        },
+        {
+          "id": "ES2002a.D.words41",
+          "speakerId": "D",
+          "text": "here",
+          "startMs": 181720,
+          "endMs": 181920
+        },
+        {
+          "id": "ES2002a.D.words43",
+          "speakerId": "D",
+          "text": "right",
+          "startMs": 181920,
+          "endMs": 182340
+        },
+        {
+          "id": "ES2002a.D.words45",
+          "speakerId": "D",
+          "text": "Okay",
+          "startMs": 183930,
+          "endMs": 185340
+        },
+        {
+          "id": "ES2002a.D.words47",
+          "speakerId": "D",
+          "text": "Very",
+          "startMs": 185340,
+          "endMs": 185470
+        },
+        {
+          "id": "ES2002a.D.words48",
+          "speakerId": "D",
+          "text": "nice",
+          "startMs": 185470,
+          "endMs": 186460
+        },
+        {
+          "id": "ES2002a.B.words273",
+          "speakerId": "B",
+          "text": "Mm-hmm",
+          "startMs": 183260,
+          "endMs": 184240
+        }
+      ],
+      "requestedActions": [
+        "select",
+        "replay",
+        "correct_if_needed",
+        "save_or_bookmark"
+      ],
+      "instruction": "Replay the disputed boundary and compare the original alternatives, including Mhm and Okay / Very nice. Do not concatenate duplicated alternatives into a new utterance. Author and check only the excerpt needed for a card, or keep the disputed range bookmarked; this task does not confirm the whole boundary.",
+      "maxReplayPaddingMs": 2000,
+      "replayPaddingMs": null,
+      "humanListening": null,
+      "effort": null,
+      "acceptancePending": true,
+      "observations": {
+        "runtimeSelectionId": null,
+        "runtimeCueMapping": null,
+        "finalText": null,
+        "finalReplayRange": null,
+        "cardId": null,
+        "bookmarkId": null,
+        "disposition": null
+      },
+      "conflictIds": [
+        "cb8af33e74cc35c34476bd420a7fe8847ac6b6acdcd04eb4a237597efa81bbc1"
+      ],
+      "overlapCaution": "The upstream Mm-hmm and Okay intervals overlap across speakers. Their ordering is not a unique audible word-order judgment."
+    },
+    {
+      "id": "boundary-short60",
+      "profile": "short60",
+      "category": "disputed_boundary",
+      "nativeReviewCaseId": "en-dialogue-ami-es2002a-candidate-short60",
+      "nativeReviewDraftDigest": "521e44dbb68299325d2d3a6783efc9d9da749f2cda765cbcbf1ccdc49d9e30c7",
+      "anchors": [
+        {
+          "draftCueId": "eedc9f400dcd18d5bf2771fd3812c27ca7918d0e9bf4c0c11e25a47106c14aad",
+          "draftCueIndex": 60,
+          "startMs": 237996,
+          "endMs": 238896,
+          "text": "So this is blue",
+          "draftStatus": "confirmed"
+        },
+        {
+          "draftCueId": "f45cb36a5b4036ed63f8f222faf7843402b58800cd0785faf1ce5fb5770f2bf4",
+          "draftCueIndex": 61,
+          "startMs": 239896,
+          "endMs": 240396,
+          "text": "blue beagle.",
+          "draftStatus": "provisional"
+        },
+        {
+          "draftCueId": "5654e2d72615f9ad7c0ba87981f789bcfc3f8dc79e8bbdc8075c511e29a97321",
+          "draftCueIndex": 62,
+          "startMs": 239900,
+          "endMs": 240500,
+          "text": "would be a beagle.",
+          "draftStatus": "provisional"
+        }
+      ],
+      "sourceResponses": [
+        {
+          "requestId": "66c55c92-39cc-4678-bb58-00ac82bb4676",
+          "caseId": "en-dialogue-ami-es2002a-candidate-short60-002",
+          "ordinal": 2,
+          "outputCueIndex": 20,
+          "requestSourceStartMs": 179796,
+          "requestSourceEndMs": 245900,
+          "requestStartMs": 58200,
+          "requestEndMs": 59100,
+          "sourceStartMs": 237996,
+          "sourceEndMs": 238896,
+          "text": "So this is blue"
+        },
+        {
+          "requestId": "66c55c92-39cc-4678-bb58-00ac82bb4676",
+          "caseId": "en-dialogue-ami-es2002a-candidate-short60-002",
+          "ordinal": 2,
+          "outputCueIndex": 21,
+          "requestSourceStartMs": 179796,
+          "requestSourceEndMs": 245900,
+          "requestStartMs": 60100,
+          "requestEndMs": 60600,
+          "sourceStartMs": 239896,
+          "sourceEndMs": 240396,
+          "text": "blue beagle."
+        },
+        {
+          "requestId": "81eedc40-9998-48d5-9f42-bbcd884e3017",
+          "caseId": "en-dialogue-ami-es2002a-candidate-short60-003",
+          "ordinal": 3,
+          "outputCueIndex": 0,
+          "requestSourceStartMs": 239900,
+          "requestSourceEndMs": 302720,
+          "requestStartMs": 0,
+          "requestEndMs": 600,
+          "sourceStartMs": 239900,
+          "sourceEndMs": 240500,
+          "text": "would be a beagle."
+        }
+      ],
+      "referenceRecords": [
+        {
+          "id": "ES2002a.D.words123",
+          "speakerId": "D",
+          "text": "So",
+          "startMs": 237960,
+          "endMs": 238180
+        },
+        {
+          "id": "ES2002a.D.words124",
+          "speakerId": "D",
+          "text": "this",
+          "startMs": 238180,
+          "endMs": 238420
+        },
+        {
+          "id": "ES2002a.D.words125",
+          "speakerId": "D",
+          "text": "is",
+          "startMs": 238420,
+          "endMs": 238560
+        },
+        {
+          "id": "ES2002a.D.words126",
+          "speakerId": "D",
+          "text": "blue",
+          "startMs": 238560,
+          "endMs": 239850
+        },
+        {
+          "id": "ES2002a.D.words128",
+          "speakerId": "D",
+          "text": "Blue",
+          "startMs": 239850,
+          "endMs": 239980
+        },
+        {
+          "id": "ES2002a.D.words129",
+          "speakerId": "D",
+          "text": "beagle",
+          "startMs": 239980,
+          "endMs": 241420
+        }
+      ],
+      "requestedActions": [
+        "select",
+        "replay",
+        "correct_if_needed",
+        "save_or_bookmark"
+      ],
+      "instruction": "Replay both conflicting Blue beagle / would be a beagle alternatives with their surrounding repeated blue. Keep both original alternatives visible. Save only a separately checked excerpt, or bookmark the conflict; do not choose the better-looking text as an automatic resolution.",
+      "maxReplayPaddingMs": 2000,
+      "replayPaddingMs": null,
+      "humanListening": null,
+      "effort": null,
+      "acceptancePending": true,
+      "observations": {
+        "runtimeSelectionId": null,
+        "runtimeCueMapping": null,
+        "finalText": null,
+        "finalReplayRange": null,
+        "cardId": null,
+        "bookmarkId": null,
+        "disposition": null
+      },
+      "conflictIds": [
+        "cf15c6a74da2b8f876ed83589d503c29fd67e8932a4c2c22f5ca911885e1cb15"
+      ],
+      "overlapCaution": "The final short60 request starts at source 239900 ms inside the upstream Blue word at 239850..239980 ms. Partial request-edge evidence is retained; no complete-word hallucination label is assigned here."
+    },
+    {
+      "id": "point-time-current120",
+      "profile": "current120",
+      "category": "uncertain_or_point_timing",
+      "nativeReviewCaseId": "en-dialogue-ami-es2002a-candidate-current120",
+      "nativeReviewDraftDigest": "a35709656327181245ac95f79f5e01effe9f201a74d43e85bfd31284dabd19f7",
+      "anchors": [
+        {
+          "draftCueId": "dd850b6de8e2a524e70b448210f19df362cea05dbd42fae6d5029e46aae2ea51",
+          "draftCueIndex": 0,
+          "startMs": 64220,
+          "endMs": 66720,
+          "text": "This is just what we're going to be doing over the next twenty five minutes.",
+          "draftStatus": "confirmed"
+        }
+      ],
+      "sourceResponses": [
+        {
+          "requestId": "a1a3adc7-4618-416b-8526-152b32d333f0",
+          "caseId": "en-dialogue-ami-es2002a-candidate-current120-000",
+          "ordinal": 0,
+          "outputCueIndex": 0,
+          "requestSourceStartMs": 62720,
+          "requestSourceEndMs": 185772,
+          "requestStartMs": 1500,
+          "requestEndMs": 4000,
+          "sourceStartMs": 64220,
+          "sourceEndMs": 66720,
+          "text": "This is just what we're going to be doing over the next twenty five minutes."
+        }
+      ],
+      "referenceRecords": [
+        {
+          "id": "ES2002a.B.words20",
+          "speakerId": "B",
+          "text": "um",
+          "startMs": 62720,
+          "endMs": 64160
+        },
+        {
+          "id": "ES2002a.B.words21",
+          "speakerId": "B",
+          "text": "this",
+          "startMs": 64160,
+          "endMs": 64350
+        },
+        {
+          "id": "ES2002a.B.words22",
+          "speakerId": "B",
+          "text": "is",
+          "startMs": 64350,
+          "endMs": 64460
+        },
+        {
+          "id": "ES2002a.B.words23",
+          "speakerId": "B",
+          "text": "just",
+          "startMs": 64460,
+          "endMs": 64800
+        },
+        {
+          "id": "ES2002a.B.words24",
+          "speakerId": "B",
+          "text": "what",
+          "startMs": 64800,
+          "endMs": 64960
+        },
+        {
+          "id": "ES2002a.B.words25",
+          "speakerId": "B",
+          "text": "we're",
+          "startMs": 64960,
+          "endMs": 65060
+        },
+        {
+          "id": "ES2002a.B.words26",
+          "speakerId": "B",
+          "text": "gonna",
+          "startMs": 65060,
+          "endMs": 65210
+        },
+        {
+          "id": "ES2002a.B.words27",
+          "speakerId": "B",
+          "text": "be",
+          "startMs": 65210,
+          "endMs": 65300
+        },
+        {
+          "id": "ES2002a.B.words28",
+          "speakerId": "B",
+          "text": "doing",
+          "startMs": 65300,
+          "endMs": 65560
+        },
+        {
+          "id": "ES2002a.B.words29",
+          "speakerId": "B",
+          "text": "over",
+          "startMs": 65560,
+          "endMs": 65650
+        },
+        {
+          "id": "ES2002a.B.words30",
+          "speakerId": "B",
+          "text": "the",
+          "startMs": 65650,
+          "endMs": 65730
+        },
+        {
+          "id": "ES2002a.B.words31",
+          "speakerId": "B",
+          "text": "next",
+          "startMs": 65730,
+          "endMs": 65970
+        },
+        {
+          "id": "ES2002a.B.words32",
+          "speakerId": "B",
+          "text": "twenty",
+          "startMs": 65970,
+          "endMs": 66190
+        },
+        {
+          "id": "ES2002a.B.words33",
+          "speakerId": "B",
+          "text": "five",
+          "startMs": 66190,
+          "endMs": 66420
+        },
+        {
+          "id": "ES2002a.B.words34",
+          "speakerId": "B",
+          "text": "minutes",
+          "startMs": 66420,
+          "endMs": 67550
+        }
+      ],
+      "requestedActions": [
+        "select",
+        "replay",
+        "correct_if_needed",
+        "save_or_bookmark"
+      ],
+      "instruction": "Use the existing positive-width subtitle interval to replay the opening. The provider word be has only a point timestamp, so do not turn it into a precise word clip or interpolate a duration. If a useful excerpt cannot be checked with the bounded replay context, bookmark it instead of claiming precise timing.",
+      "maxReplayPaddingMs": 2000,
+      "replayPaddingMs": null,
+      "humanListening": null,
+      "effort": null,
+      "acceptancePending": true,
+      "observations": {
+        "runtimeSelectionId": null,
+        "runtimeCueMapping": null,
+        "finalText": null,
+        "finalReplayRange": null,
+        "cardId": null,
+        "bookmarkId": null,
+        "disposition": null
+      },
+      "providerPointEvidence": {
+        "requestId": "a1a3adc7-4618-416b-8526-152b32d333f0",
+        "attemptId": "2a9a8b15-8e9c-4d81-8d10-39ee2dc19c4a",
+        "transcriptionIndex": 0,
+        "wordIndex": 7,
+        "word": "be",
+        "startOffset": "2.500s",
+        "endOffset": "2.500s",
+        "sourceTimeMs": 65220,
+        "wordIntervalUsable": false
+      }
+    },
+    {
+      "id": "point-time-short60",
+      "profile": "short60",
+      "category": "uncertain_or_point_timing",
+      "nativeReviewCaseId": "en-dialogue-ami-es2002a-candidate-short60",
+      "nativeReviewDraftDigest": "521e44dbb68299325d2d3a6783efc9d9da749f2cda765cbcbf1ccdc49d9e30c7",
+      "anchors": [
+        {
+          "draftCueId": "cade17098c41acc43e556dc37f5df33ed9fc848c940b469db028f0df91b0a4f2",
+          "draftCueIndex": 20,
+          "startMs": 120764,
+          "endMs": 121064,
+          "text": "as it were.",
+          "draftStatus": "provisional"
+        }
+      ],
+      "sourceResponses": [
+        {
+          "requestId": "e9bb5a41-688e-4c70-b7ba-4e0f97d3a078",
+          "caseId": "en-dialogue-ami-es2002a-candidate-short60-001",
+          "ordinal": 1,
+          "outputCueIndex": 0,
+          "requestSourceStartMs": 119864,
+          "requestSourceEndMs": 185796,
+          "requestStartMs": 900,
+          "requestEndMs": 1200,
+          "sourceStartMs": 120764,
+          "sourceEndMs": 121064,
+          "text": "as it were."
+        }
+      ],
+      "referenceRecords": [
+        {
+          "id": "ES2002a.B.words155",
+          "speakerId": "B",
+          "text": "as",
+          "startMs": 120700,
+          "endMs": 120760
+        },
+        {
+          "id": "ES2002a.B.words156",
+          "speakerId": "B",
+          "text": "it",
+          "startMs": 120760,
+          "endMs": 120860
+        },
+        {
+          "id": "ES2002a.B.words157",
+          "speakerId": "B",
+          "text": "were",
+          "startMs": 120860,
+          "endMs": 120980
+        }
+      ],
+      "requestedActions": [
+        "select",
+        "replay",
+        "correct_if_needed",
+        "save_or_bookmark"
+      ],
+      "instruction": "Replay the existing as it were subtitle interval and inspect the adjacent boundary alternatives. The provider as timestamp has zero width. Keep that evidence unchanged, and use only a listener-checked local replay interval if saving a card; otherwise bookmark the uncertain phrase.",
+      "maxReplayPaddingMs": 2000,
+      "replayPaddingMs": null,
+      "humanListening": null,
+      "effort": null,
+      "acceptancePending": true,
+      "observations": {
+        "runtimeSelectionId": null,
+        "runtimeCueMapping": null,
+        "finalText": null,
+        "finalReplayRange": null,
+        "cardId": null,
+        "bookmarkId": null,
+        "disposition": null
+      },
+      "conflictIds": [
+        "394ae84e7eb71e2b5b71408230a37840d38a353b29dbc3c13a3f2e6248bc5b82"
+      ],
+      "providerPointEvidence": {
+        "requestId": "e9bb5a41-688e-4c70-b7ba-4e0f97d3a078",
+        "attemptId": "02415285-8726-4b4d-bdcb-bdf5abfe38b9",
+        "transcriptionIndex": 0,
+        "wordIndex": 0,
+        "word": "as",
+        "startOffset": "0.900s",
+        "endOffset": "0.900s",
+        "sourceTimeMs": 120764,
+        "wordIntervalUsable": false
+      }
+    }
+  ],
+  "humanListening": null,
+  "effort": null,
+  "acceptancePending": true,
+  "qualityQualified": false
+}

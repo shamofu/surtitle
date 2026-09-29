@@ -1,0 +1,297 @@
+name: Test and release
+on:
+  push:
+    branches: [main, release]
+  pull_request:
+    branches: [main, release]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  native-build:
+    uses: ./.github/workflows/native-build.yml
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: 4
+      WEBKIT_DISABLE_COMPOSITING_MODE: 1
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        id: node
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Read the native Rust toolchain pin
+        id: rust
+        shell: bash
+        run: echo "version=$(node -p 'require("./native/installer-inputs.json").rust.version')" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+          components: rustfmt, clippy
+      - name: Install the package manager declared by this checkout
+        id: pnpm
+        run: |
+          npm install -g "$(node -p 'require("./package.json").packageManager')"
+          echo "version=$(pnpm --version)" >> "$GITHUB_OUTPUT"
+          echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: ubuntu-24.04-debug
+      - name: Install Linux desktop and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake perl pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf xvfb dbus-x11 webkit2gtk-driver ffmpeg libmpv-dev fonts-noto-cjk
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm setup:rust-tools
+      - name: Frontend and script checks
+        run: |
+          node scripts/check-version.mjs
+          node scripts/check-production-features.mjs
+          pnpm test
+          pnpm build
+      - name: Rust checks
+        run: |
+          pnpm fmt:rust:check
+          pnpm test:rust
+          pnpm test:rust:no-default-features
+          pnpm lint:rust
+          pnpm audit:rust
+          node scripts/audit-js-licenses.mjs
+      - name: Required FFmpeg integration tests
+        run: SURTITLE_TEST_FFMPEG="$(command -v ffmpeg)" pnpm test:rust:required linux-ffmpeg
+      - name: Build and seed the native Linux application
+        run: |
+          pnpm build:native:e2e
+          pnpm test:fixtures
+          mkdir -p work
+          data_dir="$(mktemp -d "$PWD/work/e2e-linux.XXXXXXXX")"
+          pnpm seed:fixtures "$data_dir" "$PWD/test-results/fixtures/日本語 & sample.mp4"
+          echo "SURTITLE_E2E_DATA_DIR=$data_dir" >> "$GITHUB_ENV"
+      - name: WebKitGTK and native Tauri E2E
+        run: dbus-run-session -- xvfb-run -a pnpm test:e2e
+        env:
+          SURTITLE_E2E_BINARY: ${{ github.workspace }}/target/debug/surtitle
+          SURTITLE_E2E_AI_RECOVERY: translation
+          SURTITLE_E2E_TRANSCRIPT_REVIEW: boundary
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: linux-evidence-${{ github.sha }}
+          path: |
+            artifacts/
+            test-results/
+  windows:
+    needs: [native-build]
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        id: node
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Read the native Rust toolchain pin
+        id: rust
+        shell: bash
+        run: echo "version=$(node -p 'require("./native/installer-inputs.json").rust.version')" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+          components: rustfmt, clippy
+      - name: Install the package manager declared by this checkout
+        id: pnpm
+        run: |
+          $packageManager = (Get-Content package.json -Raw | ConvertFrom-Json).packageManager
+          npm install -g $packageManager
+          "version=$(pnpm --version)" >> $env:GITHUB_OUTPUT
+          "store=$(pnpm store path --silent)" >> $env:GITHUB_OUTPUT
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: native-build-${{ github.sha }}
+          path: work/native-ci-artifact/
+      - name: Prepare this run's native artifact
+        run: node scripts/native-ci-artifact.mjs consume work/native-ci-artifact
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: windows-2025-debug
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/check-version.mjs
+      - run: node scripts/check-production-features.mjs
+      - name: Windows process, profile and distribution script tests
+        run: >
+          pnpm test:scripts
+          scripts/webdriver-process.test.mjs
+          scripts/run-required-rust-tests.test.mjs
+          scripts/vc-prerequisite.test.mjs
+          scripts/package-installer-smoke.test.mjs
+          scripts/package-production-smoke.test.mjs
+          scripts/native-e2e-database.test.mjs
+          scripts/native-ci-artifact.test.mjs
+          scripts/native-installer-audit.test.mjs
+          scripts/native-installer-prepare.test.mjs
+      - run: pnpm build
+      - run: pnpm test:rust
+      - name: Verify ordinary builds cannot bypass evaluation accounting
+        run: pnpm test:rust:no-default-features
+      - run: pnpm lint:rust
+      - name: Acquire tested native runtime
+        run: |
+          pwsh scripts/native-prepare.ps1 -WithDevModel
+          pwsh scripts/native-smoke.ps1
+      - name: Prepare native WebDriver and generated media
+        run: |
+          pnpm setup:driver
+          pwsh scripts/prepare-webdriver.ps1 -InstallRuntime
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
+          pnpm test:fixtures
+          ffmpeg -v error -f lavfi -i 'testsrc2=size=320x180:rate=12:duration=3' -c:v libaom-av1 -cpu-used 8 -crf 50 -y work/e2e-av1.mkv
+          pnpm build:fixtures
+          # Create mutable SQLite files with the same permissions as the app.
+          $seedArguments = ConvertTo-Json -Compress -InputObject @("$PWD/work/e2e-windows", "$PWD/test-results/fixtures/日本語 & sample.mp4")
+          $seedArgumentsBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($seedArguments))
+          & pwsh -NoProfile -File scripts/run-windows-standard-user.ps1 -Application "$PWD/target/debug/examples/seed_fixture.exe" -ArgumentsBase64 $seedArgumentsBase64
+          if ($LASTEXITCODE -ne 0) { throw 'Windows E2E learning fixture preparation failed.' }
+      - name: Build actual Windows native E2E binary
+        run: pnpm build:native:e2e
+      - name: Required FFmpeg, libmpv and Silero regressions
+        run: |
+          $env:SURTITLE_TEST_FFMPEG = (Get-Command ffmpeg -CommandType Application).Source
+          pnpm test:rust:required windows-native
+      - name: WebView2 and libmpv E2E
+        run: pnpm test:e2e
+        env:
+          SURTITLE_E2E_BINARY: ${{ github.workspace }}\target\debug\surtitle.exe
+          SURTITLE_E2E_DATA_DIR: ${{ github.workspace }}\work\e2e-windows
+          SURTITLE_E2E_AI_RECOVERY: translation
+          SURTITLE_E2E_TRANSCRIPT_REVIEW: boundary
+          SURTITLE_E2E_AV1_FIXTURE: ${{ github.workspace }}\work\e2e-av1.mkv
+          SURTITLE_TAURI_DRIVER: ${{ github.workspace }}\work\driver\bin\tauri-driver.exe
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: windows-evidence-${{ github.sha }}
+          path: |
+            artifacts/
+            test-results/
+            work/webdriver/receipt.json
+  package:
+    needs: [native-build]
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Verify the system VC runtime before building the installer
+        run: |
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File native/vc-prerequisite.ps1 -CheckOnly
+          if ($LASTEXITCODE -ne 0) { throw 'The package runner failed the VC runtime prerequisite check.' }
+      - uses: actions/setup-node@v7.0.0
+        id: node
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Read the native Rust toolchain pin
+        id: rust
+        shell: bash
+        run: echo "version=$(node -p 'require("./native/installer-inputs.json").rust.version')" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      - name: Install the package manager declared by this checkout
+        id: pnpm
+        run: |
+          $packageManager = (Get-Content package.json -Raw | ConvertFrom-Json).packageManager
+          npm install -g $packageManager
+          "version=$(pnpm --version)" >> $env:GITHUB_OUTPUT
+          "store=$(pnpm store path --silent)" >> $env:GITHUB_OUTPUT
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: native-build-${{ github.sha }}
+          path: work/native-ci-artifact/
+      - name: Use this run's native payload and source for packaging
+        run: node scripts/native-ci-artifact.mjs consume work/native-ci-artifact
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: windows-2025-release-v2
+          cache-targets: false
+          cache-directories: |
+            target/debug
+            target/release
+      - run: pnpm install --frozen-lockfile
+      - run: pwsh scripts/native-prepare.ps1
+      - name: Prepare standard installer sources and runtime notices
+        run: python scripts/native-installer-prepare.py
+      - name: Generate distribution notices and dependency manifests
+        run: |
+          pnpm setup:licenses
+          & ./work/package-tools/bin/cargo-about.exe --version
+          & ./work/package-tools/bin/cargo-about.exe generate scripts/licenses.hbs --output-file src-tauri/resources/notices/rust.html
+          node scripts/audit-js-licenses.mjs
+      # The package script owns the Cargo separator before PowerShell can consume it.
+      - run: pnpm package:app
+      - name: Prepare exact production WebDriver and generated media
+        run: |
+          pnpm setup:driver
+          pwsh scripts/prepare-webdriver.ps1 -InstallRuntime
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
+          pnpm test:fixtures
+      - name: Test production installer and assemble source/SBOM
+        run: pwsh scripts/package-verify.ps1
+      - name: Preserve package verification diagnostics
+        uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: package-evidence-${{ github.sha }}
+          path: |
+            artifacts/*.json
+            work/webdriver/receipt.json
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: release-${{ github.sha }}
+          path: artifacts/release/
+          if-no-files-found: error
+  publish:
+    needs: [linux, windows, package]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        id: node
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: release-${{ github.sha }}
+          path: artifacts/release/
+      - run: node scripts/release.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}

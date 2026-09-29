@@ -1,0 +1,16 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Responsive shell and shared controls follow all feature styles. */
+@import './shared/styles/base.css';
+@import './app/shell.css';
+@import './features/library/library.css';
+@import './shared/ui/ui.css';
+@import './features/study/study.css';
+@import './features/cards/cards.css';
+@import './features/settings/settings.css';
+@import './features/study/playback/playback.css';
+@import './features/ai/jobs.css';
+@import './features/cards/review.css';
+@import './features/ai/results.css';
+@import './features/study/transcript/transcript.css';
+@import './features/library/management.css';
+@import './app/responsive.css';

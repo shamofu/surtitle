@@ -1,0 +1,132 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.compact-select {
+  font-size: 14px;
+  padding: 9px 12px;
+  background: var(--surface);
+  max-width: 220px;
+}
+.phrase-list {
+  border-top: 1px solid var(--border);
+}
+.phrase-card {
+  padding: 26px 0;
+  border-bottom: 1px solid var(--border);
+}
+.phrase-card header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+.phrase-card h3 {
+  font-size: clamp(22px, 2.4vw, 28px);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.4px;
+  margin: 4px 0 12px;
+  overflow-wrap: anywhere;
+}
+.phrase-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.phrase-meaning {
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--text);
+  max-width: 72ch;
+}
+.phrase-card blockquote {
+  font-size: 16px;
+  line-height: 1.8;
+  margin: 14px 0 20px;
+  max-width: 72ch;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.phrase-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  gap: 16px;
+  color: var(--muted);
+}
+.phrase-card footer a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 40px;
+}
+.phrase-card footer a:hover {
+  color: var(--accent);
+}
+.phrase-card footer a > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.phrase-card footer .badge {
+  flex-shrink: 0;
+}
+.phrase-options {
+  position: relative;
+}
+.phrase-options summary {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  list-style: none;
+  cursor: pointer;
+  border-radius: 8px;
+  color: var(--muted);
+}
+.phrase-options summary::-webkit-details-marker {
+  display: none;
+}
+.phrase-options summary:hover,
+.phrase-options[open] summary {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+.phrase-options-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+  z-index: 30;
+}
+.phrase-options-panel .button {
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+}
+@media (max-width: 620px) {
+  .phrase-card header {
+    gap: 12px;
+  }
+  .phrase-controls {
+    gap: 2px;
+  }
+  .phrase-controls > .button {
+    padding-inline: 10px;
+  }
+  .phrase-card footer {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .phrases-page .library-tools {
+    width: 100%;
+  }
+}

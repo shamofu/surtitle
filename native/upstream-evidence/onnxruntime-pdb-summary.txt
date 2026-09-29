@@ -1,0 +1,20 @@
+
+
+                          Summary                           
+============================================================
+  Block Size: 4096
+  Number of blocks: 101097
+  Number of streams: 921
+  Signature: 1786493124
+  Age: 1
+  GUID: {C774A891-15A1-4A81-829E-3267509F63FD}
+  Features: 0x1
+  Has Debug Info: true
+  Has Types: true
+  Has IDs: true
+  Has Globals: true
+  Has Publics: true
+  Is incrementally linked: false
+  Has conflicting types: false
+  Is stripped: false
+

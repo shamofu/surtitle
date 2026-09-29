@@ -1,0 +1,141 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.draft-cues {
+  height: 300px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 12px 0;
+  overscroll-behavior: contain;
+}
+.draft-cue {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.draft-cue p {
+  margin: 0 0 7px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  line-height: 1.8;
+}
+.draft-cue .segment-time {
+  min-height: 40px;
+  font-size: 12px;
+  align-self: start;
+}
+.draft-chunks {
+  margin: 16px 0;
+  max-height: 240px;
+  overflow: auto;
+  font-size: 12px;
+}
+.draft-chunks summary {
+  cursor: pointer;
+  color: var(--muted);
+  padding: 10px 0;
+  min-height: 40px;
+  line-height: 1.7;
+}
+.draft-chunks > div {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.draft-chunks .badge {
+  margin-left: 12px;
+}
+.boundary-editor {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 16px 0;
+  background: var(--surface);
+}
+.boundary-alternatives {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 16px 0;
+}
+.boundary-alternative {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 280px;
+  overflow: auto;
+  min-width: 0;
+}
+.boundary-alternative h4 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.boundary-alternative p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  line-height: 1.8;
+}
+.boundary-alternative .text-button {
+  font-size: 12px;
+  min-height: 40px;
+  padding-block: 8px;
+}
+.boundary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.boundary-manual {
+  margin-top: 16px;
+}
+.boundary-edit-row {
+  display: grid;
+  grid-template-columns: 110px 110px minmax(0, 1fr) 40px;
+  gap: 8px;
+  align-items: start;
+  margin: 10px 0;
+}
+.boundary-editor .button,
+.boundary-edit-row .icon-button,
+.repair-estimate .button {
+  min-height: 40px;
+}
+.boundary-edit-row textarea {
+  min-height: 70px;
+  resize: vertical;
+}
+.repair-estimate {
+  border-top: 1px solid var(--border);
+  margin-top: 18px;
+  padding-top: 16px;
+}
+.repair-estimate small {
+  display: block;
+  color: var(--muted);
+  line-height: 1.7;
+  margin-top: 8px;
+  font-size: 12px;
+  max-width: 76ch;
+}
+.repair-result {
+  margin-top: 14px;
+}
+@media (max-width: 850px) {
+  .boundary-edit-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .boundary-alternatives {
+    grid-template-columns: 1fr;
+  }
+  .draft-cue {
+    grid-template-columns: 95px minmax(0, 1fr);
+  }
+}

@@ -1,0 +1,77 @@
+name: Native acceptance
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+# Share the main workflow's same-ref queue; acceptance never cancels a build.
+concurrency:
+  group: Test and release-${{ github.ref }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  native-build:
+    uses: ./.github/workflows/native-build.yml
+  windows:
+    needs: [native-build]
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        id: node
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: native-build-${{ github.sha }}
+          path: work/native-ci-artifact/
+      - name: Prepare this run's native artifact
+        run: node scripts/native-ci-artifact.mjs consume work/native-ci-artifact
+      - name: Read the native Rust toolchain pin
+        id: rust
+        shell: bash
+        run: echo "version=$(node -p 'require("./native/installer-inputs.json").rust.version')" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: windows-2025-native-acceptance-optimized-v1
+      - name: Install the package manager declared by this checkout
+        id: pnpm
+        run: |
+          $packageManager = (Get-Content package.json -Raw | ConvertFrom-Json).packageManager
+          npm install -g $packageManager
+          "version=$(pnpm --version)" >> $env:GITHUB_OUTPUT
+          "store=$(pnpm store path --silent)" >> $env:GITHUB_OUTPUT
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
+      - run: pnpm install --frozen-lockfile
+      - name: Prepare the verified native runtime and pinned development model
+        run: |
+          pwsh scripts/native-prepare.ps1 -WithDevModel
+          pwsh scripts/native-smoke.ps1
+      - name: Generate project-owned media without acquiring speech recordings
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
+          node scripts/generate-fixtures.mjs
+      - name: Process the complete six-hour fixture without cloud calls
+        timeout-minutes: 15
+        run: |
+          $env:SURTITLE_TEST_FFMPEG = (Get-Command ffmpeg -CommandType Application).Source
+          $env:SURTITLE_LONG_AUDIO_FILE = Join-Path $PWD 'test-results/fixtures/six-hour-silence.flac'
+          pnpm test:rust:required windows-six-hour
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: native-acceptance-evidence-${{ github.sha }}
+          path: |
+            artifacts/
+            work/ai-six-hour-acceptance/report.json

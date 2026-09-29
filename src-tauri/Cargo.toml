@@ -1,0 +1,45 @@
+[package]
+name = "surtitle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "surtitle"
+publish = false
+
+[lib]
+name = "surtitle_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+surtitle-core = { path = "../crates/core" }
+surtitle-tools = { path = "../crates/tools" }
+surtitle-ai = { path = "../crates/ai" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }
+libloading = "0.8"
+rfd = "0.16"
+sha2 = "0.10"
+fs2 = "0.4"
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_LibraryLoader"] }
+
+[features]
+default = []
+e2e-test = ["surtitle-ai/e2e-fixtures"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[dev-dependencies]
+tempfile = "3"
+rusqlite = { version = "0.40", features = ["bundled"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }

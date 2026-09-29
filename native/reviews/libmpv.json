@@ -1,0 +1,14 @@
+{
+  "sourceComplete": true,
+  "noticesComplete": true,
+  "linkedLicense": "GPL-3.0-or-later",
+  "evidence": "20 exact upstream archives and recipe/configuration retained; ordinary PE imports are Windows system libraries; static GCC runtime uses exception 3.1 through ordinary GCC compilation; MinGW copyright/notice conditions retained; actual Windows application and CPU AV1 tests passed 6/6.",
+  "limitations": [
+    "No bit-for-bit rebuild claim. Future CI builds require reviewed input hashes and fresh Windows tests."
+  ],
+  "schemaVersion": 1,
+  "componentId": "libmpv",
+  "reviewScope": "Source and notice review of the stated local payload; Microsoft VC runtime is separately installed, never bundled.",
+  "reviewedAt": "2026-09-09",
+  "reviewStatus": "complete"
+}

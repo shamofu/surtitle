@@ -1,0 +1,14 @@
+{
+  "sourceComplete": true,
+  "noticesComplete": true,
+  "linkedLicense": "MIT with retained transitive notices",
+  "evidence": "Official DLL/PDB GUID and age match; 1181 observed source/header records match the 13 exact vcpkg input archives/patches, including reconstructed generated headers; complete ORT source and Eigen MPL source supplied.",
+  "limitations": [
+    "PDB checksum coverage is observed-input evidence, not enumeration of every build input. Complete original source and recipes are retained."
+  ],
+  "schemaVersion": 1,
+  "componentId": "onnxruntime",
+  "reviewScope": "Source and notice review of the stated local payload; Microsoft VC runtime is separately installed, never bundled.",
+  "reviewedAt": "2026-09-09",
+  "reviewStatus": "complete"
+}

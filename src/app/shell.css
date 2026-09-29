@@ -1,0 +1,61 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.app-shell { height: 100dvh; display: flex; overflow: hidden; }
+.app-main { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+.topbar {
+  min-height: 72px;
+  padding: 0 32px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  gap: 40px;
+  flex-shrink: 0;
+}
+.brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; font-size: 25px; font-weight: 650; letter-spacing: -1px; line-height: 1; padding: 12px 0; }
+.main-nav { display: flex; align-items: stretch; align-self: stretch; gap: 8px; }
+.main-nav a {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 3px solid transparent;
+  padding: 3px 12px 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+.main-nav a:hover { color: var(--text); background: var(--bg); }
+.main-nav a.active { border-bottom-color: var(--accent); color: var(--accent); }
+.nav-count { min-width: 23px; padding: 1px 6px; border-radius: 5px; color: var(--accent); background: var(--accent-soft); font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.topbar-actions { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.locale-button { min-width: 40px; min-height: 40px; border-radius: 6px; color: var(--muted); font-size: 12px; font-weight: 600; padding: 8px; white-space: nowrap; }
+.locale-button:hover { color: var(--text); background: var(--surface-hover); }
+.running-label { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); white-space: nowrap; margin-right: 12px; }
+.page-content { flex: 1; overflow: auto; padding: 32px 40px 48px; scroll-behavior: smooth; min-height: 0; }
+.page-content > div { max-width: 1440px; margin: 0 auto; }
+.preview-banner, .error-banner { padding: 8px 32px; background: var(--surface-raised); display: flex; gap: 10px; align-items: center; font-size: 12px; line-height: 1.7; color: var(--muted); flex-shrink: 0; }
+.error-banner { background: var(--danger-soft); color: var(--danger); }
+.error-banner > span { min-width: 0; overflow-wrap: anywhere; }
+.error-banner button { margin-left: auto; min-height: 40px; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.page-title { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 30px; }
+.page-title > div:first-child { min-width: 0; }
+.page-title h1 { font-size: 28px; font-weight: 650; letter-spacing: -0.5px; line-height: 1.4; }
+.page-title p { font-size: 14px; color: var(--muted); margin-top: 8px; line-height: 1.8; max-width: 68ch; }
+.page-actions { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
+.eyebrow { display: none; }
+.button { display: inline-flex; justify-content: center; align-items: center; gap: 8px; padding: 9px 15px; border-radius: 6px; border: 1px solid var(--border); font-size: 14px; font-weight: 550; line-height: 1.5; white-space: nowrap; min-height: 40px; background: var(--surface); }
+.button:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--faint); }
+.button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); border-color: var(--accent); }
+.button.ghost { border-color: transparent; color: var(--muted); background: transparent; }
+.button.danger { color: var(--danger); }
+.button-count { background: #0002; border-radius: 4px; padding: 1px 5px; }
+.icon-button { width: 40px; height: 40px; display: inline-flex; justify-content: center; align-items: center; border-radius: 6px; color: var(--muted); flex-shrink: 0; }
+.icon-button:hover { color: var(--text); background: var(--surface-hover); }
+.icon-button.active { color: var(--accent); background: var(--accent-soft); }
+.badge { display: inline-flex; align-items: center; padding: 4px 8px; border-radius: 4px; font-size: 12px; line-height: 1.4; white-space: nowrap; background: var(--surface-raised); color: var(--muted); }
+.badge.accent { background: var(--accent-soft); color: var(--accent); }
+.badge.warning { color: var(--warning); background: var(--warning-soft); }
+.badge.danger { color: var(--danger); background: var(--danger-soft); }
+.back-link { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; min-height: 40px; color: var(--muted); }
+.back-link:hover { color: var(--text); }

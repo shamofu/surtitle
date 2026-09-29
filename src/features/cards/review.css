@@ -1,0 +1,221 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.review-page {
+  max-width: 820px !important;
+}
+.review-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.review-counter {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.review-title {
+  margin: 30px 0 24px;
+}
+.review-title h1 {
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
+.review-title p {
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--muted);
+  margin-top: 8px;
+}
+.session-progress {
+  height: 4px;
+  background: var(--surface-raised);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 24px;
+}
+.session-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s;
+}
+.review-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.review-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 24px 30px 0;
+}
+.review-question,
+.review-answer-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.review-prompt {
+  padding: 32px 30px;
+}
+.review-prompt h2 {
+  font-size: clamp(28px, 4vw, 40px);
+  letter-spacing: -0.6px;
+  font-weight: 550;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.review-prompt p {
+  font-size: 18px;
+  line-height: 1.8;
+  color: var(--muted);
+  margin: 20px 0;
+  max-width: 66ch;
+  overflow-wrap: anywhere;
+}
+.review-answer {
+  min-height: 112px;
+  padding: 25px 30px;
+  background: var(--surface-raised);
+  border-top: 1px solid var(--border);
+}
+.review-answer.concealed {
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.review-answer p {
+  font-size: 18px;
+  line-height: 1.8;
+  margin-top: 9px;
+  overflow-wrap: anywhere;
+}
+.review-answer kbd {
+  margin-left: 10px;
+  font-size: 12px;
+  color: inherit;
+  background: transparent;
+  border-color: currentColor;
+}
+.review-answer .review-translation,
+.review-answer .review-explanation {
+  font-size: 15px;
+  color: var(--muted);
+}
+.review-answer .review-explanation {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.review-card footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 30px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+}
+.review-card-reps {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.rating-area {
+  text-align: center;
+  margin-top: 28px;
+}
+.rating-area > p {
+  font-size: 15px;
+  color: var(--text);
+  margin-bottom: 16px;
+}
+.rating-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.rating-button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 8px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.rating-button strong {
+  font-weight: 550;
+  font-size: 15px;
+}
+.rating-button small,
+.rating-area > small {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.rating-key {
+  position: absolute;
+  left: 10px;
+  top: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.rating-button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.rating-area.waiting .rating-buttons {
+  opacity: 0.5;
+}
+.review-complete {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  padding: 36px 0;
+}
+.review-complete-icon {
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+.review-complete h2 {
+  font-size: 24px;
+  font-weight: 550;
+}
+.review-complete p {
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--muted);
+  margin: 16px 0 24px;
+  max-width: 60ch;
+}
+.review-complete-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+@media (max-width: 620px) {
+  .review-card-top,
+  .review-prompt,
+  .review-answer,
+  .review-card footer {
+    padding-inline: 20px;
+  }
+  .review-question {
+    max-width: 24ch;
+    text-align: right;
+  }
+  .rating-buttons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .review-card footer {
+    flex-wrap: wrap;
+  }
+}

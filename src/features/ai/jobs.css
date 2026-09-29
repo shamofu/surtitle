@@ -1,0 +1,53 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.job-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.job-status {
+  flex-wrap: wrap;
+}
+.local-preparation {
+  margin-bottom: 24px;
+}
+.ai-model-settings {
+  margin: 24px 0;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+}
+.ai-model-settings > h3 {
+  font-size: 16px;
+  font-weight: 550;
+  margin-bottom: 18px;
+}
+.ai-model-settings .inline-actions {
+  flex-wrap: wrap;
+}
+.job-actions .button,
+.local-preparation .button,
+.unknown-attempt .button {
+  min-height: 40px;
+}
+.unknown-attempt {
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-top: 12px;
+}
+.unknown-attempt .check-field {
+  margin: 13px 0;
+}
+.unknown-attempt h3 {
+  font-size: 15px;
+  font-weight: 550;
+}
+.unknown-attempt p {
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--muted);
+  margin-top: 8px;
+  max-width: 76ch;
+  overflow-wrap: anywhere;
+}

@@ -1,0 +1,81 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Library downloads and saved-learning management. */
+.download-jobs {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 24px;
+  background: var(--surface);
+}
+.download-jobs h2 {
+  font-size: 17px;
+  margin: 0 0 12px;
+}
+.download-job {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+.download-job > div {
+  flex: 1;
+  min-width: 0;
+}
+.download-job strong {
+  display: block;
+  font-size: 15px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.download-job p,
+.download-job summary {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+.download-job progress {
+  width: 90px;
+  accent-color: var(--accent);
+}
+.card-management {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0;
+}
+.card-management .button {
+  font-size: 13px;
+  padding: 9px 12px;
+  min-height: 40px;
+}
+.download-job .button,
+.download-job summary {
+  min-height: 40px;
+}
+.download-job summary {
+  display: list-item;
+  align-content: center;
+  cursor: pointer;
+}
+.track-controls select {
+  max-width: 230px;
+}
+.study-top .page-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 1100px) {
+  .download-job {
+    flex-wrap: wrap;
+  }
+  .download-job > div {
+    flex-basis: 100%;
+  }
+  .study-top .page-actions {
+    max-width: 350px;
+  }
+}

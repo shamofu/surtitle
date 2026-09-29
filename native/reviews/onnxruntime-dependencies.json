@@ -1,0 +1,951 @@
+{
+  "schemaVersion": 1,
+  "componentId": "onnxruntime",
+  "version": "1.29.0",
+  "binarySha256": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471",
+  "pdbSha256": "90a4faf89b0fcde664ffa690d76b23526bb192bfb5e32ea5b462a84981e35bf7",
+  "observedChecksumRecords": 1181,
+  "unresolvedChecksumRecords": 0,
+  "components": [
+    {
+      "id": "abseil",
+      "version": "20250814.0",
+      "license": "Apache-2.0",
+      "sourceArchiveSha256": "9b2b72d4e8367c0b843fa2bcfa2b08debbe3cee34f7aaa27de55a6cbb3e843db",
+      "notices": [
+        {
+          "file": "notices/abseil/LICENSE",
+          "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747"
+        }
+      ]
+    },
+    {
+      "id": "cpuinfo",
+      "version": "2025-11-18",
+      "license": "BSD-2-Clause",
+      "sourceArchiveSha256": "a550205e891f9f1982044a306cb54556347645cba129af34cd907160f83bd0f1",
+      "notices": [
+        {
+          "file": "notices/cpuinfo/LICENSE",
+          "sha256": "8e7e60636c3aa0cb03571a1a841ce5697f9551ff92b3c426c2561613d15ade70"
+        }
+      ]
+    },
+    {
+      "id": "onnx",
+      "version": "1.22.0",
+      "license": "Apache-2.0",
+      "sourceArchiveSha256": "70bb8b25cf31ea9b1d9f94baacfdc8c4fa27a760f9a10f5d93881bc9eede5fbc",
+      "notices": [
+        {
+          "file": "notices/onnx/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "file": "notices/onnx/LICENSES/Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        },
+        {
+          "file": "notices/onnx/LICENSES/BSD-2-Clause.txt",
+          "sha256": "017b5ee48f680e82cba79141c7895a1f02b856df2512225f5c427fe36765ef0b"
+        },
+        {
+          "file": "notices/onnx/NOTICE",
+          "sha256": "4d680fb1f48f07f134c9f7a8d715303b8f5160b5757bc9eec4cac783703ea592"
+        }
+      ]
+    },
+    {
+      "id": "protobuf",
+      "version": "3.21.12",
+      "license": "BSD-3-Clause",
+      "sourceArchiveSha256": "930c2c3b5ecc6c9c12615cf5ad93f1cd6e12d0aba862b572e076259970ac3a53",
+      "notices": [
+        {
+          "file": "notices/protobuf/LICENSE",
+          "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d"
+        }
+      ]
+    },
+    {
+      "id": "re2",
+      "version": "2025-11-05",
+      "license": "BSD-3-Clause",
+      "sourceArchiveSha256": "8635bc46ac8d73974b4198229805287c8d620245f2081af155d7d96d4988a3a5",
+      "notices": [
+        {
+          "file": "notices/re2/LICENSE",
+          "sha256": "6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449"
+        }
+      ]
+    },
+    {
+      "id": "eigen3",
+      "version": "3.4.0",
+      "license": "MPL-2.0",
+      "sourceArchiveSha256": "c8adb6532fbfacd2ec1418c66404159b00c34d855bdc19cefa1f0db0e5e0aa5f",
+      "notices": [
+        {
+          "file": "notices/eigen3/COPYING.APACHE",
+          "sha256": "03379001a7b12a2ec997a25554247d985270b353c10d5bafee9ac8d6519820b7"
+        },
+        {
+          "file": "notices/eigen3/COPYING.BSD",
+          "sha256": "51928dce36213c5333ba3172e847d735d4c6e9b7ff2722a326c49067155b82eb"
+        },
+        {
+          "file": "notices/eigen3/COPYING.MINPACK",
+          "sha256": "c87b7f8ee88f6195e91743820c00354833583aef091b72e2d4a49c8e28e798a0"
+        },
+        {
+          "file": "notices/eigen3/COPYING.MPL2",
+          "sha256": "66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172"
+        },
+        {
+          "file": "notices/eigen3/COPYING.README",
+          "sha256": "db640ff2bd90c6abd6a4d3fbb351e0ee4d555417cf840492054d1cbb2ea85644"
+        },
+        {
+          "file": "notices/eigen3/LICENSE",
+          "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+        }
+      ]
+    },
+    {
+      "id": "nlohmann-json",
+      "version": "3.12.0",
+      "license": "MIT",
+      "sourceArchiveSha256": "4b92eb0c06d10683f7447ce9406cb97cd4b453be18d7279320f7b2f025c10187",
+      "notices": [
+        {
+          "file": "notices/nlohmann-json/LICENSE.MIT",
+          "sha256": "46a65cffd1ea955132d95a8dd921640714a8d6b537d2e4e482d31145ae95b603"
+        },
+        {
+          "file": "notices/nlohmann-json/LICENSES/Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        },
+        {
+          "file": "notices/nlohmann-json/LICENSES/BSD-3-Clause.txt",
+          "sha256": "5a93d5831e1297ab10fe643e1a631e83be392896da14ee2951285a79012df69d"
+        },
+        {
+          "file": "notices/nlohmann-json/LICENSES/GPL-3.0-only.txt",
+          "sha256": "b6a8bf63ae2c95b0aa256ee774680d7bd18f21f457da75466f7610b3b16acc4e"
+        },
+        {
+          "file": "notices/nlohmann-json/LICENSES/MIT.txt",
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+        }
+      ]
+    },
+    {
+      "id": "boost-config",
+      "version": "1.91.0",
+      "license": "BSL-1.0",
+      "sourceArchiveSha256": "e69618fa862927db69b4dd8e6b070c647a799b892fd0ee141d28db0dab025531",
+      "notices": [
+        {
+          "file": "notices/Boost-LICENSE_1_0.txt",
+          "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+          "origin": "Verbatim license section from official ONNX Runtime ThirdPartyNotices; copyright remains in source headers"
+        }
+      ]
+    },
+    {
+      "id": "boost-mp11",
+      "version": "1.91.0",
+      "license": "BSL-1.0",
+      "sourceArchiveSha256": "6ab871e0ef397a2e7b0602f13a5f473a7381043c91b57fe907ca4925a6a1ee58",
+      "notices": [
+        {
+          "file": "notices/Boost-LICENSE_1_0.txt",
+          "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+          "origin": "Verbatim license section from official ONNX Runtime ThirdPartyNotices; copyright remains in source headers"
+        }
+      ]
+    },
+    {
+      "id": "flatbuffers",
+      "version": "23.5.26",
+      "license": "Apache-2.0",
+      "sourceArchiveSha256": "1cce06b17cddd896b6d73cc047e36a254fb8df4d7ea18a46acf16c4c0cd3f3f3",
+      "notices": [
+        {
+          "file": "notices/flatbuffers/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ]
+    },
+    {
+      "id": "ms-gsl",
+      "version": "4.2.2",
+      "license": "MIT",
+      "sourceArchiveSha256": "59e2a0a0ea22e8bcf9db2dc4d4bd21212ac6595748295fc27a7e02cf75eac4b5",
+      "notices": [
+        {
+          "file": "notices/ms-gsl/LICENSE",
+          "sha256": "4c21dc82a1c7186ea754fd59d504c00947953a3401fe8e24eaa44109ef8e2555"
+        },
+        {
+          "file": "notices/ms-gsl/ThirdPartyNotices.txt",
+          "sha256": "691d94413053d5bda219c05f57739192b30c171db0925f3722604fe06f865d3b"
+        }
+      ]
+    },
+    {
+      "id": "wil",
+      "version": "1.0.260126.7",
+      "license": "MIT",
+      "sourceArchiveSha256": "de9e03b38ff0ff8d22048f00b111cb631d21c550328f12530ccba71c05c9e361",
+      "notices": [
+        {
+          "file": "notices/wil/LICENSE",
+          "sha256": "27ebda9d51f0a56b7e281ccd8230a27236dcb51c05f64b07869ecf6e965d68b0"
+        },
+        {
+          "file": "notices/wil/ThirdPartyNotices.txt",
+          "sha256": "32403680d9c8b4a4c68c0bf650090dcfc063f99ad8a37d7ff84e00d9709a518f"
+        }
+      ]
+    },
+    {
+      "id": "safeint",
+      "version": "3.0.28",
+      "license": "MIT",
+      "sourceArchiveSha256": "d6b164bcea92a746e4d44132e505c7ab1816d1089ba99ebc674ccd4b70262ed5",
+      "notices": [
+        {
+          "file": "notices/safeint/LICENSE",
+          "sha256": "a46919cc8f01eb73f6e4b84af0d41b46b2a33b87c74e864279ef585079f82da4"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "file": "README.md",
+      "sha256": "6c4a0287ff00b26a4a5449d275f3d5fe191d374b4dad380e5cfee6840aaff37b",
+      "bytes": 2231
+    },
+    {
+      "file": "evidence/onnxruntime-dependency-inventory.json",
+      "sha256": "a18caf2efd8d68adb45ba0d75229514f14efe0b5b01ec28ceb15acb350b3328f",
+      "bytes": 173372
+    },
+    {
+      "file": "evidence/onnxruntime-deps.txt",
+      "sha256": "a088d88e42772db22c353006a8053ad7bb5372912500ae76f7d52e22390a8fd1",
+      "bytes": 7901
+    },
+    {
+      "file": "evidence/onnxruntime-external-deps.cmake",
+      "sha256": "58f4db2bf412e5aeb22f6b510c587d3d5e3c216d493127b39cdb90e565e3521c",
+      "bytes": 49947
+    },
+    {
+      "file": "evidence/onnxruntime-pdb-summary.txt",
+      "sha256": "7ddf6f4c81ba5189a9905828a63ff74481312df2f553aed3c9aad8e1dd7cdb61",
+      "bytes": 474
+    },
+    {
+      "file": "evidence/onnxruntime-source-comparison.json",
+      "sha256": "19f47f2cf81fdbd013562c2607421a11d38b7276f125d6721b3d9848c676d277",
+      "bytes": 300029
+    },
+    {
+      "file": "evidence/onnxruntime-source-inputs.json",
+      "sha256": "d4a2577bb1509e88c829d1876702462667f00160f537161e4186dfa0562dce2b",
+      "bytes": 17536
+    },
+    {
+      "file": "evidence/onnxruntime-vcpkg-configuration.json",
+      "sha256": "38aa7e4494f1222046a768f9e38a9bbda18491134a842be41bc21bbd19b4a907",
+      "bytes": 464
+    },
+    {
+      "file": "evidence/onnxruntime-vcpkg.json",
+      "sha256": "7e3febc04c51b671fe0f1d34f67765109fde52e56cd6a4ed60789b59c638283d",
+      "bytes": 3113
+    },
+    {
+      "file": "evidence/protoc-build.log",
+      "sha256": "fc19151c0615ba7e72496059493d958a47c288e3b91e4f11cb9356efa542947f",
+      "bytes": 48029
+    },
+    {
+      "file": "evidence/source-comparison-final.json",
+      "sha256": "19f47f2cf81fdbd013562c2607421a11d38b7276f125d6721b3d9848c676d277",
+      "bytes": 300029
+    },
+    {
+      "file": "evidence/source-inputs.json",
+      "sha256": "dee117f859ddeaa805248fe6ed380c6e56bdb2b08e71e12d48a7c469f0696bce",
+      "bytes": 15983
+    },
+    {
+      "file": "generated-header-evidence/abseil-cxx14-options-crlf.h",
+      "sha256": "6bda56b539de037d96ce6395d87a2aea03561322a5a3bd1f445bbc1be4708e39",
+      "bytes": 9325
+    },
+    {
+      "file": "generated-header-evidence/abseil-cxx14-options.h",
+      "sha256": "b9e4f6a767b75f534000ea3bdbb1cdbf69d9d18116cf14e1698b47d47e5e4ea1",
+      "bytes": 9141
+    },
+    {
+      "file": "generated-header-evidence/abseil-cxx17-options-crlf.h",
+      "sha256": "e9be0b2bede56c526e5136ebcaac04f40d7917b3793cd02034b69ff37265c3d4",
+      "bytes": 9325
+    },
+    {
+      "file": "generated-header-evidence/abseil-cxx17-options.h",
+      "sha256": "dfd1a55e81284112bb32a018e3bd8b8ff52de40a9c31cc3fa88c742fb89d2f9e",
+      "bytes": 9141
+    },
+    {
+      "file": "generated-header-evidence/abseil-cxx20-options-crlf.h",
+      "sha256": "1e8a40e8a7bf04ffbed4d0785c486be801f13cb0888604f3a819c6eb416851bf",
+      "bytes": 9325
+    },
+    {
+      "file": "generated-header-evidence/abseil-cxx20-options.h",
+      "sha256": "13d34ca43adcdab5fd388780b552dbe3d917e2c0aa68b1f72ebbd70334b473aa",
+      "bytes": 9141
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx-data.pb.cc",
+      "sha256": "bc7d513d9754604f4d61ce64d044ecae9f9204554d10d27dede6b0ed9f50d407",
+      "bytes": 60556
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx-data.pb.h",
+      "sha256": "746b98ba4147bcb505a1ff57ee6b727322f09f9de814b46497d5c5545826f2cb",
+      "bytes": 84688
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx-data.proto",
+      "sha256": "90a6f0d5273255f1f19fae11bd82563543ce0ff157b326cd610f503ea24ce4bb",
+      "bytes": 5116
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx-data.proto3",
+      "sha256": "d467e1692abc2c72c410a9d48d9a64e307b19b482e80660d3a968fa290ab02ff",
+      "bytes": 5009
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx-ml.pb.cc",
+      "sha256": "f64919423e09d8c3b4ad4b036b883b4e905585ad108c5c2777cedd1cb65e88aa",
+      "bytes": 456622
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx-ml.pb.h",
+      "sha256": "5f457c45ff97e1fd901ff130e6ead976e03c08357df03f0e9346a0815c06b0ec",
+      "bytes": 574374
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx-ml.proto",
+      "sha256": "4ce4bf03aa01a345de7384a6b7c68d26fdbbbb915ed4ad3ff09955b09639f831",
+      "bytes": 43315
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx-ml.proto3",
+      "sha256": "8af7975bcfd15a8d95d3529d00689d1ae2fef41051a1b430785b792568e3a0eb",
+      "bytes": 42694
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx-operators-ml.pb.cc",
+      "sha256": "60bac6d7cbf93d945cdfcc30e96025f508f983185f10cae57cfad8a42f09f85d",
+      "bytes": 44203
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx-operators-ml.pb.h",
+      "sha256": "42fc3306b14d9a2ca9af92562ede85c354a3dd8b91e2db4df5fd747c9b611f6f",
+      "bytes": 48270
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx-operators-ml.proto",
+      "sha256": "afce007b387acf329d8437df804319e9d3d6074630c8c38e45cb0556baefcee4",
+      "bytes": 5238
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx-operators-ml.proto3",
+      "sha256": "5d9ecc9d026f9c44a06e3b6e0b2b41a28bdf43b9728faddd98f1b74a77bda383",
+      "bytes": 5140
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx_data_pb.py",
+      "sha256": "0afa037fb1b318d652fbf460fadbc796b754f9c8e2f67775ca47786569d0a673",
+      "bytes": 96
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx_operators_pb.py",
+      "sha256": "09f5eb7ac7101d3397bb44ae84df79519a505984d15755ca683b2c11d02537bb",
+      "bytes": 104
+    },
+    {
+      "file": "generated-header-evidence/onnx-full/onnx/onnx_pb.py",
+      "sha256": "9bd9c997a3512ff3cdd0b8341ea83fd4435d0e06f4802fc82b5feb47d7a530ac",
+      "bytes": 94
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx-data.pb.cc",
+      "sha256": "4aacdc3a2ceff29c8eff92fdeaa9fed3c6450a181b57ab461cf981a2500816bb",
+      "bytes": 55565
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx-data.pb.h",
+      "sha256": "69fe0f5ea9a3ba1b52a72497cb056eea23a46dbbf6b2a58b3554f009fab3753f",
+      "bytes": 81037
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx-data.proto",
+      "sha256": "b93e888534425357bc9ce81a6578bfdacfd465091a8325cc0c09cfd1e7e2bc28",
+      "bytes": 5182
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx-data.proto3",
+      "sha256": "7f8724fc89fc9f79ad8ca5ea3da4f027ada36ededaaa8428a9d6314106511274",
+      "bytes": 5075
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx-ml.pb.cc",
+      "sha256": "cbc24cba307b10d1b03d01bec558b609f4e385eb7ad6276684f5fa8aa99fce1f",
+      "bytes": 409305
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx-ml.pb.h",
+      "sha256": "47639a405191a53fb207690ccb692b7d2dee17bcb9abd66723c15368bb7de8d4",
+      "bytes": 548678
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx-ml.proto",
+      "sha256": "f5996bda8d5c46d29e9ea5dd5f56465dfa7e98c22cb31529ebcbce7cbe9bbaba",
+      "bytes": 43381
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx-ml.proto3",
+      "sha256": "e288e59c69797bf49238e9b5eda22ba260d0327431d8b1b91f99bee1c3d9a4f3",
+      "bytes": 42760
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx-operators-ml.pb.cc",
+      "sha256": "646df8ff47bca68fc1643c13e9102a006cdc29a614770612dee3a71c493bd9f8",
+      "bytes": 35934
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx-operators-ml.pb.h",
+      "sha256": "aa18ecc5073696bc6ee87f0bed07c91130141323be4479ff6e45ae31f77aa367",
+      "bytes": 46382
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx-operators-ml.proto",
+      "sha256": "21e0bf9ac2deb45a15bbe32d9c973535c6d19719ced1581b2c510339e409cdbc",
+      "bytes": 5304
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx-operators-ml.proto3",
+      "sha256": "573c423722059d0dd64e48c2d8d2f99901c2d8d7c1bf2ff3fc5b0af2065fa231",
+      "bytes": 5206
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx_data_pb.py",
+      "sha256": "0afa037fb1b318d652fbf460fadbc796b754f9c8e2f67775ca47786569d0a673",
+      "bytes": 96
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx_operators_pb.py",
+      "sha256": "09f5eb7ac7101d3397bb44ae84df79519a505984d15755ca683b2c11d02537bb",
+      "bytes": 104
+    },
+    {
+      "file": "generated-header-evidence/onnx-lite/onnx/onnx_pb.py",
+      "sha256": "9bd9c997a3512ff3cdd0b8341ea83fd4435d0e06f4802fc82b5feb47d7a530ac",
+      "bytes": 94
+    },
+    {
+      "file": "notices/Boost-LICENSE_1_0.txt",
+      "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+      "bytes": 1338
+    },
+    {
+      "file": "notices/abseil/LICENSE",
+      "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747",
+      "bytes": 11361
+    },
+    {
+      "file": "notices/cpuinfo/LICENSE",
+      "sha256": "8e7e60636c3aa0cb03571a1a841ce5697f9551ff92b3c426c2561613d15ade70",
+      "bytes": 1424
+    },
+    {
+      "file": "notices/eigen3/COPYING.APACHE",
+      "sha256": "03379001a7b12a2ec997a25554247d985270b353c10d5bafee9ac8d6519820b7",
+      "bytes": 11362
+    },
+    {
+      "file": "notices/eigen3/COPYING.BSD",
+      "sha256": "51928dce36213c5333ba3172e847d735d4c6e9b7ff2722a326c49067155b82eb",
+      "bytes": 1517
+    },
+    {
+      "file": "notices/eigen3/COPYING.MINPACK",
+      "sha256": "c87b7f8ee88f6195e91743820c00354833583aef091b72e2d4a49c8e28e798a0",
+      "bytes": 2193
+    },
+    {
+      "file": "notices/eigen3/COPYING.MPL2",
+      "sha256": "66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172",
+      "bytes": 16727
+    },
+    {
+      "file": "notices/eigen3/COPYING.README",
+      "sha256": "db640ff2bd90c6abd6a4d3fbb351e0ee4d555417cf840492054d1cbb2ea85644",
+      "bytes": 264
+    },
+    {
+      "file": "notices/eigen3/LICENSE",
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+      "bytes": 16725
+    },
+    {
+      "file": "notices/flatbuffers/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358
+    },
+    {
+      "file": "notices/ms-gsl/LICENSE",
+      "sha256": "4c21dc82a1c7186ea754fd59d504c00947953a3401fe8e24eaa44109ef8e2555",
+      "bytes": 1157
+    },
+    {
+      "file": "notices/ms-gsl/ThirdPartyNotices.txt",
+      "sha256": "691d94413053d5bda219c05f57739192b30c171db0925f3722604fe06f865d3b",
+      "bytes": 2022
+    },
+    {
+      "file": "notices/nlohmann-json/LICENSE.MIT",
+      "sha256": "46a65cffd1ea955132d95a8dd921640714a8d6b537d2e4e482d31145ae95b603",
+      "bytes": 1076
+    },
+    {
+      "file": "notices/nlohmann-json/LICENSES/Apache-2.0.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+      "bytes": 10280
+    },
+    {
+      "file": "notices/nlohmann-json/LICENSES/BSD-3-Clause.txt",
+      "sha256": "5a93d5831e1297ab10fe643e1a631e83be392896da14ee2951285a79012df69d",
+      "bytes": 1460
+    },
+    {
+      "file": "notices/nlohmann-json/LICENSES/GPL-3.0-only.txt",
+      "sha256": "b6a8bf63ae2c95b0aa256ee774680d7bd18f21f457da75466f7610b3b16acc4e",
+      "bytes": 34670
+    },
+    {
+      "file": "notices/nlohmann-json/LICENSES/MIT.txt",
+      "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0",
+      "bytes": 1078
+    },
+    {
+      "file": "notices/onnx/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358
+    },
+    {
+      "file": "notices/onnx/LICENSES/Apache-2.0.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+      "bytes": 10280
+    },
+    {
+      "file": "notices/onnx/LICENSES/BSD-2-Clause.txt",
+      "sha256": "017b5ee48f680e82cba79141c7895a1f02b856df2512225f5c427fe36765ef0b",
+      "bytes": 1266
+    },
+    {
+      "file": "notices/onnx/NOTICE",
+      "sha256": "4d680fb1f48f07f134c9f7a8d715303b8f5160b5757bc9eec4cac783703ea592",
+      "bytes": 2133
+    },
+    {
+      "file": "notices/onnxruntime-LICENSE",
+      "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+      "bytes": 1094
+    },
+    {
+      "file": "notices/onnxruntime-ThirdPartyNotices.txt",
+      "sha256": "4c5b864d8974c94b37461f38163facef79a1bb5dea461667ee9e5be6a8e73f83",
+      "bytes": 343249
+    },
+    {
+      "file": "notices/protobuf/LICENSE",
+      "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d",
+      "bytes": 1732
+    },
+    {
+      "file": "notices/re2/LICENSE",
+      "sha256": "6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449",
+      "bytes": 1558
+    },
+    {
+      "file": "notices/safeint/LICENSE",
+      "sha256": "a46919cc8f01eb73f6e4b84af0d41b46b2a33b87c74e864279ef585079f82da4",
+      "bytes": 1066
+    },
+    {
+      "file": "notices/wil/LICENSE",
+      "sha256": "27ebda9d51f0a56b7e281ccd8230a27236dcb51c05f64b07869ecf6e965d68b0",
+      "bytes": 1162
+    },
+    {
+      "file": "notices/wil/ThirdPartyNotices.txt",
+      "sha256": "32403680d9c8b4a4c68c0bf650090dcfc063f99ad8a37d7ff84e00d9709a518f",
+      "bytes": 4248
+    },
+    {
+      "file": "ports/abseil/absl_cuda13_member_template.patch",
+      "sha256": "c9677fbb8d25cdcc0e8e1b3f158930fd8e77639d1b0098da9396381be81de733",
+      "bytes": 3708
+    },
+    {
+      "file": "ports/abseil/absl_cuda_warnings.patch",
+      "sha256": "dfc09be4b38a1ff5a4e19fe3781ec86d32196581f644b85a43f4fa851bcc8151",
+      "bytes": 2295
+    },
+    {
+      "file": "ports/abseil/absl_windows.patch",
+      "sha256": "bcd5bf031f6a6e050f9dd1f3c70ee9dadf66744bfe532bb342050333bc0d362c",
+      "bytes": 1503
+    },
+    {
+      "file": "ports/abseil/portfile.cmake",
+      "sha256": "52e589d656eaced348f50630ba47a09196dfcc7814dc3b84b4ed5e0d74b099d6",
+      "bytes": 1719
+    },
+    {
+      "file": "ports/abseil/vcpkg.json",
+      "sha256": "25c433345656361b0847e52c1a80a8519c19e5a10a702cb47eff48f42c3621e4",
+      "bytes": 1100
+    },
+    {
+      "file": "ports/boost-config/portfile.cmake",
+      "sha256": "c5d26335a724c615e17eef807f665126f799e0876128259d2ead145cebdde01c",
+      "bytes": 944
+    },
+    {
+      "file": "ports/boost-config/vcpkg.json",
+      "sha256": "f207e58d433be77781ec0109bb92b4b86b399c52759ff7b0d23b0726f52aacbe",
+      "bytes": 477
+    },
+    {
+      "file": "ports/boost-mp11/portfile.cmake",
+      "sha256": "07dc7ce5a695d190a2df09354e2d299efadcf114033dca7655a18dfb522e5a3b",
+      "bytes": 444
+    },
+    {
+      "file": "ports/boost-mp11/vcpkg.json",
+      "sha256": "f006df072af0aa4839d764c757d9c75394e9a21d3576f0584ebe262a63eea1eb",
+      "bytes": 540
+    },
+    {
+      "file": "ports/cpuinfo/patch_cpuinfo_h_for_arm64ec.patch",
+      "sha256": "74e9561300fb25ae31134f70ef2fc3ab02bfe9b839c04eee32e93ddb098164fb",
+      "bytes": 663
+    },
+    {
+      "file": "ports/cpuinfo/patch_vcpkg_arm64ec_support.patch",
+      "sha256": "b56750cb5bc60600b3b67aef1480ab38c4882865a30c55525f50a2b83ed45d75",
+      "bytes": 5107
+    },
+    {
+      "file": "ports/cpuinfo/portfile.cmake",
+      "sha256": "1bb906e58b2807556357b4ad5f1360741ea62dd45423c83313d831d36a6d1403",
+      "bytes": 2043
+    },
+    {
+      "file": "ports/cpuinfo/vcpkg.json",
+      "sha256": "73d66229974ecfe1cc7d1d57122c0df740da382a3411e6f27da3607ea213a1ac",
+      "bytes": 567
+    },
+    {
+      "file": "ports/eigen3/fix-vectorized-reductions-half.patch",
+      "sha256": "ca4b1fd2f2a8e7805d167157478eb63f42ae852e00697720730dc3e58e73e025",
+      "bytes": 1077
+    },
+    {
+      "file": "ports/eigen3/portfile.cmake",
+      "sha256": "fb2304afbb8f71650c255926732de8aa6f55f7dba9abcf3a318b741f794fd402",
+      "bytes": 1495
+    },
+    {
+      "file": "ports/eigen3/remove_configure_checks.patch",
+      "sha256": "60acd9d6811fb26f44bef80ef6f7d852f2b2d622157168076d560f48419edac4",
+      "bytes": 1284
+    },
+    {
+      "file": "ports/eigen3/update-warning-suppression-to-latest.patch",
+      "sha256": "f1a340d2833b33d828d494c2120fdd110e543857cce0596835f289d53e1b511c",
+      "bytes": 5803
+    },
+    {
+      "file": "ports/eigen3/vcpkg.json",
+      "sha256": "1552c959c3600a2fd6d05ed79ea028da51216a565960dfdb20b05e252292be00",
+      "bytes": 410
+    },
+    {
+      "file": "ports/flatbuffers/fix-uwp-build.patch",
+      "sha256": "8a363f9e6052511d97a477795304bd14f0009f2ee9ba0423dedc4032d98351de",
+      "bytes": 592
+    },
+    {
+      "file": "ports/flatbuffers/portfile.cmake",
+      "sha256": "e62979f89d3d8bb0e85d9ca3c405e043cadfd6a0f4d808d970ac6e6680c905ba",
+      "bytes": 1574
+    },
+    {
+      "file": "ports/flatbuffers/vcpkg.json",
+      "sha256": "71eb624e166c3a202fcfeed1bd24282e0a232a33f2ccababefd44a2313e57c13",
+      "bytes": 678
+    },
+    {
+      "file": "ports/ms-gsl/portfile.cmake",
+      "sha256": "24948a60556ad3ef8cbbf8e7c24527d82ab36073d378e0bd5b05eb3949415673",
+      "bytes": 630
+    },
+    {
+      "file": "ports/ms-gsl/vcpkg.json",
+      "sha256": "c8f2a3675022bb21e2d43be7d303e89af7eb4f976b1a4b824324e8248251890e",
+      "bytes": 347
+    },
+    {
+      "file": "ports/nlohmann-json/fix-4736_char8_t.patch",
+      "sha256": "4c0177c5b4c4fb0978b54e2e113d2c76865059a85aa1b060b87f441056813fde",
+      "bytes": 5800
+    },
+    {
+      "file": "ports/nlohmann-json/fix-4742_std_optional.patch",
+      "sha256": "218c2182366f1e9b997fc81f1b27b951a1438a3578f8e0cb22a1957cc326ccbd",
+      "bytes": 3778
+    },
+    {
+      "file": "ports/nlohmann-json/portfile.cmake",
+      "sha256": "9bae6425097eb8d78e6f9a213de5258a3dfac57056e4c42e76a3a8d805fbdc1b",
+      "bytes": 1700
+    },
+    {
+      "file": "ports/nlohmann-json/usage",
+      "sha256": "ec6460d4688d7908d8adc698700f77639013641f1ab27066e9324c9ca11276c3",
+      "bytes": 455
+    },
+    {
+      "file": "ports/nlohmann-json/vcpkg.json",
+      "sha256": "b576fa660ad7fcd9aa0324cc775b596d48aa7f14c993f63b23865a8673835310",
+      "bytes": 438
+    },
+    {
+      "file": "ports/onnx/binskim.patch",
+      "sha256": "1470c713e0399e690e8c057e7e1a05456f66e010bd3c9804b7a989eaded70935",
+      "bytes": 2390
+    },
+    {
+      "file": "ports/onnx/fix-cmakelists.patch",
+      "sha256": "18266602500bd4f7f1ebba0a0b20ecbd14c10c3dfb2692bc6c871f1dea876781",
+      "bytes": 717
+    },
+    {
+      "file": "ports/onnx/fix-dependency-protobuf.patch",
+      "sha256": "a02892e3657d4b7d80d700e774a0266a5dfb8d87125a129d15e0890514f16fe6",
+      "bytes": 998
+    },
+    {
+      "file": "ports/onnx/portfile.cmake",
+      "sha256": "c27a4455d11b86aa20ab3e77c7ba0d2d1acd26d3529ea4f1f6af8ef893c10f1b",
+      "bytes": 3380
+    },
+    {
+      "file": "ports/onnx/vcpkg.json",
+      "sha256": "b5cacb985e8f11be393ecc23906e203c6ba3db3dd4ddc8087bff613d06972bb0",
+      "bytes": 431
+    },
+    {
+      "file": "ports/protobuf/compile_options.patch",
+      "sha256": "2cee33ca7844b27e275ebed87fe419e432f9ed774c539c0aee8cc5b1923710a9",
+      "bytes": 2144
+    },
+    {
+      "file": "ports/protobuf/fix-default-proto-file-path.patch",
+      "sha256": "a991a3e51e4c0d91b30b5dcaacee9009abf510dd172efa08c9184f7d0609e3e1",
+      "bytes": 896
+    },
+    {
+      "file": "ports/protobuf/fix-static-build.patch",
+      "sha256": "8997787fc7f393557f86475f448156fee9720f79014f7cdf398668647b525316",
+      "bytes": 582
+    },
+    {
+      "file": "ports/protobuf/portfile.cmake",
+      "sha256": "09866b61d69350ca381fd0fabe989bb8cc84b3d0c73ea6dcc90e8b125d0066ff",
+      "bytes": 6045
+    },
+    {
+      "file": "ports/protobuf/protobuf-targets-vcpkg-protoc.cmake",
+      "sha256": "b6392072936942aef973ec15da763076831774502c59241ddbc104e0beceab64",
+      "bytes": 348
+    },
+    {
+      "file": "ports/protobuf/protobuf_cmake.patch",
+      "sha256": "22e798efa9d588c00c6fa5eefbc2a530e45147ba75f0a1e823dce40c686bad54",
+      "bytes": 5308
+    },
+    {
+      "file": "ports/protobuf/vcpkg-cmake-wrapper.cmake",
+      "sha256": "aab3824ed66b1e4eaf11064fe2ea2183588ab807dbc70b6cb0ddc85a1f93d03c",
+      "bytes": 556
+    },
+    {
+      "file": "ports/protobuf/vcpkg.json",
+      "sha256": "ceacca14a04561228ab6e25f5701a32baed9b37bd1617e0041c39e23e19be735",
+      "bytes": 640
+    },
+    {
+      "file": "ports/re2/portfile.cmake",
+      "sha256": "b85f302d11f21ba7cedd228b4a96dff9dfa7317979047b62c9cfb2d329147de4",
+      "bytes": 682
+    },
+    {
+      "file": "ports/re2/vcpkg.json",
+      "sha256": "050234748a052b8f27341586826521cc34ebe5877985db1bbcd7fa568e577fcd",
+      "bytes": 471
+    },
+    {
+      "file": "ports/safeint/portfile.cmake",
+      "sha256": "8ffbe8a35d455af1e21afc9d66b9e453855fb290199e1b41c705e6afcaf885b2",
+      "bytes": 452
+    },
+    {
+      "file": "ports/safeint/vcpkg.json",
+      "sha256": "d64c6e8315b7c27c9e06c2d3b9679ae9aa3cfbe8c3ccd560f33d798c14b069bc",
+      "bytes": 187
+    },
+    {
+      "file": "ports/wil/cpp14.patch",
+      "sha256": "ab863a7c685b2b35118083c5ff5881a332ab76e1f9aec0b120113dff9522e55c",
+      "bytes": 1273
+    },
+    {
+      "file": "ports/wil/portfile.cmake",
+      "sha256": "8f7163e64b47902c13eb8acc3aafc7ab47bfe43f0f11699ee395bdfd9cd00bf2",
+      "bytes": 906
+    },
+    {
+      "file": "ports/wil/vcpkg.json",
+      "sha256": "8cba735e6f8364ebe097a1cd6e1eafa6d5aa2e029d150b8802f2ff0f3d703766",
+      "bytes": 496
+    },
+    {
+      "file": "scripts/native-ort-compare.py",
+      "sha256": "7cf812ad49cfab979ad0b64aa8fe7745fab1ea3b2a6c2c1c17f3872416631825",
+      "bytes": 4472
+    },
+    {
+      "file": "scripts/native-ort-evidence.py",
+      "sha256": "3ed4b2332341b959bf1c9bf8cdd32533ec9691773a0f6c041dc8b7de8399e842",
+      "bytes": 4551
+    },
+    {
+      "file": "scripts/native-ort-generated.py",
+      "sha256": "2efd26757207a6b53da6af6474b368305794bced31244b35ee2d579f48e77cf6",
+      "bytes": 4231
+    },
+    {
+      "file": "scripts/native-ort-package.py",
+      "sha256": "8664bc518dec2c4d381a11630d36194f34aed4bb2c602fb72c8039501d38e5a3",
+      "bytes": 8358
+    },
+    {
+      "file": "scripts/native-ort-source-inputs.py",
+      "sha256": "78bba3b7f3901be8b8d497f3ad761deae25ec415ea0e3ad7a40ab91e5b3d9cc3",
+      "bytes": 5561
+    },
+    {
+      "file": "sources/abseil-20250814.0.tar.gz",
+      "sha256": "9b2b72d4e8367c0b843fa2bcfa2b08debbe3cee34f7aaa27de55a6cbb3e843db",
+      "bytes": 2235497
+    },
+    {
+      "file": "sources/boost-config-boost-1.91.0.tar.gz",
+      "sha256": "e69618fa862927db69b4dd8e6b070c647a799b892fd0ee141d28db0dab025531",
+      "bytes": 399041
+    },
+    {
+      "file": "sources/boost-mp11-boost-1.91.0.tar.gz",
+      "sha256": "6ab871e0ef397a2e7b0602f13a5f473a7381043c91b57fe907ca4925a6a1ee58",
+      "bytes": 130942
+    },
+    {
+      "file": "sources/cpuinfo-4628dc060ce4e82345dc166bbac875609db4ff69.tar.gz",
+      "sha256": "a550205e891f9f1982044a306cb54556347645cba129af34cd907160f83bd0f1",
+      "bytes": 3553030
+    },
+    {
+      "file": "sources/eigen3-1d8b82b0740839c0de7f1242a3585e3390ff5f33.tar.gz",
+      "sha256": "c8adb6532fbfacd2ec1418c66404159b00c34d855bdc19cefa1f0db0e5e0aa5f",
+      "bytes": 2894190
+    },
+    {
+      "file": "sources/flatbuffers-v23.5.26.tar.gz",
+      "sha256": "1cce06b17cddd896b6d73cc047e36a254fb8df4d7ea18a46acf16c4c0cd3f3f3",
+      "bytes": 2257271
+    },
+    {
+      "file": "sources/ms-gsl-v4.2.2.tar.gz",
+      "sha256": "59e2a0a0ea22e8bcf9db2dc4d4bd21212ac6595748295fc27a7e02cf75eac4b5",
+      "bytes": 62316
+    },
+    {
+      "file": "sources/nlohmann-json-v3.12.0.tar.gz",
+      "sha256": "4b92eb0c06d10683f7447ce9406cb97cd4b453be18d7279320f7b2f025c10187",
+      "bytes": 9678593
+    },
+    {
+      "file": "sources/onnx-v1.22.0.tar.gz",
+      "sha256": "70bb8b25cf31ea9b1d9f94baacfdc8c4fa27a760f9a10f5d93881bc9eede5fbc",
+      "bytes": 13687818
+    },
+    {
+      "file": "sources/onnxruntime-2e2543fbe9fae542f921d47a72d21d5a4ef0b710.tar.gz",
+      "sha256": "00a7483d894037b23e5f2a7d9b18c4026e3585e2636b316cd2870b6e1bc660cb",
+      "bytes": 277684829
+    },
+    {
+      "file": "sources/protobuf-v3.21.12.tar.gz",
+      "sha256": "930c2c3b5ecc6c9c12615cf5ad93f1cd6e12d0aba862b572e076259970ac3a53",
+      "bytes": 5141502
+    },
+    {
+      "file": "sources/re2-927f5d53caf8111721e734cf24724686bb745f55.tar.gz",
+      "sha256": "8635bc46ac8d73974b4198229805287c8d620245f2081af155d7d96d4988a3a5",
+      "bytes": 397888
+    },
+    {
+      "file": "sources/safeint-3.0.28.tar.gz",
+      "sha256": "d6b164bcea92a746e4d44132e505c7ab1816d1089ba99ebc674ccd4b70262ed5",
+      "bytes": 579420
+    },
+    {
+      "file": "sources/vcpkg-18a4723aeb7adbbae84bcff0edf510883800f32f.tar.gz",
+      "sha256": "a0414f2f0b75673b7e7872e392e3f0598c9c5d117348d4ca3fcec8562f6b6c38",
+      "bytes": 5301377
+    },
+    {
+      "file": "sources/wil-v1.0.260126.7.tar.gz",
+      "sha256": "de9e03b38ff0ff8d22048f00b111cb631d21c550328f12530ccba71c05c9e361",
+      "bytes": 550496
+    }
+  ],
+  "releaseEligible": false,
+  "remainingChecks": [
+    "Final effective application/installer payload, notices and corresponding-source audit"
+  ]
+}

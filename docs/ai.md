@@ -1,0 +1,70 @@
+# AI, audio preparation, and spending
+
+The Rust AI crate owns credentials, immutable inputs, requests, usage accounting, and transcript review. No IPC returns service-account JSON or access tokens. Generated content requires review before use. See [Vertex AI setup](vertex-verification.md) for application and CLI instructions.
+
+## Model selection
+
+There is no local model catalog or version allowlist. Settings contain separate, initially unset preferences for transcription, vocabulary, explanations, and translation. Each job can explicitly override its preference. Google publisher discovery supplies suggestions; a syntactically valid Gemini ID can also be entered directly. Discovery does not establish that the user's project has access.
+
+ExecutionConfig freezes the model ID, location, output limit, thinking configuration, and optional price snapshot. PreparedJob also freezes request bodies, media/source revision, settings digest, project, and credential identity. Changing these inputs requires a new quote. No running job changes model automatically.
+
+The transcription API mode is explicit: Transcribe uses VERBATIM with word timestamps; the general audio adapter requests structured subtitle cues. Model support depends on the selected adapter and settings. Unsupported combinations fail visibly. Users explicitly acknowledge the request scope and the need to review generated content.
+
+## Credentials and dispatch
+
+1. A native file dialog supplies the service-account JSON path to CredentialVault. Rust validates the format and fixed OAuth endpoint, then uses per-user Windows DPAPI. Plaintext fallback is not supported.
+2. The data directory has an exclusive process lock. Startup recovers interrupted dispatches as unknown outcomes and revokes stale execution approval. Unsent work requires renewed approval after restart.
+3. Preparation hashes immutable inputs and body templates. Equivalent plans reuse the same job. A quote is valid for approval for 30 minutes; that is not a 30-minute execution limit for an already approved immutable plan.
+4. SQLite reserves one request before dispatch. The ledger permits only one active request at a time. After authentication and input checks, dispatch validation rechecks approval, digest, cancellation, current limits, and the reservation before sending.
+5. A valid response is saved and settled once. Completed requests cannot be resent. Pause and cancellation stop subsequent requests; they cannot revoke a request already being processed by Google.
+6. Timeouts, interrupted connections, and unresolvable usage retain the appropriate hold and stop automatic progress. Acknowledging an unknown outcome does not refund it. Retrying requires a reviewed quote and separate approval.
+
+The production transport uses fixed Google HTTPS endpoints with bounded responses, no redirects, and no automatic retries.
+
+A valid usage record can settle a response whose content is rejected. Transcribe's STOP response may omit output-token count only when explicit input and total counts agree and other related counts are absent or zero. Other missing or invalid usage retains the hold.
+
+## Prices and limits
+
+Google Billing metadata is queried on request. Matching is conservative: ambiguous or incomplete prices remain unset. Users may enter their own input/output rates, including explicit zero rates. A snapshot records its source, observation time, and integer micro-USD rates. Changing the model or location in the editor clears the previous price for review. There is no built-in dated model/price catalog.
+
+For priced jobs, per-job, daily, and monthly budgets start at zero and must cover the reservation. Input reservations use conservative byte/audio bounds; the configured output limit includes generated reasoning tokens. Usage settlement rounds upward in integer micro-USD. Cached input is conservatively counted at the supplied input rate. Prices and limits are an application accounting policy, not a provider-backed invoice cap.
+
+For unpriced jobs, the user must explicitly approve the complete request count, submitted audio duration, and generation settings. A dollar ceiling cannot be calculated or guaranteed. Successful unpriced requests retain usage and a distinct uncalculated-cost state; they are not unknown network outcomes and are never represented as zero cost. The UI shows the calculated subtotal and the count of unpriced attempts separately.
+
+Unknown priced reservations remain counted across UTC day/month boundaries. Known usage is attributed to the dispatch date. Costs from another device/application, taxes, future price changes, and billing adjustments are not controlled by this ledger. Reference: [Google pricing](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing).
+
+## Local audio preparation
+
+The first explicit preparation downloads the pinned Silero model into app data, verifies its size and SHA-256, and uses the bundled CPU ONNX Runtime. This does not send media to Google. Tool leases retain the selected FFmpeg/ffprobe pair; executable hashes are checked before processing.
+
+The chosen absolute audio-stream index is used for extraction. FFmpeg decodes the selected range once into mono 16 kHz PCM. Silero processes 512-sample windows with context and recurrent state. The same stream is written to temporary PCM, then exact sample ranges are encoded to FLAC. Memory does not grow with the complete audio length. Temporary PCM is removed after successful preparation; cancellation and errors terminate and reap child processes.
+
+Chunks target 120 seconds, normally selecting pauses within 90–150 seconds and never exceeding 180 seconds. Pauses of at least 500 ms are preferred, then 200 ms pauses; forced boundaries remain possible. Each submission adds up to three seconds of context on either side. VAD does not delete audio or compress the timeline. Core intervals cover the original samples once, while send intervals deliberately overlap and are all counted in estimates.
+
+The receipt binds sample intervals, source/stream identity, tools, VAD model, and generated audio hashes. Saved immutable audio can be reused without regenerating it. Changing the execution model can create a new quote for those inputs; changing source audio, selected stream, or prepared bytes invalidates reuse. Regenerated inputs require a new estimate.
+
+## Transcript review and learning content
+
+The review engine rebases saved responses onto the source timeline. It retains originals, pending ranges, and conflicting boundaries. Only matching text at matching times is deduplicated; repetition elsewhere remains intact. A disagreement retains both alternatives for explicit selection or editing. Missing responses are pending, not silence. Provider validation state remains separate from the effective source selected for each range: a provider result, a locally reparsed candidate, a manual revision, or an unresolved range.
+
+An invalid or missing range can be recovered locally by listening and entering subtitle text with positive-width times inside its prepared audio interval, including overlap. Manual times are authored subtitle intervals. Empty rows are rejected unless the user explicitly confirms no speech for the complete range. Corrections preserve original responses and saved cards. See [transcript evidence and local review](transcript-evidence.md) for revision binding, reparsing and recovery rules.
+
+When VAD detects no speech in a submitted range but the selected result contains subtitles, the draft carries a warning and remains unadoptable until explicitly reviewed. This also applies to manually authored text. Acknowledgement changes the digest and preserves the original result. It is not evidence that the model output was correct and does not silently remove hallucinated text.
+
+Local preparations retain sustained low-posterior pauses within otherwise spoken chunks. These use the same Silero inference frames, with posterior below 0.35 throughout at least two seconds; each end receives a 250 ms inward guard. A selected cue wholly inside such a guarded interval requires explicit review. The evidence binds the policy, model/runtime hashes and original PCM sample ranges. It estimates a pause, rather than proving silence, and never deletes words, changes timestamps or supplies missing output. Whole-chunk no-speech warnings retain priority to avoid duplicate acknowledgements.
+
+Adoption requires a validated result or manual revision for every range, including confirmed no speech, and completion of the required boundary and VAD reviews. [Draft study](draft-study.md) allows learning from a confirmed excerpt while other ranges remain unresolved.
+
+Manual saving requires an inactive job and no in-flight reservation for that job. An unknown cost hold permits local correction and adoption while remaining reserved. The user separately acknowledges the complete subtitle replacement. Applying subtitles and recording adoption use one SQLite transaction; stale source revisions, old digests, and partial replacement of an existing cue are rejected. Adoption prevents further execution of that job. Reopening an adopted result does not overwrite later subtitle edits or saved cards.
+
+Manual revision history and selections are device-local operational data, excluded from portable learning exports and cleared by learning restore. Provider evidence and the cost ledger remain separate.
+
+Boundary repair prepares at most 30 seconds as a separate job bound to the parent boundary and current draft digest. It inherits the parent's execution configuration unless explicitly overridden. It requires its own quote/approval. Received repair text is retained as an alternative and never automatically replaces the originals.
+
+Vocabulary and explanation requests validate source cue IDs and selected text. Dictionary forms must preserve the same lexeme and semantic roles. A2/B1/C1 affect the frozen explanation request. Translation validates every source ID and checks source text, timing, language, and status again before local application. Quoted instructions remain translation data; URLs, code, JSON, and placeholders are preserved.
+
+Cards use a consistent snapshot of the cited source text, complete source translation when available, and audio spanning the cited adjacent cues. A generated alternative example is labeled separately. Card audio and source snapshots are independent of later subtitle or media-cache edits.
+
+## Development verification
+
+The development-only [validation CLI](vertex-verification.md#build-and-initialize-the-cli) uses a separate data root and is excluded from application distribution. It supports explicitly approved requests and offline review of saved responses. The [test guide](testing.md) covers offline regressions and real FFmpeg, libmpv and Silero integration tests. Ordinary CI sends no Vertex requests.

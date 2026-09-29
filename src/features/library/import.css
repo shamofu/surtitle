@@ -1,0 +1,38 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.modal:has(.media-import) { width: min(720px, calc(100vw - 48px)); overflow: hidden; }
+.modal:has(.media-import) .modal-inner { max-height: calc(100dvh - 62px); display: flex; flex-direction: column; }
+.modal:has(.media-import) .modal-header { flex-shrink: 0; margin-bottom: 18px; }
+.media-import { display: flex; flex-direction: column; min-height: 0; }
+.import-body { overflow: auto; min-height: 0; padding-right: 5px; }
+.media-import .segmented-control { margin-bottom: 14px; }
+.import-languages .field { margin-bottom: 14px; }
+.media-import .import-drop { margin-bottom: 18px; }
+.media-import .import-drop.is-dragging { border: 2px solid var(--accent); background: var(--accent-soft); }
+.media-import .import-drop.has-files { padding: 10px; gap: 7px; }
+.media-import .import-drop.has-files .drop-icon { display: none; }
+.media-import .import-drop.has-files > span:not(.drop-icon) { display: none; }
+.media-import .import-drop.has-files small { display: none; }
+.media-import .drop-icon { color: var(--accent); }
+.media-import .import-drop small { max-width: 50ch; }
+.import-selection { margin-bottom: 18px; }
+.import-selection-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; }
+.import-file-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 250px; overflow: auto; border-block: 1px solid var(--border); }
+.import-file-row { display: flex; gap: 12px; align-items: flex-start; padding: 14px 0; }
+.import-file-row + .import-file-row { border-top: 1px solid var(--border); }
+.import-file-row > svg { margin-top: 4px; color: var(--muted); }
+.import-file-row.imported > svg, .import-file-row.existing > svg { color: var(--accent); }
+.import-file-copy { flex: 1; min-width: 0; }
+.import-file-copy strong { display: block; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.import-file-path { display: block; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.import-file-copy p { font-size: 12px; line-height: 1.6; margin-top: 4px; color: var(--muted); overflow-wrap: anywhere; }
+.import-file-row.failed .import-file-copy p, .import-file-row.invalid .import-file-copy p { color: var(--warning); }
+.import-file-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.import-file-actions .button { padding: 6px 10px; min-height: 34px; font-size: 12px; }
+.import-results, .import-drag-notice { padding: 12px 14px; background: var(--accent-soft); color: var(--text); border-radius: 6px; font-size: 13px; line-height: 1.8; margin-bottom: 18px; }
+.media-import .import-footer { flex-wrap: wrap; flex-shrink: 0; margin-top: 14px; padding-top: 14px; }
+.library-drop-hint { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; margin: -6px 0 24px; }
+.library-drop-overlay { position: fixed; inset: 82px 24px 24px; z-index: 20; pointer-events: none; border: 2px dashed var(--accent); background: var(--accent-soft); border-radius: 10px; display: grid; place-items: center; }
+.library-drop-overlay > div { max-width: 420px; padding: 30px; text-align: center; }
+.library-drop-overlay svg { color: var(--accent); margin-bottom: 14px; }
+.library-drop-overlay strong { display: block; font-size: 22px; margin-bottom: 10px; }
+.library-drop-overlay p { font-size: 14px; line-height: 1.8; }
