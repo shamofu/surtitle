@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Production-only WebDriver probe. The installer caller owns disposable-profile seeding.
 import { execFileSync } from 'node:child_process';
-import { spawnWebDriver } from './webdriver-process.mjs';
-import { createConnection, createServer } from 'node:net';
+import { spawnWebDriver, waitForWebDriver } from './webdriver-process.mjs';
+import { createServer } from 'node:net';
 import { sha256File as hash, readJson } from './file-content.mjs';
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -12,7 +12,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const appId = 'app.surtitle.desktop';
 const requireCheck = (value, message) => { if (!value) throw Object.assign(new Error(message), { code: 'ERR_PRODUCTION_CHECK' }); };
-const wait = ms => new Promise(done => setTimeout(done, ms));
 
 const diagnosticStages = new Set(['arguments', 'profile', 'fixture', 'application', 'native-files', 'driver-files',
   'driver-start', 'driver-ready', 'session', 'app-ready', 'initial-snapshot', 'settings', 'media-load', 'metadata',
@@ -153,14 +152,6 @@ async function freePort() {
   await new Promise((done, reject) => server.close(error => error ? reject(error) : done()));
   return port;
 }
-async function ready(port) {
-  return new Promise(done => {
-    const socket = createConnection({ host: '127.0.0.1', port });
-    socket.setTimeout(500);
-    const finish = value => { socket.destroy(); done(value); };
-    socket.once('connect', () => finish(true)); socket.once('error', () => finish(false)); socket.once('timeout', () => finish(false));
-  });
-}
 
 function knownProfilePaths() {
   // Tauri uses Windows known folders. Environment-only paths cannot authorize a
@@ -219,13 +210,12 @@ export async function runProductionProbe(options, diagnostics = createProduction
   let session;
   try {
     diagnostics.stage('driver-ready');
-    let listening = false;
-    for (let tries = 0; tries < 100; tries++) {
-      requireCheck(!launchError && driver.exitCode === null, 'Production WebDriver exited before startup');
-      if (await ready(port)) { listening = true; break; }
-      await wait(100);
+    try {
+      await waitForWebDriver(driver, { port, timeoutMs: 10000 });
+    } catch (error) {
+      requireCheck(false, error?.code === 'ETIMEDOUT'
+        ? 'Production WebDriver readiness timed out' : 'Production WebDriver exited before startup');
     }
-    requireCheck(listening, 'Production WebDriver readiness timed out');
     diagnostics.stage('session');
     const { remote } = await import('webdriverio');
     session = await remote({ hostname: '127.0.0.1', port, logLevel: 'silent', connectionRetryCount: 0, connectionRetryTimeout: 60000,

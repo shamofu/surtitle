@@ -2,10 +2,12 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, request } from 'node:http';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { spawnWebDriver } from './webdriver-process.mjs';
+import { spawnWebDriver, waitForWebDriver } from './webdriver-process.mjs';
 
 const marker = 'SURTITLE_TEST_CHILD_JSON:';
 const directTimeoutMs = 10_000;
@@ -93,6 +95,210 @@ function childJson(stdout) {
   const lines = stdout.split(/\r?\n/).filter(line => line.startsWith(marker));
   assert.equal(lines.length, 1, `Expected exactly one marked child result:\n${stdout}`);
   return JSON.parse(lines[0].slice(marker.length));
+}
+
+function readinessDriver() {
+  const driver = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null });
+  // A caller can already be collecting diagnostics. Readiness must remove only
+  // its own listeners, on both success and failure.
+  driver.on('error', () => {});
+  driver.on('exit', () => {});
+  const listeners = driver.eventNames().map(event => [event, driver.listeners(event)]);
+  return { driver, assertClean() {
+    assert.deepEqual(driver.eventNames().map(event => [event, driver.listeners(event)]), listeners);
+  } };
+}
+
+function readinessServer(t, handler) {
+  const sockets = new Set(), requests = [];
+  const server = createServer((req, res) => {
+    requests.push([req.method, req.url]);
+    handler(req, res);
+  });
+  server.on('connection', socket => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+  });
+  const close = async () => {
+    server.closeAllConnections();
+    if (server.listening) await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  };
+  t.onTestFinished(close);
+  return { requests, sockets, close, async listen(port = 0) {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(port, '127.0.0.1', () => {
+        server.removeListener('error', reject);
+        resolve();
+      });
+    });
+    return server.address().port;
+  } };
+}
+
+const readinessOptions = { timeoutMs: 3_000, pollIntervalMs: 20, requestTimeoutMs: 200 };
+const respondReady = (_req, res) => res.end(JSON.stringify({ value: { ready: true } }));
+const assertOnlyStatusRequests = requests => {
+  assert.ok(requests.length > 0);
+  assert.ok(requests.every(([method, path]) => method === 'GET' && path === '/status'),
+    `Readiness must not create sessions or replay WebDriver operations: ${JSON.stringify(requests)}`);
+};
+
+test('WebDriver readiness waits for the backend when the proxy port opens first', async t => {
+  const backend = readinessServer(t, respondReady);
+  const backendPort = await backend.listen();
+  await backend.close();
+  let reportRefusal;
+  const refused = new Promise(resolve => { reportRefusal = resolve; });
+  const proxy = readinessServer(t, (req, res) => {
+    const upstream = request({ hostname: '127.0.0.1', port: backendPort, path: req.url, method: req.method, agent: false }, response => {
+      res.writeHead(response.statusCode);
+      response.pipe(res);
+    });
+    upstream.once('error', error => {
+      reportRefusal(error);
+      res.writeHead(502);
+      res.end(JSON.stringify({ value: { error: 'unknown error', message: error.message } }));
+    });
+    upstream.end();
+  });
+  const port = await proxy.listen();
+  const f = readinessDriver();
+  let ready = false;
+  const waiting = waitForWebDriver(f.driver, { port, ...readinessOptions }).then(() => { ready = true; });
+  void waiting.catch(() => {});
+  const failure = await refused;
+  assert.equal(failure.code, 'ECONNREFUSED');
+  await delay(60);
+  assert.equal(ready, false, 'A listening proxy alone must not count as a ready WebDriver');
+  await backend.listen(backendPort);
+  await waiting;
+  assertOnlyStatusRequests(proxy.requests);
+  assertOnlyStatusRequests(backend.requests);
+  await until(() => proxy.sockets.size === 0 && backend.sockets.size === 0,
+    'Successful readiness must close its HTTP sockets', 2_000);
+  f.assertClean();
+});
+
+test('WebDriver readiness retries connection refusal until the status endpoint starts', async t => {
+  const endpoint = readinessServer(t, respondReady);
+  const port = await endpoint.listen();
+  await endpoint.close();
+  const f = readinessDriver();
+  let ready = false;
+  const waiting = waitForWebDriver(f.driver, { port, ...readinessOptions }).then(() => { ready = true; });
+  void waiting.catch(() => {});
+  await delay(60);
+  assert.equal(ready, false);
+  await endpoint.listen(port);
+  await waiting;
+  assertOnlyStatusRequests(endpoint.requests);
+  f.assertClean();
+});
+
+test('WebDriver readiness retries resets, non-200 responses, invalid JSON and values other than ready true', async t => {
+  let attempt = 0;
+  const endpoint = readinessServer(t, (req, res) => {
+    const current = attempt++;
+    if (current === 0) return req.socket.destroy();
+    if (current === 1) {
+      res.writeHead(503);
+      return respondReady(req, res);
+    }
+    if (current === 2) return res.end('{invalid-json');
+    if (current === 3) return res.end(JSON.stringify({ value: { ready: false } }));
+    if (current === 4) return res.end(JSON.stringify({ value: { ready: 'true' } }));
+    if (current === 5) return res.end(JSON.stringify({ ready: true }));
+    return respondReady(req, res);
+  });
+  const port = await endpoint.listen(), f = readinessDriver();
+  await waitForWebDriver(f.driver, { port, ...readinessOptions });
+  assert.equal(attempt, 7);
+  assertOnlyStatusRequests(endpoint.requests);
+  f.assertClean();
+});
+
+for (const stalledPhase of ['headers', 'body']) {
+test(`WebDriver readiness bounds the whole request when response ${stalledPhase} stall`, async t => {
+  const endpoint = readinessServer(t, (_req, res) => {
+    if (stalledPhase === 'body') {
+      res.writeHead(200);
+      res.write('{"value":');
+      // Continuous activity must not keep an incomplete response alive forever.
+      const interval = setInterval(() => res.write(' '), 20);
+      res.once('close', () => clearInterval(interval));
+    }
+  });
+  const port = await endpoint.listen(), f = readinessDriver(), startedAt = performance.now();
+  await assert.rejects(waitForWebDriver(f.driver, {
+    port, timeoutMs: 550, pollIntervalMs: 20, requestTimeoutMs: 120,
+  }), { code: 'ETIMEDOUT' });
+  assert.ok(performance.now() - startedAt < 1_500, 'A stalled HTTP response must respect the overall deadline');
+  assert.ok(endpoint.requests.length >= 2, 'The per-request deadline must allow another status attempt');
+  await until(() => endpoint.sockets.size === 0, 'Timed-out readiness must close every HTTP socket', 2_000);
+  assertOnlyStatusRequests(endpoint.requests);
+  f.assertClean();
+});
+}
+
+test('WebDriver readiness caps request timeout to the remaining overall budget', async t => {
+  const endpoint = readinessServer(t, () => {});
+  const port = await endpoint.listen(), f = readinessDriver(), startedAt = performance.now();
+  await assert.rejects(waitForWebDriver(f.driver, {
+    port, timeoutMs: 150, pollIntervalMs: 20, requestTimeoutMs: 1_500,
+  }), { code: 'ETIMEDOUT' });
+  assert.ok(performance.now() - startedAt < 1_000, 'A request must not outlive the shorter readiness deadline');
+  await until(() => endpoint.sockets.size === 0, 'The deadline must destroy its pending HTTP socket', 2_000);
+  f.assertClean();
+});
+
+for (const failure of ['error', 'exit', 'signal']) {
+test(`WebDriver readiness aborts an active request promptly on process ${failure}`, async t => {
+  const endpoint = readinessServer(t, () => {});
+  const port = await endpoint.listen(), f = readinessDriver();
+  const waiting = waitForWebDriver(f.driver, { port, timeoutMs: 5_000, requestTimeoutMs: 3_000 });
+  void waiting.catch(() => {});
+  await until(() => endpoint.requests.length === 1, 'Readiness must begin a status request', 2_000);
+  const startedAt = performance.now();
+  const launchError = Object.assign(new Error('readiness launch failure'), { code: 'ENOENT' });
+  if (failure === 'error') f.driver.emit('error', launchError);
+  else {
+    f.driver.exitCode = failure === 'exit' ? 23 : null;
+    f.driver.signalCode = failure === 'signal' ? 'SIGTERM' : null;
+    f.driver.emit('exit', f.driver.exitCode, f.driver.signalCode);
+  }
+  await assert.rejects(waiting, error => failure === 'error' ? error === launchError : /exited/.test(error.message));
+  assert.ok(performance.now() - startedAt < 1_000, 'Process failure must abort without waiting for the HTTP deadline');
+  await until(() => endpoint.sockets.size === 0, 'Process failure must close the pending HTTP socket', 2_000);
+  f.assertClean();
+});
+}
+
+test('WebDriver readiness aborts promptly when the process exits between status attempts', async t => {
+  const endpoint = readinessServer(t, (_req, res) => res.end(JSON.stringify({ value: { ready: false } })));
+  const port = await endpoint.listen(), f = readinessDriver();
+  const waiting = waitForWebDriver(f.driver, { port, timeoutMs: 5_000, pollIntervalMs: 3_000 });
+  void waiting.catch(() => {});
+  await until(() => endpoint.requests.length === 1 && endpoint.sockets.size === 0,
+    'Readiness must finish a failed status attempt before checking the polling delay', 2_000);
+  const startedAt = performance.now();
+  f.driver.exitCode = 23;
+  f.driver.emit('exit', 23, null);
+  await assert.rejects(waiting);
+  assert.ok(performance.now() - startedAt < 1_000, 'Process exit must interrupt the polling delay');
+  assert.equal(endpoint.requests.length, 1);
+  f.assertClean();
+});
+
+for (const status of [{ exitCode: 23, signalCode: null }, { exitCode: null, signalCode: 'SIGTERM' }]) {
+test(`WebDriver readiness rejects an already terminated process (${status.exitCode ?? status.signalCode}) without making requests`, async t => {
+  const endpoint = readinessServer(t, respondReady);
+  const port = await endpoint.listen(), f = readinessDriver();
+  Object.assign(f.driver, status);
+  await assert.rejects(waitForWebDriver(f.driver, { port, ...readinessOptions }));
+  assert.equal(endpoint.requests.length, 0);
+  f.assertClean();
+});
 }
 
 test('WebDriver launcher preserves literal arguments, cwd, environment, user, stderr and nonzero child status', async t => {

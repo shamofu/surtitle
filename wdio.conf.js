@@ -1,27 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { spawnWebDriver } from './scripts/webdriver-process.mjs';
+import { spawnWebDriver, waitForWebDriver } from './scripts/webdriver-process.mjs';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, isAbsolute } from 'node:path';
-import { createConnection } from 'node:net';
 
 let driver;
 const binary = process.env.SURTITLE_E2E_BINARY;
 const dataDir = process.env.SURTITLE_E2E_DATA_DIR;
 const port = Number(process.env.SURTITLE_WEBDRIVER_PORT || 4444);
-function stopDriver() { if (driver && !driver.killed) driver.kill(); }
-async function waitForDriver() {
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
-    if (driver?.exitCode !== null) throw new Error('tauri-driver exited before opening its port');
-    const ready = await new Promise(resolveReady => {
-      const socket = createConnection({ host: '127.0.0.1', port });
-      socket.once('connect', () => { socket.destroy(); resolveReady(true); });
-      socket.once('error', () => { socket.destroy(); resolveReady(false); });
-    });
-    if (ready) return;
-    await new Promise(resolveWait => setTimeout(resolveWait, 100));
-  }
-  throw new Error('tauri-driver did not become ready within 15 seconds');
+function stopDriver() {
+  process.removeListener('exit', stopDriver);
+  if (driver && !driver.killed && driver.exitCode === null && driver.signalCode === null) driver.kill();
 }
 export const config = {
   hostname: '127.0.0.1', port, specs: ['./e2e/native/**/*.e2e.js'], maxInstances: 1,
@@ -45,11 +33,9 @@ export const config = {
     const args = ['--port', String(port)];
     if (process.env.SURTITLE_NATIVE_DRIVER) args.push('--native-driver', process.env.SURTITLE_NATIVE_DRIVER);
     driver = spawnWebDriver(process.env.SURTITLE_TAURI_DRIVER || 'tauri-driver', args, { stdio: 'inherit', windowsHide: true, env: process.env });
-    let launchError;
-    driver.once('error', error => { launchError = error; });
     process.once('exit', stopDriver);
-    await waitForDriver();
-    if (launchError) throw launchError;
+    try { await waitForWebDriver(driver, { port, timeoutMs: 15000 }); }
+    catch (error) { stopDriver(); throw error; }
   },
   afterSession: stopDriver,
   onComplete: stopDriver,
