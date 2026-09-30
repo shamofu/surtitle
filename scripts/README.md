@@ -18,7 +18,7 @@
 | 配布 | `native-installer-prepare.py` | 標準 Tauri installer の同梱 source / notices を収集する。package CI。NSIS や plugin の独自ビルドは行わない。 |
 | 配布 | `native-installer-audit.mjs`、`native-installer-audit.ps1` | 実際の installer を展開し、埋込み EXE・resources と同梱 source 情報を確認する。`package-verify.ps1`。 |
 | 配布 | `package-verify.ps1`、`package-installer-smoke.ps1`、`package-production-smoke.mjs` | 製品 installer のインストール・上書き・起動・アンインストールと source ZIP を検証する。package CI。使い捨て Windows 環境で実行する。 |
-| 配布 | `release.mjs`、`release-contract.mjs` | 検証済みの配布ファイル集合と既存タグの参照先を確認し、既存リリースを上書きせず公開する。package 検証と `vX.Y.Z` タグの CI。 |
+| 配布 | `release.mjs`、`release-contract.mjs` | 証跡を含む内部配布ファイル一式と既存タグの参照先を検証し、installer・source ZIP・公開用チェックサムの 3 ファイルを、既存リリースを上書きせず公開する。package 検証と `vX.Y.Z` タグの CI。 |
 | 依存更新 | `native-source-inputs.py`、`native_source_manifest.py`、`native-build.sh`、`native-build-evidence.py` | source catalog の URL / ファイル名 / submodule 記録を導出し、libmpv DLL と対応する source / inventory を生成する。`native/build/Dockerfile` の cache miss 時。 |
 | 依存更新 | `native-ort-source-inputs.py`、`native-ort-compare.py`、`native-ort-generated.py`、`native-ort-package.py` | 採用した公式 ORT DLL に対応する source を取得・照合・梱包する。Docker の cache miss 時。 |
 | 依存更新 | `native-source-archive-check.py` | 生成した native source tar の内容を、レビュー済み入力と照合する。上記の libmpv / ORT package 生成時。 |
@@ -37,5 +37,7 @@ libmpv と ORT の source archive は `native_source_archive.py` で生成しま
 実行手順は [開発コマンド](../README.md#development)、[E2E](../e2e/README.md)、[native build / package](../docs/native-runtime.md)、[source rebuild](../native/SOURCE-REBUILD.md) を参照してください。自動実行の入口は [CI](../.github/workflows/ci.yml)、[native build](../.github/workflows/native-build.yml)、[手動 native acceptance](../.github/workflows/native-acceptance.yml) です。
 
 リリースは [main の保護ルールとタグ作成手順](../README.md#ci-and-releases) に従います。作業ブランチから `main` への PR を Squash merge し、そのコミットの CI 成功後に所有者がバージョンタグを作成・push します。集約チェック `ci` は `validate`・native build・Linux・Windows・package がすべて成功した場合だけ通り、タグの CI 成功後に同じ実行の成果物を公開します。`main` の push や PR では公開しません。
+
+公開処理でアップロードする asset は Windows installer（`.exe`）・`surtitle-source.zip`・`SHA256SUMS.txt` の 3 ファイルです。公開処理は同じ Actions 実行の `release-<commit SHA>` artifact にある内部 bundle 全体を検証した後、installer と source ZIP の 2 件だけを記載した公開用 `SHA256SUMS.txt` を生成してアップロードします。内部 bundle の全ファイル用チェックサム、manifest、依存関係・SBOM、installer audit/smoke の JSON 証跡はそのまま保持し、追加の診断情報は `package-evidence-<commit SHA>` artifact に残します。CI の検証項目は変わりません。Actions artifact の保存期間はリポジトリ設定に従います。
 
 一時的な失敗は同じタグの workflow を再実行します。不完全な draft が残った場合は draft だけを手動削除し、タグを残して再実行します。タグの移動・削除は所有者にも許可されません。コード修正や誤ったタグの訂正には新しいバージョンとタグを使います。

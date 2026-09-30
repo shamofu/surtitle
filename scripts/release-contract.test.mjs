@@ -1,8 +1,8 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { validateRelease } from './release-contract.mjs';
 import { publishRelease } from './release.mjs';
@@ -56,8 +56,8 @@ test('rejects wrong version or evidence from a different installer even with upd
 const releaseEnv = { GITHUB_REPOSITORY: 'example/surtitle', GITHUB_REF: 'refs/tags/v0.1.0',
   GITHUB_EVENT_NAME: 'push', GITHUB_SHA: 'a'.repeat(40) };
 function publisher(directory, { existing = null, remoteStates = ['lightweight'], assets,
-  draft = true, gitFailure = false, createdReleases } = {}) {
-  const calls = [], files = validateRelease(directory, '0.1.0');
+  draft = true, gitFailure = false, createdReleases, createFailure = false } = {}) {
+  const calls = [], uploads = [];
   let remoteRead = 0, created = false;
   const run = (program, args, options) => {
     calls.push({ program, args });
@@ -82,14 +82,21 @@ function publisher(directory, { existing = null, remoteStates = ['lightweight'],
       }
       assert.deepEqual(args, ['api', '--paginate', '--slurp', 'repos/example/surtitle/releases']);
       const releases = created ? createdReleases ?? [{ id: 123, tag_name: 'v0.1.0', draft,
-        assets: assets ?? files.map(({ name, size }) => ({ name, size })) }] : existing ? [existing] : [];
+        assets: typeof assets === 'function' ? assets(uploads) : assets ?? uploads.map(({ name, size }) => ({ name, size })) }] : existing ? [existing] : [];
       return { status: 0, stdout: JSON.stringify([releases]) };
     }
     assert.equal(args[0], 'release');
-    if (args[1] === 'create') created = true;
+    if (args[1] === 'create') {
+      for (const path of args.slice(args.indexOf('--notes') + 2)) {
+        uploads.push({ path, name: basename(path), size: statSync(path).size,
+          content: basename(path) === 'SHA256SUMS.txt' ? readFileSync(path, 'utf8') : undefined });
+      }
+      if (createFailure) return { status: 1, stderr: 'Asset upload failed' };
+      created = true;
+    }
     return { status: 0, stdout: '' };
   };
-  return { calls, run };
+  return { calls, run, uploads };
 }
 
 test.for(['lightweight', 'annotated'])('publishes an existing %s tag when its draft is unavailable by tag', (tagType, t) => {
@@ -104,6 +111,50 @@ test.for(['lightweight', 'annotated'])('publishes an existing %s tag when its dr
   assert.equal(calls.some(call => call.args.includes('repos/example/surtitle/releases/tags/v0.1.0')), false);
   assert.ok(calls.at(-1).args.includes('--draft=false'));
   assert.equal(calls.at(-2).program, 'git');
+});
+
+test('uploads only installer, corresponding source and public checksums while preserving every internal artifact', t => {
+  const directory = fixture(t);
+  for (const name of ['native-audit.json', 'native-smoke.json', 'production-smoke.json', 'js-licenses.json', 'extra-private.zip']) {
+    writeFileSync(join(directory, name), `Internal evidence: ${name}`);
+  }
+  sums(directory);
+  const before = new Map(readdirSync(directory).map(name => [name, readFileSync(join(directory, name))]));
+  const { calls, run, uploads } = publisher(directory);
+  assert.equal(publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), 'v0.1.0');
+  assert.deepEqual(uploads.map(file => file.name).sort(), ['SHA256SUMS.txt', 'surtitle-source.zip', 'surtitle.exe']);
+  const checksum = uploads.find(file => file.name === 'SHA256SUMS.txt');
+  assert.equal(checksum.content, ['surtitle-source.zip', 'surtitle.exe']
+    .map(name => `${digest(before.get(name))}  ${name}`).join('\n') + '\n');
+  assert.notEqual(checksum.path, join(directory, 'SHA256SUMS.txt'));
+  assert.equal(existsSync(dirname(checksum.path)), false);
+  for (const file of uploads.filter(file => file.name !== 'SHA256SUMS.txt')) assert.equal(file.path, join(directory, file.name));
+  assert.deepEqual(readdirSync(directory).sort(), [...before.keys()].sort());
+  for (const [name, content] of before) assert.deepEqual(readFileSync(join(directory, name)), content);
+  const create = calls.find(call => call.args[1] === 'create').args;
+  const notes = create[create.indexOf('--notes') + 1];
+  assert.match(notes, /installer, SHA-256 checksums and corresponding source/);
+  assert.doesNotMatch(notes, /SBOM/);
+});
+
+test.for([false, true])('rejects tampered internal JSON before upload even with resealed checksums=%s', (reseal, t) => {
+  const directory = fixture(t), path = join(directory, 'installer-audit.json');
+  const audit = JSON.parse(readFileSync(path));
+  audit.passed = false;
+  writeFileSync(path, JSON.stringify(audit));
+  if (reseal) sums(directory);
+  assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv,
+    run: () => assert.fail('Internal validation must happen before external commands') }), /checksums|Installer evidence/);
+});
+
+test('removes only temporary public checksums after an upload failure', t => {
+  const directory = fixture(t), internalSums = readFileSync(join(directory, 'SHA256SUMS.txt'));
+  const { calls, run, uploads } = publisher(directory, { createFailure: true });
+  assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), /Asset upload failed/);
+  assert.equal(existsSync(dirname(uploads.find(file => file.name === 'SHA256SUMS.txt').path)), false);
+  assert.deepEqual(readFileSync(join(directory, 'SHA256SUMS.txt')), internalSums);
+  assert.equal(validateRelease(directory, '0.1.0').length, 9);
+  assert.equal(calls.some(call => call.args.includes('--draft=false')), false);
 });
 
 test.for([
@@ -162,8 +213,8 @@ test('remote verification failures stop publication', t => {
 });
 
 test('incomplete or incorrectly sized draft uploads are not published', t => {
-  const directory = fixture(t), files = validateRelease(directory, '0.1.0');
-  for (const assets of [[], files.map(({ name, size }) => ({ name, size: size + 1 }))]) {
+  const directory = fixture(t);
+  for (const assets of [[], files => files.map(({ name, size }) => ({ name, size: size + 1 }))]) {
     const { calls, run } = publisher(directory, { assets });
     assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), /incomplete/);
     assert.equal(calls.some(call => call.args.includes('--draft=false')), false);

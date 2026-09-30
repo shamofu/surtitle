@@ -64,6 +64,8 @@ The **Test and release** workflow runs for pushes and PRs to `main`, and pushes 
 
 Only a stable `vX.Y.Z` tag push can publish a release, after that tag's CI succeeds. The tag must match the application's version, have no leading zeroes and point to a commit in `main` history. The release uses artifacts from the same workflow run. Only repository owner `shamofu` can create `v*` tags; updates and deletion are blocked even for the owner. Published versions and assets are never replaced. Windows installers are unsigned. See [native packaging](docs/native-runtime.md) for source/notices, dependency audits and disposable installer checks.
 
+Each GitHub Release uploads three assets: the Windows installer (`.exe`), `surtitle-source.zip` containing corresponding source, and `SHA256SUMS.txt` with the SHA-256 hashes of those two files. Download the installer to install Surtitle; use the checksum file to verify your download. Maintainers can find the complete manifests, dependency/SBOM and installer audit/smoke evidence in the same Actions run's `release-<commit SHA>` artifact, with additional diagnostics in `package-evidence-<commit SHA>`. Actions artifacts are subject to the repository's retention policy.
+
 ### Releasing a version
 
 1. In a work branch, explicitly set the same stable version in `package.json`, `[workspace.package].version` in `Cargo.toml`, and `src-tauri/tauri.conf.json`. Run `pnpm rust update --workspace --offline` to update workspace package entries in `Cargo.lock`, then `node scripts/check-version.mjs`. Include the lockfile changes in the PR. Keep independently versioned crates, including `surtitle-ai`, unchanged unless they need their own version change. Dependency changes and prereleases are outside this procedure.
