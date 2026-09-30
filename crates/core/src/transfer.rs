@@ -805,19 +805,170 @@ mod tests {
         );
         assert!(export_delimited(&[card], ',').contains("'=1+1"));
     }
-    #[test]
-    fn failed_restore_keeps_current_database() {
+    // Include every learning table and the device-local rows that restore clears.
+    // Archive equality alone would miss loss of local review/application history.
+    fn restore_fixture() -> (tempfile::TempDir, Store, LearningArchive) {
         let (dir, mut db) = setup();
-        let mut a = db.archive().unwrap();
-        a.reviews.push(Review {
+        let card = db.list_cards().unwrap().remove(0);
+        db.rate_card(&card.id, "good", 0.9, chrono::Utc::now())
+            .unwrap();
+        let mut segment = db.list_segments("m").unwrap().remove(0);
+        segment.translation = Some("Retained local translation".into());
+        db.apply_translations_once("local-paid-job", 0, &"a".repeat(64), &[segment])
+            .unwrap();
+        let segments = db.list_segments("m").unwrap();
+        db.replace_subtitles("m", &segments, Some(1), true, "Retained edition")
+            .unwrap();
+        db.save_transcript_draft(
+            "local-review-job",
+            &"b".repeat(64),
+            "base-digest",
+            &serde_json::json!({"choice":"left"}),
+        )
+        .unwrap();
+        db.save_transcript_range_revision(
+            "local-review-job",
+            &"b".repeat(64),
+            0,
+            &"c".repeat(64),
+            0,
+            &id(),
+            &serde_json::json!({"text":"Retained manual range"}),
+        )
+        .unwrap();
+        db.adopt_transcript_once(
+            "local-adopted-job",
+            &"d".repeat(64),
+            &"e".repeat(64),
+            "m",
+            &crate::store::subtitle_revision(&segments).unwrap(),
+            1000,
+            2000,
+            &segments,
+        )
+        .unwrap();
+        db.insert_draft_study_selection(&DraftStudySelection {
+            id: "local-selection".into(),
+            media_id: "m".into(),
+            job_id: Some("local-review-job".into()),
+            version: 1,
+            text: "Retained bookmark".into(),
+            start_ms: 1000,
+            end_ms: 2000,
+            source_start_ms: 1000,
+            source_end_ms: 2000,
+            cue_ids: vec![segments[0].id.clone()],
+            ordinal: Some(0),
+            origin: "manual".into(),
+            timing: "cue".into(),
+            confirmed: true,
+            created_at: String::new(),
+            updated_at: String::new(),
+            source_snapshot: serde_json::json!({"digest":"retained-local-source"}),
+        })
+        .unwrap();
+        let mut incoming = db.archive().unwrap();
+        incoming.media[0].title = "Replacement media".into();
+        incoming.segments[0].text = "Replacement subtitle".into();
+        incoming.cards[0].meaning = "Replacement definition".into();
+        incoming.reviews[0].rating = "hard".into();
+        validate(&incoming).unwrap();
+        (dir, db, incoming)
+    }
+
+    type StoredRows = Vec<(String, Vec<Vec<rusqlite::types::Value>>)>;
+
+    fn stored_rows(db: &Store) -> StoredRows {
+        let tables = db
+            .conn
+            .prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        tables
+            .into_iter()
+            .map(|table| {
+                let mut statement = db
+                    .conn
+                    .prepare(&format!("SELECT * FROM \"{table}\" ORDER BY rowid"))
+                    .unwrap();
+                let columns = statement.column_count();
+                let rows = statement
+                    .query_map([], |row| {
+                        (0..columns).map(|column| row.get(column)).collect()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap();
+                (table, rows)
+            })
+            .collect()
+    }
+
+    fn assert_retained_after_reopen(db: Store, before: &StoredRows) {
+        assert_eq!(&stored_rows(&db), before);
+        let path = db.path.clone();
+        drop(db);
+        assert_eq!(&stored_rows(&Store::open(path).unwrap()), before);
+    }
+
+    #[test]
+    fn invalid_restore_is_rejected_before_creating_backup_or_changing_rows() {
+        let (dir, mut db, mut incoming) = restore_fixture();
+        let before = stored_rows(&db);
+        incoming.reviews.push(Review {
             id: id(),
             card_id: "absent".into(),
             rating: "good".into(),
             reviewed_at: now(),
             scheduled_days: 1,
         });
-        assert!(db.restore(&a, &dir.path().join("backup.sqlite")).is_err());
-        assert_eq!(db.list_cards().unwrap().len(), 1);
+        let backup = dir.path().join("backup.sqlite");
+        assert!(db.restore(&incoming, &backup).is_err());
+        assert!(!backup.exists());
+        assert_retained_after_reopen(db, &before);
+    }
+
+    #[test]
+    fn failed_backup_keeps_all_learning_and_local_rows() {
+        let (dir, mut db, incoming) = restore_fixture();
+        let before = stored_rows(&db);
+        let backup = dir.path().join("backup.sqlite");
+        std::fs::create_dir(&backup).unwrap();
+        let sentinel = backup.join("keep.txt");
+        std::fs::write(&sentinel, b"existing backup destination").unwrap();
+        assert!(db.restore(&incoming, &backup).is_err());
+        assert_eq!(
+            std::fs::read(sentinel).unwrap(),
+            b"existing backup destination"
+        );
+        assert_retained_after_reopen(db, &before);
+    }
+
+    #[test]
+    fn review_insert_failure_rolls_back_all_rows_and_retains_complete_backup() {
+        let (dir, mut db, incoming) = restore_fixture();
+        let before = stored_rows(&db);
+        assert!(before.iter().all(|(_, rows)| !rows.is_empty()));
+        // Reviews are inserted last, after deleting local state and inserting
+        // replacement media, subtitles, cards, bookmarks and subtitle versions.
+        db.conn
+            .execute_batch(
+                "CREATE TEMP TRIGGER fail_restore_review BEFORE INSERT ON main.reviews
+                 BEGIN SELECT RAISE(ABORT, 'forced restore review insert failure'); END;",
+            )
+            .unwrap();
+        let backup = dir.path().join("before.sqlite");
+        let error = db.restore(&incoming, &backup).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("forced restore review insert failure")
+        );
+        assert_eq!(stored_rows(&Store::open(backup).unwrap()), before);
+        assert_retained_after_reopen(db, &before);
     }
     #[test]
     fn result_application_markers_stay_local_and_restore_clears_them() {

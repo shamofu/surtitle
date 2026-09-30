@@ -7,6 +7,7 @@ Tests cover application behavior, native dependencies and release packaging. Ord
 ```powershell
 pnpm test
 pnpm build
+pnpm test:browser
 pnpm fmt:rust:check
 pnpm test:rust
 pnpm test:rust:no-default-features
@@ -18,14 +19,19 @@ node scripts/check-production-features.mjs
 
 `pnpm test` runs React/jsdom and Node script tests. `pnpm test:ui` and `pnpm test:scripts` select one project; `pnpm test:watch` watches both.
 
+The required `browser` CI job runs the browser suite and six visual comparisons in the same pinned Linux container. The aggregate `ci` check requires this job as well as version validation, native dependencies, Linux, Windows and package verification. See the [E2E guide](../e2e/README.md) for the visual baseline workflow; Windows browser runs do not generate the Linux reference images.
+
 The maintained regressions cover:
 
 - Immutable request approval, zero/unknown pricing, concurrent reservations, cancellation before dispatch, communication failure, crash recovery and settlement exactly once.
 - Parser/citation validation, literal source preservation, pending/conflicting transcript ranges, local corrections, stale adoption and saved-card independence.
 - Credential boundaries, learning export/restore, archive size limits, missing audio, atomic destination replacement and original media retention.
+- Restore validation rejection, backup creation failure and an injected write failure after replacement has started, with database reopen and native playback reconciliation.
 - Selected tool/audio-track identity, process cleanup, resource-scoped query invalidation, stale asynchronous results and failed preference writes.
 - UI acknowledgement, asynchronous edits, confirmed-cue validation, replay/confirmation, review scheduling and real native persistence across process restarts.
 - Native source/artifact integrity, package contents, production features and disposable installer data retention.
+
+Application AI integration tests use the production approval, execution, parser, ledger and result-application paths with real disposable SQLite databases. The `surtitle-ai/test-support` feature replaces authentication and transport with fixed offline responses and bounded synchronization gates. It is enabled only through the desktop crate's development dependency; the production feature check rejects it. These tests cover multi-request execution, conflicting edits, cancellation, application failure and uncertain transport outcomes without cloud calls. They do not evaluate generated-language quality.
 
 The [E2E guide](../e2e/README.md) covers browser and native application setup. [Native runtime and packaging](native-runtime.md) covers DLL smoke tests, source/notices audits and installer lifecycle verification. Installer lifecycle checks require a disposable Windows profile.
 

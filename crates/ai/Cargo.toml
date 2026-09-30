@@ -9,6 +9,7 @@ license = "GPL-3.0-or-later"
 default = []
 development-validation = []
 e2e-fixtures = []
+test-support = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

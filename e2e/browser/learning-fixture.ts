@@ -70,7 +70,7 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
           if (request.action === 'play') state.paused = false;
           if (request.action === 'seek') state.positionMs = request.value;
           if (request.action === 'source-seek') {
-            state.positionMs = Math.max(0, request.startMs - snapshot.settings.replayContextMs);
+            state.positionMs = Math.max(0, request.startMs - (snapshot.settings.replayContextMs ?? 0));
             state.paused = false;
           }
           if (request.action === 'rate') state.rate = request.value;

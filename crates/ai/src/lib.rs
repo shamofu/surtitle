@@ -23,6 +23,8 @@ pub use prepare::*;
 pub use transcribe::reparse_validation_transcribe_evidence;
 pub use transcript_review::*;
 pub use vad::*;
+#[cfg(feature = "test-support")]
+pub use vertex::test_support;
 pub use vertex::{ExecutionResult, VertexService};
 
 use sha2::{Digest, Sha256};

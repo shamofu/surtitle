@@ -71,7 +71,8 @@ describe('real native learning workflow (no cloud requests)', () => {
     await browser.execute(() => document.querySelector('.transcript-scroll').dispatchEvent(new WheelEvent('wheel', { deltaY: 650, bubbles: true })));
     await expect($('button=Follow playback')).toBeDisplayed();
     await $('[aria-label="Search transcript"]').setValue('19999');
-    await browser.waitUntil(async () => (await $$('.transcript-row')).length <= 2);
+    await browser.waitUntil(async () => (await $$('.transcript-row')).length === 1);
+    await expect($('.transcript-row')).toHaveText(expect.stringContaining('Practice sentence 19999. Repeat repeat.'));
     await clickInView('button=Follow playback');
     await expect($('[aria-label="Search transcript"]')).toHaveValue('');
     await expect($('button=Following playback')).toBeDisplayed();

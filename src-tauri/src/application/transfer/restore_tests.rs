@@ -515,6 +515,111 @@ fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
             .and_then(|track| track.ff_index),
         Some(2)
     );
+    wait(&state, "load pre-restore subtitles", |_| {
+        state
+            .playback
+            .operation()
+            .unwrap()
+            .subtitle_text()
+            .is_some_and(|text| text.contains("Old unpunctuated caption"))
+    });
+    let previous_subtitle = state.playback.operation().unwrap().subtitle_text();
+    let mut before_failure = lock(&state.db).unwrap().archive().unwrap();
+    before_failure.exported_at.clear();
+    let mut assert_failed_restore_recovered = |stage| {
+        let mut after_failure = lock(&state.db).unwrap().archive().unwrap();
+        after_failure.exported_at.clear();
+        assert_eq!(
+            serde_json::to_value(after_failure).unwrap(),
+            serde_json::to_value(&before_failure).unwrap()
+        );
+        let recovered = wait(&state, stage, |current| {
+            current.ready && current.paused && (2100..=2400).contains(&current.position_ms)
+        });
+        assert_eq!(
+            recovered
+                .tracks
+                .iter()
+                .find(|track| track.kind == "audio" && track.selected)
+                .and_then(|track| track.ff_index),
+            Some(2)
+        );
+        assert_eq!(
+            state
+                .playback
+                .operation()
+                .unwrap()
+                .current_media()
+                .as_deref(),
+            Some("restore-media")
+        );
+        wait(&state, "retain subtitles after failed restore", |_| {
+            state.playback.operation().unwrap().subtitle_text() == previous_subtitle
+        });
+        for _ in 0..3 {
+            pump();
+            let persisted = state.playback_tick(true).unwrap();
+            assert!(
+                persisted.error.is_none()
+                    && persisted.ready
+                    && persisted.paused
+                    && (2100..=2400).contains(&persisted.position_ms)
+            );
+            // Persist the recovered native clock, allowing decoder rounding but
+            // preserving every old learning row and audio/subtitle selection.
+            let expected_media = before_failure
+                .media
+                .iter_mut()
+                .find(|media| media.id == "restore-media")
+                .unwrap();
+            expected_media.last_position_ms = persisted.position_ms;
+            expected_media.duration_ms = persisted.duration_ms;
+            let mut after_persist = lock(&state.db).unwrap().archive().unwrap();
+            after_persist.exported_at.clear();
+            assert_eq!(
+                serde_json::to_value(after_persist).unwrap(),
+                serde_json::to_value(&before_failure).unwrap()
+            );
+            assert_eq!(
+                state.playback.operation().unwrap().subtitle_text(),
+                previous_subtitle
+            );
+        }
+    };
+    // A file at the backup-directory path deterministically rejects backup
+    // creation after the player has stopped, without relying on ACL behavior.
+    let backup_directory = state.root.join("backups");
+    std::fs::remove_dir(&backup_directory).unwrap();
+    std::fs::write(&backup_directory, b"blocked backup destination").unwrap();
+    assert!(restore_learning_archive(&state, &archive).is_err());
+    assert_eq!(
+        std::fs::read(&backup_directory).unwrap(),
+        b"blocked backup destination"
+    );
+    assert_failed_restore_recovered("reopen after backup failure");
+    std::fs::remove_file(&backup_directory).unwrap();
+    std::fs::create_dir(&backup_directory).unwrap();
+    // A main-schema trigger also applies to the application's existing DB
+    // connection. Reject the second subtitle after replacement rows were written.
+    let connection = rusqlite::Connection::open(&lock(&state.db).unwrap().path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER fail_restore_segment BEFORE INSERT ON segments
+             WHEN NEW.id='restore-b'
+             BEGIN SELECT RAISE(ABORT, 'forced native restore insert failure'); END;",
+        )
+        .unwrap();
+    let failure = restore_learning_archive(&state, &archive).unwrap_err();
+    connection
+        .execute_batch("DROP TRIGGER fail_restore_segment;")
+        .unwrap();
+    drop(connection);
+    assert!(
+        failure
+            .to_string()
+            .contains("forced native restore insert failure")
+    );
+    assert_failed_restore_recovered("reopen after transaction failure");
     let ticker = Ticker::start(&state);
     restore_learning_archive(&state, &archive).unwrap();
     let restored = wait(&state, "restore resume and audio", |current| {

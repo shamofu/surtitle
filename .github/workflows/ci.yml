@@ -29,6 +29,30 @@ jobs:
   native-build:
     needs: [validate]
     uses: ./.github/workflows/native-build.yml
+  browser:
+    needs: [validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Build the pinned browser test environment
+        run: docker build --platform linux/amd64 -f scripts/browser-tests.Dockerfile -t surtitle-browser-tests .
+      - name: Browser behavior and six visual comparisons
+        run: |
+          mkdir -p test-results playwright-report
+          docker run --rm --init --ipc=host \
+            --mount "type=bind,source=$PWD/test-results,target=/app/test-results" \
+            --mount "type=bind,source=$PWD/playwright-report,target=/app/playwright-report" \
+            surtitle-browser-tests
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: browser-evidence-${{ github.sha }}
+          path: |
+            test-results/browser/
+            test-results/visual/
+            playwright-report/browser/
+            playwright-report/visual/
   linux:
     needs: [validate]
     runs-on: ubuntu-24.04
@@ -293,7 +317,7 @@ jobs:
           if-no-files-found: error
   ci:
     name: ci
-    needs: [validate, native-build, linux, windows, package]
+    needs: [validate, native-build, browser, linux, windows, package]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -301,7 +325,7 @@ jobs:
       - name: Require every validation job to succeed
         env:
           RESULTS: ${{ toJSON(needs) }}
-        run: jq -e 'length == 5 and all(.[]; .result == "success")' <<< "$RESULTS"
+        run: jq -e 'length == 6 and all(.[]; .result == "success")' <<< "$RESULTS"
   publish:
     needs: [ci]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.event.deleted != true

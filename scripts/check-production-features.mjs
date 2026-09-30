@@ -9,7 +9,7 @@ export function validateProductionFeatures(tree) {
   }
   for (const row of rows) {
     const features = row.split('|')[1]?.replace(/\s*\(\*\)$/, '').split(',') ?? [];
-    if (features.some(feature => ['development-validation', 'e2e-fixtures', 'e2e-test'].includes(feature.trim()))) {
+    if (features.some(feature => ['development-validation', 'e2e-fixtures', 'e2e-test', 'test-support'].includes(feature.trim()))) {
       throw new Error(`Development-only AI feature in production graph: ${row}`);
     }
   }

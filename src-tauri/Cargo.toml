@@ -40,6 +40,8 @@ e2e-test = ["surtitle-ai/e2e-fixtures"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]
+surtitle-ai = { path = "../crates/ai", features = ["test-support"] }
+tokio = { version = "1", features = ["macros"] }
 tempfile = "3"
 rusqlite = { version = "0.40", features = ["bundled"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }

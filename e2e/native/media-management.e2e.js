@@ -10,7 +10,7 @@ const invoke = (command, args = {}) => browser.execute(async (name, parameters) 
 const snapshot = () => invoke('get_app_snapshot');
 const navigate = path => browser.execute(next => { window.history.pushState({}, '', next); window.dispatchEvent(new PopStateEvent('popstate')); }, path);
 const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex');
-let mediaId, cardId, savedAudioHash, savedAudioPath, server, serverUrl;
+let server, serverUrl, originalSettings, originalFfmpeg;
 async function ready() { await browser.setTimeout({ script: 180000 }); await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__)); await $('h1').waitForDisplayed(); }
 async function playerReady() {
   await browser.waitUntil(async () => {
@@ -32,18 +32,26 @@ async function cardArticle() { await navigate('/cards'); await $('[aria-label="S
 
 (process.platform === 'win32' ? describe : describe.skip)('native media management and background downloads', () => {
   before(async () => {
-    assert(existsSync(source), 'Generate the multitrack fixture before native E2E');
     await ready(); const initial = await snapshot();
+    originalSettings = initial.settings;
+    originalFfmpeg = initial.tools.find(item => item.id === 'ffmpeg');
     await invoke('update_settings', { settings: { ...initial.settings, locale: 'en', dailyBudgetUsd: 0, replayContextMs: 0 } });
     const ffmpeg = (await invoke('scan_external_tools')).find(item => item.toolId === 'ffmpeg' && item.selectable);
     assert(ffmpeg); await invoke('set_tool_provider', { request: { toolId: 'ffmpeg', provider: 'external', path: ffmpeg.path } });
-    await invoke('import_media', { request: { kind: 'local', pathOrUrl: source, title: 'Multitrack regression', learningLanguage: 'en', explanationLanguage: 'ja' } });
-    mediaId = (await snapshot()).media.find(item => item.title === 'Multitrack regression').id;
     await browser.refresh(); await ready();
   });
-  after(async () => { if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } });
+  after(async () => {
+    if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+    if (originalFfmpeg) await invoke('set_tool_provider', { request: { toolId: 'ffmpeg', provider: originalFfmpeg.provider, ...(originalFfmpeg.provider === 'external' ? { path: originalFfmpeg.path } : {}) } });
+    if (originalSettings) await invoke('update_settings', { settings: originalSettings });
+  });
 
-  it('persists the selected FFmpeg audio index and resumes through a complete process restart', async () => {
+  it('retains selected tracks, subtitle versions and saved cards through restart and media removal', async function () {
+    this.timeout(600000);
+    assert(existsSync(source), 'Generate the multitrack fixture before native E2E');
+    await invoke('import_media', { request: { kind: 'local', pathOrUrl: source, title: 'Multitrack regression', learningLanguage: 'en', explanationLanguage: 'ja' } });
+    const mediaId = (await snapshot()).media.find(item => item.title === 'Multitrack regression').id;
+    await browser.refresh(); await ready();
     await navigate(`/study/${mediaId}`); await playerReady();
     const tracks = (await invoke('get_player_state')).tracks;
     const english = tracks.find(track => track.kind === 'audio' && track.ffIndex === 2);
@@ -60,9 +68,7 @@ async function cardArticle() { await navigate('/cards'); await $('[aria-label="S
     assert(state.paused && state.positionMs >= 4900 && state.positionMs <= 5300, `Wrong resume position: ${state.positionMs}`);
     assert.equal(state.tracks.find(track => track.kind === 'audio' && track.selected).ffIndex, 2);
     await browser.saveScreenshot(resolve('test-results/native/media-resume-tracks.png'));
-  });
-  it('chooses embedded subtitles explicitly and restores an edited previous version', async function () {
-    this.timeout(300000);
+
     await openSubtitles();
     await chooseSubtitle('3');
     await $('button=Use these subtitles').click();
@@ -84,14 +90,13 @@ async function cardArticle() { await navigate('/cards'); await $('[aria-label="S
     await browser.waitUntil(async () => (await invoke('list_segments', { mediaId }))[0]?.text === '日本語の字幕を編集しました。', { timeout: 60000 });
     await dialogClosed();
     assert.equal((await snapshot()).media.find(item => item.id === mediaId).subtitleStreamIndex, 3);
-  });
-  it('edits and suspends a real saved card without changing its audio or review schedule', async () => {
+
     const sourceCues = await invoke('list_segments', { mediaId });
     const segment = sourceCues[0];
     const before = await snapshot();
     await invoke('save_card', { request: { mediaId, segmentId: segment.id, sourceCueIds: sourceCues.map(cue => cue.id), term: 'managed phrase', meaning: 'Original meaning', example: sourceCues.map(cue => cue.text).join('\n') } });
-    const saved = (await snapshot()).cards.find(item => !before.cards.some(old => old.id === item.id)); assert(saved); cardId = saved.id;
-    assert.equal(saved.audioStreamIndex, 2); savedAudioPath = saved.audioPath; savedAudioHash = hash(savedAudioPath);
+    const saved = (await snapshot()).cards.find(item => !before.cards.some(old => old.id === item.id)); assert(saved); const cardId = saved.id;
+    assert.equal(saved.audioStreamIndex, 2); const savedAudioPath = saved.audioPath, savedAudioHash = hash(savedAudioPath);
     assert.equal(saved.sourceCues.length, 2); assert.equal(saved.startMs, 500); assert.equal(saved.endMs, 4500);
     const bytes = readFileSync(savedAudioPath), offset = bytes.indexOf(Buffer.from('data')) + 8;
     let crossings = 0; for (let i = offset + 2; i + 1 < bytes.length; i += 2) if (bytes.readInt16LE(i - 2) < 0 && bytes.readInt16LE(i) >= 0) crossings++;
@@ -111,8 +116,7 @@ async function cardArticle() { await navigate('/cards'); await $('[aria-label="S
     await browser.waitUntil(async () => (await snapshot()).cards.find(item => item.id === cardId).suspended === true);
     const changed = (await snapshot()).cards.find(item => item.id === cardId);
     assert.equal(changed.dueAt, rated.dueAt); assert.equal(changed.reviewCount, rated.reviewCount); assert.equal(hash(savedAudioPath), savedAudioHash);
-  });
-  it('removes the library item while retaining originals and saved cards, then deletes only the chosen card', async () => {
+
     await navigate(`/study/${mediaId}`); await openMore(); await $('button=Remove from library').click();
     await $('dialog').$('button=Remove from library').click();
     await dialogClosed();
@@ -126,28 +130,28 @@ async function cardArticle() { await navigate('/cards'); await $('[aria-label="S
     assert(existsSync(source));
   });
   it('imports a local HTTP fixture through the UI, cancels a slow download and explicitly retries a failed one', async () => {
-    const body = readFileSync(savedAudioPath); let retries = 0;
+    const body = readFileSync(fixture.mediaPath); let retries = 0;
     server = createServer((request, response) => {
-      if (request.url === '/slow.wav') {
-        response.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': 128 * 1024 * 1024 });
+      if (request.url === '/slow.mp4') {
+        response.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': 128 * 1024 * 1024 });
         const interval = setInterval(() => response.write(Buffer.alloc(64 * 1024)), 50); response.on('close', () => clearInterval(interval));
-      } else if (request.url === '/retry.wav' && retries++ === 0) {
-        response.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': body.length + 1000 }); response.end(body);
-      } else { response.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': body.length }); response.end(body); }
+      } else if (request.url === '/retry.mp4' && retries++ === 0) {
+        response.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': body.length + 1000 }); response.end(body);
+      } else { response.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': body.length }); response.end(body); }
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); serverUrl = `http://127.0.0.1:${server.address().port}`;
-    await navigate('/'); await $('button=Add video or audio').click(); await $('dialog').$('button=URL').click(); await $('dialog input[type="url"]').setValue(`${serverUrl}/success.wav`); await $('dialog').$('button=Add to library').click();
-    await browser.waitUntil(async () => (await invoke('list_download_jobs')).some(job => job.request.pathOrUrl.endsWith('/success.wav') && job.status === 'completed'));
+    await navigate('/'); await $('button=Add video or audio').click(); await $('dialog').$('button=URL').click(); await $('dialog input[type="url"]').setValue(`${serverUrl}/success.mp4`); await $('dialog').$('button=Add to library').click();
+    await browser.waitUntil(async () => (await invoke('list_download_jobs')).some(job => job.request.pathOrUrl === `${serverUrl}/success.mp4` && job.status === 'completed'));
     await dialogClosed();
-    const completed = (await invoke('list_download_jobs')).find(job => job.request.pathOrUrl.endsWith('/success.wav'));
+    const completed = (await invoke('list_download_jobs')).find(job => job.request.pathOrUrl === `${serverUrl}/success.mp4`);
     await $(`a.media-card[href="/study/${completed.mediaId}"]`).waitForDisplayed();
-    const request = { kind: 'url', learningLanguage: 'en', explanationLanguage: 'ja', pathOrUrl: `${serverUrl}/slow.wav` };
+    const request = { kind: 'url', learningLanguage: 'en', explanationLanguage: 'ja', pathOrUrl: `${serverUrl}/slow.mp4` };
     const slow = await invoke('start_url_import', { request }); await browser.waitUntil(async () => (await invoke('list_download_jobs')).find(job => job.id === slow).storedBytes > 0);
     await $(`[data-download-id="${slow}"]`).$('button=Cancel download').click(); await browser.waitUntil(async () => (await invoke('list_download_jobs')).find(job => job.id === slow).status === 'cancelled');
-    const failed = await invoke('start_url_import', { request: { ...request, pathOrUrl: `${serverUrl}/retry.wav` } });
+    const failed = await invoke('start_url_import', { request: { ...request, pathOrUrl: `${serverUrl}/retry.mp4` } });
     await browser.waitUntil(async () => (await invoke('list_download_jobs')).find(job => job.id === failed).status === 'failed');
     const article = await $(`[data-download-id="${failed}"]`); await article.$('button=Retry from start').click();
-    await browser.waitUntil(async () => (await invoke('list_download_jobs')).some(job => job.id !== failed && job.request.pathOrUrl.endsWith('/retry.wav') && job.status === 'completed'));
+    await browser.waitUntil(async () => (await invoke('list_download_jobs')).some(job => job.id !== failed && job.request.pathOrUrl === `${serverUrl}/retry.mp4` && job.status === 'completed'));
     const final = await snapshot(); assert.equal(final.budget.spentUsd, 0); assert.equal(final.budget.reservedUsd, 0); assert.equal(final.settings.credentialConfigured, false);
     assert(!readdirSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'media')).some(name => name.startsWith('.download-')), 'Cancelled or failed downloads retained partial files');
     await browser.saveScreenshot(resolve('test-results/native/background-downloads.png'));

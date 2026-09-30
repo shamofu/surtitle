@@ -26,29 +26,51 @@ pub(super) fn approve_and_start(
     acknowledge_unpriced: bool,
     acknowledge_unqualified: bool,
 ) -> Result<()> {
+    let plan = approve_for_execution(
+        &state,
+        &quote_id,
+        digest,
+        retry,
+        acknowledge_unpriced,
+        acknowledge_unqualified,
+    )?;
+    tauri::async_runtime::spawn(async move {
+        let _ = run_approved(state, quote_id, plan).await;
+    });
+    Ok(())
+}
+
+fn approve_for_execution(
+    state: &AppState,
+    quote_id: &str,
+    digest: &str,
+    retry: bool,
+    acknowledge_unpriced: bool,
+    acknowledge_unqualified: bool,
+) -> Result<PreparedJob> {
     // Serialize approval against local transcript correction/adoption. A paused
     // job cannot become dispatchable between the editor's check and its write.
     let review_guard = lock(&state.ai_session.transcript_review)?;
-    let quote = state.ai.quote(&quote_id)?;
-    let plan = state.ai.prepared_job(&quote_id)?;
+    let quote = state.ai.quote(quote_id)?;
+    let plan = state.ai.prepared_job(quote_id)?;
     ensure!(
         quote.digest == digest,
         "The reviewed preparation changed. Review the current quote."
     );
     ensure!(
         lock(&state.db)?
-            .transcript_adopted(&quote_id, digest)?
+            .transcript_adopted(quote_id, digest)?
             .is_none(),
         "Subtitles from this job have already been adopted"
     );
-    verify_current_binding(&state, &plan)?;
+    verify_current_binding(state, &plan)?;
     ensure!(
-        quote_for_ui(&state, quote.clone(), retry)?.can_approve,
+        quote_for_ui(state, quote.clone(), retry)?.can_approve,
         "Review the current quote and budget before approval"
     );
     if retry {
         state.ai.reapprove_scope(
-            &quote_id,
+            quote_id,
             digest,
             acknowledge_unpriced,
             acknowledge_unqualified,
@@ -59,23 +81,55 @@ pub(super) fn approve_and_start(
             "Use explicit retry approval for this job"
         );
         state.ai.approve_scope(
-            &quote_id,
+            quote_id,
             digest,
             acknowledge_unpriced,
             acknowledge_unqualified,
         )?;
     }
     drop(review_guard);
-    tauri::async_runtime::spawn(async move {
-        let _ = run_approved(state, quote_id, plan).await;
-    });
-    Ok(())
+    Ok(plan)
+}
+
+// This seam stays inside the application. Production creates only VertexService;
+// integration tests use the same AI worker with offline authorization/transport.
+trait JobExecutor: Send + Sync {
+    fn execute_next_with_guard(
+        &self,
+        job_id: &str,
+        before_send: impl FnOnce() -> surtitle_ai::Result<()> + Send,
+    ) -> impl std::future::Future<Output = surtitle_ai::Result<Option<ExecutionResult>>> + Send;
+}
+
+impl JobExecutor for VertexService {
+    async fn execute_next_with_guard(
+        &self,
+        job_id: &str,
+        before_send: impl FnOnce() -> surtitle_ai::Result<()> + Send,
+    ) -> surtitle_ai::Result<Option<ExecutionResult>> {
+        VertexService::execute_next_with_guard(self, job_id, before_send).await
+    }
 }
 
 pub(super) async fn run_approved(
     state: AppState,
     quote_id: String,
     plan: PreparedJob,
+) -> Result<()> {
+    run_approved_with(state, quote_id, plan, |state| {
+        Ok(VertexService::new(
+            state.ai.clone(),
+            CredentialVault::new(state.root.join("credentials"))?,
+        )?)
+    })
+    .await
+}
+
+async fn run_approved_with<E: JobExecutor>(
+    state: AppState,
+    quote_id: String,
+    plan: PreparedJob,
+    make_executor: impl FnOnce(&AppState) -> Result<E>,
 ) -> Result<()> {
     let execution = async {
         if plan.requests.iter().any(|task| {
@@ -94,10 +148,7 @@ pub(super) async fn run_approved(
             })
             .await??;
         }
-        let service = VertexService::new(
-            state.ai.clone(),
-            CredentialVault::new(state.root.join("credentials"))?,
-        )?;
+        let service = make_executor(&state)?;
         loop {
             let state_before = state.ai.quote(&quote_id)?.state;
             if ["paused", "cancelled", "completed"].contains(&state_before.as_str()) {
@@ -175,3 +226,6 @@ pub fn resolve_unknown_attempt(
         .acknowledge_unknown(&attempt_id)
         .map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests;

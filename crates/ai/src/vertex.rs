@@ -10,9 +10,12 @@ use zeroize::Zeroizing;
 
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
+#[cfg(feature = "test-support")]
+pub mod test_support;
+
 // These private seams keep fault injection out of the public API and renderer.
 // Production always uses CredentialVault and the HTTPS-only, nonretrying client
-// created below. Test doubles are compiled only in vertex::fault_tests.
+// created below. Offline implementations exist only in tests or test-support.
 trait Authorization: Send + Sync {
     fn access_token(
         &self,
