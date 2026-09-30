@@ -59,7 +59,7 @@ The optional [Dev Container](.devcontainer/README.md) supports Linux development
 
 ## CI and releases
 
-Work on a short-lived branch and open a PR against `main`. The protected `main` branch requires an up-to-date PR, the GitHub Actions `ci` check and resolved review conversations; approvals are optional (0 required). Use Squash merge; merged branches are deleted automatically. Linear history is required, force pushes and deletion are blocked, and there are no bypass actors. There is no release branch.
+Direct pushes to `main` are allowed. PRs are optional; Squash merge is recommended when using a PR, and merged branches are deleted automatically. PR approval, resolved review conversations and a successful `ci` check are not required before updating `main`. CI continues to run after pushes and for PRs. Linear history is required, force pushes and deletion are blocked, and there are no bypass actors. There is no release branch.
 
 The **Test and release** workflow runs for pushes and PRs to `main`, and pushes of `v*` tags. The initial `validate` job checks version consistency before builds. The aggregate `ci` check succeeds only when `validate`, browser, native build, Linux, Windows and package verification all succeed; failures, cancellations and skipped jobs do not pass. The browser job runs functional checks and six visual comparisons in a pinned Linux container. Native dependency builds use Docker caching. Application tests and installer lifecycle checks run for each source revision.
 
@@ -69,8 +69,8 @@ Each GitHub Release uploads three assets: the Windows installer (`.exe`), `surti
 
 ### Releasing a version
 
-1. In a work branch, explicitly set the same stable version in `package.json`, `[workspace.package].version` in `Cargo.toml`, and `src-tauri/tauri.conf.json`. Run `pnpm rust update --workspace --offline` to update workspace package entries in `Cargo.lock`, then `node scripts/check-version.mjs`. Include the lockfile changes in the PR. Keep independently versioned crates, including `surtitle-ai`, unchanged unless they need their own version change. Dependency changes and prereleases are outside this procedure.
-2. Merge the PR into `main` and wait for its CI to succeed.
+1. On `main` or a work branch, explicitly set the same stable version in `package.json`, `[workspace.package].version` in `Cargo.toml`, and `src-tauri/tauri.conf.json`. Run `pnpm rust update --workspace --offline` to update workspace package entries in `Cargo.lock`, then `node scripts/check-version.mjs`. Commit the lockfile changes with the version changes. Keep independently versioned crates, including `surtitle-ai`, unchanged unless they need their own version change. Dependency changes and prereleases are outside this procedure.
+2. Push the changes directly to `main` or merge a PR into `main` (Squash merge recommended), then wait for that commit's `main` push CI to succeed before creating a release tag.
 3. As `shamofu`, use the following PowerShell commands from the repository root with authenticated Git and GitHub CLI. They select the current remote `main` commit, verify its latest push workflow succeeded, derive the tag from that commit's version, and push only that annotated tag. A previously tested commit in `main` history can also be released by setting `$releaseCommit` to its full SHA before checking its ancestry, run and version, provided it includes this tag-triggered workflow. Commits from before this migration do not support tag-triggered releases, even if their main CI succeeded.
 
 ```powershell

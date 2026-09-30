@@ -36,7 +36,7 @@ libmpv と ORT の source archive は `native_source_archive.py` で生成しま
 
 実行手順は [開発コマンド](../README.md#development)、[E2E](../e2e/README.md)、[native build / package](../docs/native-runtime.md)、[source rebuild](../native/SOURCE-REBUILD.md) を参照してください。自動実行の入口は [CI](../.github/workflows/ci.yml)、[native build](../.github/workflows/native-build.yml)、[手動 native acceptance](../.github/workflows/native-acceptance.yml) です。
 
-リリースは [main の保護ルールとタグ作成手順](../README.md#ci-and-releases) に従います。作業ブランチから `main` への PR を Squash merge し、そのコミットの CI 成功後に所有者がバージョンタグを作成・push します。集約チェック `ci` は `validate`・native build・Linux・Windows・package がすべて成功した場合だけ通り、タグの CI 成功後に同じ実行の成果物を公開します。`main` の push や PR では公開しません。
+リリースは [main の保護ルールとタグ作成手順](../README.md#ci-and-releases) に従います。`main` への直接 push が可能で、PR は任意です（PR を使う場合は Squash merge を推奨）。PR の承認・レビュー会話の解決・更新前の CI 成功は必須ではありません。CI は push 後と PR で引き続き実行されます。線形履歴の必須化と force push・ブランチ削除の禁止は維持します。直接 push または PR のマージ後、そのコミットの `main` push CI 成功を確認してから所有者がバージョンタグを作成・push します。集約チェック `ci` は `validate`・native build・Linux・Windows・package がすべて成功した場合だけ通り、タグの CI 成功後に同じ実行の成果物を公開します。`main` の push や PR では公開しません。
 
 公開処理でアップロードする asset は Windows installer（`.exe`）・`surtitle-source.zip`・`SHA256SUMS.txt` の 3 ファイルです。公開処理は同じ Actions 実行の `release-<commit SHA>` artifact にある内部 bundle 全体を検証した後、installer と source ZIP の 2 件だけを記載した公開用 `SHA256SUMS.txt` を生成してアップロードします。内部 bundle の全ファイル用チェックサム、manifest、依存関係・SBOM、installer audit/smoke の JSON 証跡はそのまま保持し、追加の診断情報は `package-evidence-<commit SHA>` artifact に残します。CI の検証項目は変わりません。Actions artifact の保存期間はリポジトリ設定に従います。
 
