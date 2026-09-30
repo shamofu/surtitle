@@ -42,7 +42,10 @@ export function publishRelease({ directory = 'artifacts/release', version = JSON
   const notes = `Surtitle ${version}\n\nWindows 11 x64. Unsigned NSIS installer.\nLicenses, SBOM and corresponding-source records accompany this release.`;
   // Leave incomplete uploads as drafts; only publish the complete asset set.
   gh(['release', 'create', tag, '--repo', repo, '--draft', '--verify-tag', '--title', `Surtitle ${version}`, '--notes', notes, ...files.map(file => file.path)]);
-  const draft = JSON.parse(gh(['api', `repos/${repo}/releases/tags/${tag}`]));
+  // The by-tag endpoint only returns published releases; authenticated lists include drafts.
+  const matching = pages(`repos/${repo}/releases`).filter(release => release.tag_name === tag);
+  if (matching.length !== 1) throw new Error('New release draft is missing or ambiguous; publication stopped');
+  const draft = matching[0];
   if (draft.draft !== true || draft.assets.length !== files.length) throw new Error('Draft upload is incomplete; publication stopped');
   for (const file of files) {
     const uploaded = draft.assets.filter(asset => asset.name === file.name);

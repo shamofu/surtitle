@@ -56,9 +56,9 @@ test('rejects wrong version or evidence from a different installer even with upd
 const releaseEnv = { GITHUB_REPOSITORY: 'example/surtitle', GITHUB_REF: 'refs/tags/v0.1.0',
   GITHUB_EVENT_NAME: 'push', GITHUB_SHA: 'a'.repeat(40) };
 function publisher(directory, { existing = null, remoteStates = ['lightweight'], assets,
-  draft = true, gitFailure = false } = {}) {
+  draft = true, gitFailure = false, createdReleases } = {}) {
   const calls = [], files = validateRelease(directory, '0.1.0');
-  let remoteRead = 0;
+  let remoteRead = 0, created = false;
   const run = (program, args, options) => {
     calls.push({ program, args });
     assert.equal(options.shell, false);
@@ -76,14 +76,23 @@ function publisher(directory, { existing = null, remoteStates = ['lightweight'],
       return { status: 0, stdout };
     }
     assert.equal(program, 'gh');
-    if (args.includes('--paginate')) return { status: 0, stdout: JSON.stringify([existing ? [existing] : []]) };
-    if (args[0] === 'api') return { status: 0, stdout: JSON.stringify({ draft, assets: assets ?? files.map(({ name, size }) => ({ name, size })) }) };
+    if (args[0] === 'api') {
+      if (args[1] === 'repos/example/surtitle/releases/tags/v0.1.0') {
+        return { status: 1, stderr: 'gh: Not Found (HTTP 404)' };
+      }
+      assert.deepEqual(args, ['api', '--paginate', '--slurp', 'repos/example/surtitle/releases']);
+      const releases = created ? createdReleases ?? [{ id: 123, tag_name: 'v0.1.0', draft,
+        assets: assets ?? files.map(({ name, size }) => ({ name, size })) }] : existing ? [existing] : [];
+      return { status: 0, stdout: JSON.stringify([releases]) };
+    }
+    assert.equal(args[0], 'release');
+    if (args[1] === 'create') created = true;
     return { status: 0, stdout: '' };
   };
   return { calls, run };
 }
 
-test.for(['lightweight', 'annotated'])('publishes an existing %s tag through a complete draft', (tagType, t) => {
+test.for(['lightweight', 'annotated'])('publishes an existing %s tag when its draft is unavailable by tag', (tagType, t) => {
   const directory = fixture(t), { calls, run } = publisher(directory, { remoteStates: [tagType] });
   assert.equal(publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), 'v0.1.0');
   const create = calls.find(call => call.args[1] === 'create').args;
@@ -91,8 +100,28 @@ test.for(['lightweight', 'annotated'])('publishes an existing %s tag through a c
   assert.ok(create.includes('--verify-tag'));
   assert.equal(create.includes('--target'), false);
   assert.equal(calls.filter(call => call.program === 'git').length, 2);
+  assert.equal(calls.filter(call => call.args.includes('--paginate')).length, 2);
+  assert.equal(calls.some(call => call.args.includes('repos/example/surtitle/releases/tags/v0.1.0')), false);
   assert.ok(calls.at(-1).args.includes('--draft=false'));
   assert.equal(calls.at(-2).program, 'git');
+});
+
+test.for([
+  { reason: 'missing', releases: [] },
+  { reason: 'wrong tag', releases: [{ id: 123, tag_name: 'v0.2.0', draft: true }] },
+  { reason: 'ambiguous', releases: [{ id: 123, tag_name: 'v0.1.0', draft: true },
+    { id: 124, tag_name: 'v0.1.0', draft: true }] },
+])('does not publish a $reason draft after upload', ({ releases }, t) => {
+  const directory = fixture(t), { calls, run } = publisher(directory, { createdReleases: releases });
+  assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), /missing or ambiguous/);
+  assert.ok(calls.some(call => call.args[1] === 'create'));
+  assert.equal(calls.some(call => call.args.includes('--draft=false')), false);
+});
+
+test('does not edit a release published elsewhere during upload', t => {
+  const directory = fixture(t), { calls, run } = publisher(directory, { draft: false });
+  assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), /publication stopped/);
+  assert.equal(calls.some(call => call.args.includes('--draft=false')), false);
 });
 
 test.for([false, true])('never overwrites an existing release with draft=%s', (draft, t) => {
