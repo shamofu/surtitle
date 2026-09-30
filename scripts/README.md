@@ -11,14 +11,14 @@
 | アプリ検証 | `native-smoke.ps1` | 実際の DLL をロードし、mpv・ORT の初期化を確認する。Windows CI、installer smoke、ローカル準備後。 |
 | アプリ検証 | `generate-fixtures.mjs`、`generate-multitrack-fixture.mjs` | 再生・音声トラック選択・長時間メディア用の入力をローカル生成する。`pnpm test:fixtures`、native acceptance。 |
 | アプリ検証 | `*.test.mjs`、`test-setup.mjs` | 上記と下記の保守対象スクリプトの回帰テスト・共通設定。`pnpm test` / `pnpm test:scripts`。 |
-| 配布 | `check-version.mjs`、`check-production-features.mjs` | リリース番号の不一致と、開発専用機能の製品への混入を検出する。CI、`package-verify.ps1`。 |
+| 配布 | `check-version.mjs`、`check-release.mjs`、`check-production-features.mjs` | リリース番号の整合性、安定版タグの形式・番号・`main` 履歴への所属、開発専用機能の製品への混入を検出する。CI の `validate`、製品検証。 |
 | 配布 | `audit-js-licenses.mjs`、`licenses.hbs` | 同梱 JavaScript / Rust 依存の notices とソース情報を用意する。CI、`package-verify.ps1`、cargo-about。 |
 | 配布 | `native-ci-artifact.mjs` | native 出力のファイル集合・SHA を検証し、現在の checkout の manifest に適用する。native build の export 後、Windows CI の consume、最終 source ZIP 検証。 |
 | 配布 | `native-audit.mjs` | 配布対象 DLL・notices・source 情報と PE 依存関係を確認する。`package-verify.ps1`。 |
 | 配布 | `native-installer-prepare.py` | 標準 Tauri installer の同梱 source / notices を収集する。package CI。NSIS や plugin の独自ビルドは行わない。 |
 | 配布 | `native-installer-audit.mjs`、`native-installer-audit.ps1` | 実際の installer を展開し、埋込み EXE・resources と同梱 source 情報を確認する。`package-verify.ps1`。 |
 | 配布 | `package-verify.ps1`、`package-installer-smoke.ps1`、`package-production-smoke.mjs` | 製品 installer のインストール・上書き・起動・アンインストールと source ZIP を検証する。package CI。使い捨て Windows 環境で実行する。 |
-| 配布 | `release.mjs`、`release-contract.mjs` | 検証済みの配布ファイル集合を確認し、既存リリースを上書きせず公開する。package 検証と release ブランチの CI。 |
+| 配布 | `release.mjs`、`release-contract.mjs` | 検証済みの配布ファイル集合と既存タグの参照先を確認し、既存リリースを上書きせず公開する。package 検証と `vX.Y.Z` タグの CI。 |
 | 依存更新 | `native-source-inputs.py`、`native_source_manifest.py`、`native-build.sh`、`native-build-evidence.py` | source catalog の URL / ファイル名 / submodule 記録を導出し、libmpv DLL と対応する source / inventory を生成する。`native/build/Dockerfile` の cache miss 時。 |
 | 依存更新 | `native-ort-source-inputs.py`、`native-ort-compare.py`、`native-ort-generated.py`、`native-ort-package.py` | 採用した公式 ORT DLL に対応する source を取得・照合・梱包する。Docker の cache miss 時。 |
 | 依存更新 | `native-source-archive-check.py` | 生成した native source tar の内容を、レビュー済み入力と照合する。上記の libmpv / ORT package 生成時。 |
@@ -35,3 +35,7 @@ libmpv と ORT の source archive は `native_source_archive.py` で生成しま
 通常のアプリ変更では native 依存の Docker cache を使い、取得済み出力の整合性とアプリ・installer の動作を検証します。
 
 実行手順は [開発コマンド](../README.md#development)、[E2E](../e2e/README.md)、[native build / package](../docs/native-runtime.md)、[source rebuild](../native/SOURCE-REBUILD.md) を参照してください。自動実行の入口は [CI](../.github/workflows/ci.yml)、[native build](../.github/workflows/native-build.yml)、[手動 native acceptance](../.github/workflows/native-acceptance.yml) です。
+
+リリースは [main の保護ルールとタグ作成手順](../README.md#ci-and-releases) に従います。作業ブランチから `main` への PR を Squash merge し、そのコミットの CI 成功後に所有者がバージョンタグを作成・push します。集約チェック `ci` は `validate`・native build・Linux・Windows・package がすべて成功した場合だけ通り、タグの CI 成功後に同じ実行の成果物を公開します。`main` の push や PR では公開しません。
+
+一時的な失敗は同じタグの workflow を再実行します。不完全な draft が残った場合は draft だけを手動削除し、タグを残して再実行します。タグの移動・削除は所有者にも許可されません。コード修正や誤ったタグの訂正には新しいバージョンとタグを使います。

@@ -53,33 +53,90 @@ test('rejects wrong version or evidence from a different installer even with upd
   assert.throws(() => validateRelease(root, '0.1.0'), /different installer/);
 });
 
-test('publishes through a complete draft and never overwrites an existing tag or release', t => {
-  const directory = fixture(t), files = validateRelease(directory, '0.1.0');
-  const env = { GITHUB_REPOSITORY: 'example/surtitle', GITHUB_REF: 'refs/heads/release', GITHUB_EVENT_NAME: 'push', GITHUB_SHA: 'a'.repeat(40) };
-  for (const existing of ['tag', 'release', null]) {
-    const calls = [];
-    const run = (_, args) => {
-      calls.push(args);
-      let output = '';
-      if (args.includes('--paginate')) output = JSON.stringify([args.at(-1).includes('matching-refs')
-        ? (existing === 'tag' ? [{ ref: 'refs/tags/v0.1.0' }] : []) : (existing === 'release' ? [{ tag_name: 'v0.1.0' }] : [])]);
-      else if (args[0] === 'api') output = JSON.stringify({ draft: true, assets: files.map(({ name, size }) => ({ name, size })) });
-      return { status: 0, stdout: output };
-    };
-    if (existing) {
-      assert.throws(() => publishRelease({ directory, version: '0.1.0', env, run }), /already exists/);
-      assert.equal(calls.some(args => args[0] === 'release'), false);
-    } else {
-      assert.equal(publishRelease({ directory, version: '0.1.0', env, run }), 'v0.1.0');
-      assert.ok(calls.find(args => args[1] === 'create').includes('--draft'));
-      assert.ok(calls.at(-1).includes('--draft=false'));
+const releaseEnv = { GITHUB_REPOSITORY: 'example/surtitle', GITHUB_REF: 'refs/tags/v0.1.0',
+  GITHUB_EVENT_NAME: 'push', GITHUB_SHA: 'a'.repeat(40) };
+function publisher(directory, { existing = null, remoteStates = ['lightweight'], assets,
+  draft = true, gitFailure = false } = {}) {
+  const calls = [], files = validateRelease(directory, '0.1.0');
+  let remoteRead = 0;
+  const run = (program, args, options) => {
+    calls.push({ program, args });
+    assert.equal(options.shell, false);
+    if (program === 'git') {
+      assert.deepEqual(args, ['ls-remote', 'origin', 'refs/tags/v0.1.0', 'refs/tags/v0.1.0^{}']);
+      if (gitFailure) return { status: 128, stderr: 'Remote access failed' };
+      const state = remoteStates[Math.min(remoteRead++, remoteStates.length - 1)];
+      let stdout = '';
+      if (state === 'lightweight') stdout = `${releaseEnv.GITHUB_SHA}\trefs/tags/v0.1.0\n`;
+      if (state === 'annotated') stdout = `${'b'.repeat(40)}\trefs/tags/v0.1.0\n${releaseEnv.GITHUB_SHA}\trefs/tags/v0.1.0^{}\n`;
+      if (state === 'moved') stdout = `${'c'.repeat(40)}\trefs/tags/v0.1.0\n`;
+      if (state === 'moved-annotated') stdout = `${'b'.repeat(40)}\trefs/tags/v0.1.0\n${'c'.repeat(40)}\trefs/tags/v0.1.0^{}\n`;
+      if (state === 'peeled-only') stdout = `${releaseEnv.GITHUB_SHA}\trefs/tags/v0.1.0^{}\n`;
+      if (state === 'wrong-ref') stdout = `${releaseEnv.GITHUB_SHA}\trefs/tags/v0.1.00\n`;
+      return { status: 0, stdout };
     }
-  }
+    assert.equal(program, 'gh');
+    if (args.includes('--paginate')) return { status: 0, stdout: JSON.stringify([existing ? [existing] : []]) };
+    if (args[0] === 'api') return { status: 0, stdout: JSON.stringify({ draft, assets: assets ?? files.map(({ name, size }) => ({ name, size })) }) };
+    return { status: 0, stdout: '' };
+  };
+  return { calls, run };
+}
+
+test.for(['lightweight', 'annotated'])('publishes an existing %s tag through a complete draft', (tagType, t) => {
+  const directory = fixture(t), { calls, run } = publisher(directory, { remoteStates: [tagType] });
+  assert.equal(publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), 'v0.1.0');
+  const create = calls.find(call => call.args[1] === 'create').args;
+  assert.ok(create.includes('--draft'));
+  assert.ok(create.includes('--verify-tag'));
+  assert.equal(create.includes('--target'), false);
+  assert.equal(calls.filter(call => call.program === 'git').length, 2);
+  assert.ok(calls.at(-1).args.includes('--draft=false'));
+  assert.equal(calls.at(-2).program, 'git');
 });
 
-test('incomplete draft uploads are not published', t => {
-  const directory = fixture(t), calls = [];
-  const run = (_, args) => { calls.push(args); return { status: 0, stdout: args.includes('--paginate') ? '[[]]' : JSON.stringify({ draft: true, assets: [] }) }; };
-  assert.throws(() => publishRelease({ directory, version: '0.1.0', env: { GITHUB_REPOSITORY: 'example/repo', GITHUB_REF: 'refs/heads/release', GITHUB_EVENT_NAME: 'push' }, run }), /incomplete/);
-  assert.equal(calls.some(args => args.includes('--draft=false')), false);
+test.for([false, true])('never overwrites an existing release with draft=%s', (draft, t) => {
+  const directory = fixture(t);
+  const { calls, run } = publisher(directory, { existing: { tag_name: 'v0.1.0', draft } });
+  assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), /already exists/);
+  assert.equal(calls.some(call => call.args[0] === 'release'), false);
+});
+
+test('rejects invalid events, version mismatches, repositories and missing commit SHAs before external commands', t => {
+  const directory = fixture(t), run = () => assert.fail('Invalid release input must not invoke Git or GitHub');
+  for (const changes of [
+    { GITHUB_REF: 'refs/heads/main' }, { GITHUB_REF: 'refs/heads/release' },
+    { GITHUB_REF: 'refs/tags/v0.1.0-rc.1' }, { GITHUB_REF: 'refs/tags/v00.1.0' },
+    { GITHUB_REF: 'refs/tags/v0.2.0' }, { GITHUB_EVENT_NAME: 'workflow_dispatch' },
+    { GITHUB_EVENT_NAME: 'pull_request' }, { GITHUB_SHA: undefined },
+    { GITHUB_REPOSITORY: 'not-a-repository' },
+  ]) assert.throws(() => publishRelease({ directory, version: '0.1.0', env: { ...releaseEnv, ...changes }, run }));
+});
+
+test.for(['missing', 'peeled-only', 'moved', 'moved-annotated', 'wrong-ref'])('does not create a release for a %s remote tag', (state, t) => {
+  const directory = fixture(t), { calls, run } = publisher(directory, { remoteStates: [state] });
+  assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), /tag.*(missing|differs|invalid)/);
+  assert.equal(calls.some(call => call.args[0] === 'release'), false);
+});
+
+test.for(['missing', 'moved', 'moved-annotated'])('leaves a draft when its tag becomes %s during upload', (state, t) => {
+  const directory = fixture(t), { calls, run } = publisher(directory, { remoteStates: ['annotated', state] });
+  assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), /tag.*(missing|differs)/);
+  assert.ok(calls.some(call => call.args[1] === 'create'));
+  assert.equal(calls.some(call => call.args.includes('--draft=false')), false);
+});
+
+test('remote verification failures stop publication', t => {
+  const directory = fixture(t), { calls, run } = publisher(directory, { gitFailure: true });
+  assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), /Remote access failed/);
+  assert.equal(calls.some(call => call.args[0] === 'release'), false);
+});
+
+test('incomplete or incorrectly sized draft uploads are not published', t => {
+  const directory = fixture(t), files = validateRelease(directory, '0.1.0');
+  for (const assets of [[], files.map(({ name, size }) => ({ name, size: size + 1 }))]) {
+    const { calls, run } = publisher(directory, { assets });
+    assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), /incomplete/);
+    assert.equal(calls.some(call => call.args.includes('--draft=false')), false);
+  }
 });
