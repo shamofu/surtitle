@@ -34,8 +34,11 @@ export function ToolRow({
   );
   async function perform(action: () => Promise<void>) {
     setBusy(true);
-    await report(action);
-    setBusy(false);
+    try {
+      await report(action);
+    } finally {
+      setBusy(false);
+    }
   }
   const ready = tool.status === 'ready';
   return (
@@ -82,14 +85,17 @@ export function ToolRow({
         </p>
       )}
       {tool.path && (
-        <code className="tool-path" title={tool.path}>
-          {tool.path}
-        </code>
+        <div className="tool-current-path">
+          <span>{t('現在使用中のパス', 'Currently used path')}</span>
+          <code className="tool-path" title={tool.path}>{tool.path}</code>
+        </div>
       )}
       {tool.error && <p className="field-error">{tool.error}</p>}
       <div className="tool-actions">
-        <div className="segmented-control compact">
+        <div className="segmented-control compact" role="group" aria-label={t(`${tool.name}の取得方法`, `${tool.name} source`)}>
           <button
+            type="button"
+            aria-pressed={tool.provider === 'managed' && !chooseExternal}
             className={
               tool.provider === 'managed' && !chooseExternal ? 'selected' : ''
             }
@@ -113,6 +119,8 @@ export function ToolRow({
           </button>
           {tool.id !== 'vad' && (
             <button
+              type="button"
+              aria-pressed={tool.provider === 'external' || chooseExternal}
               className={
                 tool.provider === 'external' || chooseExternal ? 'selected' : ''
               }
@@ -167,6 +175,24 @@ export function ToolRow({
       </div>
       {chooseExternal && (
         <div className="external-picker">
+          <h4>{t('PATHで見つかった候補', 'Candidates found on PATH')}</h4>
+          <p className="helper-text">{t('候補を選ぶと下の入力欄にパスが入ります。「検証してこのパスを使用」で確認・適用します。', 'Select a candidate to fill the path below, then verify and use it.')}</p>
+          {available.length > 0 ? (
+            <div className="candidate-list">
+              {available.map((candidate) => (
+                <div key={candidate.path} className={`tool-candidate ${externalPath === candidate.path ? 'selected' : ''}`}>
+                  <div>
+                    <code>{candidate.path}</code>
+                    <small>{t('未検証・選択後に機能互換性を確認します。', 'Unverified; capabilities are checked when selected.')}{candidate.reason ? ` ${candidate.reason}` : ''}</small>
+                  </div>
+                  <Button disabled={busy || !candidate.selectable} aria-label={t(`候補を選択 ${candidate.path}`, `Select candidate ${candidate.path}`)} aria-pressed={externalPath === candidate.path} onClick={() => setExternalPath(candidate.path)}>
+                    {externalPath === candidate.path && <Check size={14} />}
+                    {externalPath === candidate.path ? t('選択中', 'Selected') : t('選択', 'Select')}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : <p className="helper-text">{t('候補がありません。PATHを再検索するか、実行ファイルのパスを入力してください。', 'No candidates found. Rescan PATH or enter an executable path.')}</p>}
           <Field
             label={t(
               '使用する実行ファイルの絶対パス',
@@ -179,6 +205,7 @@ export function ToolRow({
           >
             <input
               value={externalPath}
+              disabled={busy}
               onChange={(event) => setExternalPath(event.target.value)}
               placeholder={
                 tool.id === 'ffmpeg'
@@ -187,29 +214,6 @@ export function ToolRow({
               }
             />
           </Field>
-          {available.length > 0 && (
-            <div className="candidate-list">
-              {available.map((candidate) => (
-                <button
-                  key={candidate.path}
-                  disabled={!candidate.selectable}
-                  onClick={() => setExternalPath(candidate.path)}
-                  className={externalPath === candidate.path ? 'selected' : ''}
-                >
-                  <span>
-                    <code>{candidate.path}</code>
-                    <small>
-                      {t(
-                        '未検証・選択後に機能互換性を確認します。',
-                        'Unverified; capabilities are checked when selected.',
-                      )}
-                      {candidate.reason ? ` ${candidate.reason}` : ''}
-                    </small>
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
           <Button
             busy={busy}
             disabled={!externalPath.trim()}
@@ -231,6 +235,7 @@ export function ToolRow({
             <Check size={15} />
             {t('検証してこのパスを使用', 'Verify and use this path')}
           </Button>
+          <p className="helper-text">{t('検証に成功するとすぐに反映します。設定画面の「変更を保存」は不要です。', 'A successful verification takes effect immediately. You do not need to save settings separately.')}</p>
         </div>
       )}
     </article>

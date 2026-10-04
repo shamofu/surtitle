@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 
 dll, pdb, listing, destination = map(Path, sys.argv[1:5])
-workspace = Path(__file__).resolve().parent.parent
+workspace = Path(__file__).resolve().parents[2]
 definition = json.loads((workspace / 'native/build/onnxruntime-sources.json').read_text())
 runtime = json.loads((workspace / 'native/runtime-windows-x64.json').read_text())
 component = next(item for item in runtime['components'] if item['id'] == 'onnxruntime')

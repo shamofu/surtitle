@@ -8,12 +8,12 @@ Browser interaction tests use explicit test-only native transport fixtures for s
 
 ## Browser CI and visual baselines
 
-The required browser CI job runs the functional suite and `pnpm test:visual` in the image defined by `scripts/browser-tests.Dockerfile`. Its Playwright image is pinned by version and digest; Node, pnpm and Rust follow the repository pins. The source-only build context excludes host dependencies, build output and credentials. No desktop build is needed.
+The required browser CI job runs the functional suite and `pnpm test:visual` in the image defined by `e2e/browser/Dockerfile`. Its Playwright image is pinned by version and digest; Node, pnpm and Rust follow the repository pins. The source-only build context excludes host dependencies, build output and credentials. No desktop build is needed.
 
 With a Linux Docker engine available, run the same environment locally:
 
 ```sh
-docker build --platform linux/amd64 -f scripts/browser-tests.Dockerfile -t surtitle-browser-tests .
+docker build --platform linux/amd64 -f e2e/browser/Dockerfile -t surtitle-browser-tests .
 docker run --rm --init --ipc=host surtitle-browser-tests
 ```
 
@@ -39,7 +39,7 @@ CI retains `test-results/browser`, `test-results/visual`, `playwright-report/bro
 ## Native setup
 
 1. Run `pnpm install --frozen-lockfile`, `pnpm build`, `pnpm build:native:e2e` and `pnpm build:fixtures`. Windows also needs the [native DLLs](../docs/native-runtime.md).
-2. Install `tauri-driver` with `pnpm setup:driver`; set `SURTITLE_TAURI_DRIVER` to its absolute path. On Windows run `pwsh -File scripts/prepare-webdriver.ps1` for the matching EdgeDriver; on Linux use WebKitWebDriver.
+2. Install `tauri-driver` with `pnpm setup:driver`; set `SURTITLE_TAURI_DRIVER` to its absolute path. On Windows run `pwsh -File e2e/support/prepare-webdriver.ps1` for the matching EdgeDriver; on Linux use WebKitWebDriver.
 3. Run `pnpm test:fixtures` using an existing FFmpeg. It generates the Japanese/space/ampersand video, multitrack media, subtitles and six-hour silence locally.
 4. Use `pnpm seed:fixtures <fresh-data-directory> <absolute-media-path>` to create a disposable SQLite profile. Set `SURTITLE_E2E_DATA_DIR` to that profile, `SURTITLE_E2E_BINARY` to the absolute E2E executable, and `SURTITLE_NATIVE_DRIVER` to the native WebDriver when needed.
 5. Set `SURTITLE_E2E_AI_RECOVERY=translation` and `SURTITLE_E2E_TRANSCRIPT_REVIEW=boundary` for the authored recovery presets. Run `pnpm test:e2e`; Linux uses `dbus-run-session -- xvfb-run -a pnpm test:e2e`.

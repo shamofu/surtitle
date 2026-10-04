@@ -12,10 +12,10 @@ Keep the JSON key outside the repository, container, chat, and public CI. Import
 
 Launch an installed build, or build the app using the [native runtime guide](native-runtime.md).
 
-1. Open Settings, import the service-account JSON, and check the project and location.
-2. Select a model separately for transcription, vocabulary, explanations, and translation. Defaults are unset. Fetch Google suggestions or enter the exact Gemini model ID. Discovery is not proof of access.
-3. Choose the transcription API mode and output/thinking settings supported by the selected model.
-4. Fetch a price or enter independently verified rates. A failed or ambiguous lookup leaves pricing unset. An unpriced job needs explicit scope approval and cannot promise a dollar cap. For a priced job, set a small nonzero budget; the initial value is zero.
+1. Open Settings and import the service-account JSON. The read-only project ID comes from this key; check it and choose the location. Import another JSON key to change the project.
+2. Fetch Google suggestions once and use them for transcription, vocabulary, explanations, and translation, or enter exact Gemini model IDs directly. Each purpose has a separate, initially unset selection. Discovery is not proof of access.
+3. Choose **How to create subtitles** and keep the recommended standard output limit for typical requests. Detailed output/thinking settings must be supported by the selected model.
+4. Fetch a price or enter independently verified rates. A failed or ambiguous lookup leaves pricing unset. An unpriced job needs explicit scope approval and cannot promise a dollar cap. For priced jobs, set a small nonzero **Monthly AI budget** and adjust daily/per-job limits in detailed settings if needed. All limits initially start at zero; any zero limit blocks priced jobs. Save the settings.
 5. Import a short source and select the exact range. Review the resulting model, location, request count, submitted audio including overlap, output limits, price, and immutable quote before approving.
 6. Inspect the result before saving a card or applying subtitles. Review, adoption, and applying an already received translation are local operations with no generation charge.
 

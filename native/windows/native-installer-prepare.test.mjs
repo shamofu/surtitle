@@ -6,7 +6,7 @@ test('source preparation preserves pinned sources/notices and rejects tampered d
   const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-B', '-c', String.raw`
 import hashlib, importlib.util, io, json, pathlib, tarfile, tempfile
 from unittest.mock import patch
-spec=importlib.util.spec_from_file_location('prepare', 'scripts/native-installer-prepare.py')
+spec=importlib.util.spec_from_file_location('prepare', 'native/windows/native-installer-prepare.py')
 m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 with tempfile.TemporaryDirectory() as temp:
     root=pathlib.Path(temp); downloads=root/'work/native-installer-downloads'; downloads.mkdir(parents=True)
@@ -62,7 +62,7 @@ with tempfile.TemporaryDirectory() as temp:
     try: m.prepare_prerequisite(root)
     except ValueError: pass
     else: raise AssertionError('NSIS interpolation in the prerequisite URL accepted')
-`], { cwd: new URL('..', import.meta.url), encoding: 'utf8', windowsHide: true, timeout: 15_000 });
+`], { cwd: new URL('../..', import.meta.url), encoding: 'utf8', windowsHide: true, timeout: 15_000 });
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });

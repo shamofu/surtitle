@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Download only a signed Microsoft driver with the same major/minor/build as WebView2.
-param([string]$OutputDirectory = (Join-Path $PSScriptRoot '../work/webdriver'), [switch]$InstallRuntime)
+param([string]$OutputDirectory = (Join-Path $PSScriptRoot '../../work/webdriver'), [switch]$InstallRuntime)
 $ErrorActionPreference = 'Stop'
 $destination = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $destination | Out-Null

@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 if (-not $IsWindows -or [Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64') {
     throw 'This native loader smoke test requires Windows x64.'
 }
-$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $runtime = if ($RuntimeDirectory) { [IO.Path]::GetFullPath($RuntimeDirectory) } else { Join-Path $repoRoot 'src-tauri/resources/native' }
 if (-not $runtime.StartsWith($repoRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Native smoke directory must be inside the workspace.' }
 # Verify the complete expected set before allowing executable native code to load.

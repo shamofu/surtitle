@@ -5,7 +5,7 @@ import browserConfig from './playwright.config';
 // Baselines share one browser, OS and font environment with CI. In particular,
 // running --update-snapshots on Windows must not replace the Linux baselines.
 if (process.platform !== 'linux' || process.env.SURTITLE_VISUAL_ENV !== 'playwright-1.63.0-noble') {
-  throw new Error('Run visual checks in the pinned image built from scripts/browser-tests.Dockerfile. See e2e/README.md.');
+  throw new Error('Run visual checks in the pinned image built from e2e/browser/Dockerfile. See e2e/README.md.');
 }
 
 export default defineConfig({

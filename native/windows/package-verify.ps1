@@ -2,13 +2,13 @@
 param([switch]$DisposableProfile)
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
-$workspace = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+$workspace = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../..')).Path
 Set-Location -LiteralPath $workspace
 & node scripts/check-version.mjs
 if ($LASTEXITCODE -ne 0) { throw 'Release version mismatch.' }
 & node scripts/check-production-features.mjs
 if ($LASTEXITCODE -ne 0) { throw 'Development-only AI code must not be packaged.' }
-& node scripts/native-audit.mjs --release
+& node native/windows/native-audit.mjs --release
 if ($LASTEXITCODE -ne 0) { throw 'Native source and notice verification failed.' }
 $releaseDir = Join-Path $workspace 'artifacts/release'
 $sourceDir = Join-Path $workspace 'work/release-source'
@@ -21,10 +21,10 @@ $installers = @(Get-ChildItem -LiteralPath 'target/release/bundle/nsis' -Filter 
 if ($installers.Count -ne 1) { throw 'Exactly one NSIS installer is required.' }
 $installer = $installers[0]
 # Extract once, then use the observed executable hash throughout the lifecycle test.
-& pwsh -NoProfile -File scripts/native-installer-audit.ps1 -Installer $installer.FullName
+& node native/windows/native-installer-audit.mjs audit $installer.FullName
 if ($LASTEXITCODE -ne 0) { throw 'Installer payload verification failed.' }
 $profileArguments = if ($DisposableProfile) { @('-DisposableProfile') } else { @() }
-& pwsh -NoProfile -File scripts/package-installer-smoke.ps1 -Installer $installer.FullName -InstallDirectory 'work/installer-test/日本語 & application' @profileArguments
+& pwsh -NoProfile -File native/windows/package-installer-smoke.ps1 -Installer $installer.FullName -InstallDirectory 'work/installer-test/日本語 & application' @profileArguments
 if ($LASTEXITCODE -ne 0) { throw 'Installer lifecycle or production application verification failed.' }
 Copy-Item -LiteralPath $installer.FullName -Destination $releaseDir
 foreach ($name in @('native-audit.json', 'native-smoke.json', 'installer-smoke.json', 'production-smoke.json', 'installer-audit.json')) {
@@ -76,9 +76,9 @@ try {
 # Verify the actual ZIP's source archives, not just the directory used to create it.
 & $sevenZip x '-y' ('-o' + $sourceCheck) (Join-Path $releaseDir 'surtitle-source.zip') 'native/*' 'native-sources/*' 'native-installer-sources/*' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Cannot extract the source ZIP for verification.' }
-& node scripts/native-ci-artifact.mjs verify-source $sourceCheck
+& node native/build/native-ci-artifact.mjs verify-source $sourceCheck
 if ($LASTEXITCODE -ne 0) { throw 'Native source files are missing or changed in the source ZIP.' }
-& node scripts/native-installer-audit.mjs source-check $sourceCheck
+& node native/windows/native-installer-audit.mjs source-check $sourceCheck
 if ($LASTEXITCODE -ne 0) { throw 'Installer or Rust source files are missing or changed in the source ZIP.' }
 $version = (Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).version
 $audit = Get-Content -LiteralPath 'artifacts/installer-audit.json' -Raw | ConvertFrom-Json

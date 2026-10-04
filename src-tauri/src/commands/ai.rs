@@ -14,7 +14,7 @@ pub fn get_app_snapshot(state: State<'_, AppState>) -> std::result::Result<AppSn
 }
 
 #[tauri::command]
-pub async fn import_credential(state: State<'_, AppState>) -> std::result::Result<(), String> {
+pub async fn import_credential(state: State<'_, AppState>) -> std::result::Result<bool, String> {
     crate::application::models::import_credential(state.inner().clone()).await
 }
 

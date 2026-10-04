@@ -55,6 +55,7 @@ async function openStudy() {
   await browser.waitUntil(async () => { const state = await player(); return state.ready && state.surfaceVisible && state.videoWidth === 640 && state.durationMs >= 11990 && state.durationMs <= 12010; }, { timeoutMsg: 'The real twelve-second disposable media was not loaded' });
 }
 async function saveContextInUi(value) {
+  const wasSaved = (await snapshot()).settings.replayContextMs === value;
   await navigate('/settings');
   await contextInput().waitForEnabled();
   // Use real editing keys so React observes clearing the controlled numeric input.
@@ -64,8 +65,12 @@ async function saveContextInUi(value) {
   await expect(contextInput()).toHaveValue('');
   await contextInput().addValue(String(value));
   await expect(contextInput()).toHaveValue(String(value));
-  await $('button=Save changes').waitForEnabled();
-  await $('button=Save changes').click();
+  if (wasSaved) {
+    await expect($('button=Save changes')).not.toBeEnabled();
+  } else {
+    await $('button=Save changes').waitForEnabled();
+    await $('button=Save changes').click();
+  }
   await browser.waitUntil(async () => (await snapshot()).settings.replayContextMs === value, { timeoutMsg: `Playback context ${value} was not saved` });
   await browser.refresh();
   await expect(contextInput()).toHaveValue(String(value));

@@ -23,8 +23,8 @@ Windows requires Visual Studio C++ Build Tools, WebView2 Runtime, Node.js from `
 ```powershell
 pnpm install --frozen-lockfile
 # Obtain and consume the native build output as described in docs/native-runtime.md.
-pwsh -File scripts/native-prepare.ps1
-pwsh -File scripts/native-smoke.ps1
+pwsh -File native/windows/native-prepare.ps1
+pwsh -File native/windows/native-smoke.ps1
 pnpm tauri dev
 ```
 
@@ -44,6 +44,14 @@ The optional [Dev Container](.devcontainer/README.md) supports Linux development
 | `pnpm package:app` | Standard Tauri NSIS build |
 
 `pnpm install --frozen-lockfile` acquires JavaScript and Rust dependencies using both lockfiles. Use `pnpm rust <subcommand> ...` for other Cargo operations. In PowerShell quote a forwarded separator as `'--'`.
+
+### Build storage
+
+Development and test builds use limited debug information (`debug = 1`) while retaining local incremental compilation. To inspect types and variables in a debugger, set `CARGO_PROFILE_DEV_DEBUG=2` for the development command, or `CARGO_PROFILE_TEST_DEBUG=2` for tests. Release settings are unchanged.
+
+Keep the build cache while iterating. After finishing a task, run `cargo clean` from that worktree to remove Cargo output; `cargo clean --dry-run` previews the operation. Cargo honors `CARGO_TARGET_DIR` and Cargo configuration, so check any custom target location before cleaning. Source, lockfiles, downloaded Cargo dependencies and application learning data are retained. A worktree separates source and its local outputs; user-wide package caches and toolchains remain shared.
+
+For the optional Dev Container, export any needed logs first, then use `docker stop surtitle-dev` followed by `docker rm surtitle-dev`. This removes the container build layer while keeping Docker image and shared build caches. See the [container guide](.devcontainer/README.md) for WSL commands. No project cleanup wrapper is needed.
 
 ## Documentation
 

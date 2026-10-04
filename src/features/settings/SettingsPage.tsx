@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { PausedJobs } from './PausedJobs';
 import { ToolRow } from './ToolRow';
-import { mergeSettingsRefresh } from './merge-settings';
-// SPDX-License-Identifier: GPL-3.0-or-later
+import { equalSetting, mergeSettingsRefresh } from './merge-settings';
 import { useEffect, useRef, useState } from 'react';
 import {
   Archive,
@@ -22,8 +21,9 @@ import {
 } from 'lucide-react';
 
 import { settingsApi } from './api';
+import { aiApi } from '../ai/api';
 import { nativeAvailable } from '../../shared/native/transport';
-import type { AiPurpose } from '../../shared/contracts/ai';
+import type { AiPurpose, DiscoveredModel } from '../../shared/contracts/ai';
 import type { AppSettings } from '../../shared/contracts/settings';
 
 import type { ExternalToolCandidate } from '../../shared/contracts/settings';
@@ -41,18 +41,61 @@ import { TransferDialog } from '../transfer/TransferDialog';
 
 import { ModelEditor, emptyModel } from '../ai/ModelEditor';
 
+function completeBudgets(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    monthlyBudgetUsd: settings.monthlyBudgetUsd ?? settings.dailyBudgetUsd,
+    perJobBudgetUsd: settings.perJobBudgetUsd ?? settings.dailyBudgetUsd,
+    aiModels: settings.aiModels ?? {},
+  };
+}
+
+const learningLevels = [
+  ['A1', '挨拶や簡単な自己紹介ができる', 'Greetings and simple introductions'],
+  ['A2', '買い物など身近な会話ができる', 'Everyday exchanges, such as shopping'],
+  ['B1', '経験や考えを日常的な言葉で説明できる', 'Explain experiences and opinions in everyday language'],
+  ['B2', '複雑な話題でも議論や説明ができる', 'Discuss and explain more complex topics'],
+  ['C1', '専門的な内容を理解し柔軟に表現できる', 'Understand specialist content and express yourself flexibly'],
+  ['C2', '細かなニュアンスまで理解し表現できる', 'Understand and express subtle nuances'],
+] as const;
+
 export function SettingsPage() {
   const { mutate } = useDataActions();
   const { data } = useSnapshot();
   const { t } = useAppearance();
-  const { report } = useNotifications();
+  const { report, notify } = useNotifications();
   const [draft, setDraft] = useState<AppSettings>();
   const savedSettings = useRef<AppSettings | undefined>(undefined);
+  const lastMonthlyBudget = useRef(0);
   const [busy, setBusy] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [candidates, setCandidates] = useState<ExternalToolCandidate[]>([]);
   const [transfer, setTransfer] = useState(false);
+  const [retentionCustom, setRetentionCustom] = useState(false);
+  const [credentialRevision, setCredentialRevision] = useState(0);
+  const [credentialBusy, setCredentialBusy] = useState(false);
+  const [modelCatalogue, setModelCatalogue] = useState<{ key: string; models: DiscoveredModel[] }>({ key: '', models: [] });
+  const [modelsBusy, setModelsBusy] = useState(false);
+  const [modelNotice, setModelNotice] = useState('');
+  const catalogueKey = JSON.stringify([
+    draft?.vertexLocation || 'global',
+    data?.settings.vertexProject,
+    data?.settings.credentialConfigured,
+    credentialRevision,
+  ]);
+  const catalogue = useRef({ key: catalogueKey, revision: 0, mounted: true });
+  if (catalogue.current.key !== catalogueKey) {
+    catalogue.current = { ...catalogue.current, key: catalogueKey, revision: catalogue.current.revision + 1 };
+  }
+  useEffect(() => {
+    catalogue.current.mounted = true;
+    return () => { catalogue.current.mounted = false; };
+  }, []);
+  useEffect(() => {
+    setModelsBusy(false);
+    setModelNotice('');
+  }, [catalogueKey]);
   useEffect(() => {
     if (!nativeAvailable()) return;
     let mounted = true;
@@ -67,14 +110,24 @@ export function SettingsPage() {
   useEffect(() => {
     if (!data?.settings) return;
     const previous = savedSettings.current;
-    const next = data.settings;
+    const next = completeBudgets(data.settings);
     savedSettings.current = next;
-    setDraft((current) => mergeSettingsRefresh(previous, current, next));
+    setDraft((current) => {
+      const refreshed = mergeSettingsRefresh(previous, current, next);
+      if (Number.isFinite(refreshed.monthlyBudgetUsd)) lastMonthlyBudget.current = refreshed.monthlyBudgetUsd!;
+      return refreshed;
+    });
   }, [data?.settings]);
   function change<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     setDraft((current) => {
       if (!current) return current;
       const updated = { ...current, [key]: value };
+      if (key === 'monthlyBudgetUsd' && Number.isFinite(value)) {
+        const previousMonthly = Number.isFinite(current.monthlyBudgetUsd) ? current.monthlyBudgetUsd! : lastMonthlyBudget.current;
+        if (current.dailyBudgetUsd === previousMonthly) updated.dailyBudgetUsd = value as number;
+        if ((current.perJobBudgetUsd ?? current.dailyBudgetUsd) === previousMonthly) updated.perJobBudgetUsd = value as number;
+        lastMonthlyBudget.current = value as number;
+      }
       if (key === 'vertexLocation' && value !== current.vertexLocation) {
         updated.aiModels = Object.fromEntries(
           Object.entries(current.aiModels || {}).map(([purpose, model]) => [
@@ -88,13 +141,51 @@ export function SettingsPage() {
   }
   async function save() {
     if (!draft) return;
+    const submitted = completeBudgets(draft);
+    const previousSaved = savedSettings.current;
     setBusy(true);
-    await report(
-      () =>
-        mutate(() => settingsApi.updateSettings(draft), { kind: 'snapshot' }),
-      t('設定を保存しました。', 'Settings saved.'),
-    );
-    setBusy(false);
+    try {
+      const saved = await report(async () => {
+        await mutate(() => settingsApi.updateSettings(submitted), { kind: 'snapshot' });
+        return true;
+      }, t('設定を保存しました。', 'Settings saved.'));
+      if (saved && savedSettings.current === previousSaved) savedSettings.current = submitted;
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function importCredential() {
+    setCredentialBusy(true);
+    try {
+      const imported = await report(() => mutate(settingsApi.importCredential, { kind: 'snapshot' }));
+      if (imported) {
+        setCredentialRevision((current) => current + 1);
+        notify(t('認証情報を保存しました。', 'Credential saved.'));
+      }
+    } finally {
+      setCredentialBusy(false);
+    }
+  }
+  async function discoverModels() {
+    const requestedRevision = ++catalogue.current.revision;
+    const requestedKey = catalogueKey;
+    setModelsBusy(true);
+    setModelNotice('');
+    try {
+      const result = await aiApi.vertexModels(draft?.vertexLocation || 'global');
+      if (!catalogue.current.mounted || catalogue.current.revision !== requestedRevision) return;
+      setModelCatalogue({ key: requestedKey, models: result });
+      setModelNotice(t(
+        `${result.length} 件の候補を全用途で使えます。候補への掲載だけでは、このプロジェクトでの実行可否は確認できません。`,
+        `${result.length} ${result.length === 1 ? 'candidate is' : 'candidates are'} available for every purpose. Listing does not confirm access in this project.`,
+      ));
+    } catch {
+      if (catalogue.current.mounted && catalogue.current.revision === requestedRevision) {
+        setModelNotice(t('候補を取得できませんでした。モデルIDを直接入力するか、もう一度取得してください。', 'Could not fetch candidates. Enter a model ID directly or try again.'));
+      }
+    } finally {
+      if (catalogue.current.mounted && catalogue.current.revision === requestedRevision) setModelsBusy(false);
+    }
   }
   async function scan() {
     setScanning(true);
@@ -115,35 +206,29 @@ export function SettingsPage() {
   }
   const valid =
     !!draft &&
-    draft.dailyBudgetUsd >= 0 &&
-    draft.dailyBudgetUsd <= 1000 &&
-    Number.isFinite(draft.dailyBudgetUsd) &&
-    draft.retention >= 0.7 &&
-    draft.retention <= 0.97 &&
+    [draft.dailyBudgetUsd, draft.monthlyBudgetUsd ?? draft.dailyBudgetUsd, draft.perJobBudgetUsd ?? draft.dailyBudgetUsd].every((budget) => Number.isFinite(budget) && budget >= 0 && budget <= 1000) &&
+    draft.retention >= 0.7 - 0.0000001 &&
+    draft.retention <= 0.97 + 0.0000001 &&
     Number.isInteger(draft.replayContextMs ?? 150) &&
     (draft.replayContextMs ?? 150) >= 0 &&
     (draft.replayContextMs ?? 150) <= 1000 &&
     !!draft.learningLanguage.trim() &&
-    !!draft.explanationLanguage.trim();
+    !!draft.explanationLanguage.trim() &&
+    Object.values(draft.aiModels || {}).every((model) => !model || (Number.isInteger(model.maxOutputTokens) && model.maxOutputTokens >= 1 && model.maxOutputTokens <= 1048576));
+  const dirty = !!draft && !equalSetting(draft, savedSettings.current);
+  const monthlyBudget = draft?.monthlyBudgetUsd ?? draft?.dailyBudgetUsd ?? 0;
+  const perJobBudget = draft?.perJobBudgetUsd ?? draft?.dailyBudgetUsd ?? 0;
+  const customBudget = !!draft && (draft.dailyBudgetUsd !== monthlyBudget || perJobBudget !== monthlyBudget);
+  const retentionPreset = [0.85, 0.9, 0.95].find((value) => Math.abs(value - (draft?.retention ?? 0.9)) < 0.000001);
   return (
     <div className="settings-page page-enter">
       <PageTitle
         title={t('設定', 'Settings')}
         description={t(
-          '学習する言語や再生方法を調整できます。',
-          'Choose your languages and playback preferences.',
+          '学習・AI・外部ツールの設定を調整できます。',
+          'Adjust your learning, AI, and external tool settings.',
         )}
-      >
-        <Button
-          variant="primary"
-          busy={busy}
-          disabled={!valid}
-          onClick={() => void save()}
-        >
-          <Save size={16} />
-          {t('変更を保存', 'Save changes')}
-        </Button>
-      </PageTitle>
+      />
       <div className="settings-layout">
         <nav
           className="settings-nav"
@@ -206,36 +291,53 @@ export function SettingsPage() {
                 </Field>
               </div>
               <div className="field-row">
-                <Field label={t('学習レベルの目安', 'Learning level')}>
+                <Field label={t('学習レベルの目安', 'Learning level')} hint={t('選択した表現のAI解説の難しさに反映します。迷ったら B1 から始め、解説に合わせて調整してください。', 'Controls the difficulty of AI explanations for selected phrases. Start at B1 if unsure, then adjust to suit the explanations.')}>
                   <select
                     value={draft?.proficiency || 'B1'}
                     onChange={(event) =>
                       change('proficiency', event.target.value)
                     }
                   >
-                    {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map((level) => (
-                      <option key={level}>{level}</option>
+                    {learningLevels.map(([level, ja, en]) => (
+                      <option key={level} value={level}>{level} — {t(ja, en)}</option>
                     ))}
                   </select>
                 </Field>
+                <div className="settings-field-group">
                 <Field
-                  label={t('目標の記憶保持率', 'Target retention')}
+                  label={t('復習の頻度', 'Review frequency')}
                   hint={t(
-                    '高くすると復習の回数が増えます。',
-                    'Higher retention means more reviews.',
+                    '記憶力の自己評価は不要です。復習の負担に合わせて選べます。',
+                    'No need to judge your memory. Choose the review workload that suits you.',
                   )}
                 >
+                  <select value={retentionCustom || retentionPreset == null ? 'custom' : String(retentionPreset)} onChange={(event) => {
+                    setRetentionCustom(event.target.value === 'custom');
+                    if (event.target.value !== 'custom') change('retention', Number(event.target.value));
+                  }}>
+                    <option value="0.85">{t('少なめ — 復習の負担を抑える', 'Lighter — fewer reviews')}</option>
+                    <option value="0.9">{t('標準（おすすめ）— バランスよく復習', 'Standard (recommended) — balanced reviews')}</option>
+                    <option value="0.95">{t('多め — 忘れる前にこまめに復習', 'More frequent — review before forgetting')}</option>
+                    <option value="custom">{t('カスタム — 詳細を調整', 'Custom — adjust the details')}</option>
+                  </select>
+                </Field>
+                <details className="settings-details" open={retentionCustom || retentionPreset == null}>
+                  <summary>{t('復習の詳細設定', 'Advanced review settings')}</summary>
+                  <Field label={t('目標の記憶保持率（%）', 'Target retention (%)')} hint={t('次の復習まで覚えていることを目指す割合です。高いほど復習が増えます。標準は90%です。', 'The proportion you aim to remember until the next review. Higher values mean more reviews. The standard is 90%.')}>
                   <input
                     type="number"
-                    min="0.7"
-                    max="0.97"
-                    step="0.01"
-                    value={draft?.retention ?? 0.9}
-                    onChange={(event) =>
-                      change('retention', Number(event.target.value))
-                    }
+                    min="70"
+                    max="97"
+                    step="1"
+                    value={Number.isNaN(draft?.retention) ? '' : Number(((draft?.retention ?? 0.9) * 100).toFixed(4))}
+                    onChange={(event) => {
+                      setRetentionCustom(true);
+                      change('retention', event.target.value === '' ? Number.NaN : Number(event.target.value) / 100);
+                    }}
                   />
                 </Field>
+                </details>
+                </div>
               </div>
               <Field
                 label={t(
@@ -319,13 +421,11 @@ export function SettingsPage() {
             </div>
             <fieldset disabled={!draft || busy}>
               <div className="field-row">
-                <Field label={t('プロジェクト ID', 'Project ID')}>
+                <Field label={t('プロジェクト ID', 'Project ID')} hint={t('サービスアカウントのJSONから読み込みます。変更する場合は別のJSONを読み込んでください。', 'Read from the service-account JSON. Import another JSON key to change it.')}>
                   <input
                     value={draft?.vertexProject || ''}
-                    onChange={(event) =>
-                      change('vertexProject', event.target.value)
-                    }
-                    placeholder="my-language-project"
+                    readOnly
+                    placeholder={t('JSONを読み込むと表示されます', 'Import JSON to display the project')}
                   />
                 </Field>
                 <Field label={t('ロケーション', 'Location')}>
@@ -357,22 +457,15 @@ export function SettingsPage() {
                 </strong>
                 <p>
                   {t(
-                    'JSON ファイルを選ぶと、このデバイスで保護して保存します。',
-                    'Import a JSON key to protect and store it on this device.',
+                    'JSONを読み込むと、このデバイスで保護して保存し、すぐに反映します。',
+                    'Import a JSON key to protect and store it on this device. It takes effect immediately.',
                   )}
                 </p>
               </div>
               <Button
-                disabled={!nativeAvailable()}
-                onClick={() =>
-                  void report(
-                    () =>
-                      mutate(settingsApi.importCredential, {
-                        kind: 'snapshot',
-                      }),
-                    t('認証情報を保存しました。', 'Credential saved.'),
-                  )
-                }
+                busy={credentialBusy}
+                disabled={!nativeAvailable() || busy}
+                onClick={() => void importCredential()}
               >
                 <Download size={15} />
                 {t('JSON を読み込む', 'Import JSON')}
@@ -393,6 +486,15 @@ export function SettingsPage() {
                   )}
                 </p>
               </div>
+            </div>
+            <div className="model-catalogue">
+              <Button busy={modelsBusy} disabled={!draft || busy || credentialBusy || !nativeAvailable() || !data?.settings.credentialConfigured} onClick={() => void discoverModels()}>
+                <RefreshCw size={15} />
+                {t('Vertexからモデル候補を取得', 'Fetch Vertex model candidates')}
+              </Button>
+              <p>{t('一度取得すると、以下のすべての用途で選べます。モデルIDを直接入力することもできます。', 'Fetch once to use the candidates for every purpose below. You can also enter a model ID directly.')}</p>
+              {!data?.settings.credentialConfigured && <p>{t('先にサービスアカウントのJSONを読み込んでください。', 'Import a service-account JSON key first.')}</p>}
+              {modelNotice && <p role="status">{modelNotice}</p>}
             </div>
             {(
               [
@@ -417,6 +519,7 @@ export function SettingsPage() {
                   purpose={purpose}
                   value={draft?.aiModels?.[purpose] || emptyModel(purpose)}
                   location={draft?.vertexLocation || 'global'}
+                  candidates={modelCatalogue.key === catalogueKey ? modelCatalogue.models : []}
                   disabled={!draft || busy}
                   onChange={(model) =>
                     setDraft((current) =>
@@ -447,15 +550,15 @@ export function SettingsPage() {
             </div>
             <div className="budget-summary">
               <div>
-                <span>{t('算定済みの利用額', 'Calculated spending')}</span>
+                <span>{t('今月の算定済み利用額', 'Calculated spending this month')}</span>
                 <strong>{data ? money(data.budget.spentUsd) : '—'}</strong>
               </div>
               <div>
-                <span>{t('金額を予約中', 'Priced reservations')}</span>
+                <span>{t('現在の予約額', 'Current reservations')}</span>
                 <strong>{data ? money(data.budget.reservedUsd) : '—'}</strong>
               </div>
               <div>
-                <span>{t('設定上限', 'Limit')}</span>
+                <span>{t('保存済みの月額上限', 'Saved monthly limit')}</span>
                 <strong>{data ? money(data.budget.limitUsd) : '—'}</strong>
               </div>
             </div>
@@ -469,12 +572,12 @@ export function SettingsPage() {
             )}
             <Field
               label={t(
-                'AI 予算（1 回・1 日・1 か月それぞれの上限 / USD）',
-                'AI budget (per job / day / month, each in USD)',
+                '1か月のAI予算（USD）',
+                'Monthly AI budget (USD)',
               )}
               hint={t(
-                '初期値は $0。単価を設定した処理の各上限に適用します。料金未設定の処理は対象範囲を別途承認します。',
-                'Starts at $0 and caps priced jobs. Unpriced jobs require separate scope approval.',
+                'UTC基準の暦月ごとの上限です。$0では料金を算定できる処理を停止します。料金未設定の処理は金額上限の対象外で、送信範囲を別途承認します。',
+                'A limit for each UTC calendar month. $0 stops priced jobs. Unpriced jobs are outside the dollar limits and require separate approval of the request scope.',
               )}
             >
               <div className="currency-input">
@@ -484,19 +587,41 @@ export function SettingsPage() {
                   min="0"
                   max="1000"
                   step="0.01"
-                  value={draft?.dailyBudgetUsd ?? 0}
+                  value={Number.isNaN(monthlyBudget) ? '' : monthlyBudget}
                   disabled={!draft || busy}
                   onChange={(event) =>
-                    change('dailyBudgetUsd', Number(event.target.value))
+                    change('monthlyBudgetUsd', event.target.value === '' ? Number.NaN : Number(event.target.value))
                   }
                 />
               </div>
             </Field>
+            {customBudget && <p className="budget-custom-summary">{t(
+              `詳細の上限を設定済み：1日 ${money(draft!.dailyBudgetUsd)}、1処理 ${money(perJobBudget)}。月額と異なる上限だけを維持し、同じ上限は月額の変更に合わせます。`,
+              `Advanced limits: ${money(draft!.dailyBudgetUsd)} per day and ${money(perJobBudget)} per job. Independent limits are kept when the monthly budget changes.`,
+            )}</p>}
+            <details className="settings-details budget-details">
+              <summary>{t('1日・1処理の上限を調整', 'Adjust daily and per-job limits')}</summary>
+              <p className="helper-text">{t('月額と同じ上限は月額の変更に合わせて調整します。個別の上限はそのまま維持します。いずれかの上限が$0の場合、料金を算定できる処理は実行できません。', 'Limits matching the monthly budget follow its changes. Independent limits are kept. A $0 limit blocks priced jobs.')}</p>
+              <div className="field-row">
+                <div className="settings-field-group">
+                  <Field label={t('1日の上限（USD）', 'Daily limit (USD)')} hint={t('UTC基準の暦日ごとに集計します。', 'Usage is counted by UTC calendar day.')}>
+                    <input type="number" min="0" max="1000" step="0.01" value={Number.isNaN(draft?.dailyBudgetUsd) ? '' : draft?.dailyBudgetUsd ?? 0} disabled={!draft || busy} onChange={(event) => change('dailyBudgetUsd', event.target.value === '' ? Number.NaN : Number(event.target.value))} />
+                  </Field>
+                  <Button disabled={!draft || busy || !Number.isFinite(monthlyBudget) || draft.dailyBudgetUsd === monthlyBudget} onClick={() => change('dailyBudgetUsd', monthlyBudget)}>{t('月額と同じに戻す', 'Match the monthly budget')}</Button>
+                </div>
+                <div className="settings-field-group">
+                  <Field label={t('1処理の上限（USD）', 'Per-job limit (USD)')} hint={t('1処理には、文字起こしなどの複数のリクエストを含む場合があります。', 'One job can include multiple requests, such as transcription chunks.')}>
+                    <input type="number" min="0" max="1000" step="0.01" value={Number.isNaN(perJobBudget) ? '' : perJobBudget} disabled={!draft || busy} onChange={(event) => change('perJobBudgetUsd', event.target.value === '' ? Number.NaN : Number(event.target.value))} />
+                  </Field>
+                  <Button disabled={!draft || busy || !Number.isFinite(monthlyBudget) || perJobBudget === monthlyBudget} onClick={() => change('perJobBudgetUsd', monthlyBudget)}>{t('月額と同じに戻す', 'Match the monthly budget')}</Button>
+                </div>
+              </div>
+            </details>
             <p className="notice">
               <ShieldCheck size={17} />
               {t(
-                '結果不明のリクエストは自動再試行せず、予約額を維持します。バックアップ復元でも利用額は巻き戻りません。',
-                'Unknown requests keep their reserved budget and are never automatically retried. Restoring a backup does not roll back usage.',
+                '結果不明のリクエストは自動再試行せず、日・月が変わっても予約額を維持します。バックアップ復元でも利用額は巻き戻りません。',
+                'Unknown requests keep their reservations across days and months and are never automatically retried. Restoring a backup does not roll back usage.',
               )}
             </p>
           </section>
@@ -537,12 +662,12 @@ export function SettingsPage() {
             <Field
               label={t('yt-dlp の更新チャンネル', 'yt-dlp update channel')}
               hint={t(
-                'YouTube の変更に早く追従する nightly が初期値です。設定を保存してから更新を確認してください。',
-                'Nightly is the default for prompt YouTube fixes. Save changes before checking for updates.',
+                '安定版のStableが初期値です。Nightlyは最新の修正を早く試したい場合に選べます。保存後に更新を確認してください。',
+                'Stable is the default. Choose Nightly to try the latest fixes sooner. Save changes before checking for updates.',
               )}
             >
               <select
-                value={draft?.ytDlpChannel || 'nightly'}
+                value={draft?.ytDlpChannel || 'stable'}
                 disabled={!draft || busy}
                 onChange={(event) =>
                   change(
@@ -551,8 +676,8 @@ export function SettingsPage() {
                   )
                 }
               >
-                <option value="nightly">Nightly</option>
                 <option value="stable">Stable</option>
+                <option value="nightly">Nightly</option>
               </select>
             </Field>
             <div className="bundled-note">
@@ -613,24 +738,17 @@ export function SettingsPage() {
               {t('エクスポート・復元を開く', 'Export or restore')}
             </Button>
           </section>
-          <div className="settings-save">
-            <p>
-              {t(
-                'Surtitle · GPL-3.0-or-later · 学習データはローカル保存',
-                'Surtitle · GPL-3.0-or-later · Learning is stored locally',
-              )}
-            </p>
-            <Button
-              variant="primary"
-              busy={busy}
-              disabled={!valid}
-              onClick={() => void save()}
-            >
-              <Save size={16} />
-              {t('変更を保存', 'Save changes')}
-            </Button>
-          </div>
         </div>
+      </div>
+      <div className="settings-save">
+        <div>
+          <strong role="status">{busy ? t('保存中…', 'Saving…') : !draft ? t('デスクトップアプリで設定できます', 'Settings are available in the desktop app') : dirty ? t('未保存の変更があります', 'You have unsaved changes') : t('設定は保存済みです', 'Settings are saved')}</strong>
+          <p>{draft && !valid ? t('入力内容を確認してください。', 'Check the entered values.') : t('学習・AI・更新チャンネルの変更は保存すると反映されます。', 'Save to apply learning, AI, and update-channel changes.')}</p>
+        </div>
+        <Button variant="primary" busy={busy} disabled={!valid || !dirty || credentialBusy} onClick={() => void save()}>
+          <Save size={16} />
+          {t('変更を保存', 'Save changes')}
+        </Button>
       </div>
       {transfer && <TransferDialog onClose={() => setTransfer(false)} />}
     </div>

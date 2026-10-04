@@ -31,7 +31,7 @@ jobs:
           name: native-build-${{ github.sha }}
           path: work/native-ci-artifact/
       - name: Prepare this run's native artifact
-        run: node scripts/native-ci-artifact.mjs consume work/native-ci-artifact
+        run: node native/build/native-ci-artifact.mjs consume work/native-ci-artifact
       - name: Read the native Rust toolchain pin
         id: rust
         shell: bash
@@ -56,12 +56,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Prepare the verified native runtime and pinned development model
         run: |
-          pwsh scripts/native-prepare.ps1 -WithDevModel
-          pwsh scripts/native-smoke.ps1
+          pwsh native/windows/native-prepare.ps1 -WithDevModel
+          pwsh native/windows/native-smoke.ps1
       - name: Generate project-owned media without acquiring speech recordings
         run: |
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
-          node scripts/generate-fixtures.mjs
+          node e2e/support/generate-fixtures.mjs
       - name: Process the complete six-hour fixture without cloud calls
         timeout-minutes: 15
         run: |

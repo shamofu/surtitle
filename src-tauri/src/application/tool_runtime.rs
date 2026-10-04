@@ -69,10 +69,10 @@ fn set_selection(p: &mut Preferences, k: ToolKind, value: ToolSelection) {
     }
 }
 pub(crate) fn channel(p: &Preferences) -> YtDlpChannel {
-    if p.settings.yt_dlp_channel == "stable" {
-        YtDlpChannel::Stable
-    } else {
+    if p.settings.yt_dlp_channel == "nightly" {
         YtDlpChannel::Nightly
+    } else {
+        YtDlpChannel::Stable
     }
 }
 

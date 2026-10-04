@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
-import { auditInstaller, verifyInstallerSources } from './native-installer-audit.mjs';
+import { auditInstaller, extractAndAuditInstaller, verifyInstallerSources } from './native-installer-audit.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 function fixture(t) {
@@ -35,6 +35,20 @@ test('records the extracted executable and verifies standard plugin, native DLLs
   assert.equal(report.applicationSha256, digest('actual embedded production executable'));
   assert.equal(report.installerSha256, digest('installer'));
   assert.equal(report.files.length, 7);
+});
+
+test('installer extraction checks the exact payload and rejects a changed installer or extraction failure', t => {
+  const f = fixture(t);
+  const installer = join(f.root, 'installer.exe');
+  const extract = (_path, directory) => cpSync(join(f.root, 'extracted'), directory, { recursive: true });
+  assert.equal(extractAndAuditInstaller(installer, f.root, extract).passed, true);
+  assert.throws(() => extractAndAuditInstaller(installer, f.root, (path, directory) => {
+    extract(path, directory);
+    writeFileSync(path, 'replaced during extraction');
+  }), /Installer changed/);
+  assert.throws(() => extractAndAuditInstaller(installer, f.root, () => {
+    throw new Error('archiver failed');
+  }), /archiver failed/);
 });
 
 test('rejects missing or changed DLLs/notices and an altered standard utility', t => {

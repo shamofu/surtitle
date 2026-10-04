@@ -43,20 +43,21 @@ existing source/notice and binary checks deliberately reject stale evidence.
 
 ## Build and verify
 
-The build wrapper requires a fresh output directory. After collecting the
-required new evidence, build with:
+Use a fresh `work/native-ci-artifact/` directory with regular, non-symlink
+ancestors. After collecting the required new evidence, build with:
 
 ```sh
-bash scripts/native-ci-build.sh
+docker buildx build --file native/build/Dockerfile --target export --provenance=false --output type=local,dest=work/native-ci-artifact .
+node native/build/native-ci-artifact.mjs verify work/native-ci-artifact
 ```
 
 Then on Windows:
 
 ```powershell
-node scripts/native-ci-artifact.mjs consume work/native-ci-artifact
-pwsh -File scripts/native-prepare.ps1
-pwsh -File scripts/native-smoke.ps1
-python scripts/native-installer-prepare.py
+node native/build/native-ci-artifact.mjs consume work/native-ci-artifact
+pwsh -File native/windows/native-prepare.ps1
+pwsh -File native/windows/native-smoke.ps1
+python native/windows/native-installer-prepare.py
 pnpm test:scripts
 ```
 

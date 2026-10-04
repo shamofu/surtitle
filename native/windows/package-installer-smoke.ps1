@@ -6,7 +6,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
-$workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 Set-Location -LiteralPath $workspace
 if (-not $IsWindows) { throw 'NSIS verification requires Windows.' }
 if ($env:CI -ne 'true' -and -not $DisposableProfile) { throw 'Use an isolated CI runner or explicitly supply -DisposableProfile in a disposable Windows user profile.' }
@@ -57,7 +57,7 @@ function Assert-Payload {
     }
     if (Get-ChildItem -LiteralPath $installRoot -Recurse -File | Where-Object { $_.Name -in @('ffmpeg.exe','ffprobe.exe','yt-dlp.exe','deno.exe') -or $_.Extension -eq '.onnx' }) { throw 'On-demand dependencies were bundled.' }
     if (Get-ChildItem -LiteralPath $installRoot -Recurse -File | Where-Object { $_.Name -in @('msvcp140.dll','msvcp140_1.dll','vcruntime140.dll','vcruntime140_1.dll','vulkan-1.dll','MicrosoftEdgeWebview2Setup.exe','MicrosoftEdgeWebView2RuntimeInstaller.exe') }) { throw 'A separately installed or unused Microsoft/Vulkan runtime was bundled.' }
-    & pwsh -NoProfile -File scripts/native-smoke.ps1 -RuntimeDirectory $runtime
+    & pwsh -NoProfile -File native/windows/native-smoke.ps1 -RuntimeDirectory $runtime
     if ($LASTEXITCODE -ne 0) { throw 'Installed native libraries failed to initialize.' }
 }
 function Probe-Production {
@@ -70,10 +70,10 @@ function Probe-Production {
     $seedApplication = Join-Path $workspace 'target/debug/examples/seed_fixture.exe'
     $seedArguments = ConvertTo-Json -InputObject @($localData, $fixture) -Compress
     $seedArgumentsBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($seedArguments))
-    & pwsh -NoProfile -File scripts/run-windows-standard-user.ps1 -Application $seedApplication -ArgumentsBase64 $seedArgumentsBase64
+    & pwsh -NoProfile -File e2e/support/run-windows-standard-user.ps1 -Application $seedApplication -ArgumentsBase64 $seedArgumentsBase64
     if ($LASTEXITCODE -ne 0) { throw 'Disposable production learning fixture preparation failed.' }
     $expected = $embeddedApplicationHash
-    $arguments = @('scripts/package-production-smoke.mjs', '--application', $binary,
+    $arguments = @('native/windows/package-production-smoke.mjs', '--application', $binary,
         '--expected-application-sha256', $expected, '--data-root', $localData, '--fixture', $fixture,
         '--driver', (Join-Path $workspace 'work/driver/bin/tauri-driver.exe'),
         '--native-driver', (Join-Path $workspace 'work/webdriver/msedgedriver.exe'),

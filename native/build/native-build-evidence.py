@@ -18,9 +18,9 @@ if not runtime.is_file():
     raise SystemExit('A completed candidate DLL is required')
 
 recipe_paths = ['native/build/Dockerfile', 'native/build/sources.json', 'native/build/cross-win64.ini',
-                'native/build/toolchain-win64.cmake', 'scripts/native-build.sh',
-                'scripts/native-source-inputs.py', 'scripts/native_source_manifest.py', 'scripts/native-build-evidence.py',
-                'scripts/native-source-archive-check.py', 'scripts/native_source_archive.py',
+                'native/build/toolchain-win64.cmake', 'native/build/native-build.sh',
+                'native/build/native-source-inputs.py', 'native/build/native_source_manifest.py', 'native/build/native-build-evidence.py',
+                'native/build/native-source-archive-check.py', 'native/build/native_source_archive.py',
                 'native/reviews/libmpv-dependencies.json']
 bundle_inputs = [(workspace / path, 'recipe/' + path) for path in recipe_paths]
 inventory = []

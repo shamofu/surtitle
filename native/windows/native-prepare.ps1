@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param([switch]$WithDevModel)
 $ErrorActionPreference = 'Stop'
-$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $manifestPath = Join-Path $repoRoot 'native/runtime-windows-x64.json'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if (-not $IsWindows -or [Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64') {
@@ -82,4 +82,4 @@ $artifacts = Resolve-RepoPath 'artifacts'
 New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
 @{schemaVersion=1;sha=$env:GITHUB_SHA;preparedAt=[DateTime]::UtcNow.ToString('o');releaseEligible=$false;files=$receipts} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $artifacts 'native-prepare.json') -Encoding utf8
-Write-Host 'Native files verified. Run node scripts/native-audit.mjs --release and the separate application/installer checks before packaging.'
+Write-Host 'Native files verified. Run node native/windows/native-audit.mjs --release and the separate application/installer checks before packaging.'

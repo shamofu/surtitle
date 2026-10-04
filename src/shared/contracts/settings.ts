@@ -31,6 +31,8 @@ export interface AppSettings {
   learningLanguage: string;
   explanationLanguage: string;
   dailyBudgetUsd: number;
+  monthlyBudgetUsd?: number;
+  perJobBudgetUsd?: number;
   vertexProject: string;
   vertexLocation: string;
   credentialConfigured: boolean;

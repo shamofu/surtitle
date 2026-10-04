@@ -9,23 +9,23 @@ WORKDIR /workspace
 
 FROM toolchain AS libmpv-sources
 COPY native/build/sources.json /workspace/native/build/sources.json
-COPY scripts/native-source-inputs.py scripts/native_source_manifest.py /workspace/scripts/
-RUN python3 scripts/native-source-inputs.py /workspace /build/sources /build/source-cache --download --download-only
+COPY native/build/native-source-inputs.py native/build/native_source_manifest.py /workspace/native/build/
+RUN python3 native/build/native-source-inputs.py /workspace /build/sources /build/source-cache --download --download-only
 
 FROM libmpv-sources AS libmpv-build
 COPY native/build/cross-win64.ini native/build/toolchain-win64.cmake native/build/Dockerfile /workspace/native/build/
 COPY native/reviews/libmpv-dependencies.json /workspace/native/reviews/libmpv-dependencies.json
-COPY scripts/native-build.sh scripts/native-build-evidence.py scripts/native-source-archive-check.py scripts/native_source_archive.py /workspace/scripts/
-RUN --network=none bash scripts/native-build.sh /workspace /build \
-    && python3 scripts/native-build-evidence.py /workspace /build /out/native-build \
+COPY native/build/native-build.sh native/build/native-build-evidence.py native/build/native-source-archive-check.py native/build/native_source_archive.py /workspace/native/build/
+RUN --network=none bash native/build/native-build.sh /workspace /build \
+    && python3 native/build/native-build-evidence.py /workspace /build /out/native-build \
     && rm -rf /build /out/native-build/logs /out/native-build/toolchain-notices
 
 FROM toolchain AS ort-sources
 COPY native/build/onnxruntime-sources.json /workspace/native/build/onnxruntime-sources.json
 COPY native/upstream-evidence/onnxruntime-overlay-ports/ /workspace/native/upstream-evidence/onnxruntime-overlay-ports/
-COPY scripts/native-ort-source-inputs.py /workspace/scripts/
+COPY native/build/native-ort-source-inputs.py /workspace/native/build/
 RUN --mount=type=secret,id=github_token,env=SURTITLE_NATIVE_GITHUB_TOKEN \
-    python3 scripts/native-ort-source-inputs.py /workspace /build/ort-corresponding \
+    python3 native/build/native-ort-source-inputs.py /workspace /build/ort-corresponding \
     && rm -rf /build/ort-corresponding/registry
 
 FROM ort-sources AS ort-package
@@ -33,16 +33,16 @@ COPY native/runtime-windows-x64.json /workspace/native/runtime-windows-x64.json
 COPY native/upstream-evidence/onnxruntime-*.json native/upstream-evidence/onnxruntime-*.txt native/upstream-evidence/onnxruntime-*.cmake /workspace/native/upstream-evidence/
 COPY native/reviews/onnxruntime-dependencies.json /workspace/native/reviews/onnxruntime-dependencies.json
 COPY native/onnxruntime-LICENSE native/onnxruntime-ThirdPartyNotices.txt /workspace/native/
-COPY scripts/native-ort-compare.py scripts/native-ort-generated.py scripts/native-ort-package.py scripts/native-ort-evidence.py scripts/native-source-archive-check.py scripts/native_source_archive.py /workspace/scripts/
-RUN --network=none python3 scripts/native-ort-compare.py /workspace /build/ort-corresponding \
+COPY native/build/native-ort-compare.py native/build/native-ort-generated.py native/build/native-ort-package.py native/build/native-ort-evidence.py native/build/native-source-archive-check.py native/build/native_source_archive.py /workspace/native/build/
+RUN --network=none python3 native/build/native-ort-compare.py /workspace /build/ort-corresponding \
     && cmake -S /build/ort-corresponding/comparison-sources/protobuf/source/cmake \
        -B /build/ort-corresponding/protoc-build -G Ninja -DCMAKE_BUILD_TYPE=Release \
        -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_BUILD_SHARED_LIBS=OFF -Dprotobuf_WITH_ZLIB=OFF \
        > /build/ort-corresponding/protoc-build.log 2>&1 \
     && cmake --build /build/ort-corresponding/protoc-build --target protoc --parallel 4 \
        >> /build/ort-corresponding/protoc-build.log 2>&1 \
-    && python3 scripts/native-ort-generated.py /build/ort-corresponding \
-    && python3 scripts/native-ort-package.py /workspace /build/ort-corresponding /out/ort \
+    && python3 native/build/native-ort-generated.py /build/ort-corresponding \
+    && python3 native/build/native-ort-package.py /workspace /build/ort-corresponding /out/ort \
     && rm -rf /build/ort-corresponding/comparison-sources /build/ort-corresponding/protoc-build \
        /build/ort-corresponding/generated-header-evidence /out/ort/notices
 

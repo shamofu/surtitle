@@ -29,7 +29,7 @@ jobs:
           secrets: |
             github_token=${{ github.token }}
       - name: Verify exported files
-        run: node scripts/native-ci-artifact.mjs verify work/native-ci-artifact
+        run: node native/build/native-ci-artifact.mjs verify work/native-ci-artifact
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: native-build-${{ github.sha }}

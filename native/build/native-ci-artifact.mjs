@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { sha256File, readJson as json } from './file-content.mjs';
+import { sha256File, readJson as json } from '../../scripts/file-content.mjs';
 import { copyFileSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -122,7 +122,7 @@ function main(args) {
   check(directory && !extra.length && ['verify', 'consume', 'verify-source'].includes(command),
     'Usage: native-ci-artifact.mjs verify DIRECTORY | consume DIRECTORY | verify-source SOURCE_ROOT');
   if (command === 'verify') validateNativeArtifact(directory);
-  if (command === 'consume') consumeNativeArtifact(directory, resolve(dirname(fileURLToPath(import.meta.url)), '..'));
+  if (command === 'consume') consumeNativeArtifact(directory, resolve(dirname(fileURLToPath(import.meta.url)), '../..'));
   if (command === 'verify-source') verifyNativeSources(directory);
   console.log('Native ' + command + ' completed.');
 }

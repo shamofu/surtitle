@@ -7,7 +7,7 @@ import type {
 } from '../../shared/contracts/settings';
 
 export const settingsApi = {
-  importCredential: () => call<void>('import_credential'),
+  importCredential: () => call<boolean>('import_credential'),
   updateSettings: (settings: AppSettings) =>
     call<void>('update_settings', { settings }),
   updateAppearance: (appearance: {

@@ -75,7 +75,7 @@ for path in sorted((workspace / 'native/upstream-evidence').glob('onnxruntime-*'
     if path.is_file():
         selected[path] = 'evidence/' + path.name
 for name in ['native-ort-evidence.py', 'native-ort-source-inputs.py', 'native-ort-compare.py', 'native-ort-generated.py', 'native-ort-package.py', 'native-source-archive-check.py', 'native_source_archive.py']:
-    selected[workspace / 'scripts' / name] = 'scripts/' + name
+    selected[workspace / 'native/build' / name] = 'native/build/' + name
 selected[workspace / 'native/reviews/onnxruntime-dependencies.json'] = 'evidence/reviewed-dependencies.json'
 for name in ['native/build/onnxruntime-sources.json', 'native/runtime-windows-x64.json']:
     selected[workspace / name] = name
@@ -117,7 +117,7 @@ workspace evidence directory. Build the patched protobuf {protobuf['version']} h
 ```sh
 cmake -S ROOT/{protobuf_source}/cmake -B ROOT/protoc-build -G Ninja -DCMAKE_BUILD_TYPE=Release -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_BUILD_SHARED_LIBS=OFF -Dprotobuf_WITH_ZLIB=OFF
 cmake --build ROOT/protoc-build --target protoc --parallel 4
-python3 scripts/native-ort-generated.py ROOT
+python3 native/build/native-ort-generated.py ROOT
 ```
 
 The generated-header script applies upstream Abseil CMake ABI pinning rules

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { spawnWebDriver, waitForWebDriver } from './scripts/webdriver-process.mjs';
+import { spawnWebDriver, waitForWebDriver } from './e2e/support/webdriver-process.mjs';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, isAbsolute } from 'node:path';
 

@@ -3,7 +3,7 @@ import { readFile, readdir, mkdir, writeFile, realpath, stat } from 'node:fs/pro
 import { dirname, resolve, relative, isAbsolute, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const manifest = JSON.parse(await readFile(resolve(root, 'native/runtime-windows-x64.json'), 'utf8'));
 const runtime = resolve(root, 'src-tauri/resources/native');
 const errors = [], blockers = [], components = [];

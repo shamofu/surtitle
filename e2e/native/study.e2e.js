@@ -99,7 +99,7 @@ describe('real native learning workflow (no cloud requests)', () => {
       await $('.main-nav a[href="/settings"]').click();
       await $('button=Check updates').waitForEnabled();
       await clickInView('button=Check updates');
-      assert((await browser.execute(() => document.querySelector('.page-content').scrollTop)) > 0,
+      assert((await browser.execute(() => document.querySelector('.settings-layout').scrollTop)) > 0,
         'The update check must exercise navigation away from a scrolled settings page');
       const success = $('button.toast.success');
       await expect(success).toBeDisplayed();

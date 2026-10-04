@@ -87,7 +87,7 @@ def prepare(workspace, toolchain, acquire=download):
 
 
 def main():
-    workspace = Path(__file__).resolve().parent.parent
+    workspace = Path(__file__).resolve().parents[2]
     inputs = json.loads((workspace / 'native/installer-inputs.json').read_text(encoding='utf-8'))
     version = subprocess.check_output(['rustc', '--version'], text=True).split()[1]
     if version != inputs['rust']['version']:

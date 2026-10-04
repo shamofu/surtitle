@@ -81,6 +81,7 @@ impl Services {
             std::fs::create_dir_all(root.join(dir))?;
         }
         let preferences = PreferencesStore::open(root.join("preferences.json"))?;
+        models::reconcile_credential_project(&preferences, &root)?;
         let db = Store::open(root.join("learning.sqlite"))?;
         let ai = surtitle_ai::AiStore::open(root.join("charges.sqlite"))?;
         let tools = ToolRuntime::open(root.join("tools"), tool_path)?;
@@ -106,7 +107,10 @@ impl Services {
         let mut settings = p.settings.clone();
         settings.credential_configured = p.credential_id.is_some();
         // JSON keeps the wire field; operational spending limits belong to the ledger.
-        settings.daily_budget_usd = self.ai.budget()?.daily_microusd as f64 / 1_000_000.;
+        let budget = self.ai.budget()?;
+        settings.daily_budget_usd = budget.daily_microusd as f64 / 1_000_000.;
+        settings.monthly_budget_usd = Some(budget.monthly_microusd as f64 / 1_000_000.);
+        settings.per_job_budget_usd = Some(budget.per_job_microusd as f64 / 1_000_000.);
         Ok(settings)
     }
     pub fn player_state(&self) -> Result<PlayerState> {

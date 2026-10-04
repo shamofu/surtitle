@@ -45,7 +45,7 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'surtitle source 日本語 & '));
   onTestFinished(() => rmSync(root, { recursive: true, force: true }));
   const path = join(root, 'source.tar.gz');
-  const entries = [member('recipe/scripts/native-build.sh', 'reviewed build recipe'),
+  const entries = [member('recipe/native/build/native-build.sh', 'reviewed build recipe'),
     member('archives/mpv-fixed.tar.gz', 'unchanged upstream archive'),
     member('notices/mpv/LICENSE', 'required retained notice')];
   const document = { schemaVersion: 1, kind: 'libmpv', files: expected(entries) };
@@ -153,7 +153,7 @@ function ortFixture(t) {
   const f = fixture(t);
   const entries = [member('sources/onnxruntime-fixed.tar.gz', 'original ORT source'),
     member('ports/abseil/fix.patch', 'reviewed patch'), member('notices/onnxruntime-LICENSE', 'retained MIT license'),
-    member('scripts/native-ort-package.py', 'source packaging recipe'),
+    member('native/build/native-ort-package.py', 'source packaging recipe'),
     member('evidence/generated-run.json', '{"observed":true}')];
   const inventory = { schemaVersion: 1, componentId: 'onnxruntime', binarySha256: hash('fixed DLL'),
     files: expected(entries).map(({ path, ...rest }) => ({ file: path, ...rest })) };

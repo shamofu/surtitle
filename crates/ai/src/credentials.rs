@@ -65,6 +65,12 @@ impl CredentialVault {
         Ok(metadata)
     }
 
+    /// Read only the validated identity of a protected key; never expose its contents.
+    pub fn metadata(&self, id: &str) -> Result<CredentialMetadata> {
+        let (_, metadata) = self.load_json(id)?;
+        Ok(metadata)
+    }
+
     pub fn list(&self) -> Result<Vec<CredentialMetadata>> {
         let mut out = Vec::new();
         for entry in fs::read_dir(&self.directory)? {
@@ -272,6 +278,28 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let vault = CredentialVault::new(dir.path()).unwrap();
         assert!(vault.credential_path("../secret").is_err());
+        assert!(vault.metadata("../secret").is_err());
+    }
+    #[cfg(windows)]
+    #[test]
+    fn metadata_reads_the_identity_from_the_protected_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = CredentialVault::new(dir.path()).unwrap();
+        let json = serde_json::json!({
+            "type":"service_account", "token_uri":"https://oauth2.googleapis.com/token",
+            "project_id":"sample-project", "client_email":"user@sample-project.iam.gserviceaccount.com",
+            "private_key_id":"test-only", "private_key":"synthetic test contents"
+        }).to_string();
+        let expected = validate_json(&json).unwrap();
+        fs::write(
+            vault.credential_path(&expected.id).unwrap(),
+            protect(json.as_bytes()).unwrap(),
+        )
+        .unwrap();
+        let observed = vault.metadata(&expected.id).unwrap();
+        assert_eq!(observed.project_id, expected.project_id);
+        assert_eq!(observed.client_email, expected.client_email);
+        assert_eq!(observed.id, expected.id);
     }
     #[cfg(windows)]
     #[test]

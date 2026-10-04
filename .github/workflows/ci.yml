@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Build the pinned browser test environment
-        run: docker build --platform linux/amd64 -f scripts/browser-tests.Dockerfile -t surtitle-browser-tests .
+        run: docker build --platform linux/amd64 -f e2e/browser/Dockerfile -t surtitle-browser-tests .
       - name: Browser behavior and six visual comparisons
         run: |
           mkdir -p test-results playwright-report
@@ -169,7 +169,7 @@ jobs:
           name: native-build-${{ github.sha }}
           path: work/native-ci-artifact/
       - name: Prepare this run's native artifact
-        run: node scripts/native-ci-artifact.mjs consume work/native-ci-artifact
+        run: node native/build/native-ci-artifact.mjs consume work/native-ci-artifact
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           key: windows-2025-debug
@@ -179,15 +179,15 @@ jobs:
       - name: Windows process, profile and distribution script tests
         run: >
           pnpm test:scripts
-          scripts/webdriver-process.test.mjs
-          scripts/run-required-rust-tests.test.mjs
-          scripts/vc-prerequisite.test.mjs
-          scripts/package-installer-smoke.test.mjs
-          scripts/package-production-smoke.test.mjs
-          scripts/native-e2e-database.test.mjs
-          scripts/native-ci-artifact.test.mjs
-          scripts/native-installer-audit.test.mjs
-          scripts/native-installer-prepare.test.mjs
+          e2e/support/webdriver-process.test.mjs
+          e2e/support/run-required-rust-tests.test.mjs
+          native/windows/vc-prerequisite.test.mjs
+          native/windows/package-installer-smoke.test.mjs
+          native/windows/package-production-smoke.test.mjs
+          e2e/support/native-e2e-database.test.mjs
+          native/build/native-ci-artifact.test.mjs
+          native/windows/native-installer-audit.test.mjs
+          native/windows/native-installer-prepare.test.mjs
       - run: pnpm build
       - run: pnpm test:rust
       - name: Verify ordinary builds cannot bypass evaluation accounting
@@ -195,12 +195,12 @@ jobs:
       - run: pnpm lint:rust
       - name: Acquire tested native runtime
         run: |
-          pwsh scripts/native-prepare.ps1 -WithDevModel
-          pwsh scripts/native-smoke.ps1
+          pwsh native/windows/native-prepare.ps1 -WithDevModel
+          pwsh native/windows/native-smoke.ps1
       - name: Prepare native WebDriver and generated media
         run: |
           pnpm setup:driver
-          pwsh scripts/prepare-webdriver.ps1 -InstallRuntime
+          pwsh e2e/support/prepare-webdriver.ps1 -InstallRuntime
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
           pnpm test:fixtures
           ffmpeg -v error -f lavfi -i 'testsrc2=size=320x180:rate=12:duration=3' -c:v libaom-av1 -cpu-used 8 -crf 50 -y work/e2e-av1.mkv
@@ -208,7 +208,7 @@ jobs:
           # Create mutable SQLite files with the same permissions as the app.
           $seedArguments = ConvertTo-Json -Compress -InputObject @("$PWD/work/e2e-windows", "$PWD/test-results/fixtures/日本語 & sample.mp4")
           $seedArgumentsBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($seedArguments))
-          & pwsh -NoProfile -File scripts/run-windows-standard-user.ps1 -Application "$PWD/target/debug/examples/seed_fixture.exe" -ArgumentsBase64 $seedArgumentsBase64
+          & pwsh -NoProfile -File e2e/support/run-windows-standard-user.ps1 -Application "$PWD/target/debug/examples/seed_fixture.exe" -ArgumentsBase64 $seedArgumentsBase64
           if ($LASTEXITCODE -ne 0) { throw 'Windows E2E learning fixture preparation failed.' }
       - name: Build actual Windows native E2E binary
         run: pnpm build:native:e2e
@@ -274,7 +274,7 @@ jobs:
           name: native-build-${{ github.sha }}
           path: work/native-ci-artifact/
       - name: Use this run's native payload and source for packaging
-        run: node scripts/native-ci-artifact.mjs consume work/native-ci-artifact
+        run: node native/build/native-ci-artifact.mjs consume work/native-ci-artifact
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           key: windows-2025-release-v2
@@ -283,9 +283,9 @@ jobs:
             target/debug
             target/release
       - run: pnpm install --frozen-lockfile
-      - run: pwsh scripts/native-prepare.ps1
+      - run: pwsh native/windows/native-prepare.ps1
       - name: Prepare standard installer sources and runtime notices
-        run: python scripts/native-installer-prepare.py
+        run: python native/windows/native-installer-prepare.py
       - name: Generate distribution notices and dependency manifests
         run: |
           pnpm setup:licenses
@@ -297,11 +297,11 @@ jobs:
       - name: Prepare exact production WebDriver and generated media
         run: |
           pnpm setup:driver
-          pwsh scripts/prepare-webdriver.ps1 -InstallRuntime
+          pwsh e2e/support/prepare-webdriver.ps1 -InstallRuntime
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
           pnpm test:fixtures
       - name: Test production installer and assemble source/SBOM
-        run: pwsh scripts/package-verify.ps1
+        run: pwsh native/windows/package-verify.ps1
       - name: Preserve package verification diagnostics
         uses: actions/upload-artifact@v7.0.1
         if: always()

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useId, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { aiApi } from './api';
@@ -9,6 +8,7 @@ import type { AiPurpose } from '../../shared/contracts/ai';
 import type { DiscoveredModel } from '../../shared/contracts/ai';
 import { useAppearance } from '../../app/runtime';
 import { Button, Field } from '../../shared/ui/index';
+import './model-editor.css';
 
 export const emptyModel = (purpose: AiPurpose): AiModelPreference => ({
   modelId: '',
@@ -26,12 +26,14 @@ export function ModelEditor({
   purpose,
   location,
   disabled = false,
+  candidates,
 }: {
   value: AiModelPreference;
   onChange: (value: AiModelPreference) => void;
   purpose: AiPurpose;
   location: string;
   disabled?: boolean;
+  candidates?: DiscoveredModel[];
 }) {
   const { t } = useAppearance();
   const id = useId();
@@ -52,6 +54,18 @@ export function ModelEditor({
     };
   }, []);
   const [models, setModels] = useState<DiscoveredModel[]>([]);
+  useEffect(() => {
+    setModels([]);
+  }, [location]);
+  const availableModels = candidates ?? models;
+  const recommendedTokens = emptyModel(purpose).maxOutputTokens;
+  const [editingCustomOutput, setEditingCustomOutput] = useState(false);
+  const customOutput =
+    editingCustomOutput || value.maxOutputTokens !== recommendedTokens;
+  const details = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    setEditingCustomOutput(false);
+  }, [purpose]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [manual, setManual] = useState(value.price?.source === 'user');
@@ -190,7 +204,7 @@ export function ModelEditor({
           }}
         />
         <datalist id={id}>
-          {models.map((model) => (
+          {availableModels.map((model) => (
             <option key={model.id} value={model.id}>
               {model.displayName}
               {model.launchStage ? ` · ${model.launchStage}` : ''}
@@ -198,17 +212,33 @@ export function ModelEditor({
           ))}
         </datalist>
       </Field>
-      <div className="inline-actions">
-        <Button
-          disabled={frozen || !nativeAvailable()}
-          onClick={() => void discover()}
-        >
-          <RefreshCw size={14} />
-          {t('Vertexから候補を取得', 'Fetch Vertex candidates')}
-        </Button>
-      </div>
+      {candidates === undefined && (
+        <div className="inline-actions model-discovery-actions">
+          <Button
+            disabled={frozen || !nativeAvailable()}
+            busy={busy}
+            onClick={() => void discover()}
+          >
+            <RefreshCw size={14} />
+            {t('Vertexから候補を取得', 'Fetch Vertex candidates')}
+          </Button>
+        </div>
+      )}
       {purpose === 'transcription' && (
-        <Field label={t('文字起こしのAPI方式', 'Transcription API mode')}>
+        <Field
+          label={t('字幕の作り方', 'How to create subtitles')}
+          hint={
+            value.transcriptionMode === 'transcribe'
+              ? t(
+                  '単語ごとのテキストと時刻を取得し、アプリが字幕を組み立てます（Transcribe）。',
+                  'Get text and timestamps for each word; the app assembles the subtitles (Transcribe).',
+                )
+              : t(
+                  'AIが文章を字幕区間にまとめ、区間ごとの開始・終了時刻を生成します（GenerateContent）。',
+                  'AI groups speech into subtitle cues and generates a start and end time for each cue (GenerateContent).',
+                )
+          }
+        >
           <select
             value={value.transcriptionMode}
             disabled={frozen}
@@ -222,44 +252,84 @@ export function ModelEditor({
           >
             <option value="transcribe">
               {t(
-                'Transcribe：逐語・単語時刻',
-                'Transcribe: verbatim and word timestamps',
+                '逐語の文字起こし・単語時刻',
+                'Verbatim transcription and word timestamps',
               )}
             </option>
             <option value="subtitles">
               {t(
-                'GenerateContent：時刻付き字幕',
-                'GenerateContent: timed subtitles',
+                '字幕区間をまとめて生成',
+                'Generate timed subtitle cues',
               )}
             </option>
           </select>
         </Field>
       )}
-      <details>
+      <Field
+        label={t('回答の長さの上限', 'Output limit')}
+        hint={
+          customOutput
+            ? t(
+                `カスタム設定：1要求あたり最大 ${value.maxOutputTokens.toLocaleString()} トークン。詳細設定で変更できます。`,
+                `Custom: up to ${value.maxOutputTokens.toLocaleString()} tokens per request. Edit the value in the detailed settings.`,
+              )
+            : t(
+                '通常は標準のまま利用できます。用途に合わせてアプリが用意した上限です。',
+                'Use the standard setting for typical requests. This is an app preset for this task.',
+              )
+        }
+      >
+        <select
+          value={customOutput ? 'custom' : 'standard'}
+          disabled={frozen}
+          onChange={(event) => {
+            if (event.target.value === 'standard') {
+              setEditingCustomOutput(false);
+              onChange({ ...value, maxOutputTokens: recommendedTokens });
+            } else {
+              setEditingCustomOutput(true);
+              if (details.current) details.current.open = true;
+            }
+          }}
+        >
+          <option value="standard">
+            {t('標準（おすすめ）', 'Standard (recommended)')}
+          </option>
+          <option value="custom">{t('カスタム', 'Custom')}</option>
+        </select>
+      </Field>
+      <details ref={details} className="model-editor-details">
         <summary>
           {t('出力・思考・料金の設定', 'Output, thinking, and pricing')}
         </summary>
-        <div className="field-row">
-          <Field
-            label={t(
-              '1要求の出力トークン上限',
-              'Maximum output tokens per request',
-            )}
-          >
-            <input
-              type="number"
-              min="1"
-              max="65536"
-              value={value.maxOutputTokens}
-              disabled={frozen}
-              onChange={(event) =>
-                onChange({
-                  ...value,
-                  maxOutputTokens: Number(event.target.value),
-                })
-              }
-            />
-          </Field>
+        <div className="model-editor-detail-content">
+          {customOutput && (
+            <Field
+              label={t(
+                '1要求の出力トークン上限',
+                'Maximum output tokens per request',
+              )}
+              hint={t(
+                '小さすぎると回答が途中で切れる場合があります。大きくすると料金の最大見積もりが増えます。トークンはテキストの長さを数える単位です。',
+                'A low limit can cut answers short. A higher limit increases the maximum cost estimate. Tokens measure the length of text.',
+              )}
+            >
+              <input
+                type="number"
+                min="1"
+                max="1048576"
+                step="1"
+                value={value.maxOutputTokens}
+                disabled={frozen}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    maxOutputTokens: Number(event.target.value),
+                  })
+                }
+              />
+            </Field>
+          )}
           <Field label={t('思考設定', 'Thinking setting')}>
             <select
               value={thinking}
@@ -281,105 +351,105 @@ export function ModelEditor({
               </option>
             </select>
           </Field>
-        </div>
-        {thinking === 'level' && (
-          <Field label={t('思考レベル', 'Thinking level')}>
-            <select
-              value={value.thinkingLevel || 'LOW'}
-              disabled={frozen}
-              onChange={(event) =>
-                onChange({ ...value, thinkingLevel: event.target.value })
-              }
-            >
-              {['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'].map((level) => (
-                <option key={level}>{level}</option>
-              ))}
-            </select>
-          </Field>
-        )}
-        {thinking === 'budget' && (
-          <Field label={t('思考トークン予算', 'Thinking token budget')}>
-            <input
-              type="number"
-              min="0"
-              max="65536"
-              value={value.thinkingBudget ?? 1024}
-              disabled={frozen}
-              onChange={(event) =>
-                onChange({
-                  ...value,
-                  thinkingBudget: Number(event.target.value),
-                })
-              }
-            />
-          </Field>
-        )}
-        <p className="helper-text">
-          {t(
-            '対応しない設定はAPIエラーになります。自動で設定を変更して再送しません。',
-            'Unsupported settings produce an API error. Settings are never changed and retried automatically.',
-          )}
-        </p>
-        <div className="inline-actions">
-          <Button
-            disabled={frozen || !nativeAvailable() || !value.modelId.trim()}
-            onClick={() => void price()}
-          >
-            {t('公式料金を取得', 'Retrieve public prices')}
-          </Button>
-          <Button disabled={frozen} onClick={() => setManual(!manual)}>
-            {t('単価を手動設定', 'Set rates manually')}
-          </Button>
-          {value.price && (
-            <Button
-              disabled={frozen}
-              onClick={() => {
-                onChange({ ...value, price: null });
-                setNotice('');
-              }}
-            >
-              {t('料金未設定に戻す', 'Clear pricing')}
-            </Button>
-          )}
-        </div>
-        {manual && (
-          <>
-            <div className="field-row">
-              <Field
-                label={t(
-                  '入力 USD / 100万トークン',
-                  'Input USD / million tokens',
-                )}
+          {thinking === 'level' && (
+            <Field label={t('思考レベル', 'Thinking level')}>
+              <select
+                value={value.thinkingLevel || 'LOW'}
+                disabled={frozen}
+                onChange={(event) =>
+                  onChange({ ...value, thinkingLevel: event.target.value })
+                }
               >
-                <input
-                  inputMode="decimal"
-                  value={input}
-                  disabled={frozen}
-                  onChange={(event) => setInput(event.target.value)}
-                />
-              </Field>
-              <Field
-                label={t(
-                  '出力 USD / 100万トークン',
-                  'Output USD / million tokens',
-                )}
-              >
-                <input
-                  inputMode="decimal"
-                  value={output}
-                  disabled={frozen}
-                  onChange={(event) => setOutput(event.target.value)}
-                />
-              </Field>
-            </div>
+                {['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'].map((level) => (
+                  <option key={level}>{level}</option>
+                ))}
+              </select>
+            </Field>
+          )}
+          {thinking === 'budget' && (
+            <Field label={t('思考トークン予算', 'Thinking token budget')}>
+              <input
+                type="number"
+                min="0"
+                max="65536"
+                value={value.thinkingBudget ?? 1024}
+                disabled={frozen}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    thinkingBudget: Number(event.target.value),
+                  })
+                }
+              />
+            </Field>
+          )}
+          <p className="helper-text">
+            {t(
+              '対応しない設定はAPIエラーになります。自動で設定を変更して再送しません。',
+              'Unsupported settings produce an API error. Settings are never changed and retried automatically.',
+            )}
+          </p>
+          <div className="inline-actions">
             <Button
-              disabled={frozen || !validRate(input) || !validRate(output)}
-              onClick={applyManual}
+              disabled={frozen || !nativeAvailable() || !value.modelId.trim()}
+              onClick={() => void price()}
             >
-              {t('この単価を適用', 'Apply these rates')}
+              {t('公式料金を取得', 'Retrieve public prices')}
             </Button>
-          </>
-        )}
+            <Button disabled={frozen} onClick={() => setManual(!manual)}>
+              {t('単価を手動設定', 'Set rates manually')}
+            </Button>
+            {value.price && (
+              <Button
+                disabled={frozen}
+                onClick={() => {
+                  onChange({ ...value, price: null });
+                  setNotice('');
+                }}
+              >
+                {t('料金未設定に戻す', 'Clear pricing')}
+              </Button>
+            )}
+          </div>
+          {manual && (
+            <>
+              <div className="field-row">
+                <Field
+                  label={t(
+                    '入力 USD / 100万トークン',
+                    'Input USD / million tokens',
+                  )}
+                >
+                  <input
+                    inputMode="decimal"
+                    value={input}
+                    disabled={frozen}
+                    onChange={(event) => setInput(event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label={t(
+                    '出力 USD / 100万トークン',
+                    'Output USD / million tokens',
+                  )}
+                >
+                  <input
+                    inputMode="decimal"
+                    value={output}
+                    disabled={frozen}
+                    onChange={(event) => setOutput(event.target.value)}
+                  />
+                </Field>
+              </div>
+              <Button
+                disabled={frozen || !validRate(input) || !validRate(output)}
+                onClick={applyManual}
+              >
+                {t('この単価を適用', 'Apply these rates')}
+              </Button>
+            </>
+          )}
+        </div>
       </details>
       <p className="helper-text">
         {value.price

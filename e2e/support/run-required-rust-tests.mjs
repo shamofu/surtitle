@@ -5,7 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const minutes = value => value * 60_000;
 const test = (packageName, name, timeoutMs = minutes(3)) => Object.freeze({
   packageName, name, timeoutMs,
@@ -132,7 +132,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => controller.abort());
   try {
     requireCondition(!extra.length && ((!option && !directory) || (option === '--evidence-dir' && directory)),
-      'Usage: node scripts/run-required-rust-tests.mjs SUITE [--evidence-dir LOG_DIRECTORY]');
+      'Usage: node e2e/support/run-required-rust-tests.mjs SUITE [--evidence-dir LOG_DIRECTORY]');
     await runRequiredSuite(name, { evidenceDirectory: directory, signal: controller.signal });
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

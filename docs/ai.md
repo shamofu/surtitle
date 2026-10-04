@@ -4,15 +4,17 @@ The Rust AI crate owns credentials, immutable inputs, requests, usage accounting
 
 ## Model selection
 
-There is no local model catalog or version allowlist. Settings contain separate, initially unset preferences for transcription, vocabulary, explanations, and translation. Each job can explicitly override its preference. Google publisher discovery supplies suggestions; a syntactically valid Gemini ID can also be entered directly. Discovery does not establish that the user's project has access.
+There is no local model catalog or version allowlist. Settings contain separate, initially unset preferences for transcription, vocabulary, explanations, and translation. Each job can explicitly override its preference. Fetch Google publisher suggestions once in Settings to share them across all four purposes; a syntactically valid Gemini ID can also be entered directly. Discovery does not establish that the user's project has access. Changing location or importing another credential invalidates the shared suggestions.
+
+The output limit defaults to an application preset for each purpose: 4,096 tokens for explanations, 8,192 for vocabulary, and 12,288 for transcription or translation. Use **Standard (recommended)** for typical requests, or choose **Custom** to edit the per-request token ceiling in detailed settings. Existing custom values are retained. These presets do not guarantee that every model supports the selected settings or that every response fits the ceiling.
 
 ExecutionConfig freezes the model ID, location, output limit, thinking configuration, and optional price snapshot. PreparedJob also freezes request bodies, media/source revision, settings digest, project, and credential identity. Changing these inputs requires a new quote. No running job changes model automatically.
 
-The transcription API mode is explicit: Transcribe uses VERBATIM with word timestamps; the general audio adapter requests structured subtitle cues. Model support depends on the selected adapter and settings. Unsupported combinations fail visibly. Users explicitly acknowledge the request scope and the need to review generated content.
+**How to create subtitles** chooses the request and response format. **Verbatim transcription and word timestamps** uses Transcribe's VERBATIM configuration; the app assembles subtitles from words and their timings. **Generate timed subtitle cues** asks the general audio adapter for text grouped into cues with start and end times. Both use the `generateContent` endpoint. Model support depends on the selected adapter and settings. Unsupported combinations fail visibly. Users explicitly acknowledge the request scope and the need to review generated content.
 
 ## Credentials and dispatch
 
-1. A native file dialog supplies the service-account JSON path to CredentialVault. Rust validates the format and fixed OAuth endpoint, then uses per-user Windows DPAPI. Plaintext fallback is not supported.
+1. A native file dialog supplies the service-account JSON path to CredentialVault. Rust validates the format and fixed OAuth endpoint, then uses per-user Windows DPAPI. Settings display the JSON's project ID as read-only; import another JSON key to change it. Credential import takes effect immediately, and cancellation leaves the credential unchanged. Plaintext fallback is not supported.
 2. The data directory has an exclusive process lock. Startup recovers interrupted dispatches as unknown outcomes and revokes stale execution approval. Unsent work requires renewed approval after restart.
 3. Preparation hashes immutable inputs and body templates. Equivalent plans reuse the same job. A quote is valid for approval for 30 minutes; that is not a 30-minute execution limit for an already approved immutable plan.
 4. SQLite reserves one request before dispatch. The ledger permits only one active request at a time. After authentication and input checks, dispatch validation rechecks approval, digest, cancellation, current limits, and the reservation before sending.
@@ -28,6 +30,8 @@ A valid usage record can settle a response whose content is rejected. Transcribe
 Google Billing metadata is queried on request. Matching is conservative: ambiguous or incomplete prices remain unset. Users may enter their own input/output rates, including explicit zero rates. A snapshot records its source, observation time, and integer micro-USD rates. Changing the model or location in the editor clears the previous price for review. There is no built-in dated model/price catalog.
 
 For priced jobs, per-job, daily, and monthly budgets start at zero and must cover the reservation. Input reservations use conservative byte/audio bounds; the configured output limit includes generated reasoning tokens. Usage settlement rounds upward in integer micro-USD. Cached input is conservatively counted at the supplied input rate. Prices and limits are an application accounting policy, not a provider-backed invoice cap.
+
+Settings present the monthly budget as the main limit, with daily and per-job limits under detailed settings. Days and months use UTC calendar periods; one job can include multiple requests. Limits matching the monthly value follow changes to it; independently set values remain unchanged. Existing ledger limits are preserved. A zero value in any of the three limits blocks priced jobs.
 
 For unpriced jobs, the user must explicitly approve the complete request count, submitted audio duration, and generation settings. A dollar ceiling cannot be calculated or guaranteed. Successful unpriced requests retain usage and a distinct uncalculated-cost state; they are not unknown network outcomes and are never represented as zero cost. The UI shows the calculated subtotal and the count of unpriced attempts separately.
 

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { sha256File as hash, readJson as json } from './file-content.mjs';
-import { readFileSync, writeFileSync, readdirSync, lstatSync, mkdirSync, existsSync } from 'node:fs';
+import { sha256File as hash, readJson as json } from '../../scripts/file-content.mjs';
+import { readFileSync, writeFileSync, readdirSync, lstatSync, mkdirSync, mkdtempSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const assert = (value, message) => { if (!value) throw new Error(message); };
 
 function regular(root, name) {
@@ -90,14 +91,34 @@ export function verifyInstallerSources(sourceRoot) {
   return true;
 }
 
+export function extractAndAuditInstaller(installer, root = workspace, extract = (path, directory) => {
+  execFileSync(process.platform === 'win32' ? '7z.exe' : '7z', ['x', '-y', '-o' + directory, path],
+    { stdio: 'ignore', windowsHide: true });
+}) {
+  const path = resolve(installer);
+  const beforeHash = hash(path);
+  const work = join(resolve(root), 'work');
+  for (let cursor = work; ; cursor = dirname(cursor)) {
+    const info = lstatSync(cursor, { throwIfNoEntry: false });
+    assert(!info || (info.isDirectory() && !info.isSymbolicLink()),
+      'Installer extraction must use regular directories without links');
+    if (dirname(cursor) === cursor) break;
+  }
+  mkdirSync(work, { recursive: true });
+  const directory = mkdtempSync(join(work, 'installer-payload-audit-'));
+  extract(path, directory);
+  assert(hash(path) === beforeHash, 'Installer changed while extracting its payload');
+  return auditInstaller(path, directory, root);
+}
+
 function main([command, first, second, ...extra]) {
-  assert(first && !extra.length, 'Usage: native-installer-audit.mjs audit INSTALLER EXTRACTED | source-check SOURCE_ROOT');
+  assert(first && !extra.length, 'Usage: native-installer-audit.mjs audit INSTALLER [EXTRACTED] | source-check SOURCE_ROOT');
   if (command === 'source-check' && !second) {
     verifyInstallerSources(resolve(first));
     console.log('Installer and Rust source archives are present with their pinned checksums.');
   } else {
-    assert(command === 'audit' && second, 'Expected installer and extracted directory');
-    const report = auditInstaller(resolve(first), resolve(second));
+    assert(command === 'audit', 'Expected installer audit or source-check');
+    const report = second ? auditInstaller(resolve(first), resolve(second)) : extractAndAuditInstaller(first);
     mkdirSync(join(workspace, 'artifacts'), { recursive: true });
     writeFileSync(join(workspace, 'artifacts/installer-audit.json'), JSON.stringify(report, null, 2) + '\n');
     console.log('Verified the extracted production executable, DLLs and notices.');

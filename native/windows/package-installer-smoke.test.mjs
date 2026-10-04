@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const childTimeoutMs = 15_000;
 // Each test starts one PowerShell process; fixture setup and assertions need
 // their own margin outside its deadline. Cleanup uses a separate hook budget.
@@ -48,7 +48,7 @@ $results | ConvertTo-Json -Compress
     env: {
       ...process.env,
       SURTITLE_INSTALLER_TEST_CASES: JSON.stringify(cases),
-      SURTITLE_INSTALLER_TEST_SCRIPT: join(workspace, 'scripts/package-installer-smoke.ps1'),
+      SURTITLE_INSTALLER_TEST_SCRIPT: join(workspace, 'native/windows/package-installer-smoke.ps1'),
       SURTITLE_INSTALLER_TEST_INPUT: join(workspace, 'package.json'),
     },
   });
@@ -147,7 +147,7 @@ $observations = foreach ($root in $pathForms) {
 `;
   const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')], {
     cwd: workspace, encoding: 'utf8', windowsHide: true, timeout: childTimeoutMs,
-    env: { ...process.env, SURTITLE_RETENTION_TEST_ROOT: root, SURTITLE_RETENTION_TEST_SCRIPT: join(workspace, 'scripts/package-installer-smoke.ps1') },
+    env: { ...process.env, SURTITLE_RETENTION_TEST_ROOT: root, SURTITLE_RETENTION_TEST_SCRIPT: join(workspace, 'native/windows/package-installer-smoke.ps1') },
   });
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stderr);

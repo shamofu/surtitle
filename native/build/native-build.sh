@@ -8,7 +8,7 @@ source_root="$build_root/sources"
 prefix="$build_root/prefix"
 logs="$build_root/logs"
 mkdir -p "$prefix" "$logs" "$build_root/objects"
-python3 "$workspace/scripts/native-source-inputs.py" "$workspace" "$source_root"
+python3 "$workspace/native/build/native-source-inputs.py" "$workspace" "$source_root"
 export PKG_CONFIG_PATH=
 export PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig:$prefix/share/pkgconfig"
 export CMAKE_PREFIX_PATH="$prefix"

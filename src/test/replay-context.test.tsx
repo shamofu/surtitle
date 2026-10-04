@@ -55,6 +55,8 @@ function mount(replayContextMs?: number) {
       retention: 0.9,
       replayContextMs,
       dailyBudgetUsd: 0,
+      monthlyBudgetUsd: 0,
+      perJobBudgetUsd: 0,
       vertexProject: '',
       vertexLocation: 'global',
       credentialConfigured: false,
@@ -89,7 +91,7 @@ describe('source playback context settings', () => {
   it.each([0, 150, 1000])(
     'saves %i ms without changing unrelated settings',
     async (value) => {
-      mount(150);
+      mount(value === 150 ? 0 : 150);
       const before = structuredClone(context.data!.settings);
       fireEvent.change(input(), { target: { value: String(value) } });
       expect(save()).toBeEnabled();

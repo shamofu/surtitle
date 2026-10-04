@@ -143,6 +143,10 @@ pub struct AppSettings {
     pub learning_language: String,
     pub explanation_language: String,
     pub daily_budget_usd: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monthly_budget_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_job_budget_usd: Option<f64>,
     pub vertex_project: String,
     pub vertex_location: String,
     pub credential_configured: bool,
@@ -188,7 +192,7 @@ fn default_replay_context() -> u16 {
     150
 }
 fn default_channel() -> String {
-    "nightly".into()
+    "stable".into()
 }
 impl Default for AppSettings {
     fn default() -> Self {
@@ -198,6 +202,8 @@ impl Default for AppSettings {
             learning_language: "en".into(),
             explanation_language: "ja".into(),
             daily_budget_usd: 0.,
+            monthly_budget_usd: Some(0.),
+            per_job_budget_usd: Some(0.),
             vertex_project: String::new(),
             vertex_location: "global".into(),
             credential_configured: false,
@@ -320,4 +326,27 @@ pub struct DraftStudyCardFields {
     pub example: String,
     pub translation: Option<String>,
     pub explanation: Option<String>,
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::AppSettings;
+
+    #[test]
+    fn legacy_settings_preserve_budget_fallback_and_explicit_channel() {
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        for field in ["monthlyBudgetUsd", "perJobBudgetUsd", "ytDlpChannel"] {
+            value.as_object_mut().unwrap().remove(field);
+        }
+        value["dailyBudgetUsd"] = serde_json::json!(12.);
+        let legacy: AppSettings = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(legacy.daily_budget_usd, 12.);
+        assert_eq!(legacy.monthly_budget_usd, None);
+        assert_eq!(legacy.per_job_budget_usd, None);
+        assert_eq!(legacy.yt_dlp_channel, "stable");
+        value["ytDlpChannel"] = serde_json::json!("nightly");
+        let explicit: AppSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(explicit.yt_dlp_channel, "nightly");
+        assert_eq!(AppSettings::default().yt_dlp_channel, "stable");
+    }
 }

@@ -1,0 +1,62 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.model-editor {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.model-editor > .field,
+.model-editor-detail-content > .field,
+.model-editor > .helper-text,
+.model-editor > .notice {
+  margin: 0;
+}
+
+.model-editor .inline-actions {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.model-editor .button {
+  white-space: normal;
+}
+
+.model-discovery-actions {
+  padding-bottom: 6px;
+}
+
+.model-editor-details {
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.model-editor-details > summary {
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--muted);
+  min-height: 24px;
+}
+
+.model-editor-detail-content {
+  display: grid;
+  gap: 18px;
+  padding-top: 20px;
+}
+
+.model-editor .helper-text,
+.model-editor .field small {
+  max-width: 72ch;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .model-editor .field-row {
+    flex-direction: column;
+  }
+
+  .model-editor .field-row > .field {
+    width: 100%;
+    min-width: 0;
+  }
+}

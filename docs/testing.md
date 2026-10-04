@@ -56,7 +56,7 @@ pnpm test:rust:required windows-native
 
 Logs are written under `artifacts/required-rust-tests/<suite>/`; rerunning replaces those logs. Use `--evidence-dir <directory>` to retain another run. The runner bounds each Cargo build/test invocation and terminates only its owned process tree on timeout/interruption.
 
-The runner selects full Rust test names. When moving an integration test between application modules, update the registry in `scripts/run-required-rust-tests.mjs` in the same change, then run the required suite. A normal workspace test run does not execute these ignored native tests.
+The runner selects full Rust test names. When moving an integration test between application modules, update the registry in `e2e/support/run-required-rust-tests.mjs` in the same change, then run the required suite. A normal workspace test run does not execute these ignored native tests.
 
 The six-hour suite verifies complete sample coverage, bounded preparation time, storage use, temporary PCM cleanup and Windows process memory. It measures local silent-audio preparation, not speech quality. After preparing the native DLLs and development Silero model:
 

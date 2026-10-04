@@ -110,7 +110,7 @@ fn cache_expires_and_manual_check_bypasses_it_without_replacing_tools() {
                 .test_value()
                 .unwrap()
                 .update_checks
-                .get_mut("yt-dlp/nightly")
+                .get_mut("yt-dlp/stable")
                 .unwrap()
                 .checked_at_ms = timestamp;
             check_with(&state, false, lookup).await.unwrap();
@@ -131,6 +131,12 @@ fn cache_expires_and_manual_check_bypasses_it_without_replacing_tools() {
 fn channel_switches_do_not_display_or_reuse_another_channels_metadata() {
     run(async {
         let (_root, state) = state();
+        state
+            .preferences
+            .test_value()
+            .unwrap()
+            .settings
+            .yt_dlp_channel = "nightly".into();
         install_fixture(&state, ToolKind::YtDlp);
         state
             .preferences
@@ -215,6 +221,12 @@ fn channel_switches_do_not_display_or_reuse_another_channels_metadata() {
 fn stale_inflight_responses_and_shutdown_cannot_update_preferences() {
     run(async {
         let (_root, state) = state();
+        state
+            .preferences
+            .test_value()
+            .unwrap()
+            .settings
+            .yt_dlp_channel = "nightly".into();
         install_fixture(&state, ToolKind::YtDlp);
         check_with(&state, true, |_, _| async {
             state

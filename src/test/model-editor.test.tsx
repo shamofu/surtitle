@@ -10,7 +10,11 @@ import {
   screen,
 } from '@testing-library/react';
 import { ModelEditor, emptyModel } from '../features/ai/ModelEditor';
-import type { AiModelPreference } from '../shared/contracts/ai';
+import type {
+  AiModelPreference,
+  AiPurpose,
+  DiscoveredModel,
+} from '../shared/contracts/ai';
 import { aiApi } from '../features/ai/api';
 
 vi.mock('../features/ai/api', () => ({
@@ -37,8 +41,12 @@ afterEach(() => {
 });
 function Harness({
   initial = emptyModel('vocabulary'),
+  purpose = 'vocabulary',
+  candidates,
 }: {
   initial?: AiModelPreference;
+  purpose?: AiPurpose;
+  candidates?: DiscoveredModel[];
 }) {
   const [value, setValue] = useState(initial);
   return (
@@ -46,8 +54,9 @@ function Harness({
       <ModelEditor
         value={value}
         onChange={setValue}
-        purpose="vocabulary"
+        purpose={purpose}
         location="global"
+        candidates={candidates}
       />
       <output data-testid="value">{JSON.stringify(value)}</output>
     </>
@@ -58,6 +67,145 @@ const state = () =>
     screen.getByTestId('value').textContent || '{}',
   ) as AiModelPreference;
 describe('arbitrary model and price selection', () => {
+  it('uses shared candidates without fetching or selecting a model automatically', () => {
+    const onChange = vi.fn();
+    const value = { ...emptyModel('translation'), modelId: 'gemini-saved' };
+    const { rerender, container } = render(
+      <ModelEditor
+        value={value}
+        onChange={onChange}
+        purpose="translation"
+        location="global"
+        candidates={[]}
+      />,
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Fetch Vertex candidates' }),
+    ).not.toBeInTheDocument();
+    rerender(
+      <ModelEditor
+        value={value}
+        onChange={onChange}
+        purpose="translation"
+        location="global"
+        candidates={[
+          {
+            id: 'gemini-discovered',
+            displayName: 'Discovered model',
+            launchStage: 'GA',
+          },
+        ]}
+      />,
+    );
+    expect(container.querySelector('datalist option')).toHaveAttribute(
+      'value',
+      'gemini-discovered',
+    );
+    expect(screen.getByDisplayValue('gemini-saved')).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(aiApi.vertexModels).not.toHaveBeenCalled();
+  });
+  it('clears standalone candidates when the location changes', async () => {
+    vi.mocked(aiApi.vertexModels).mockResolvedValue([
+      { id: 'gemini-old-location', displayName: 'Old location' },
+    ]);
+    const value = emptyModel('vocabulary');
+    const onChange = vi.fn();
+    const { rerender, container } = render(
+      <ModelEditor
+        value={value}
+        onChange={onChange}
+        purpose="vocabulary"
+        location="global"
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Fetch Vertex candidates' }),
+    );
+    await screen.findByText(/These are candidates returned by Google/);
+    expect(container.querySelector('datalist option')).toHaveAttribute(
+      'value',
+      'gemini-old-location',
+    );
+    rerender(
+      <ModelEditor
+        value={value}
+        onChange={onChange}
+        purpose="vocabulary"
+        location="us-central1"
+      />,
+    );
+    expect(container.querySelector('datalist option')).not.toBeInTheDocument();
+  });
+  it.each([
+    ['explanation', 4096],
+    ['vocabulary', 8192],
+    ['transcription', 12288],
+    ['translation', 12288],
+  ] as const)('restores the %s standard output limit to %i', (purpose, tokens) => {
+    render(
+      <Harness
+        purpose={purpose}
+        initial={{ ...emptyModel(purpose), maxOutputTokens: 7777 }}
+      />,
+    );
+    const preset = screen.getByRole('combobox', { name: /^Output limit/ });
+    expect(preset).toHaveValue('custom');
+    expect(state().maxOutputTokens).toBe(7777);
+    fireEvent.change(preset, { target: { value: 'standard' } });
+    expect(state().maxOutputTokens).toBe(tokens);
+    expect(preset).toHaveValue('standard');
+    expect(
+      screen.queryByRole('spinbutton', { name: /^Maximum output tokens/ }),
+    ).not.toBeInTheDocument();
+  });
+  it('opens custom settings without changing the preset value and retains a custom limit', () => {
+    const { container } = render(<Harness />);
+    fireEvent.change(screen.getByRole('combobox', { name: /^Output limit/ }), {
+      target: { value: 'custom' },
+    });
+    expect(state().maxOutputTokens).toBe(8192);
+    expect(container.querySelector('details')).toHaveAttribute('open');
+    const tokens = screen.getByRole('spinbutton', {
+      name: /^Maximum output tokens/,
+    });
+    expect(tokens).toHaveAttribute('max', '1048576');
+    fireEvent.change(tokens, { target: { value: '131072' } });
+    expect(state().maxOutputTokens).toBe(131072);
+    fireEvent.change(screen.getByRole('combobox', { name: /Gemini model ID/ }), {
+      target: { value: 'gemini-another' },
+    });
+    expect(state().maxOutputTokens).toBe(131072);
+    expect(screen.getByRole('combobox', { name: /^Output limit/ })).toHaveValue(
+      'custom',
+    );
+  });
+  it('explains the subtitle methods with user-facing names', () => {
+    render(
+      <Harness
+        purpose="transcription"
+        initial={emptyModel('transcription')}
+      />,
+    );
+    const method = screen.getByRole('combobox', {
+      name: /^How to create subtitles/,
+    });
+    expect(method).toHaveValue('transcribe');
+    expect(
+      screen.getByRole('option', {
+        name: 'Verbatim transcription and word timestamps',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/the app assembles the subtitles \(Transcribe\)/),
+    ).toBeInTheDocument();
+    fireEvent.change(method, { target: { value: 'subtitles' } });
+    expect(state().transcriptionMode).toBe('subtitles');
+    expect(
+      screen.getByText(/generates a start and end time for each cue \(GenerateContent\)/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Transcription API mode')).not.toBeInTheDocument();
+  });
   it('discards a stale price after location changes, even if the location changes back', async () => {
     let complete!: (
       value: Awaited<ReturnType<typeof aiApi.vertexPrice>>,

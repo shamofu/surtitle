@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Production-only WebDriver probe. The installer caller owns disposable-profile seeding.
 import { execFileSync } from 'node:child_process';
-import { spawnWebDriver, waitForWebDriver } from './webdriver-process.mjs';
+import { spawnWebDriver, waitForWebDriver } from '../../e2e/support/webdriver-process.mjs';
 import { createServer } from 'node:net';
-import { sha256File as hash, readJson } from './file-content.mjs';
+import { sha256File as hash, readJson } from '../../scripts/file-content.mjs';
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const appId = 'app.surtitle.desktop';
 const requireCheck = (value, message) => { if (!value) throw Object.assign(new Error(message), { code: 'ERR_PRODUCTION_CHECK' }); };
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { parseOptions, sanitizedEnvironment, validateSnapshot, validateMetadata, validateSeededProfile, playerDiagnostics, createProductionDiagnostics } from './package-production-smoke.mjs';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, cpSync, rmSync } from 'node:fs';
-import { join, toNamespacedPath } from 'node:path';
+import { dirname, join, toNamespacedPath } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const fixture = { mediaId: 'fixture-media', cardId: 'fixture-card', mediaPath: 'C:\\fixture\\日本語 & sample.mp4', segmentCount: 20000 };
@@ -155,12 +155,13 @@ test('unknown production exception names and codes never enter failure evidence'
 test('production CLI records a failed argument stage and exits nonzero without launching an app', { timeout: 10_000 }, t => {
   const root = mkdtempSync(join(tmpdir(), 'surtitle-production-cli-'));
   t.onTestFinished(() => rmSync(root, { recursive: true, force: true }));
-  mkdirSync(join(root, 'scripts'));
-  for (const name of ['package-production-smoke.mjs', 'webdriver-process.mjs', 'file-content.mjs']) {
-    cpSync(new URL(name, import.meta.url), join(root, 'scripts', name));
+  for (const path of ['native/windows/package-production-smoke.mjs', 'e2e/support/webdriver-process.mjs', 'scripts/file-content.mjs']) {
+    const destination = join(root, path);
+    mkdirSync(dirname(destination), { recursive: true });
+    cpSync(new URL('../../' + path, import.meta.url), destination);
   }
   const secret = 'private-page-content';
-  const result = spawnSync(process.execPath, [join(root, 'scripts/package-production-smoke.mjs'), '--' + secret],
+  const result = spawnSync(process.execPath, [join(root, 'native/windows/package-production-smoke.mjs'), '--' + secret],
     { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 5000 });
   assert.ifError(result.error);
   assert.equal(result.status, 1);

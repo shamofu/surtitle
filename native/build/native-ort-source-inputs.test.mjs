@@ -231,7 +231,7 @@ sha = lambda data: hashlib.sha256(data).hexdigest()
 with tempfile.TemporaryDirectory() as temporary:
     workspace = Path(temporary) / 'workspace'
     root, destination = Path(temporary) / 'root', Path(temporary) / 'package'
-    for path in ['native/build', 'native/reviews', 'native/upstream-evidence', 'scripts']:
+    for path in ['native/build', 'native/reviews', 'native/upstream-evidence']:
         (workspace / path).mkdir(parents=True, exist_ok=True)
     for path in ['archives', 'comparison-sources/protobuf/source', 'ports/protobuf', 'generated-header-evidence']:
         (root / path).mkdir(parents=True, exist_ok=True)
@@ -281,7 +281,7 @@ with tempfile.TemporaryDirectory() as temporary:
     (workspace / 'native/reviews/onnxruntime-dependencies.json').write_text(json.dumps(review))
     for name in ['native-ort-evidence.py', 'native-ort-source-inputs.py', 'native-ort-compare.py',
                  'native-ort-generated.py', 'native-ort-package.py', 'native-source-archive-check.py', 'native_source_archive.py']:
-        shutil.copyfile(script.parent / name, workspace / 'scripts' / name)
+        shutil.copyfile(script.parent / name, workspace / 'native/build' / name)
     command = [sys.executable, '-B', str(script), str(workspace), str(root), str(destination)]
     result = subprocess.run(command, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr

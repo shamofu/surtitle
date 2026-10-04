@@ -9,14 +9,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 test('VC prerequisite manifest pins the actual hook and helper bytes', () => {
-  const manifest = JSON.parse(readFileSync(new URL('../native/runtime-windows-x64.json', import.meta.url), 'utf8'));
+  const manifest = JSON.parse(readFileSync(new URL('../../native/runtime-windows-x64.json', import.meta.url), 'utf8'));
   const prerequisites = manifest.prerequisites.filter(item => item.id === 'microsoft-vc-runtime-x64');
   assert.equal(prerequisites.length, 1);
   const prerequisite = prerequisites[0];
   for (const [field, path] of [['hook', 'native/windows-prerequisite.nsh'], ['helper', 'native/vc-prerequisite.ps1']]) {
     assert.equal(prerequisite[`${field}Path`], path);
     assert.match(prerequisite[`${field}Sha256`], /^[a-f0-9]{64}$/);
-    const actual = createHash('sha256').update(readFileSync(new URL('../' + path, import.meta.url))).digest('hex');
+    const actual = createHash('sha256').update(readFileSync(new URL('../../' + path, import.meta.url))).digest('hex');
     assert.equal(prerequisite[`${field}Sha256`], actual, `VC prerequisite ${field} hash must match the committed input bytes`);
   }
 });
@@ -25,7 +25,7 @@ test.skipIf(process.platform !== 'win32')('VC prerequisite resolves its adjacent
   const directory = realpathSync.native(mkdtempSync(join(tmpdir(), 'surtitle VC manifest 日本語 & ')));
   t.onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
   const helper = join(directory, 'vc-prerequisite.ps1');
-  copyFileSync(new URL('../native/vc-prerequisite.ps1', import.meta.url), helper);
+  copyFileSync(new URL('../../native/vc-prerequisite.ps1', import.meta.url), helper);
   const cwd = join(directory, 'caller');
   mkdirSync(cwd);
   writeFileSync(join(cwd, 'runtime-windows-x64.json'), '{}');
@@ -120,7 +120,7 @@ $security = Get-Module -Name Microsoft.PowerShell.Security
     const result = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
       encoding: 'utf8', windowsHide: true, timeout: 15_000,
       env: { ...environment, PSModulePath: inheritedModules, SURTITLE_VC_SHADOW_ROOT: shadowRoot,
-        SURTITLE_VC_HELPER: fileURLToPath(new URL('../native/vc-prerequisite.ps1', import.meta.url)),
+        SURTITLE_VC_HELPER: fileURLToPath(new URL('../../native/vc-prerequisite.ps1', import.meta.url)),
         SURTITLE_VC_MANIFEST: manifestPath,
         SURTITLE_VC_INITIALIZE: initialize ? '1' : '0', SURTITLE_VC_SIGNED: powershell, SURTITLE_VC_UNSIGNED: unsigned },
     });

@@ -55,3 +55,14 @@ Create the container with the helper, then use VS Code **Dev Containers: Attach 
 **Reopen in Container** can inject client-managed mounts such as a `/vscode` volume or GUI sockets, which `initialize.sh` rejects. Create the container with the helper and attach to it to retain the configured mount isolation. [Dev Container configuration specification](https://github.com/devcontainers/spec/blob/main/docs/specs/devcontainerjson-reference.md)
 
 Tmpfs requires `exec` for esbuild and native Node modules; `nosuid,nodev` remain enabled and privileged containers are rejected. Since source is intentionally shared, this configuration does not prevent arbitrary programs from writing to other unmasked source paths. Add any new tool's output location to the masks and mount checks before using it.
+
+## Finish a development session
+
+Export needed logs and screenshots before stopping the container: temporary output masks disappear on stop. Use standard Docker commands to remove the container and its writable build layer:
+
+```sh
+docker stop surtitle-dev
+docker rm surtitle-dev
+```
+
+When using Docker in WSL Ubuntu, run `wsl -d Ubuntu -u root -- docker stop surtitle-dev` and then `wsl -d Ubuntu -u root -- docker rm surtitle-dev`. Source files remain in the checkout. Docker images and shared build caches remain available for future sessions; these commands do not prune other projects. To clear only Cargo output while retaining a running environment, use `docker exec --user vscode --workdir /workspaces/surtitle surtitle-dev cargo clean`.

@@ -17,15 +17,16 @@ From a fresh extracted source directory, inspect the supplied source files and
 build the native artifact:
 
 ```sh
-node scripts/native-ci-artifact.mjs verify-source .
-bash scripts/native-ci-build.sh
+node native/build/native-ci-artifact.mjs verify-source .
+docker buildx build --file native/build/Dockerfile --target export --provenance=false --output type=local,dest=work/native-ci-artifact .
+node native/build/native-ci-artifact.mjs verify work/native-ci-artifact
 ```
 
 The build exports six files into a fresh `work/native-ci-artifact/` directory:
 `mpv-2.dll`, `libmpv-source.tar.gz`, `onnxruntime-source.tar.gz`,
 `libmpv-build-evidence.json`, `onnxruntime-source-inventory.json` and
 `SHA256SUMS.txt`. Docker caches complete native stages by their source and recipe
-inputs. The wrapper also accepts Buildx options, such as `--no-cache`.
+inputs. Add Buildx options, such as `--no-cache`, directly to the Docker command.
 
 The libmpv recipe compiles the pinned source archives. Compiler packages and
 intermediate build trees remain inside Docker. Compiler versions and PE
@@ -46,10 +47,10 @@ Use the same extracted working copy on Windows, including the six exported
 native files, then run:
 
 ```powershell
-node scripts/native-ci-artifact.mjs consume work/native-ci-artifact
+node native/build/native-ci-artifact.mjs consume work/native-ci-artifact
 pnpm install --frozen-lockfile
-pwsh -File scripts/native-prepare.ps1
-pwsh -File scripts/native-smoke.ps1
+pwsh -File native/windows/native-prepare.ps1
+pwsh -File native/windows/native-smoke.ps1
 pnpm tauri dev
 ```
 
@@ -71,10 +72,10 @@ configuration. Restore that saved `.cargo/config.toml` in place; do not append i
 From a fresh working copy with native resources prepared:
 
 ```powershell
-python scripts/native-installer-prepare.py
+python native/windows/native-installer-prepare.py
 pnpm package:app
 # Only on a fresh CI runner or disposable Windows profile:
-pwsh -File scripts/package-verify.ps1
+pwsh -File native/windows/package-verify.ps1
 ```
 
 Preparation collects source archives and installer notices. Tauri obtains and

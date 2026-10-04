@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { withReadOnlyDatabase } from '../../scripts/native-e2e-database.mjs';
+import { withReadOnlyDatabase } from '../support/native-e2e-database.mjs';
 
 // These authored subtitles accompany digital silence. This suite verifies local
 // transport and persistence, not audible speech, transcript quality or listening.
