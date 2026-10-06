@@ -51,6 +51,15 @@ impl PlaybackStops {
                 .or(self.sentence_end)
                 .is_some_and(|end| position >= end)
     }
+    pub(super) fn should_pause(
+        &self,
+        position: u64,
+        ready: bool,
+        paused: bool,
+        seek_pending: bool,
+    ) -> bool {
+        ready && !paused && !seek_pending && self.reached(position)
+    }
     pub(super) fn completed(&mut self) {
         self.explicit_end = None;
         self.sentence_end = None;

@@ -1,3 +1,4 @@
+use super::seeks::SeekEvent;
 use super::*;
 use libloading::Library;
 use std::{
@@ -224,9 +225,10 @@ impl Mpv {
     pub fn visible(&self) -> bool {
         unsafe { IsWindowVisible(self.child) != 0 }
     }
-    pub fn drain_events(&self) -> (bool, Option<i32>) {
+    pub(super) fn drain_events(&self) -> (bool, Option<i32>, Vec<SeekEvent>) {
         let mut loaded = false;
         let mut error = None;
+        let mut seeks = Vec::new();
         unsafe {
             for _ in 0..128 {
                 let event = (self.wait)(self.handle, 0.);
@@ -236,6 +238,11 @@ impl Mpv {
                 if (*event).event_id == 8 {
                     loaded = true;
                 } // MPV_EVENT_FILE_LOADED
+                match (*event).event_id {
+                    20 => seeks.push(SeekEvent::Started),   // MPV_EVENT_SEEK
+                    21 => seeks.push(SeekEvent::Restarted), // MPV_EVENT_PLAYBACK_RESTART
+                    _ => {}
+                }
                 if (*event).event_id == 7 && !(*event).data.is_null() {
                     let end = &*(*event).data.cast::<EndFile>();
                     if end.reason == 4 {
@@ -244,7 +251,7 @@ impl Mpv {
                 }
             }
         }
-        (loaded, error)
+        (loaded, error, seeks)
     }
     pub fn tracks(&self) -> Vec<Track> {
         unsafe {

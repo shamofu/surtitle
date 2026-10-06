@@ -81,14 +81,25 @@ async function replay(request, expectedStart, expectedEnd) {
   await control({ action: 'loop' });
   await control({ action: 'seek', startMs: 6000 });
   await control({ action: 'rate', value: .5 });
-  await control(request);
-  let first;
-  await browser.waitUntil(async () => {
-    const state = await player();
-    if (!state.paused && state.positionMs >= Math.max(0, expectedStart - 45) && state.positionMs < expectedStart + 140) { first = state.positionMs; return true; }
-    return false;
-  }, { timeout: 4000, interval: 30, timeoutMsg: `Playback did not begin at contextual source start ${expectedStart}` });
-  assert.notEqual(first, undefined);
+  // Sample next to the actual IPC command. A separate WebDriver round trip can
+  // miss the first 140 ms of source playback on a busy hosted desktop.
+  const beginning = await browser.execute(async (nextRequest, start) => {
+    const nativeInvoke = window.__TAURI_INTERNALS__.invoke;
+    await nativeInvoke('player_control', { request: nextRequest });
+    const deadline = performance.now() + 4000;
+    const samples = [];
+    let last;
+    while (performance.now() < deadline) {
+      const state = await nativeInvoke('get_player_state');
+      last = { positionMs: state.positionMs, paused: state.paused, ready: state.ready, error: state.error };
+      if (samples.length < 16) samples.push(last);
+      if (!state.paused && state.positionMs > start && state.positionMs < start + 140)
+        return { first: state.positionMs, last, samples };
+      await new Promise(resolve => setTimeout(resolve, 30));
+    }
+    return { first: null, last, samples };
+  }, request, expectedStart);
+  assert.notEqual(beginning.first, null, `Playback did not begin at contextual source start ${expectedStart}: ${JSON.stringify(beginning)}`);
   await browser.waitUntil(async () => { const state = await player(); return state.paused && state.positionMs >= expectedEnd - 45; }, { timeout: 14000, interval: 30, timeoutMsg: `Source replay did not pause at contextual end ${expectedEnd}` });
   const stopped = await player();
   assert(stopped.positionMs <= expectedEnd + 120, `Expected source stop near ${expectedEnd}, got ${stopped.positionMs}`);
@@ -187,6 +198,35 @@ async function assertNominalUnchanged() {
     await control({ action: 'rate', value: .5 });
     await invoke('play_source_range', { mediaId, sourceCueIds: [nominalCues[1].id] });
     await browser.waitUntil(async () => { const state = await player(); return state.paused && state.positionMs >= 4705 && state.positionMs <= 4870; }, { timeout: 14000, interval: 40, timeoutMsg: 'Saved-source replay did not use the configured context' });
+    await assertNominalUnchanged();
+  });
+
+  it('keeps the latest rapid seek and lets pause and play control the pending range', async () => {
+    await openStudy();
+    await control({ action: 'pause' });
+    await control({ action: 'loop' });
+    await control({ action: 'rate', value: .5 });
+    await browser.execute(async () => {
+      const nativeInvoke = window.__TAURI_INTERNALS__.invoke;
+      await nativeInvoke('player_control', { request: { action: 'seek', startMs: 1000, endMs: 2000 } });
+      await nativeInvoke('player_control', { request: { action: 'seek', startMs: 3000, endMs: 4000 } });
+      await nativeInvoke('player_control', { request: { action: 'seek', startMs: 5000, endMs: 6000 } });
+      await nativeInvoke('player_control', { request: { action: 'pause' } });
+    });
+    await browser.waitUntil(async () => {
+      const state = await player();
+      return state.paused && state.positionMs >= 4955 && state.positionMs <= 5120;
+    }, { timeout: 5000, interval: 30, timeoutMsg: 'Rapid seeks did not retain the last target and pause choice' });
+    await control({ action: 'play' });
+    await browser.waitUntil(async () => {
+      const state = await player();
+      assert.equal(state.error, null);
+      return !state.paused && state.positionMs > 5200 && state.positionMs < 6000;
+    }, { timeout: 5000, interval: 30, timeoutMsg: 'Playing did not resume the last rapid seek' });
+    await browser.waitUntil(async () => {
+      const state = await player();
+      return state.paused && state.positionMs >= 5955 && state.positionMs <= 6120;
+    }, { timeout: 6000, interval: 30, timeoutMsg: 'The last rapid seek lost its explicit range stop' });
     await assertNominalUnchanged();
   });
 

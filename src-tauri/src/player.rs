@@ -69,6 +69,12 @@ pub struct Control {
 
 mod stops;
 use stops::PlaybackStops;
+#[cfg(any(windows, test))]
+mod seeks;
+#[cfg(windows)]
+use seeks::{PendingSeek, SeekRequest};
+#[cfg(windows)]
+const SEEK_TIMEOUT_ERROR: &str = "Media seek did not finish. Try seeking again.";
 
 pub struct Player {
     #[cfg(windows)]
@@ -76,6 +82,10 @@ pub struct Player {
     state: PlayerState,
     stops: PlaybackStops,
     pending_load: Option<(String, u64, Option<u32>)>,
+    #[cfg(windows)]
+    pending_seek: Option<(PendingSeek, Instant)>,
+    #[cfg(windows)]
+    loading_seek: Option<SeekRequest>,
     #[cfg(windows)]
     subtitle_track: Option<i64>,
     #[allow(dead_code)]
@@ -101,6 +111,10 @@ impl Player {
                 stops: PlaybackStops::default(),
                 pending_load: None,
                 #[cfg(windows)]
+                pending_seek: None,
+                #[cfg(windows)]
+                loading_seek: None,
+                #[cfg(windows)]
                 subtitle_track: None,
                 tick: Instant::now(),
             })
@@ -125,6 +139,8 @@ impl Player {
         self.stops.reset_media();
         #[cfg(windows)]
         {
+            self.pending_seek = None;
+            self.loading_seek = None;
             self.subtitle_track = None;
         }
         Ok(())
@@ -153,6 +169,8 @@ impl Player {
         );
         #[cfg(windows)]
         {
+            self.pending_seek = None;
+            self.loading_seek = None;
             self.native.drain_events();
             self.native.command(&[
                 "loadfile",
@@ -238,11 +256,31 @@ impl Player {
                 self.stops.arm_sentence(self.state.position_ms);
             }
             "play" => {
+                #[cfg(windows)]
+                if let Some((pending, _)) = &mut self.pending_seek {
+                    pending.latest().paused = false;
+                    self.state.paused = false;
+                    return Ok(());
+                }
+                #[cfg(windows)]
+                if let Some(request) = &mut self.loading_seek {
+                    request.paused = false;
+                    self.state.paused = false;
+                    return Ok(());
+                }
                 self.stops.arm_sentence(self.state.position_ms);
                 self.state.paused = false;
                 self.set("pause", "no")?;
             }
             "pause" => {
+                #[cfg(windows)]
+                if let Some((pending, _)) = &mut self.pending_seek {
+                    pending.latest().paused = true;
+                }
+                #[cfg(windows)]
+                if let Some(request) = &mut self.loading_seek {
+                    request.paused = true;
+                }
                 self.state.paused = true;
                 self.set("pause", "yes")?;
             }
@@ -256,12 +294,43 @@ impl Player {
                 );
                 self.set("ab-loop-a", "no")?;
                 self.set("ab-loop-b", "no")?;
-                self.state.position_ms = target;
-                self.set("time-pos", &(target as f64 / 1000.).to_string())?;
-                self.stops.seek(target, c.end_ms);
-                if c.end_ms.is_some() {
-                    self.state.paused = false;
-                    self.set("pause", "no")?;
+                #[cfg(windows)]
+                {
+                    let paused = c.end_ms.is_none()
+                        && self
+                            .pending_seek
+                            .as_mut()
+                            .map(|(pending, _)| pending.latest().paused)
+                            .unwrap_or(self.state.paused);
+                    let request = SeekRequest {
+                        target,
+                        end: c.end_ms,
+                        paused,
+                        repeating: false,
+                    };
+                    if let Some((pending, _)) = &mut self.pending_seek {
+                        pending.queued = Some(request);
+                        self.state.position_ms = target;
+                        self.state.paused = paused;
+                    } else if self.pending_load.is_some() {
+                        // A seek requested while opening a file belongs to that
+                        // file. Preserve FILE_LOADED until its target can be sent.
+                        self.loading_seek = Some(request);
+                        self.state.position_ms = target;
+                        self.state.paused = paused;
+                    } else {
+                        self.begin_seek(request)?;
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    self.state.position_ms = target;
+                    self.set("time-pos", &(target as f64 / 1000.).to_string())?;
+                    self.stops.seek(target, c.end_ms);
+                    if c.end_ms.is_some() {
+                        self.state.paused = false;
+                        self.set("pause", "no")?;
+                    }
                 }
             }
             "rate" => {
@@ -292,6 +361,17 @@ impl Player {
                     self.set("ab-loop-a", "no")?;
                     self.set("ab-loop-b", "no")?;
                     self.stops.set_repeat(false, self.state.position_ms);
+                }
+                #[cfg(windows)]
+                if let Some((pending, _)) = &mut self.pending_seek {
+                    let latest = pending.latest();
+                    latest.end = None;
+                    latest.repeating = c.start_ms.is_some() && c.end_ms.is_some();
+                }
+                #[cfg(windows)]
+                if let Some(request) = &mut self.loading_seek {
+                    request.end = None;
+                    request.repeating = c.start_ms.is_some() && c.end_ms.is_some();
                 }
             }
             "track" => {
@@ -339,6 +419,21 @@ impl Player {
         let _ = (key, value);
         Ok(())
     }
+    #[cfg(windows)]
+    fn begin_seek(&mut self, request: SeekRequest) -> Result<()> {
+        // time-pos only queues a native seek. Keep playback paused until this
+        // seek restarts, so an old clock cannot consume the new range stop.
+        self.native.set("pause", "yes")?;
+        self.state.paused = true;
+        self.native.drain_events();
+        self.native
+            .set("time-pos", &(request.target as f64 / 1000.).to_string())?;
+        self.state.position_ms = request.target;
+        self.state.paused = request.paused;
+        self.stops.seek(request.target, None);
+        self.pending_seek = Some((PendingSeek::new(request), Instant::now()));
+        Ok(())
+    }
     pub fn configure_sentence_pause(&mut self, enabled: bool, ends: Vec<u64>) {
         self.state.sentence_pause = enabled;
         self.stops.configure(enabled, ends, self.state.position_ms);
@@ -346,13 +441,15 @@ impl Player {
     pub fn poll(&mut self) -> PlayerState {
         #[cfg(windows)]
         {
-            let (loaded, load_error) = self.native.drain_events();
+            let (loaded, load_error, seek_events) = self.native.drain_events();
             if let Some(error) = load_error {
                 self.state.error = Some(format!(
                     "Media playback failed (mpv error {error}). Check the file or choose another media source."
                 ));
                 self.state.ready = false;
                 self.pending_load = None;
+                self.pending_seek = None;
+                self.loading_seek = None;
             }
             let mut restored_now = false;
             if loaded
@@ -372,15 +469,23 @@ impl Player {
                             .context("Saved audio stream is unavailable; choose another track")?;
                         self.native.set("aid", &track.id.to_string())?;
                     }
-                    if position > 0 {
+                    let request = self.loading_seek.take().or_else(|| {
+                        (position > 0).then_some(SeekRequest {
+                            target: position,
+                            end: None,
+                            paused: self.state.paused,
+                            repeating: false,
+                        })
+                    });
+                    if let Some(mut request) = request {
                         let duration = self.native.number("duration").unwrap_or(f64::MAX) * 1000.;
-                        let position = position.min(duration.max(0.) as u64);
-                        self.native
-                            .set("time-pos", &(position as f64 / 1000.).to_string())?;
-                        self.state.position_ms = position;
+                        request.target = request.target.min(duration.max(0.) as u64);
+                        self.begin_seek(request)?;
                     }
-                    self.native
-                        .set("pause", if self.state.paused { "yes" } else { "no" })?;
+                    if self.pending_seek.is_none() {
+                        self.native
+                            .set("pause", if self.state.paused { "yes" } else { "no" })?;
+                    }
                     Ok(())
                 })();
                 if let Err(error) = restore {
@@ -391,6 +496,7 @@ impl Player {
             }
             if self.state.ready
                 && !restored_now
+                && self.pending_seek.is_none()
                 && let Some(p) = self.native.number("time-pos")
             {
                 self.state.position_ms = (p.max(0.) * 1000.) as u64;
@@ -401,6 +507,7 @@ impl Player {
                 self.state.duration_ms = (d.max(0.) * 1000.) as u64;
             }
             if self.state.ready
+                && self.pending_seek.is_none()
                 && let Some(p) = self.native.string("pause")
             {
                 self.state.paused = p == "yes";
@@ -409,6 +516,48 @@ impl Player {
             self.state.surface_visible = self.native.visible();
             self.state.video_width = self.native.number("video-params/w").unwrap_or(0.) as u32;
             self.state.video_height = self.native.number("video-params/h").unwrap_or(0.) as u32;
+            if !restored_now && let Some((pending, _)) = &mut self.pending_seek {
+                for event in seek_events {
+                    pending.observe(event);
+                }
+            }
+            if self
+                .pending_seek
+                .as_ref()
+                .is_some_and(|(pending, _)| pending.complete())
+            {
+                let (pending, _) = self.pending_seek.take().unwrap();
+                if let Some(next) = pending.queued {
+                    if let Err(error) = self.begin_seek(next) {
+                        self.state.error = Some(error.to_string());
+                    }
+                } else {
+                    if let Some(position) = self.native.number("time-pos") {
+                        self.state.position_ms = (position.max(0.) * 1000.) as u64;
+                    }
+                    pending.active.arm(&mut self.stops);
+                    if self.state.error.as_deref() == Some(SEEK_TIMEOUT_ERROR) {
+                        self.state.error = None;
+                    }
+                    let paused = pending.active.paused
+                        || self
+                            .native
+                            .string("eof-reached")
+                            .is_some_and(|value| value == "yes");
+                    match self.native.set("pause", if paused { "yes" } else { "no" }) {
+                        Ok(()) => self.state.paused = paused,
+                        Err(error) => self.state.error = Some(error.to_string()),
+                    }
+                }
+            } else if self
+                .pending_seek
+                .as_ref()
+                .is_some_and(|(_, started)| started.elapsed().as_secs() >= 15)
+            {
+                self.pending_seek = None;
+                self.state.error = Some(SEEK_TIMEOUT_ERROR.into());
+                self.state.paused = true;
+            }
         }
         #[cfg(all(not(windows), feature = "e2e-test"))]
         {
@@ -418,7 +567,16 @@ impl Player {
             }
             self.tick = Instant::now();
         }
-        if !self.state.paused && self.state.ready && self.stops.reached(self.state.position_ms) {
+        #[cfg(windows)]
+        let seek_pending = self.pending_seek.is_some() || self.loading_seek.is_some();
+        #[cfg(not(windows))]
+        let seek_pending = false;
+        if self.stops.should_pause(
+            self.state.position_ms,
+            self.state.ready,
+            self.state.paused,
+            seek_pending,
+        ) {
             match self.set("pause", "yes") {
                 Ok(()) => {
                     self.state.paused = true;
@@ -861,6 +1019,23 @@ mod subtitle_tests {
             player.configure_sentence_pause(true, vec![800, 1600, 2400]);
             player.control(&command("play", None, None)).unwrap();
             wait_for_stop(&mut player, 800);
+            // A new load cancels both an active seek and its superseding target.
+            player
+                .control(&command("seek", Some(0), Some(2100)))
+                .unwrap();
+            player
+                .control(&command("seek", Some(1000), Some(2500)))
+                .unwrap();
+            player.load(&source).unwrap();
+            assert!(player.pending_seek.is_none());
+            assert!(player.loading_seek.is_none());
+            // Seeking before FILE_LOADED must preserve that event and apply to
+            // the newly loaded file, with its own explicit range stop.
+            player
+                .control(&command("seek", Some(500), Some(900)))
+                .unwrap();
+            assert_eq!(player.loading_seek.unwrap().target, 500);
+            wait_for_stop(&mut player, 900);
             let invalid = temp.path().join("broken.mkv");
             std::fs::write(&invalid, b"not a media container").unwrap();
             player.load(&invalid).unwrap();
