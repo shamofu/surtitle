@@ -186,7 +186,8 @@ describe('real native learning workflow (no cloud requests)', () => {
       assert.notEqual((await generated())[0].id, previousId, 'Editing did not replace the generated subtitle track');
     }
   });
-  it('keeps zero-budget quotes blocked without calling an AI endpoint', async () => {
+  it('keeps quotes blocked without credentials even when the budget is unlimited', async () => {
+    assert.equal((await snapshot()).settings.credentialConfigured, false);
     // WebKit's WebDriver cannot serialize a rejected IPC promise reliably.
     const result = JSON.parse(await browser.execute(async (id) => {
       try {

@@ -138,7 +138,12 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await expect(page.locator('.model-editor datalist option[value="gemini-shared-fixture"]')).toHaveCount(4);
       expect(await page.evaluate(() => (window as any).__learningFixture.calls.filter((call: any) => call.command === 'list_vertex_models').length)).toBe(1);
       await capture('models');
-      const transcription = page.locator('.model-preference').first();
+      const detailedModels = page.locator('#ai-models > details');
+      await detailedModels.locator('summary').filter({ hasText: locale === 'ja' ? '用途ごとの詳細設定' : 'Detailed settings by purpose' }).click();
+      await expect(detailedModels).toHaveAttribute('open', '');
+      const transcription = detailedModels.locator('.model-preference').filter({
+        has: page.getByRole('heading', { name: locale === 'ja' ? '文字起こし' : 'Transcription', exact: true }),
+      });
       await transcription.scrollIntoViewIfNeeded();
       await capture('transcription');
       const outputLimit = transcription.getByRole('combobox', { name: locale === 'ja' ? /^回答の長さの上限/ : /^Output limit/ });
@@ -148,8 +153,10 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await tokens.scrollIntoViewIfNeeded();
       await capture('custom-output');
       await outputLimit.selectOption('standard');
-      const modelInputs = page.getByRole('combobox', { name: /^GeminiモデルID|^Gemini model ID/ });
-      await modelInputs.nth(1).fill('gemini-shared-fixture');
+      const vocabulary = detailedModels.locator('.model-preference').filter({
+        has: page.getByRole('heading', { name: locale === 'ja' ? '語彙・イディオム' : 'Vocabulary & idioms', exact: true }),
+      });
+      await vocabulary.getByRole('combobox', { name: /^GeminiモデルID|^Gemini model ID/ }).fill('gemini-shared-fixture');
       await expect(save).toBeEnabled();
       const monthly = page.getByRole('spinbutton', { name: locale === 'ja' ? /^1か月のAI予算/ : /^Monthly AI budget/ });
       await monthly.fill('20');

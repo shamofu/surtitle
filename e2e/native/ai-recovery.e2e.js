@@ -63,24 +63,28 @@ async function settings() {
     assert((await $('dialog').getText()).includes('こんにちは。'));
     await $('button[aria-label="Close"]').click();
     await invoke('edit_segment', { segment: { ...source, text: 'An edited source.' } });
-    const stale = await invoke('list_saved_ai_results', { jobId });
-    assert.equal(stale[0].canApply, false);
-    // Serialize the application's rejection inside the webview: a WebDriver
-    // transport/serialization failure must fail this test, not satisfy it.
-    const application = JSON.parse(await browser.execute(async id => {
-      try {
-        await window.__TAURI_INTERNALS__.invoke('apply_saved_ai_result', { jobId: id, ordinal: 0 });
-        return JSON.stringify({ succeeded: true });
-      } catch (error) {
-        return JSON.stringify({ succeeded: false, reason: String(error?.message ?? error) });
-      }
-    }, jobId));
-    assert.deepEqual(application, {
-      succeeded: false,
-      reason: 'approved source subtitles changed; output was retained for review and further sending stopped',
-    });
-    assert.equal((await segments())[0].translation, null);
-    await invoke('edit_segment', { segment: source });
+    try {
+      const stale = await invoke('list_saved_ai_results', { jobId });
+      assert.equal(stale[0].canApply, false);
+      assert.deepEqual(stale[0].translations, pending[0].translations, 'Source changes must retain the saved output');
+      // Serialize the application's rejection inside the webview: a WebDriver
+      // transport/serialization failure must fail this test, not satisfy it.
+      const application = JSON.parse(await browser.execute(async id => {
+        try {
+          await window.__TAURI_INTERNALS__.invoke('apply_saved_ai_result', { jobId: id, ordinal: 0 });
+          return JSON.stringify({ succeeded: true });
+        } catch (error) {
+          return JSON.stringify({ succeeded: false, reason: String(error?.message ?? error) });
+        }
+      }, jobId));
+      assert.deepEqual(application, {
+        succeeded: false,
+        reason: 'Prepared input changed; prepare and approve a new job',
+      });
+      assert.equal((await segments())[0].translation, null);
+    } finally {
+      await invoke('edit_segment', { segment: source });
+    }
     assert.equal((await invoke('list_saved_ai_results', { jobId }))[0].canApply, true);
     assert.deepEqual(attempts(), ledgerBefore);
   });

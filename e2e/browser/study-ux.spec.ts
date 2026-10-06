@@ -6,10 +6,15 @@ import { installLearningFixture } from './learning-fixture';
 type FixtureWindow = Window & {
   __learningFixture: {
     state: { positionMs: number; paused: boolean };
-    calls: { command: string; args: { request?: { action: string; value?: number; startMs?: number; endMs?: number } } }[];
+    calls: { command: string; args: { request?: { action?: string; value?: number; startMs?: number; endMs?: number; fields?: Record<string, string> } } }[];
+    call: (command: string, args?: Record<string, any>) => Promise<unknown>;
     requestClose: () => boolean;
     closeCount: () => number;
   };
+};
+
+type DraftSaveGateWindow = FixtureWindow & {
+  __draftSaveGate: { pending: boolean; release: () => void };
 };
 
 async function openStudy(page: Page, locale: 'en' | 'ja' = 'en', theme: 'light' | 'dark' = 'light') {
@@ -25,36 +30,66 @@ async function createDraft(page: Page, locale: 'en' | 'ja' = 'en') {
   await page.getByLabel(locale === 'ja' ? '意味' : 'Meaning', { exact: true }).fill('少し寄り道をする');
 }
 
-test('real router keeps drafts when staying and discards only when leaving is confirmed', async ({ page }) => {
+async function blockDraftSaves(page: Page) {
+  await page.evaluate(() => {
+    const fixture = (window as FixtureWindow).__learningFixture;
+    const original = fixture.call.bind(fixture);
+    let release!: () => void;
+    const saved = new Promise<void>(resolve => { release = resolve; });
+    const gate = { pending: false, release: () => release() };
+    Object.assign(window, { __draftSaveGate: gate });
+    fixture.call = async (command, args = {}) => {
+      if (command === 'save_editor_draft') { gate.pending = true; await saved; }
+      return original(command, args);
+    };
+  });
+}
+
+test('real router saves unfinished phrases before leaving and restores them on return', async ({ page }) => {
   await openStudy(page);
   await createDraft(page);
-  await page.getByRole('link', { name: 'Back to library' }).click();
-  await expect(page.getByRole('dialog', { name: 'You have unfinished phrases' })).toBeVisible();
-  await expect(page).toHaveURL(/\/study\/visual-fixture$/);
-  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
-  await expect(page.getByLabel('Word or phrase', { exact: true })).toHaveValue('take a little detour');
   await page.getByRole('button', { name: 'Continue later', exact: true }).click();
   await page.getByRole('button', { name: 'Close panel', exact: true }).click();
   await page.getByRole('button', { name: 'Unfinished phrases (1)', exact: true }).click();
   await page.locator('.study-phrase-draft > .button').click();
   await expect(page.getByRole('textbox', { name: 'Meaning', exact: true })).toHaveValue('少し寄り道をする');
+  await blockDraftSaves(page);
+  await page.getByRole('textbox', { name: 'Meaning', exact: true }).fill('少し寄り道をする（あとで追記）');
   await page.getByRole('link', { name: 'Back to library' }).click();
-  await page.getByRole('button', { name: 'Discard and continue', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as DraftSaveGateWindow).__draftSaveGate.pending)).toBe(true);
+  await expect(page).toHaveURL(/\/study\/visual-fixture$/);
+  await expect(page.getByRole('dialog', { name: 'You have unfinished phrases' })).toHaveCount(0);
+  await page.evaluate(() => (window as DraftSaveGateWindow).__draftSaveGate.release());
   await expect(page.getByRole('heading', { name: 'Library', exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
-  expect(await page.evaluate(() => (window as FixtureWindow).__learningFixture.requestClose())).toBe(false);
+  await expect(page.getByRole('dialog', { name: 'You have unfinished phrases' })).toHaveCount(0);
+  expect(await page.evaluate(() => (window as FixtureWindow).__learningFixture.calls.filter(call => call.command === 'save_editor_draft').at(-1)?.args.request?.fields)).toMatchObject({
+    term: 'take a little detour', meaning: '少し寄り道をする（あとで追記）',
+  });
+  expect(await page.evaluate(() => (window as FixtureWindow).__learningFixture.calls.some(call => call.command === 'delete_editor_draft'))).toBe(false);
+  await page.locator('.media-card').filter({ hasText: 'A walk along the coast' }).click();
+  await expect(page).toHaveURL(/\/study\/visual-fixture$/);
+  await page.getByRole('button', { name: 'Unfinished phrases (1)', exact: true }).click();
+  await page.locator('.study-phrase-draft > .button').click();
+  await expect(page.getByLabel('Word or phrase', { exact: true })).toHaveValue('take a little detour');
+  await expect(page.getByRole('textbox', { name: 'Meaning', exact: true })).toHaveValue('少し寄り道をする（あとで追記）');
 });
 
-test('a native close request uses the same draft confirmation', async ({ page }) => {
+test('a native close request waits for the latest draft save to finish', async ({ page }) => {
   await openStudy(page);
+  await blockDraftSaves(page);
   await createDraft(page);
   expect(await page.evaluate(() => (window as FixtureWindow).__learningFixture.requestClose())).toBe(true);
-  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as DraftSaveGateWindow).__draftSaveGate.pending)).toBe(true);
   expect(await page.evaluate(() => (window as FixtureWindow).__learningFixture.closeCount())).toBe(0);
   await expect(page.getByLabel('Word or phrase', { exact: true })).toHaveValue('take a little detour');
-  expect(await page.evaluate(() => (window as FixtureWindow).__learningFixture.requestClose())).toBe(true);
-  await page.getByRole('button', { name: 'Discard and continue', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'You have unfinished phrases' })).toHaveCount(0);
+  await page.evaluate(() => (window as DraftSaveGateWindow).__draftSaveGate.release());
   await expect.poll(() => page.evaluate(() => (window as FixtureWindow).__learningFixture.closeCount())).toBe(1);
+  expect(await page.evaluate(() => (window as FixtureWindow).__learningFixture.calls.filter(call => call.command === 'save_editor_draft').at(-1)?.args.request?.fields)).toMatchObject({
+    term: 'take a little detour', meaning: '少し寄り道をする',
+  });
+  expect(await page.evaluate(() => (window as FixtureWindow).__learningFixture.calls.some(call => call.command === 'delete_editor_draft'))).toBe(false);
 });
 
 test('real virtualized transcript restores its search, translations and scroll after inspection', async ({ page }) => {
@@ -90,17 +125,17 @@ test('real virtualized transcript restores its search, translations and scroll a
 test('caption navigation preserves playback state and inspector input without AI calls', async ({ page }) => {
   await openStudy(page);
   await page.getByRole('button', { name: 'Next subtitle', exact: true }).click();
-  expect(await page.evaluate(() => ({ ...(window as FixtureWindow).__learningFixture.state }))).toMatchObject({ positionMs: 77000, paused: true });
+  await expect.poll(() => page.evaluate(() => ({ ...(window as FixtureWindow).__learningFixture.state }))).toMatchObject({ positionMs: 77000, paused: true });
   await page.getByRole('button', { name: 'Play', exact: true }).click();
   await page.getByRole('button', { name: 'Previous subtitle', exact: true }).click();
-  expect(await page.evaluate(() => ({ ...(window as FixtureWindow).__learningFixture.state }))).toMatchObject({ positionMs: 70000, paused: false });
+  await expect.poll(() => page.evaluate(() => ({ ...(window as FixtureWindow).__learningFixture.state }))).toMatchObject({ positionMs: 70000, paused: false });
   await createDraft(page);
   const original = await page.locator('.context-sentence').textContent();
   await page.getByRole('button', { name: 'Next subtitle', exact: true }).click();
   await expect(page.locator('.context-sentence')).toHaveText(original!);
   await expect(page.getByLabel('Word or phrase', { exact: true })).toHaveValue('take a little detour');
   await page.locator('.caption-navigation').getByRole('button', { name: 'Listen again', exact: true }).click();
-  expect(await page.evaluate(() => (window as FixtureWindow).__learningFixture.calls.filter(call => call.command === 'player_control' && call.args.request?.action === 'source-seek').at(-1)?.args.request)).toEqual({ action: 'source-seek', startMs: 77000, endMs: 84000 });
+  await expect.poll(() => page.evaluate(() => (window as FixtureWindow).__learningFixture.calls.filter(call => call.command === 'player_control' && call.args.request?.action === 'source-seek').at(-1)?.args.request)).toEqual({ action: 'source-seek', startMs: 77000, endMs: 84000 });
   expect(await page.evaluate(() => (window as FixtureWindow).__learningFixture.calls.some(call => /quote|start_ai|approve_ai/.test(call.command)))).toBe(false);
 });
 

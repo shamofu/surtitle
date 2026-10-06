@@ -388,6 +388,11 @@ async function closeReview() {
     await openTransfer();
     assert((await $('dialog .format-option[aria-pressed="true"]').getText()).includes('Portable backup'));
     await $('dialog').$('button=Choose destination').click();
+    const exportComplete = $('dialog [aria-label="Export complete"]');
+    await exportComplete.waitForDisplayed({ timeout: 60000 });
+    await expect(exportComplete).toHaveText(expect.stringContaining(zipPath));
+    await expect(exportComplete.$('button=Open containing folder')).toBeEnabled();
+    await exportComplete.$('button=Done').click();
     await $('dialog').waitForExist({ reverse: true, timeout: 60000 });
     const zip = readFileSync(zipPath), zipHash = createHash('sha256').update(zip).digest('hex');
     assert.equal(zip.subarray(0, 4).toString('hex'), '504b0304');

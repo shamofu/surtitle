@@ -37,6 +37,9 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
     await page.getByRole('button', { name: locale === 'ja' ? 'フレーズを保存' : 'Save a phrase', exact: true }).click();
     await page.getByLabel(locale === 'ja' ? '語彙・フレーズ' : 'Word or phrase', { exact: true }).fill('take a little detour');
     await page.getByLabel(locale === 'ja' ? '意味' : 'Meaning', { exact: true }).fill('少し寄り道をする');
+    await expect(page.locator('.save-phrase-form').getByRole('status')).toHaveText(
+      locale === 'ja' ? '入力は自動保存されます。' : 'Your input is saved automatically.',
+    );
     await page.locator('.save-phrase-form').scrollIntoViewIfNeeded();
     await capture(page, `phrase-save-${label}`);
   });

@@ -21,7 +21,13 @@ async function playerReady() {
 async function openMore() {
   if (!(await $('.study-secondary-tools').isExisting())) await $('button=More').click();
 }
-async function openSubtitles() { await openMore(); await $('button=Extract embedded subtitles').click(); await $('dialog').waitForDisplayed(); }
+async function openSubtitles() {
+  await openMore();
+  await $('button=Prepare subtitles').click();
+  await $('dialog').waitForDisplayed();
+  await $('dialog').$('button=Embedded').click();
+  await $('dialog select').waitForDisplayed();
+}
 async function dialogClosed() { await $('dialog').waitForExist({ reverse: true, timeout: 60000 }); }
 async function chooseSubtitle(value) {
   await $(`dialog option[value="${value}"]`).waitForExist({ timeout: 60000 });
