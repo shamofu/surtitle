@@ -4,7 +4,7 @@ impl Store {
     pub fn archive(&self) -> Result<LearningArchive> {
         Ok(LearningArchive {
             format: "surtitle.learning".into(),
-            schema_version: 1,
+            schema_version: 2,
             exported_at: now(),
             media: self.list_media()?,
             segments: self.all("SELECT data FROM segments ORDER BY media_id,start_ms")?,
@@ -18,6 +18,13 @@ impl Store {
                 .iter()
                 .map(DraftStudySelection::detached)
                 .collect(),
+            editor_drafts: self
+                .all::<EditorDraft>("SELECT data FROM editor_drafts ORDER BY rowid")?
+                .iter()
+                .map(EditorDraft::detached)
+                .collect(),
+            transcript_issues: self
+                .all("SELECT data FROM transcript_issues ORDER BY media_id,start_ms,id")?,
         })
     }
     pub fn backup(&self, path: &Path) -> Result<()> {
@@ -29,7 +36,7 @@ impl Store {
         self.backup(backup_path)?;
         let tx = self.conn.transaction()?;
         tx.execute_batch(
-            "DELETE FROM draft_study_selections; DELETE FROM transcript_range_selections; DELETE FROM transcript_range_revisions; DELETE FROM transcript_draft_heads; DELETE FROM transcript_adoptions; DELETE FROM transcript_drafts; DELETE FROM ai_result_applications; DELETE FROM reviews; DELETE FROM cards; DELETE FROM segments; DELETE FROM media;",
+            "DELETE FROM transcript_issues; DELETE FROM editor_drafts; DELETE FROM draft_study_selections; DELETE FROM transcript_range_selections; DELETE FROM transcript_range_revisions; DELETE FROM transcript_draft_heads; DELETE FROM transcript_adoptions; DELETE FROM transcript_drafts; DELETE FROM ai_result_applications; DELETE FROM reviews; DELETE FROM cards; DELETE FROM segments; DELETE FROM media;",
         )?;
         for m in &archive.media {
             tx.execute(
@@ -76,6 +83,12 @@ impl Store {
                 ],
             )?;
         }
+        for draft in &archive.editor_drafts {
+            let draft = draft.detached();
+            tx.execute("INSERT INTO editor_drafts(id,media_id,kind,source_key,version,data) VALUES(?,?,?,?,?,?)",
+                params![draft.id, draft.media_id, draft.kind, draft.source_key, draft.version as i64, serde_json::to_string(&draft)?])?;
+        }
+        super::transcript_issues::upsert_transcript_issues_on(&tx, &archive.transcript_issues)?;
         for r in &archive.reviews {
             tx.execute(
                 "INSERT INTO reviews VALUES(?,?,?)",

@@ -380,8 +380,8 @@ pub async fn extract_card_audio(
     range: surtitle_core::AudioClipRange,
 ) -> Result<PathBuf> {
     ensure!(
-        segment.status == "confirmed" && segment.media_id == media.id,
-        "subtitle is not confirmed"
+        surtitle_core::is_usable_subtitle_status(&segment.status) && segment.media_id == media.id,
+        "subtitle is not usable"
     );
     ensure!(
         segment.end_ms > segment.start_ms && segment.end_ms - segment.start_ms <= 180_000,

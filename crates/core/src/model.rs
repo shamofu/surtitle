@@ -42,6 +42,28 @@ pub struct SubtitleSegment {
     pub translation: Option<String>,
     #[serde(default = "confirmed")]
     pub status: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub review_issues: Vec<SubtitleReviewIssue>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitleReviewIssue {
+    pub id: String,
+    pub kind: String,
+    pub start_ms: u64,
+    pub end_ms: u64,
+    #[serde(default)]
+    pub alternatives: Vec<SubtitleReviewAlternative>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitleReviewAlternative {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub text: String,
+}
+pub fn is_usable_subtitle_status(status: &str) -> bool {
+    matches!(status, "confirmed" | "generated" | "generated_review")
 }
 fn confirmed() -> String {
     "confirmed".into()
@@ -270,6 +292,10 @@ pub struct LearningArchive {
     pub subtitle_versions: Vec<SubtitleVersion>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub draft_study_selections: Vec<DraftStudySelection>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub editor_drafts: Vec<crate::EditorDraft>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transcript_issues: Vec<crate::TranscriptIssueRecord>,
 }
 
 /// A local learning excerpt, independent of canonical subtitles and saved cards.

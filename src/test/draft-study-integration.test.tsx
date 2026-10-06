@@ -22,6 +22,9 @@ import { studyApi } from '../features/study/api';
 import { playerApi } from '../features/study/playback/api';
 import { settingsApi } from '../features/settings/api';
 import { aiApi } from '../features/ai/api';
+import { continuationApi } from '../features/ai/continuations';
+import { editorDraftApi } from '../features/study/editor-drafts/api';
+import { cardsApi } from '../features/cards/api';
 import type { AppSnapshot } from '../shared/contracts/snapshot';
 import type { Media } from '../shared/contracts/media';
 import type { PlayerState } from '../shared/contracts/player';
@@ -43,6 +46,7 @@ vi.mock('../features/study/api', () => ({
   studyApi: {
     segments: vi.fn(),
     candidates: vi.fn(),
+    transcriptIssues: vi.fn().mockResolvedValue([]),
     transcriptReview: vi.fn(),
     transcriptResultDetail: vi.fn(),
   },
@@ -63,6 +67,16 @@ vi.mock('../features/settings/api', () => ({
   settingsApi: { updateSettings: vi.fn() },
 }));
 
+vi.mock('../features/ai/continuations', () => ({ continuationApi: { list: vi.fn().mockResolvedValue([]), save: vi.fn(), discard: vi.fn() } }));
+vi.mock('../features/study/editor-drafts/api', () => ({
+  editorSourceKey: (cues: {id:string}[]) => JSON.stringify(cues.map(cue => cue.id)),
+  editorDraftApi: {
+    list: vi.fn().mockResolvedValue([]),
+    save: vi.fn(async (request) => ({ ...request, version: request.expectedVersion + 1, stale: false, bindingVerified: true, sourceMediaSignature: '', createdAt: '', updatedAt: '' })),
+    discard: vi.fn().mockResolvedValue(undefined), rebind: vi.fn(), commitSubtitle: vi.fn(),
+    savePhrase: vi.fn(async (_reference, request) => cardsApi.saveCard(request)),
+  },
+}));
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
 vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, closeWindow: vi.fn() }));
 vi.mock('../features/study/drafts/api', async (importOriginal) => {
@@ -90,6 +104,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 }));
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ mediaId: 'media' }),
+  useSearch: () => ({}),
   useNavigate: () => vi.fn(),
   useBlocker: () => ({ status: 'idle' }),
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
@@ -250,6 +265,12 @@ beforeAll(() => {
   );
 });
 beforeEach(() => {
+  vi.mocked(continuationApi.list).mockResolvedValue([]);
+  vi.mocked(editorDraftApi.list).mockResolvedValue([]);
+  vi.mocked(editorDraftApi.save).mockImplementation(async request => ({ ...request, version: request.expectedVersion + 1, stale: false, bindingVerified: true, sourceMediaSignature: '', createdAt: '', updatedAt: '' }));
+  vi.mocked(editorDraftApi.discard).mockResolvedValue(undefined);
+  vi.mocked(editorDraftApi.savePhrase).mockImplementation(async (_reference, request) => cardsApi.saveCard(request));
+
   state = {
     ready: true,
     positionMs: 0,
@@ -293,6 +314,7 @@ beforeEach(() => {
   };
   vi.mocked(studyApi.segments).mockResolvedValue([canonical]);
   vi.mocked(studyApi.candidates).mockResolvedValue([]);
+  vi.mocked(studyApi.transcriptIssues).mockResolvedValue([]);
   vi.mocked(studyApi.transcriptReview).mockResolvedValue(review);
   vi.mocked(playerApi.loadMedia).mockResolvedValue(undefined);
   vi.mocked(playerApi.playerState).mockImplementation(async () => state);

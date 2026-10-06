@@ -16,6 +16,247 @@ fn job(state: &AppState, preparation: &str) -> String {
 const COMPLETE: &str = "11111111-1111-4111-8111-111111111111";
 const PENDING: &str = "22222222-2222-4222-8222-222222222222";
 const REPAIR: &str = "33333333-3333-4333-8333-333333333333";
+
+fn automatic_job(state: &AppState) -> JobQuote {
+    let mut receipt = load_receipt(state, COMPLETE).unwrap();
+    receipt.prepared_job = receipt
+        .prepared_job
+        .with_apply_policy(TranscriptApplyPolicy::Auto)
+        .unwrap();
+    surtitle_core::store::write_json_atomic(&receipt.directory.join("receipt.json"), &receipt)
+        .unwrap();
+    let quote = state
+        .ai
+        .seed_transcript_review_fixture(receipt.prepared_job.clone(), false)
+        .unwrap();
+    register_fixture_job(state, &receipt, &quote, None).unwrap();
+    quote
+}
+
+#[test]
+fn legacy_policy_stays_manual_and_auto_policy_is_frozen_in_the_digest() {
+    let (_directory, state) = fixture();
+    let plan = load_receipt(&state, COMPLETE).unwrap().prepared_job;
+    let old_json = serde_json::to_value(&plan).unwrap();
+    assert!(old_json.get("apply_policy").is_none());
+    let legacy: PreparedJob = serde_json::from_value(old_json).unwrap();
+    assert_eq!(legacy.apply_policy, TranscriptApplyPolicy::Manual);
+    assert_eq!(legacy.digest().unwrap(), plan.digest().unwrap());
+    assert!(!automatic::apply_completed(&state, &job(&state, COMPLETE)).unwrap());
+    let auto = plan
+        .clone()
+        .with_apply_policy(TranscriptApplyPolicy::Auto)
+        .unwrap();
+    assert_ne!(auto.digest().unwrap(), plan.digest().unwrap());
+    let execution = auto.execution.clone();
+    assert_eq!(
+        auto.with_execution(execution).unwrap().apply_policy,
+        TranscriptApplyPolicy::Auto
+    );
+}
+
+#[test]
+fn completed_auto_transcript_recovers_once_with_portable_conflicts_and_preserves_later_edits() {
+    let (directory, state) = fixture();
+    let quote = automatic_job(&state);
+    let connection = rusqlite::Connection::open(directory.path().join("charges.sqlite")).unwrap();
+    let before = charge_snapshot(&connection);
+    drop(state);
+    let state = Services::open(directory.path().to_path_buf()).unwrap();
+    let mut cues = lock(&state.db)
+        .unwrap()
+        .list_segments("e2e-transcript-review")
+        .unwrap();
+    assert!(!cues.is_empty());
+    assert!(
+        cues.iter()
+            .all(|cue| surtitle_core::is_usable_subtitle_status(&cue.status)
+                && cue.status != "confirmed")
+    );
+    let marked = cues
+        .iter()
+        .find(|cue| !cue.review_issues.is_empty())
+        .unwrap();
+    assert!(
+        marked
+            .review_issues
+            .iter()
+            .any(|issue| issue.alternatives.len() >= 2)
+    );
+    assert_eq!(
+        lock(&state.db)
+            .unwrap()
+            .subtitle_versions("e2e-transcript-review")
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(before, charge_snapshot(&connection));
+    let snapshot = serde_json::to_value(
+        crate::application::ai::snapshot::get_app_snapshot(state.clone()).unwrap(),
+    )
+    .unwrap();
+    let summary = snapshot["jobs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|j| j["id"] == quote.id)
+        .unwrap();
+    assert_eq!(summary["resultState"], "applied_with_warnings");
+    assert_eq!(summary["needsAttention"], false);
+    assert_eq!(summary["transcriptReview"], false);
+    let archive = lock(&state.db).unwrap().archive().unwrap();
+    assert!(
+        archive
+            .segments
+            .iter()
+            .any(|cue| !cue.review_issues.is_empty())
+    );
+    cues[0].text = "Later correction".into();
+    cues[0].status = "confirmed".into();
+    lock(&state.db).unwrap().edit_segment(&cues[0]).unwrap();
+    drop(state);
+    let state = Services::open(directory.path().to_path_buf()).unwrap();
+    assert_eq!(
+        lock(&state.db).unwrap().segment(&cues[0].id).unwrap().text,
+        "Later correction"
+    );
+    assert!(!automatic::apply_completed(&state, &quote.id).unwrap());
+    assert_eq!(before, charge_snapshot(&connection));
+}
+
+#[test]
+fn automatic_application_rejects_source_changes_without_losing_received_candidates() {
+    let (_directory, state) = fixture();
+    let quote = automatic_job(&state);
+    let mut old = lock(&state.db)
+        .unwrap()
+        .segment("e2e-transcript-review-old")
+        .unwrap();
+    old.text = "Changed while transcription was running".into();
+    lock(&state.db).unwrap().edit_segment(&old).unwrap();
+    assert!(automatic::apply_completed(&state, &quote.id).is_err());
+    assert_eq!(
+        lock(&state.db).unwrap().segment(&old.id).unwrap().text,
+        old.text
+    );
+    assert!(state.ai.response(&quote.id, 0).unwrap().is_some());
+    assert!(state.ai.response(&quote.id, 1).unwrap().is_some());
+    assert!(
+        lock(&state.db)
+            .unwrap()
+            .transcript_adopted(&quote.id, &quote.digest)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn restoring_pre_application_learning_data_does_not_reactivate_completed_auto_jobs() {
+    let (directory, state) = fixture();
+    let original = lock(&state.db).unwrap().archive().unwrap();
+    let quote = automatic_job(&state);
+    assert!(automatic::apply_completed(&state, &quote.id).unwrap());
+    assert!(
+        state
+            .ai
+            .transcript_application_recorded(&quote.id, &quote.digest)
+            .unwrap()
+    );
+    lock(&state.db)
+        .unwrap()
+        .restore(&original, &directory.path().join("before-restore.sqlite"))
+        .unwrap();
+    assert!(
+        lock(&state.db)
+            .unwrap()
+            .transcript_adopted(&quote.id, &quote.digest)
+            .unwrap()
+            .is_none()
+    );
+    drop(state);
+    let state = Services::open(directory.path().to_path_buf()).unwrap();
+    assert_eq!(
+        lock(&state.db)
+            .unwrap()
+            .segment("e2e-transcript-review-old")
+            .unwrap()
+            .text,
+        "Original subtitle"
+    );
+    assert!(!automatic::apply_completed(&state, &quote.id).unwrap());
+}
+
+#[test]
+fn complete_silence_is_applied_with_portable_range_records_without_fabricating_subtitles() {
+    let (directory, state) = fixture();
+    let quote = automatic_job(&state);
+    let connection = rusqlite::Connection::open(directory.path().join("charges.sqlite")).unwrap();
+    connection
+        .execute(
+            "UPDATE ai_requests SET response_json=? WHERE job_id=?",
+            rusqlite::params![
+                serde_json::to_string(&ParsedOutput::Transcript { cues: vec![] }).unwrap(),
+                &quote.id
+            ],
+        )
+        .unwrap();
+    assert!(automatic::apply_completed(&state, &quote.id).unwrap());
+    let db = lock(&state.db).unwrap();
+    assert!(
+        db.list_segments("e2e-transcript-review")
+            .unwrap()
+            .is_empty()
+    );
+    let issues = db.list_transcript_issues("e2e-transcript-review").unwrap();
+    assert_eq!(issues.len(), 2);
+    assert!(issues.iter().all(|issue| issue.kind == "no_speech"));
+    assert_eq!(issues[0].start_ms, 0);
+    assert_eq!(issues.last().unwrap().end_ms, 8000);
+    let archive = db.archive().unwrap();
+    assert_eq!(archive.transcript_issues.len(), 2);
+    drop(db);
+    let (_, draft, _) = load_draft(&state, &load_binding(&state, &quote.id).unwrap()).unwrap();
+    assert!(draft.segments.is_empty());
+}
+
+#[test]
+fn retry_after_committed_adoption_refreshes_the_player_before_clearing_the_failure() {
+    let (_directory, state) = fixture();
+    let quote = automatic_job(&state);
+    state
+        .playback
+        .operation()
+        .unwrap()
+        .attach("e2e-transcript-review".into());
+    let failure = automatic::apply_completed(&state, &quote.id).unwrap_err();
+    assert!(
+        state
+            .ai
+            .transcript_application_recorded(&quote.id, &quote.digest)
+            .unwrap()
+    );
+    crate::application::ai::jobs::record_failure(&state, &quote.id, "apply", &failure).unwrap();
+    assert!(
+        crate::application::ai::jobs::retry_ai_application(state.clone(), quote.id.clone())
+            .is_err()
+    );
+    assert_eq!(
+        state.ai.job_issue(&quote.id).unwrap().unwrap().code,
+        "local_apply"
+    );
+    state.playback.shutdown().unwrap();
+    crate::application::ai::jobs::retry_ai_application(state.clone(), quote.id.clone()).unwrap();
+    assert!(state.ai.job_issue(&quote.id).unwrap().is_none());
+    assert_eq!(
+        lock(&state.db)
+            .unwrap()
+            .subtitle_versions("e2e-transcript-review")
+            .unwrap()
+            .len(),
+        1
+    );
+}
 fn authored_range() -> ManualTranscriptContent {
     ManualTranscriptContent::Subtitles {
         segments: vec![

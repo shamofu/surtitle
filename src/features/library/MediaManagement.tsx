@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { queryKeys } from '../../shared/query/keys';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { libraryApi } from './api';
 import { nativeAvailable } from '../../shared/native/transport';
-import type { Media } from '../../shared/contracts/media';
+import type { Media, MediaStream } from '../../shared/contracts/media';
+import { languageName } from '../../shared/format';
 import {
   useDataActions,
   useAppearance,
@@ -125,19 +126,33 @@ export function DownloadJobs() {
   );
 }
 
+export function recommendedSubtitleStream(streams: MediaStream[], learningLanguage: string) {
+  const normalize = (value: string) => {
+    try { return new Intl.Locale(value.trim().replaceAll('_', '-')).language; }
+    catch { return value.toLowerCase(); }
+  };
+  const matches = streams.filter(item => item.kind === 'subtitle' && item.supportedText &&
+    item.language && normalize(item.language) === normalize(learningLanguage));
+  return matches.length === 1 ? matches[0].index : undefined;
+}
+
 export function SubtitleSourceDialog({
   media,
-  initialMode,
+  initialMode = 'choose',
+  initialStreamIndex,
+  onTranscribe,
   onClose,
 }: {
   media: Media;
-  initialMode: 'embedded' | 'file' | 'versions';
+  initialMode?: 'choose' | 'embedded' | 'file' | 'versions' | 'transcribe';
+  initialStreamIndex?: number;
+  onTranscribe?: () => void;
   onClose: () => void;
 }) {
   const { mutate } = useDataActions();
-  const { t } = useAppearance();
+  const { t, locale } = useAppearance();
   const { report } = useNotifications();
-  const [mode, setMode] = useState(initialMode);
+  const [mode, setMode] = useState(initialMode === 'choose' ? 'embedded' : initialMode);
   const [stream, setStream] = useState('');
   const [version, setVersion] = useState('');
   const [replace, setReplace] = useState(false);
@@ -153,11 +168,18 @@ export function SubtitleSourceDialog({
     enabled: mode === 'versions' && !busy,
   });
   const hasExisting = media.segmentCount > 0;
+  useEffect(() => {
+    if (!streams.data) return;
+    const requested = streams.data.find(item => item.index === initialStreamIndex && item.kind === 'subtitle' && item.supportedText);
+    const recommended = initialStreamIndex !== undefined ? requested?.index : recommendedSubtitleStream(streams.data, media.learningLanguage);
+    if (recommended !== undefined) setStream(String(recommended));
+  }, [streams.data, initialStreamIndex, media.learningLanguage]);
   const canSubmit =
-    (!hasExisting || replace) &&
-    (mode === 'file' || (mode === 'embedded' ? stream !== '' : version !== ''));
+    mode === 'transcribe' ? !!onTranscribe : (!hasExisting || replace) &&
+    (mode === 'file' || (mode === 'embedded' ? streams.data?.some(item => String(item.index) === stream && item.supportedText) : version !== ''));
   async function submit() {
     if (!canSubmit) return;
+    if (mode === 'transcribe') { onTranscribe?.(); return; }
     setBusy(true);
     const success = await report(
       async () => {
@@ -190,7 +212,7 @@ export function SubtitleSourceDialog({
   }
   return (
     <Modal
-      title={t('学習する字幕を選ぶ', 'Choose your study subtitles')}
+      title={t('字幕を用意する', 'Set up study subtitles')}
       onClose={() => {
         if (!busy) onClose();
       }}
@@ -199,6 +221,7 @@ export function SubtitleSourceDialog({
         {(
           [
             ['embedded', t('埋め込み字幕', 'Embedded')],
+            ...(onTranscribe ? [['transcribe', t('全編を文字起こし', 'Transcribe full media')]] as const : []),
             ['file', t('字幕ファイル', 'Subtitle file')],
             ['versions', t('保存した旧版', 'Saved versions')],
           ] as const
@@ -227,6 +250,9 @@ export function SubtitleSourceDialog({
             </p>
           )}
           {streams.error && <p role="alert">{streams.error.message}</p>}
+          {streams.data && initialStreamIndex !== undefined && !streams.data.some(item => item.index === initialStreamIndex && item.kind === 'subtitle' && item.supportedText) && <p className="notice warning">
+            {t('再生中の字幕は学習用に読み込めません。別の字幕か全編の文字起こしを選んでください。', 'The playback captions cannot be imported for study. Choose another subtitle track or transcribe the full media.')}
+          </p>}
           <Field label={t('抽出する字幕', 'Subtitle to extract')}>
             <select
               value={stream}
@@ -244,8 +270,8 @@ export function SubtitleSourceDialog({
                     value={item.index}
                     disabled={!item.supportedText}
                   >
-                    {item.title || item.language || t('字幕', 'Subtitle')} ·{' '}
-                    {item.codec} · #{item.index}
+                    {item.title || (item.language ? languageName(item.language, locale || 'en') : t('字幕', 'Subtitle'))}
+                    {item.language && item.title ? ` · ${languageName(item.language, locale || 'en')}` : ''}
                     {!item.supportedText
                       ? t(
                           '（画像字幕・非対応）',
@@ -260,13 +286,18 @@ export function SubtitleSourceDialog({
             !streams.data.some((item) => item.kind === 'subtitle') && (
               <p>
                 {t(
-                  '埋め込み字幕はありません。字幕ファイルを選択できます。',
-                  'No embedded subtitles were found. You can choose a subtitle file.',
+                  'この作品に字幕はありません。全編の文字起こしか、字幕ファイルを利用できます。',
+                  'No embedded subtitles were found. Transcribe the full media or choose a subtitle file.',
                 )}
               </p>
             )}
+          {streams.data?.some(item => item.kind === 'subtitle') && !streams.data.some(item => item.kind === 'subtitle' && item.supportedText) && <p className="notice">
+            {t('画像の字幕は学習用に読み込めません。全編の文字起こしか字幕ファイルを利用してください。', 'Image captions cannot be used for study. Transcribe the full media or choose a subtitle file.')}
+          </p>}
+          {streams.data && <details><summary>{t('字幕の詳細', 'Subtitle details')}</summary><ul>{streams.data.filter(item => item.kind === 'subtitle').map(item => <li key={item.index}>{item.title || item.language || t('字幕', 'Subtitle')} · {item.codec} · #{item.index}</li>)}</ul></details>}
         </>
       )}
+      {mode === 'transcribe' && <p>{t('動画・音声の全編から字幕を作成します。全体の見積もりを一度承認すると、最後まで自動で処理します。', 'Create subtitles for the entire video or recording. Review one estimate, then processing continues to the end automatically.')}</p>}
       {mode === 'file' && (
         <p>
           {t(
@@ -300,7 +331,7 @@ export function SubtitleSourceDialog({
           )}
         </>
       )}
-      {hasExisting && (
+      {hasExisting && mode !== 'transcribe' && (
         <label className="check-field">
           <input
             type="checkbox"
@@ -332,7 +363,7 @@ export function SubtitleSourceDialog({
           disabled={!canSubmit}
           onClick={() => void submit()}
         >
-          {mode === 'file'
+          {mode === 'transcribe' ? t('全編の見積もりへ', 'Estimate full transcription') : mode === 'file'
             ? t('ファイルを選ぶ', 'Choose file')
             : t('この字幕へ切り替える', 'Use these subtitles')}
         </Button>

@@ -26,6 +26,10 @@ pub struct JobSummary {
     created_at: String,
     pending_results: usize,
     transcript_review: bool,
+    has_transcript_result: bool,
+    needs_attention: bool,
+    result_state: String,
+    issue: Option<surtitle_ai::JobIssue>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,6 +89,7 @@ pub struct AiQuote {
     pricing_source: Option<String>,
     unpriced: bool,
     location: String,
+    apply_policy: TranscriptApplyPolicy,
 }
 
 #[derive(Serialize)]
@@ -132,6 +137,7 @@ pub struct PreparationSummary {
     core_duration_ms: u64,
     send_duration_ms: u64,
     chunk_count: usize,
+    whole_media: bool,
 }
 
 pub(crate) mod bindings;

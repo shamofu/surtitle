@@ -153,11 +153,16 @@ fn local_candidate_requires_selection_and_completed_settlement_and_detects_tampe
 #[test]
 fn missing_invalid_and_valid_empty_results_remain_distinct() {
     let (_directory, store, request) = setup();
+    assert!(!store.has_transcript_result(&request.job_id).unwrap());
     assert_eq!(
         store.transcript_result_reviews(&request.job_id).unwrap()[0].state,
         TranscriptResultState::Pending
     );
     let missing = json!({"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":3}});
+    store
+        .record_transcript_evidence(&request, &missing)
+        .unwrap();
+    assert!(store.has_transcript_result(&request.job_id).unwrap());
     assert_eq!(
         classified(&task(), &missing).1,
         Some(TranscriptResultReason::CandidateMissing)

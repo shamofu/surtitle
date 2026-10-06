@@ -323,7 +323,7 @@ impl Player {
                     "invalid player bounds"
                 );
                 #[cfg(windows)]
-                self.native.bounds(b);
+                self.native.bounds(b)?;
             }
             "hide" => {
                 self.hide();

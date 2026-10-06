@@ -6,6 +6,12 @@ job is incomplete or disputed. This does not replace the active subtitle track.
 Embedded captions and SRT/VTT imports are also available without cloud
 transcription. Review source text and timing before saving a card.
 
+New whole-recording jobs apply subtitles automatically when complete. This draft
+study workflow is for working with available excerpts before then, or recovering
+useful portions of an incomplete job. Phrase and subtitle editor drafts are a
+separate autosave feature; [learning backups](data-transfer.md) preserve both kinds
+of draft without transferring their old source authority.
+
 ## Learning workflow
 
 1. Open media, then **Transcript → Study a draft**, and select a transcription job.

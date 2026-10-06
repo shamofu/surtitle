@@ -102,16 +102,13 @@ pub(super) fn period_starts(at: i64) -> Result<(i64, i64)> {
 }
 pub(super) fn check_budget(conn: &Connection, job: &str, additional: u64, at: i64) -> Result<()> {
     let b = limits(conn)?;
-    if b.per_job_microusd == 0 || b.daily_microusd == 0 || b.monthly_microusd == 0 {
-        return Err(AiError::BudgetDisabled);
-    }
     let (day, month) = period_starts(at)?;
     for (used, cap, label) in [
         (job_spend(conn, job)?, b.per_job_microusd, "job"),
         (period_spend(conn, day)?, b.daily_microusd, "daily"),
         (period_spend(conn, month)?, b.monthly_microusd, "monthly"),
     ] {
-        if used.checked_add(additional).is_none_or(|n| n > cap) {
+        if cap != 0 && used.checked_add(additional).is_none_or(|n| n > cap) {
             return Err(AiError::BudgetExceeded(label));
         }
     }

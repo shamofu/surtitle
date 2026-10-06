@@ -30,6 +30,7 @@ pub fn list_transcription_preparations(
                         .map(|b| b.job_id.clone()),
                     repair_parent_job_id: parent.as_ref().map(|p| p.job_id.clone()),
                     repair_boundary_id: parent.map(|p| p.boundary_id),
+                    whole_media: receipt.prepared_job.apply_policy == TranscriptApplyPolicy::Auto,
                 })
             })
             .collect::<Result<Vec<_>>>()
@@ -119,16 +120,22 @@ pub(super) fn create_audio_quote_selected(
                         == crate::application::ai::bindings::settings_fingerprint(&p.settings)?))
         {
             let mut quote = state.ai.quote(&binding.job_id)?;
-            if quote.state == "prepared"
+            if ["prepared", "paused", "needs_review"].contains(&quote.state.as_str())
                 && quote.quote_expires_at_ms <= chrono::Utc::now().timestamp_millis()
             {
                 quote = state.ai.refresh_quote(&binding.job_id)?;
             }
-            return crate::application::ai::quotes::quote_for_ui(state, quote, false);
+            let retry = quote.state != "prepared";
+            return crate::application::ai::quotes::quote_for_ui(state, quote, retry);
         }
     }
     let mut binding = receipt.prepared_job.binding.clone();
     binding.settings_sha256 = crate::application::ai::bindings::settings_fingerprint(&p.settings)?;
+    let policy = if parent.is_none() {
+        receipt.prepared_job.apply_policy
+    } else {
+        TranscriptApplyPolicy::Manual
+    };
     let plan = PreparedJob::new(
         receipt.prepared_job.title.clone(),
         p.settings.vertex_project.clone(),
@@ -137,7 +144,8 @@ pub(super) fn create_audio_quote_selected(
         binding,
         requests,
         execution,
-    )?;
+    )?
+    .with_apply_policy(policy)?;
     let quote = state.ai.prepare(plan)?;
     save_binding(
         state,

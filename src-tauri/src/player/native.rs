@@ -213,18 +213,8 @@ impl Mpv {
     pub fn number(&self, key: &str) -> Option<f64> {
         self.string(key)?.parse().ok()
     }
-    pub fn bounds(&self, b: &Bounds) {
-        unsafe {
-            SetWindowPos(
-                self.child,
-                ptr::null_mut(),
-                (b.x * b.scale_factor).round() as i32,
-                (b.y * b.scale_factor).round() as i32,
-                (b.width * b.scale_factor).round() as i32,
-                (b.height * b.scale_factor).round() as i32,
-                SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-            );
-        }
+    pub fn bounds(&self, b: &Bounds) -> Result<()> {
+        place_video_window(self.child, b)
     }
     pub fn hide(&self) {
         unsafe {
@@ -337,11 +327,102 @@ impl Mpv {
         }
     }
 }
+fn place_video_window(child: windows_sys::Win32::Foundation::HWND, b: &Bounds) -> Result<()> {
+    let positioned = unsafe {
+        SetWindowPos(
+            child,
+            HWND_TOP,
+            (b.x * b.scale_factor).round() as i32,
+            (b.y * b.scale_factor).round() as i32,
+            (b.width * b.scale_factor).round() as i32,
+            (b.height * b.scale_factor).round() as i32,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        )
+    };
+    ensure!(
+        positioned != 0,
+        "could not show video: {}",
+        std::io::Error::last_os_error()
+    );
+    Ok(())
+}
+
 impl Drop for Mpv {
     fn drop(&mut self) {
         unsafe {
             (self.destroy)(self.handle);
             DestroyWindow(self.child);
         }
+    }
+}
+
+#[cfg(test)]
+mod surface_tests {
+    use super::*;
+
+    #[test]
+    fn video_is_above_sibling_after_resize_and_modal_restore() {
+        unsafe {
+            let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+            let create = |parent, style| {
+                CreateWindowExW(
+                    0,
+                    class.as_ptr(),
+                    ptr::null(),
+                    style,
+                    0,
+                    0,
+                    100,
+                    100,
+                    parent,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    ptr::null(),
+                )
+            };
+            let parent = create(ptr::null_mut(), WS_POPUP);
+            assert!(!parent.is_null());
+            let webview = create(parent, WS_CHILD);
+            let video = create(parent, WS_CHILD);
+            assert!(!webview.is_null() && !video.is_null());
+            let active = GetForegroundWindow();
+            let mut bounds = Bounds {
+                x: 10.,
+                y: 20.,
+                width: 80.,
+                height: 60.,
+                scale_factor: 1.5,
+            };
+            for width in [80., 90.] {
+                ShowWindow(video, SW_HIDE);
+                SetWindowPos(
+                    webview,
+                    HWND_TOP,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+                bounds.width = width;
+                place_video_window(video, &bounds).unwrap();
+                assert_eq!(GetTopWindow(parent), video);
+                assert_ne!(GetWindowLongPtrW(video, GWL_STYLE) as u32 & WS_VISIBLE, 0);
+                assert_eq!(GetForegroundWindow(), active);
+            }
+            DestroyWindow(parent);
+        }
+    }
+
+    #[test]
+    fn invalid_video_window_reports_placement_failure() {
+        let bounds = Bounds {
+            x: 0.,
+            y: 0.,
+            width: 10.,
+            height: 10.,
+            scale_factor: 1.,
+        };
+        assert!(place_video_window(ptr::null_mut(), &bounds).is_err());
     }
 }

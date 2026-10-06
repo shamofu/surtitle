@@ -5,6 +5,18 @@ the same records and every registered card-audio clip. CSV/TSV export the phrase
 collection; SRT/VTT export a selected media item's source subtitles and, when
 available, a separate translation file.
 
+Export from a media item defaults to SRT for that item's subtitles. Export from
+the library defaults to a ZIP backup. JSON/ZIP always cover the whole learning
+collection, and CSV/TSV always cover all cards. The dialog describes the selected
+scope before export, then lists the files actually written, including any
+translation file, and offers to open their containing folder.
+
+JSON/ZIP archives use version 2, preserving phrase and subtitle editor drafts as
+well as generated-subtitle status, warnings and alternatives. Restore accepts
+both version 1 and version 2 archives. Restored drafts keep their text but are
+detached from the old source; choose current subtitles explicitly to reconnect
+them before saving a card or subtitle edit.
+
 Cards keep nominal source timestamps separately from the actual extracted audio
 range. New clips include the configured playback context (150 ms per side by
 default, up to 1,000 ms), bounded by the media duration. JSON/ZIP preserve this
@@ -16,8 +28,9 @@ even though it does not include audio bytes.
 ZIP export fails if a registered clip is missing, unreadable, outside managed
 audio storage, or no longer a regular file. The error identifies its card and
 asks the user to restore the clip. A card that never had audio is valid; a missing
-registered clip is not silently converted into an audio-less card. Export does
-not change the learning database or source audio.
+registered clip is not silently converted into an audio-less card. Pending editor
+changes are saved before export. Writing the archive does not change saved cards
+or source audio.
 
 JSON/ZIP export enforces the same byte limits as restore: 256 MiB for learning
 JSON, 64 MiB per audio clip, and 8 GiB for the complete uncompressed ZIP contents.
@@ -35,6 +48,8 @@ guarantee, not a promise against hardware failure or filesystem corruption.
 
 Restore previews and validates the archive before applying it, backs up the
 current learning database, and places restored audio in a new managed directory.
+Pending editor changes are saved before restore, and old editing sessions are
+cleared after it succeeds so they cannot overwrite the restored drafts.
 It does not import credentials, cost ledgers, paid jobs, execution approvals, or
 external-tool selections. Original media files are not bundled in backups.
 

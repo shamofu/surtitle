@@ -5,28 +5,44 @@ import { useNotifications } from '../../app/runtime';
 import { nativeAvailable } from '../../shared/native/transport';
 import { closeWindow, subscribeWindowClose } from '../../shared/native/window';
 
-export function useStudyExitGuard(dirty: boolean, saving: boolean, onDiscard: () => void) {
+export function useStudyExitGuard(dirty: boolean, saving: boolean, onDiscard: () => void, beforeLeave?: () => Promise<void>) {
   const protectedSession = dirty || saving;
   const latest = useRef(protectedSession);
   latest.current = protectedSession;
+  const latestBeforeLeave = useRef(beforeLeave); latestBeforeLeave.current = beforeLeave;
+  const latestSaving = useRef(saving); latestSaving.current = saving;
   const { notify } = useNotifications();
   const [nativeClose, setNativeClose] = useState(false);
   const [closing, setClosing] = useState(false);
   const [error, setError] = useState('');
   const closePending = useRef(false);
   const blocker = useBlocker({
-    shouldBlockFn: useCallback(({ current, next }) =>
-      latest.current && current.pathname !== next.pathname, []),
+    shouldBlockFn: useCallback(({ current, next }) => {
+      if (current.pathname === next.pathname) return false;
+      if (latestSaving.current) return true;
+      if (latestBeforeLeave.current) {
+        return latestBeforeLeave.current().then(() => false).catch(cause => {
+          setError(cause instanceof Error ? cause.message : String(cause)); return true;
+        });
+      }
+      return latest.current;
+    }, []),
     withResolver: true,
     enableBeforeUnload: protectedSession,
-    disabled: !protectedSession,
+    disabled: !protectedSession && !beforeLeave,
   });
 
   useEffect(() => {
     if (!nativeAvailable()) return;
     return subscribeWindowClose(() => {
-      if (!latest.current) return false;
-      setNativeClose(true);
+      if (!latest.current && !latestBeforeLeave.current) return false;
+      if (closePending.current) return true;
+      if (latestSaving.current || !latestBeforeLeave.current) { setNativeClose(true); return true; }
+      closePending.current = true;
+      setClosing(true);
+      void latestBeforeLeave.current().then(closeWindow).catch(cause => {
+        setError(cause instanceof Error ? cause.message : String(cause)); setNativeClose(true);
+      }).finally(() => { closePending.current = false; setClosing(false); });
       return true;
     }, cause => notify(String(cause), 'error'));
   }, [notify]);
@@ -57,5 +73,15 @@ export function useStudyExitGuard(dirty: boolean, saving: boolean, onDiscard: ()
       blocker.proceed();
     }
   }
-  return { open: nativeClose || blocker.status === 'blocked', closing, error, keepEditing, discard };
+  async function retry() {
+    if (saving || closePending.current || !beforeLeave) return;
+    setClosing(true); setError(''); closePending.current = true;
+    try {
+      await beforeLeave();
+      if (nativeClose) await closeWindow();
+      else if (blocker.status === 'blocked') blocker.proceed();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { closePending.current = false; setClosing(false); }
+  }
+  return { open: nativeClose || blocker.status === 'blocked', closing, error, keepEditing, discard, retry };
 }

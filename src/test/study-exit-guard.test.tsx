@@ -6,7 +6,7 @@ import { closeWindow } from '../shared/native/window';
 
 const fixture = vi.hoisted(() => ({
   options: undefined as undefined | {
-    shouldBlockFn: (locations: { current: { pathname: string }; next: { pathname: string } }) => boolean;
+    shouldBlockFn: (locations: { current: { pathname: string }; next: { pathname: string } }) => boolean | Promise<boolean>;
     enableBeforeUnload: boolean; disabled: boolean;
   },
   status: 'idle',
@@ -79,4 +79,33 @@ it('keeps drafts and reports native close failures, and coalesces duplicate conf
   await waitFor(() => expect(result.current.error).toBe('Could not close'));
   expect(fixture.discard).not.toHaveBeenCalled();
   expect(result.current.open).toBe(true);
+});
+
+it('waits for draft persistence before navigation and native closure', async () => {
+  let complete!: () => void;
+  const flush = vi.fn(() => new Promise<void>(resolve => { complete = resolve; }));
+  renderHook(() => useStudyExitGuard(true, false, fixture.discard, flush));
+  const navigation = fixture.options!.shouldBlockFn({ current: { pathname: '/study/a' }, next: { pathname: '/cards' } });
+  expect(flush).toHaveBeenCalledOnce();
+  complete();
+  await expect(navigation).resolves.toBe(false);
+  act(() => { expect(fixture.closeRequested?.()).toBe(true); });
+  expect(closeWindow).not.toHaveBeenCalled();
+  await act(async () => { complete(); });
+  expect(closeWindow).toHaveBeenCalledOnce();
+  expect(fixture.discard).not.toHaveBeenCalled();
+});
+
+it('keeps navigation blocked after failed persistence and retries without discarding', async () => {
+  fixture.status = 'blocked';
+  const flush = vi.fn().mockRejectedValueOnce(new Error('disk full')).mockResolvedValue(undefined);
+  const { result } = renderHook(() => useStudyExitGuard(true, false, fixture.discard, flush));
+  await act(async () => {
+    expect(await fixture.options!.shouldBlockFn({ current: { pathname: '/study/a' }, next: { pathname: '/cards' } })).toBe(true);
+  });
+  expect(result.current.error).toBe('disk full');
+  expect(fixture.proceed).not.toHaveBeenCalled();
+  await act(() => result.current.retry());
+  expect(fixture.proceed).toHaveBeenCalledOnce();
+  expect(fixture.discard).not.toHaveBeenCalled();
 });

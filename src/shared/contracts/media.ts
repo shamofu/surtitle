@@ -25,7 +25,22 @@ export interface SubtitleSegment {
   endMs: number;
   text: string;
   translation?: string;
-  status?: 'confirmed' | 'provisional' | 'review';
+  status?: 'confirmed' | 'generated' | 'generated_review' | 'provisional' | 'review';
+  reviewIssues?: { id: string; kind: string; startMs: number; endMs: number; alternatives: { startMs: number; endMs: number; text: string }[] }[];
+}
+
+export interface TranscriptIssueRecord {
+  id: string;
+  mediaId: string;
+  sourceId: string;
+  kind: string;
+  startMs: number;
+  endMs: number;
+  alternatives: { startMs: number; endMs: number; text: string }[];
+}
+
+export function subtitleUsable(segment: Pick<SubtitleSegment, 'status'>): boolean {
+  return !segment.status || ['confirmed', 'generated', 'generated_review'].includes(segment.status);
 }
 
 export interface ImportRequest {

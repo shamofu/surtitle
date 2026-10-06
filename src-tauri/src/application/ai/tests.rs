@@ -8,6 +8,7 @@ fn segment() -> surtitle_core::SubtitleSegment {
         text: "Hello.".into(),
         translation: None,
         status: "confirmed".into(),
+        review_issues: vec![],
     }
 }
 fn cue() -> SourceCue {

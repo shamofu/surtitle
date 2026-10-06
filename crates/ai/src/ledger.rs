@@ -7,8 +7,11 @@ mod accounting;
 mod approval;
 mod dispatch;
 mod initialize;
+mod issues;
+mod local_applications;
 mod read;
 mod settlement;
+pub use issues::JobIssue;
 
 mod transcript_evidence;
 pub use transcript_evidence::*;

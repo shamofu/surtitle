@@ -3,6 +3,9 @@ import { PausedJobs } from './PausedJobs';
 import { ToolRow } from './ToolRow';
 import { equalSetting, mergeSettingsRefresh } from './merge-settings';
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearch } from '@tanstack/react-router';
+import { continuationApi, type AiContinuation } from '../ai/continuations';
+import { ModelSetup } from '../ai/ModelSetup';
 import {
   Archive,
   ArrowDownToLine,
@@ -60,6 +63,9 @@ const learningLevels = [
 ] as const;
 
 export function SettingsPage() {
+  const navigate = useNavigate();
+  const { resume } = useSearch({ from: '/settings' });
+  const [continuations, setContinuations] = useState<AiContinuation[]>([]);
   const { mutate } = useDataActions();
   const { data } = useSnapshot();
   const { t } = useAppearance();
@@ -96,6 +102,7 @@ export function SettingsPage() {
     setModelsBusy(false);
     setModelNotice('');
   }, [catalogueKey]);
+  useEffect(() => { if (nativeAvailable()) void continuationApi.list().then(setContinuations).catch(() => {}); }, []);
   useEffect(() => {
     if (!nativeAvailable()) return;
     let mounted = true;
@@ -150,6 +157,7 @@ export function SettingsPage() {
         return true;
       }, t('設定を保存しました。', 'Settings saved.'));
       if (saved && savedSettings.current === previousSaved) savedSettings.current = submitted;
+      return saved;
     } finally {
       setBusy(false);
     }
@@ -220,8 +228,10 @@ export function SettingsPage() {
   const perJobBudget = draft?.perJobBudgetUsd ?? draft?.dailyBudgetUsd ?? 0;
   const customBudget = !!draft && (draft.dailyBudgetUsd !== monthlyBudget || perJobBudget !== monthlyBudget);
   const retentionPreset = [0.85, 0.9, 0.95].find((value) => Math.abs(value - (draft?.retention ?? 0.9)) < 0.000001);
+  const continuation = continuations.find(item => item.id === resume) || continuations[0];
   return (
     <div className="settings-page page-enter">
+      {continuation && <div className="notice"><span>{t('途中のAI依頼に戻れます。', 'You can return to your unfinished AI request.')}</span><Button disabled={!valid || credentialBusy} busy={busy} onClick={async () => { if (await save()) void navigate({ to: '/study/$mediaId', params: { mediaId: continuation.mediaId }, search: { resume: continuation.id } }); }}>{t('保存して元の操作に戻る', 'Save and return to your request')}</Button></div>}
       <PageTitle
         title={t('設定', 'Settings')}
         description={t(
@@ -496,6 +506,8 @@ export function SettingsPage() {
               {!data?.settings.credentialConfigured && <p>{t('先にサービスアカウントのJSONを読み込んでください。', 'Import a service-account JSON key first.')}</p>}
               {modelNotice && <p role="status">{modelNotice}</p>}
             </div>
+            <ModelSetup models={draft?.aiModels || {}} location={draft?.vertexLocation || 'global'} candidates={modelCatalogue.key === catalogueKey ? modelCatalogue.models : []} disabled={!draft || busy || credentialBusy} onChange={aiModels => change('aiModels', aiModels)} />
+            <details><summary>{t('用途ごとの詳細設定', 'Detailed settings by purpose')}</summary>
             {(
               [
                 'transcription',
@@ -534,6 +546,7 @@ export function SettingsPage() {
                 />
               </section>
             ))}
+            </details>
           </section>
           <section id="budget" className="settings-card">
             <div className="settings-section-title">
@@ -559,7 +572,7 @@ export function SettingsPage() {
               </div>
               <div>
                 <span>{t('保存済みの月額上限', 'Saved monthly limit')}</span>
-                <strong>{data ? money(data.budget.limitUsd) : '—'}</strong>
+                <strong>{data ? data.budget.limitUsd === 0 ? t('上限なし', 'Unlimited') : money(data.budget.limitUsd) : '—'}</strong>
               </div>
             </div>
             {data && data.budget.monetaryTotalsComplete === false && (
@@ -576,8 +589,8 @@ export function SettingsPage() {
                 'Monthly AI budget (USD)',
               )}
               hint={t(
-                'UTC基準の暦月ごとの上限です。$0では料金を算定できる処理を停止します。料金未設定の処理は金額上限の対象外で、送信範囲を別途承認します。',
-                'A limit for each UTC calendar month. $0 stops priced jobs. Unpriced jobs are outside the dollar limits and require separate approval of the request scope.',
+                'UTC基準の暦月ごとの上限です。0は月額の上限なしです。正の金額は料金を算定できる処理に適用します。料金未設定の処理は金額上限の対象外で、送信範囲を別途承認します。',
+                'A limit for each UTC calendar month. Zero means no monthly limit. Positive amounts cap priced jobs. Unpriced jobs are outside the dollar limits and require separate approval of the request scope.',
               )}
             >
               <div className="currency-input">
@@ -601,7 +614,7 @@ export function SettingsPage() {
             )}</p>}
             <details className="settings-details budget-details">
               <summary>{t('1日・1処理の上限を調整', 'Adjust daily and per-job limits')}</summary>
-              <p className="helper-text">{t('月額と同じ上限は月額の変更に合わせて調整します。個別の上限はそのまま維持します。いずれかの上限が$0の場合、料金を算定できる処理は実行できません。', 'Limits matching the monthly budget follow its changes. Independent limits are kept. A $0 limit blocks priced jobs.')}</p>
+              <p className="helper-text">{t('月額と同じ上限は月額の変更に合わせて調整します。個別の上限はそのまま維持します。各上限の0は、その期間・処理の上限なしを意味します。', 'Limits matching the monthly budget follow its changes. Independent limits are kept. Zero removes the limit for that period or job.')}</p>
               <div className="field-row">
                 <div className="settings-field-group">
                   <Field label={t('1日の上限（USD）', 'Daily limit (USD)')} hint={t('UTC基準の暦日ごとに集計します。', 'Usage is counted by UTC calendar day.')}>

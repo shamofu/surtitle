@@ -83,8 +83,8 @@ impl Store {
                     && current.start_ms == update.start_ms
                     && current.end_ms == update.end_ms
                     && current.text == update.text
-                    && current.status == "confirmed"
-                    && update.status == "confirmed",
+                    && crate::is_usable_subtitle_status(&current.status)
+                    && update.status == current.status,
                 "AI translation source changed"
             );
             tx.execute(
@@ -172,6 +172,32 @@ impl Store {
         end_ms: u64,
         segments: &[SubtitleSegment],
     ) -> Result<bool> {
+        self.adopt_transcript_with_issues_once(
+            job_id,
+            job_digest,
+            draft_digest,
+            media_id,
+            expected_revision,
+            start_ms,
+            end_ms,
+            segments,
+            &[],
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn adopt_transcript_with_issues_once(
+        &mut self,
+        job_id: &str,
+        job_digest: &str,
+        draft_digest: &str,
+        media_id: &str,
+        expected_revision: &str,
+        start_ms: u64,
+        end_ms: u64,
+        segments: &[SubtitleSegment],
+        issues: &[TranscriptIssueRecord],
+    ) -> Result<bool> {
         ensure!(
             !job_id.is_empty() && job_id.len() <= 128,
             "invalid transcript job"
@@ -220,10 +246,35 @@ impl Store {
             "source subtitles changed; review a new preparation"
         );
         validate_transcript_range(&current, start_ms, end_ms, segments, media_id)?;
+        ensure!(
+            issues.iter().all(|issue| issue.media_id == media_id
+                && issue.start_ms >= start_ms
+                && issue.end_ms <= end_ms),
+            "Transcript issues belong outside the adopted range"
+        );
         let previous = current
             .iter()
             .filter(|segment| segment.start_ms < end_ms && segment.end_ms > start_ms)
             .collect::<Vec<_>>();
+        if !previous.is_empty() {
+            let media_json: String =
+                tx.query_row("SELECT data FROM media WHERE id=?", [media_id], |row| {
+                    row.get(0)
+                })?;
+            let media: Media = serde_json::from_str(&media_json)?;
+            let version = SubtitleVersion {
+                id: id(),
+                media_id: media_id.into(),
+                created_at: now(),
+                label: "Before applying generated subtitles".into(),
+                stream_index: media.subtitle_stream_index,
+                segments: current.clone(),
+            };
+            tx.execute(
+                "INSERT INTO subtitle_versions(id,media_id,data) VALUES(?,?,?)",
+                params![version.id, media_id, serde_json::to_string(&version)?],
+            )?;
+        }
         for old in &previous {
             tx.execute("DELETE FROM segments WHERE id=?", [&old.id])?;
         }
@@ -238,6 +289,10 @@ impl Store {
                 ],
             )?;
         }
+        super::transcript_issues::deactivate_transcript_issues_on(
+            &tx, media_id, start_ms, end_ms, false,
+        )?;
+        super::transcript_issues::upsert_transcript_issues_on(&tx, issues)?;
         tx.execute("INSERT INTO transcript_adoptions(job_id,job_digest,draft_digest,previous_segments_json,adopted_at) VALUES(?,?,?,?,?)", params![job_id,job_digest,draft_digest,serde_json::to_string(&previous)?,now()])?;
         tx.commit()?;
         Ok(true)

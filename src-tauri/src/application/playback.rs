@@ -83,10 +83,11 @@ impl PlaybackOperation<'_> {
         self.session.media_id.take()
     }
     fn player(&mut self) -> Result<&mut Player> {
-        self.session
-            .player
-            .as_mut()
-            .context("Native player is unavailable; prepare the bundled runtime")
+        let error =
+            self.session.error.clone().unwrap_or_else(|| {
+                "Native player is unavailable; prepare the bundled runtime".into()
+            });
+        self.session.player.as_mut().context(error)
     }
     fn optional_player(&mut self) -> Option<&mut Player> {
         self.session.player.as_mut()
@@ -424,6 +425,12 @@ pub(super) fn restore_learning_archive(
         .join("backups")
         .join(format!("before-restore-{}.sqlite", surtitle_core::id()));
     let restored = lock(&state.db)?.restore(archive, &backup);
+    if restored.is_ok() {
+        state.preferences.update(|preferences| {
+            preferences.ai_continuations.clear();
+            Ok(())
+        })?;
+    }
     // On a transaction/backup failure the old database is intact; reopen its
     // retained current item too, so a failed restore does not strand the player.
     let can_reopen = previous.as_deref().filter(|id| {
@@ -462,6 +469,7 @@ mod source_playback_tests {
             text: "Source sentence".into(),
             translation: None,
             status: "confirmed".into(),
+            review_issues: vec![],
         }
     }
     fn ids(values: &[&str]) -> Vec<String> {

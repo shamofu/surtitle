@@ -151,6 +151,13 @@ impl AiStore {
     pub fn recover_interrupted(&self) -> Result<u64> {
         let mut conn = self.connect()?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let interrupted = {
+            let mut statement = tx.prepare("SELECT id FROM ai_jobs WHERE state='approved'")?;
+            let jobs = statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            jobs
+        };
         let changed = tx.execute(
             "UPDATE ai_attempts SET state='unknown' WHERE state='reserved'",
             [],
@@ -168,7 +175,31 @@ impl AiStore {
             &changed.to_string(),
         )?;
         tx.commit()?;
+        for job in interrupted {
+            let unknown: bool = self.connect()?.query_row(
+                "SELECT EXISTS(SELECT 1 FROM ai_attempts WHERE job_id=? AND state='unknown')",
+                [&job],
+                |row| row.get(0),
+            )?;
+            self.record_job_issue(
+                &job,
+                if unknown {
+                    "unknown_outcome"
+                } else {
+                    "interrupted"
+                },
+                "recovery",
+                None,
+                if unknown { "review_unknown" } else { "resume" },
+            )?;
+        }
         Ok(changed as u64)
+    }
+
+    /// Finish only locally applied jobs whose requests are already durably complete.
+    pub fn finish_local_application(&self, job_id: &str) -> Result<()> {
+        self.connect()?.execute("UPDATE ai_jobs SET state='completed' WHERE id=? AND state IN ('needs_review','paused') AND NOT EXISTS(SELECT 1 FROM ai_requests WHERE job_id=? AND state!='completed')", params![job_id,job_id])?;
+        Ok(())
     }
 
     /// Explicitly accept the conservative reservation as potentially spent. This does

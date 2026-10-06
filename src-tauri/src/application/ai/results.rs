@@ -17,9 +17,9 @@ pub(super) fn apply_received_output(
     }
     // Hold the same DB mutex across validation and writes to prevent a concurrent
     // subtitle edit from slipping between the check and translation application.
-    verify_application_binding(state, plan)?;
+    verify_application_binding(state, plan).map_err(|_| AiError::PreparationChanged)?;
     let mut db = lock(&state.db)?;
-    verify_task_sources(&db, plan)?;
+    verify_task_sources(&db, plan).map_err(|_| AiError::PreparationChanged)?;
     let updates_translation = matches!(&output, ParsedOutput::Translation { .. });
     if let ParsedOutput::Translation { translations } = output {
         let Some(RequestTask::Translation { cues, .. }) = plan.requests.get(ordinal as usize)
@@ -135,7 +135,24 @@ pub fn apply_saved_ai_result(
     job_id: String,
     ordinal: u32,
 ) -> std::result::Result<(), String> {
-    apply_saved_result(&state, &job_id, ordinal).map_err(err)
+    (|| {
+        apply_saved_result(&state, &job_id, ordinal)?;
+        if saved_results(&state, &job_id)?
+            .iter()
+            .all(|result| result.applied)
+        {
+            state.ai.finish_local_application(&job_id)?;
+            if state
+                .ai
+                .job_issue(&job_id)?
+                .is_some_and(|issue| issue.code == "local_apply")
+            {
+                state.ai.clear_job_issue(&job_id)?;
+            }
+        }
+        Ok(())
+    })()
+    .map_err(err)
 }
 
 pub fn list_vocabulary_candidates(

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { subscribeNative } from '../../shared/native/events';
 import { QuoteApproval } from './QuoteApproval';
-// SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from 'react';
-import { Link } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
+import { continuationApi, type AiContinuation } from './continuations';
 
 import {
   ArrowRight,
@@ -35,23 +35,40 @@ export function AiDialog({
   initialRange,
   initialKind = 'transcribe',
   initialTerm,
+  continuation,
+  sourceContext,
+  sourceInvalid = false,
+  onReselectSource,
+  onApproved,
   onClose,
 }: {
   media: Media;
   initialRange?: { startMs: number; endMs: number };
   initialKind?: AiQuote['kind'];
   initialTerm?: string;
+  continuation?: AiContinuation;
+  sourceContext?: { sourceCueIds: string[]; sourceRevision: string };
+  sourceInvalid?: boolean;
+  onReselectSource?: (continuation: AiContinuation) => void;
+  onApproved?: (kind: AiQuote['kind'], focusTerm: string) => void;
   onClose: () => void;
 }) {
   const { mutate } = useDataActions();
   const { t } = useAppearance();
   const { data } = useSnapshot();
   const { report } = useNotifications();
-  const [kind, setKind] = useState<AiQuote['kind']>(initialKind);
-  const [focusTerm, setFocusTerm] = useState(initialTerm || '');
+  const navigate = useNavigate();
+  const [continuationId] = useState(() => continuation?.id || crypto.randomUUID());
+  const [kind, setKind] = useState<AiQuote['kind']>(continuation?.kind || initialKind);
+  const [wholeMedia, setWholeMedia] = useState(continuation?.wholeMedia ?? true);
+  const [focusTerm, setFocusTerm] = useState(continuation?.focusTerm ?? initialTerm ?? '');
   const [models, setModels] = useState<
     Partial<Record<AiPurpose, AiModelPreference>>
-  >({});
+  >(continuation?.models || {});
+  const mediaSignature = JSON.stringify([media.path, media.audioStreamIndex, media.learningLanguage, media.explanationLanguage]);
+  const [boundMediaSignature, setBoundMediaSignature] = useState(continuation ? continuation.sourceMediaSignature : mediaSignature);
+  const mediaChanged = boundMediaSignature !== mediaSignature;
+  const continuationMediaChanged = !!continuation && continuation.sourceMediaSignature !== mediaSignature;
   const purpose: AiPurpose =
     kind === 'transcribe'
       ? 'transcription'
@@ -64,19 +81,17 @@ export function AiDialog({
     models[purpose] ||
     data?.settings.aiModels?.[purpose] ||
     emptyModel(purpose);
+  const invalidSource = (sourceInvalid || mediaChanged) && kind !== 'transcribe';
   const modelValid =
     !!selectedModel.modelId.trim() &&
     Number.isInteger(selectedModel.maxOutputTokens) &&
     selectedModel.maxOutputTokens > 0;
 
   const [start, setStart] = useState(
-    timestamp(initialRange?.startMs || 0, true),
+    continuation?.start ?? timestamp(initialRange?.startMs || 0, true),
   );
   const [end, setEnd] = useState(
-    timestamp(
-      initialRange?.endMs || Math.min(media.durationMs || 60000, 60000),
-      true,
-    ),
+    continuation?.end ?? timestamp(initialRange?.endMs ?? media.durationMs, true),
   );
   const [quote, setQuote] = useState<AiQuote | null>(null);
   const [busy, setBusy] = useState(false);
@@ -87,17 +102,23 @@ export function AiDialog({
     [],
   );
   useEffect(() => {
-    if (kind !== 'transcribe' || !nativeAvailable()) return;
+    if (mediaChanged) { setQuote(null); setPreparation(undefined); setPreparations([]); }
+  }, [mediaSignature, mediaChanged]);
+  useEffect(() => {
+    if (kind !== 'transcribe' || mediaChanged || !nativeAvailable()) return;
     let active = true;
     void report(() => aiApi.transcriptionPreparations(media.id)).then(
       (items) => {
-        if (active && items) setPreparations(items);
+        if (active && items) {
+          setPreparations(continuationMediaChanged ? [] : items);
+          if (!continuationMediaChanged && continuation?.preparationId) setPreparation(items.find(item => item.id === continuation.preparationId));
+        }
       },
     );
     return () => {
       active = false;
     };
-  }, [kind, media.id, report]);
+  }, [kind, media.id, mediaSignature, mediaChanged, continuationMediaChanged, report]);
   const [progress, setProgress] = useState<{
     phase: string;
     processed_ms: number;
@@ -105,12 +126,13 @@ export function AiDialog({
     completed_chunks: number;
     total_chunks: number;
   }>();
-  const startMs = parseTimestamp(start),
-    endMs = parseTimestamp(end);
+  const startMs = kind === 'transcribe' && wholeMedia ? 0 : parseTimestamp(start),
+    endMs = kind === 'transcribe' && wholeMedia ? media.durationMs : parseTimestamp(end);
   const valid =
     startMs !== null &&
     endMs !== null &&
     endMs > startMs &&
+    (kind !== 'transcribe' || media.durationMs > 0) &&
     (!media.durationMs || endMs <= media.durationMs);
   useEffect(() => {
     if (!preparing || !nativeAvailable()) return;
@@ -125,7 +147,7 @@ export function AiDialog({
     setPreparation(undefined);
     setProgress(undefined);
     const result = await report(() =>
-      mutate(() => aiApi.prepareTranscription(media.id, startMs, endMs), {
+      mutate(() => aiApi.prepareTranscription(media.id, startMs, endMs, wholeMedia), {
         kind: 'snapshot',
       }),
     );
@@ -137,15 +159,21 @@ export function AiDialog({
       ]);
     }
     setPreparing(false);
+    return result;
   }
   async function estimate() {
-    if (!valid || !modelValid || (kind === 'transcribe' && !preparation))
+    if (!valid || !modelValid || invalidSource || busy || preparing || !data?.settings.credentialConfigured)
       return;
     setBusy(true);
+    if (kind === 'transcribe') setBoundMediaSignature(mediaSignature);
+    const prepared = kind === 'transcribe'
+      ? (!mediaChanged && preparation && preparation.startMs === startMs && preparation.endMs === endMs && (!wholeMedia || preparation.wholeMedia) ? preparation : await prepare())
+      : undefined;
+    if (kind === 'transcribe' && !prepared) { setBusy(false); return; }
     const result = await report(() =>
-      kind === 'transcribe' && preparation
+      kind === 'transcribe' && prepared
         ? mutate(
-            () => aiApi.createTranscriptionQuote(preparation.id, selectedModel),
+            () => aiApi.createTranscriptionQuote(prepared.id, selectedModel),
             { kind: 'snapshot' },
           )
         : mutate(
@@ -164,21 +192,50 @@ export function AiDialog({
             { kind: 'snapshot' },
           ),
     );
-    if (result) setQuote(result);
+    if (result) {
+      setQuote(result);
+      await report(() => saveContinuation(result.id, prepared?.id));
+    }
     setBusy(false);
   }
   async function approve() {
-    if (!quote) return;
+    if (!quote || invalidSource) return;
     setBusy(true);
     const result = await report(
       async () => {
-        await mutate(() => aiApi.approveQuote(quote), { kind: 'snapshot' });
+        await mutate(() => quote.isRetry ? aiApi.reapproveQuote(quote) : aiApi.approveQuote(quote), { kind: 'snapshot' });
         return true;
       },
       t('承認した処理を開始しました。', 'Your approved job has started.'),
     );
+    if (result) { onApproved?.(kind, focusTerm.trim()); await report(() => continuationApi.discard(continuationId)); onClose(); }
     setBusy(false);
-    if (result) onClose();
+  }
+  function saveContinuation(quoteId = quote?.id, preparationId = preparation?.id) {
+    return continuationApi.save({ id: continuationId, mediaId: media.id, kind, start, end, wholeMedia, focusTerm, models, preparationId, quoteId,
+      sourceCueIds: sourceContext?.sourceCueIds ?? continuation?.sourceCueIds,
+      sourceRevision: sourceContext?.sourceRevision ?? continuation?.sourceRevision,
+      sourceMediaSignature: kind === 'transcribe' ? mediaSignature : boundMediaSignature });
+  }
+  async function openSettings() {
+    if (busy || preparing) return;
+    setBusy(true);
+    const saved = await report(() => saveContinuation());
+    setBusy(false);
+    if (saved) { onClose(); void navigate({ to: '/settings', search: { resume: saved.id } }); }
+  }
+  useEffect(() => {
+    if (!continuation?.quoteId || continuationMediaChanged || !nativeAvailable()) return;
+    let active = true;
+    void report(() => aiApi.reviewAiJob(continuation.quoteId!)).then(result => { if (active && result) setQuote(result); });
+    return () => { active = false; };
+  }, [continuation?.quoteId, continuationMediaChanged, report]);
+  async function reselectSource() {
+    if (busy || preparing || !onReselectSource) return;
+    setBusy(true);
+    const saved = await report(() => saveContinuation());
+    setBusy(false);
+    if (saved) onReselectSource(saved);
   }
   return (
     <Modal
@@ -187,6 +244,14 @@ export function AiDialog({
         if (!busy && !preparing) onClose();
       }}
     >
+      {kind === 'transcribe' && mediaChanged && <div className="notice warning" role="alert">
+        <p>{t('教材か言語設定が変わったため、以前の音声準備と見積もりを使わず、現在の対象で準備し直します。', 'The material or language settings changed. A new estimate will use the current source shown below.')}</p>
+        <p>{media.title} · {media.path} · {t('音声トラック', 'Audio track')}: {media.audioStreamIndex ?? t('既定', 'Default')} · {media.learningLanguage} → {media.explanationLanguage}</p>
+      </div>}
+      {invalidSource && <div className="notice warning" role="alert">
+        <p>{t('出典の字幕が変わったか見つかりません。入力は保持しています。字幕を選び直してから見積もりを確認してください。', 'The source subtitles changed or are missing. Your input is kept. Select the subtitles again before reviewing an estimate.')}</p>
+        {onReselectSource && <Button disabled={busy || preparing} onClick={() => void reselectSource()}>{t('字幕を選び直す', 'Select subtitles again')}</Button>}
+      </div>}
       {!quote ? (
         <>
           <div className="ai-kind-list">
@@ -226,6 +291,10 @@ export function AiDialog({
               </button>
             ))}
           </div>
+          {(!data?.settings.credentialConfigured || !modelValid || !data?.settings.vertexProject) && <div className="notice warning">
+            <p>{t('AIを使うための設定が必要です。入力と対象範囲を残して設定へ進めます。', 'Finish AI setup. Your input and selected scope will be kept.')}</p>
+            <Button disabled={busy || preparing} onClick={() => void openSettings()}>{t('設定してこの操作に戻る', 'Set up and return here')}</Button>
+          </div>}
           {kind === 'vocabulary' && (
             <Field
               label={t(
@@ -259,15 +328,21 @@ export function AiDialog({
           {kind === 'transcribe' && (
             <p className="helper-text">
               {t(
-                '受信後に字幕を確認し、不正な時刻や未取得の区間は原音を聴いて手動で修正できます。すべての認識誤りを自動検出できるわけではありません。',
-                'Review the received subtitles. Invalid times and missing ranges can be corrected manually while listening to the source. Some recognition errors cannot be detected automatically.',
+                '全編の字幕は完成後に自動表示します。気になる箇所には印を付け、あとから原音を聴いて修正できます。',
+                'Full-video subtitles appear automatically when finished. Marked passages can be corrected later while listening.',
               )}
             </p>
           )}
           <div className="scope-heading">
-            <h3>{t('使う区間を選ぶ', 'Choose your range')}</h3>
+            <h3>{t('対象', 'Scope')}</h3>
           </div>
-          <div className="field-row">
+          {kind === 'transcribe' && <div className="segmented-control">
+            <button disabled={busy || preparing} className={wholeMedia ? 'selected' : ''} onClick={() => { setWholeMedia(true); setPreparation(undefined); }}>{t('全編を文字起こし', 'Transcribe the whole video')}</button>
+            <button disabled={busy || preparing} className={!wholeMedia ? 'selected' : ''} onClick={() => { setWholeMedia(false); setPreparation(undefined); }}>{t('範囲を指定', 'Choose a range')}</button>
+          </div>}
+          {kind === 'transcribe' && wholeMedia ? <p className="notice">{media.durationMs > 0
+            ? t(`全編 ${timestamp(media.durationMs, true)} を一括で処理します。`, `Process the entire ${timestamp(media.durationMs, true)} video in one job.`)
+            : t('動画の長さを確認しています。確認後に見積もれます。', 'Waiting for the video duration before estimating.')}</p> : <div className="field-row">
             <Field label={t('開始', 'From')} hint="hh:mm:ss">
               <input
                 value={start}
@@ -293,8 +368,8 @@ export function AiDialog({
                 inputMode="decimal"
               />
             </Field>
-          </div>
-          {!valid && (
+          </div>}
+          {!valid && !(kind === 'transcribe' && wholeMedia && !media.durationMs) && (
             <p className="field-error">
               {t(
                 '動画内の有効な開始・終了時刻を入力してください。',
@@ -302,7 +377,7 @@ export function AiDialog({
               )}
             </p>
           )}
-          {kind === 'transcribe' && preparations.length > 0 && (
+          {kind === 'transcribe' && !wholeMedia && preparations.length > 0 && (
             <Field
               label={t(
                 '保存済みの音声準備を使う',
@@ -382,22 +457,11 @@ export function AiDialog({
                     {t('キャンセル', 'Cancel')}
                   </Button>
                 </div>
-              ) : (
-                <Button
-                  disabled={!valid || busy}
-                  onClick={() => void prepare()}
-                >
-                  <Mic2 size={15} />
-                  {t(
-                    '音声をローカルで準備（無料）',
-                    'Prepare audio locally (free)',
-                  )}
-                </Button>
-              )}
+              ) : null}
             </div>
           )}
-          <section className="ai-model-settings">
-            <h3>{t('モデルと出力設定', 'Model and output settings')}</h3>
+          <details className="ai-model-settings" open={!modelValid}>
+            <summary>{modelValid ? `${t('使用するモデル', 'Model')}: ${selectedModel.modelId}` : t('モデルを選ぶ', 'Choose a model')}</summary>
             <ModelEditor
               key={purpose}
               purpose={purpose}
@@ -408,13 +472,13 @@ export function AiDialog({
                 setModels((current) => ({ ...current, [purpose]: model }))
               }
             />
-          </section>
+          </details>
           <div className="notice">
             <ShieldCheck size={18} />
             <span>
               {t(
-                '見積もりを確認してから実行できます。予算の初期値は $0 です。',
-                'You will review the estimate before any paid job. The initial budget is $0.',
+                '全体の見積もりを確認してから実行します。予算0は上限なしです。',
+                'Review the complete estimate before running. A budget of zero means unlimited.',
               )}
             </span>
           </div>
@@ -424,9 +488,7 @@ export function AiDialog({
                 'AI を使うにはサービスアカウントの設定が必要です。',
                 'Set up your service account to use AI.',
               )}{' '}
-              <Link to="/settings" onClick={onClose}>
-                {t('設定を開く', 'Open settings')} →
-              </Link>
+              <Button onClick={() => void openSettings()}>{t('設定を開く', 'Open settings')} →</Button>
             </p>
           )}
           <footer className="modal-footer">
@@ -440,12 +502,13 @@ export function AiDialog({
               disabled={
                 !valid ||
                 !modelValid ||
+                invalidSource ||
                 preparing ||
-                (kind === 'transcribe' && !preparation)
+                !data?.settings.credentialConfigured || !data?.settings.vertexProject
               }
             >
               <CircleDollarSign size={16} />
-              {t('見積もりを確認', 'Review estimate')}
+              {kind === 'transcribe' ? t('準備して全体の見積もりを確認', 'Prepare and review the complete estimate') : t('見積もりを確認', 'Review estimate')}
             </Button>
           </footer>
         </>
@@ -460,7 +523,7 @@ export function AiDialog({
           </button>
           <QuoteApproval
             key={quote.id}
-            quote={quote}
+            quote={invalidSource ? { ...quote, canApprove: false, blockedReason: t('字幕を選び直してください。', 'Select the subtitles again.') } : quote}
             busy={busy}
             onApprove={() => void approve()}
           />

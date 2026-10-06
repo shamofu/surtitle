@@ -41,6 +41,7 @@ pub struct TranscriptionPreparation {
     job_id: Option<String>,
     repair_parent_job_id: Option<String>,
     repair_boundary_id: Option<String>,
+    whole_media: bool,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,6 +73,7 @@ pub(crate) mod ranges;
 use ranges::*;
 pub(crate) mod review;
 use review::*;
+pub(crate) mod automatic;
 pub(crate) mod repair;
 use repair::*;
 #[cfg(feature = "e2e-test")]

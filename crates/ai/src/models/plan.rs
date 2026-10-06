@@ -20,8 +20,25 @@ pub struct PreparedJob {
     pub binding: PreparationBinding,
     pub requests: Vec<RequestTask>,
     pub execution: ExecutionConfig,
+    /// Local result handling is approved with the immutable job, never inferred
+    /// from a legacy range or changed by later settings.
+    #[serde(default, skip_serializing_if = "TranscriptApplyPolicy::is_manual")]
+    pub apply_policy: TranscriptApplyPolicy,
     frozen_requests: Vec<Value>,
     frozen_task_digests: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscriptApplyPolicy {
+    #[default]
+    Manual,
+    Auto,
+}
+impl TranscriptApplyPolicy {
+    fn is_manual(&self) -> bool {
+        *self == Self::Manual
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -67,6 +84,7 @@ impl PreparedJob {
             binding,
             requests,
             execution,
+            apply_policy: TranscriptApplyPolicy::Manual,
             frozen_requests: Vec::new(),
             frozen_task_digests: Vec::new(),
         })
@@ -99,6 +117,7 @@ impl PreparedJob {
             binding,
             requests,
             execution,
+            apply_policy: TranscriptApplyPolicy::Manual,
             frozen_requests,
             frozen_task_digests,
         };
@@ -106,6 +125,7 @@ impl PreparedJob {
         Ok(job)
     }
     pub fn with_execution(self, execution: ExecutionConfig) -> Result<Self> {
+        let policy = self.apply_policy;
         Self::new(
             self.title,
             self.project_id,
@@ -114,6 +134,26 @@ impl PreparedJob {
             self.requests,
             execution,
         )
+        .map(|mut job| {
+            job.apply_policy = policy;
+            job
+        })
+    }
+    pub fn with_apply_policy(mut self, policy: TranscriptApplyPolicy) -> Result<Self> {
+        if policy == TranscriptApplyPolicy::Auto
+            && self.requests.iter().any(|task| {
+                !matches!(
+                    task,
+                    RequestTask::AudioTranscription { .. } | RequestTask::TranscribePreview { .. }
+                )
+            })
+        {
+            return Err(AiError::Invalid(
+                "Automatic subtitle application requires audio transcription".into(),
+            ));
+        }
+        self.apply_policy = policy;
+        Ok(self)
     }
     pub fn request_body_snapshot(&self, ordinal: u32) -> Result<&Value> {
         self.frozen_requests
@@ -154,6 +194,16 @@ impl PreparedJob {
 
     pub fn validate(&self) -> Result<()> {
         self.execution.validate()?;
+        if self.apply_policy == TranscriptApplyPolicy::Auto
+            && self.requests.iter().any(|task| {
+                !matches!(
+                    task,
+                    RequestTask::AudioTranscription { .. } | RequestTask::TranscribePreview { .. }
+                )
+            })
+        {
+            return Err(AiError::PreparationChanged);
+        }
         if self.frozen_requests.len() != self.requests.len()
             || self.frozen_task_digests.len() != self.requests.len()
         {

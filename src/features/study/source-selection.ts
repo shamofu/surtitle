@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { SubtitleSegment } from '../../shared/contracts/media';
+import { subtitleUsable } from '../../shared/contracts/media';
 export type SelectedContext = SubtitleSegment & { sourceCueIds?: string[] };
 
 export function resolveSourceSelection(
@@ -26,7 +27,7 @@ export function resolveSourceSelection(
             return (
               cue?.id === id &&
               cue.mediaId === mediaId &&
-              (!cue.status || cue.status === 'confirmed')
+              subtitleUsable(cue)
             );
           }))));
   const selected: SelectedContext | undefined = missingOrReorderedSelection
@@ -40,11 +41,11 @@ export function resolveSourceSelection(
           translation: selectedCues.every((cue) => cue.translation?.trim())
             ? selectedCues.map((cue) => cue.translation).join('\n')
             : undefined,
-          status: selectedCues.every(
-            (cue) => !cue.status || cue.status === 'confirmed',
-          )
-            ? 'confirmed'
+          status: selectedCues.every(subtitleUsable)
+            ? selectedCues.some(cue => cue.status === 'generated_review') ? 'generated_review'
+              : selectedCues.some(cue => cue.status === 'generated') ? 'generated' : 'confirmed'
             : 'provisional',
+          reviewIssues: selectedCues.flatMap(cue => cue.reviewIssues || []),
         }
       : selectedFirst;
 

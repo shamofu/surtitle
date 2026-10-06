@@ -19,7 +19,17 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
             .list_jobs()?
             .into_iter()
             .map(|q| {
-                let transcript_review = q.requests.iter().any(|request| request.audio_duration_ms > 0);
+                let has_audio = q.requests.iter().any(|request| request.audio_duration_ms > 0);
+                let has_transcript_result = has_audio && state.ai.has_transcript_result(&q.id)?;
+                let applied = has_audio && (lock(&state.db)?.transcript_adopted(&q.id, &q.digest)?.is_some()
+                    || state.ai.transcript_application_recorded(&q.id, &q.digest)?);
+                let automatic = has_audio && state.ai.prepared_job(&q.id)?.apply_policy == TranscriptApplyPolicy::Auto;
+                let transcript_review = has_transcript_result && !applied && (!automatic || q.state != "approved");
+                let result_state = if applied {
+                    let has_warnings = crate::application::transcript::automatic::applied_has_warnings(&state, &q.id)?;
+                    if has_warnings { "applied_with_warnings" } else { "applied" }
+                } else if has_transcript_result { "ready" } else { "none" };
+                let issue = state.ai.job_issue(&q.id)?;
                 let pending_results = saved_results(&state, &q.id)?
                     .iter()
                     .filter(|result| !result.applied)
@@ -27,6 +37,8 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                 let context = p.quotes.get(&q.id);
                 let status = if unknown_jobs.contains(q.id.as_str()) {
                     "unknown"
+                } else if applied {
+                    "completed"
                 } else {
                     match q.state.as_str() {
                         "completed" => "completed",
@@ -37,16 +49,28 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                         _ => "failed",
                     }
                 };
-                let (ja, en) = match status {
+                let (ja, en) = match issue.as_ref().map(|issue| issue.code.as_str()) {
+                    Some("credentials") => ("認証設定を確認してください。受信済み結果は保存されています。", "Check your credentials. Received results are saved."),
+                    Some("budget") => ("予算の上限に達しました。設定を見直して残りを再開できます。", "The budget limit was reached. Update it to resume the remaining work."),
+                    Some("provider") => ("サービスがリクエストを受け付けませんでした。モデルとプロジェクトの設定を確認してください。", "The service rejected the request. Check the model and project settings."),
+                    Some("source_changed") => ("元の動画または字幕が変更されています。受信済み結果は保存されています。", "The source media or subtitles changed. Received results are saved."),
+                    Some("local_apply") => ("結果は受信済みですが、字幕への反映に失敗しました。追加送信せずに反映を再試行できます。", "Results were received but could not be applied. Retry applying without another request."),
+                    Some("invalid_output") => ("受信した結果を確認してください。既に完成した部分は保存されています。", "Review the received result. Completed portions are saved."),
+                    _ => match status {
                     "unknown" => ("結果不明です。費用記録を保持しています。再実行は別途承認が必要です。", "The outcome is unknown. Accounting is retained. Retrying requires separate approval."),
                     "paused" => ("一時停止しています。続行には残りの処理の承認が必要です。", "Paused. Approve the remaining work to continue."),
                     "failed" => ("処理または元字幕の確認が必要です。受信済み結果と費用は保存されています。", "Review the job or source subtitles. Received results and accounting have been retained."),
                     _ if pending_results > 0 => ("受信済み翻訳を保存しています。確認して適用できます。追加送信はありません。", "Received translations are saved. Review and apply them without another request."),
                     "queued" => ("実行の承認を待っています。", "Waiting for your approval."),
+                    "completed" if applied => ("字幕に反映しました。注意箇所は字幕の印から修正できます。", "Subtitles were applied. You can edit marked passages later."),
+                    "completed" if transcript_review => ("結果を受信しました。字幕への反映を確認してください。", "Results received. Review them to apply the subtitles."),
                     "completed" => ("承認された処理が完了しました。", "The approved work is complete."),
                     "cancelled" => ("キャンセルしました。受信済み結果と費用記録は保持します。", "Cancelled. Received results and accounting are retained."),
                     _ => ("承認された範囲を処理しています。", "Processing the approved scope."),
+                    },
                 };
+                let needs_attention = issue.is_some() || pending_results > 0 || transcript_review
+                    || ["unknown", "paused", "failed", "queued"].contains(&status);
                 let message = if p.settings.locale == "ja" { ja } else { en }.to_owned();
                 Ok(JobSummary {
                     id: q.id,
@@ -58,6 +82,10 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                     created_at: utc_time(q.created_at_ms),
                     pending_results,
                     transcript_review,
+                    has_transcript_result,
+                    needs_attention,
+                    result_state: result_state.into(),
+                    issue,
                 })
             })
             .collect::<Result<Vec<_>>>()?;

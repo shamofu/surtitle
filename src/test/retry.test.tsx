@@ -37,6 +37,7 @@ vi.mock('../features/ai/api', () => ({
     resolveUnknownAttempt: vi.fn(),
     pauseAiJob: vi.fn(),
     cancelAiJob: vi.fn(),
+    retryAiApplication: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -102,5 +103,13 @@ describe('fresh approval for remaining AI work', () => {
     expect(
       screen.queryByRole('button', { name: 'Estimate remaining work' }),
     ).not.toBeInTheDocument();
+  });
+  it('offers only local application when every response has already arrived', async () => {
+    render(<JobActions job={{ ...job, status: 'failed', progress: 1, issue: { code: 'local_apply', phase: 'apply', occurredAt: '', nextAction: 'retry_local' } }} />);
+    expect(screen.queryByRole('button', { name: 'Estimate remaining work' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry applying saved results' }));
+    await waitFor(() => expect(aiApi.retryAiApplication).toHaveBeenCalledExactlyOnceWith(job.id));
+    expect(aiApi.createRetryQuote).not.toHaveBeenCalled();
+    expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
   });
 });

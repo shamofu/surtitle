@@ -9,11 +9,18 @@ import {
 } from '@testing-library/react';
 import { TransferDialog } from '../features/transfer/TransferDialog';
 import { transferApi } from '../features/transfer/api';
+import { clearEditorDraftSessions, flushEditorDrafts } from '../features/study/editor-drafts/useEditorDraft';
 
 const modal = vi.hoisted(() => ({ register: () => () => {} }));
+vi.mock('../features/study/editor-drafts/useEditorDraft', () => ({
+  flushEditorDrafts: vi.fn().mockResolvedValue(undefined),
+  clearEditorDraftSessions: vi.fn(),
+}));
 
 vi.mock('../features/transfer/api', () => ({
   transferApi: {
+    exportLearning: vi.fn(),
+    revealExportFile: vi.fn().mockResolvedValue(undefined),
     previewRestore: vi.fn(),
     discardRestorePreview: vi.fn().mockResolvedValue(undefined),
     restoreLearning: vi.fn().mockResolvedValue(undefined),
@@ -67,6 +74,46 @@ const preview = (token: string) => ({
   warnings: ['Reviewed local backup'],
 });
 
+it('exports this media by default and shows both original and translated output paths', async () => {
+  const close = vi.fn();
+  vi.mocked(transferApi.exportLearning).mockResolvedValue(['C:/exports/video.srt', 'C:/exports/video.translation.srt']);
+  render(<TransferDialog mediaId="video" onClose={close} />);
+  expect(screen.getByRole('button', { name: /SRT/ })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByText(/Scope: subtitles for this media/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Choose destination' }));
+  await screen.findByText('C:/exports/video.translation.srt');
+  expect(transferApi.exportLearning).toHaveBeenCalledWith('srt', 'video');
+  expect(close).not.toHaveBeenCalled();
+  fireEvent.click(screen.getAllByRole('button', { name: 'Open containing folder' })[1]);
+  expect(transferApi.revealExportFile).toHaveBeenCalledWith('C:/exports/video.translation.srt');
+});
+
+it('clearly labels all-data and all-phrase exports and retains the dialog after picker cancellation', async () => {
+  vi.mocked(transferApi.exportLearning).mockResolvedValue([]);
+  const close = vi.fn();
+  render(<TransferDialog onClose={close} />);
+  expect(screen.getByText('Scope: all learning data')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: /CSV/ }));
+  expect(screen.getByText('Scope: phrases from all media')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Choose destination' }));
+  await waitFor(() => expect(transferApi.exportLearning).toHaveBeenCalledWith('csv', undefined));
+  expect(close).not.toHaveBeenCalled();
+  expect(screen.queryByText('Your export is ready.')).not.toBeInTheDocument();
+});
+
+it('waits for pending editor changes before creating a backup', async () => {
+  let finish!: () => void;
+  vi.mocked(flushEditorDrafts).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  vi.mocked(transferApi.exportLearning).mockResolvedValue(['C:/exports/backup.zip']);
+  render(<TransferDialog onClose={() => {}} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Choose destination' }));
+  expect(flushEditorDrafts).toHaveBeenCalledOnce();
+  expect(transferApi.exportLearning).not.toHaveBeenCalled();
+  finish();
+  await screen.findByText('C:/exports/backup.zip');
+  expect(clearEditorDraftSessions).not.toHaveBeenCalled();
+});
+
 it('releases only the selected preview token when its dialog is unmounted', async () => {
   vi.mocked(transferApi.previewRestore).mockResolvedValue(
     preview('owned-preview'),
@@ -111,6 +158,10 @@ it('discards replaced previews, retains a cancelled picker selection and require
       'second',
     ),
   );
+  expect(flushEditorDrafts).toHaveBeenCalledOnce();
+  expect(clearEditorDraftSessions).toHaveBeenCalledOnce();
+  expect(vi.mocked(flushEditorDrafts).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(transferApi.restoreLearning).mock.invocationCallOrder[0]);
+  expect(vi.mocked(transferApi.restoreLearning).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(clearEditorDraftSessions).mock.invocationCallOrder[0]);
 });
 
 it('discards a native preview that arrives after the dialog was unmounted', async () => {

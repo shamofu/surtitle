@@ -132,6 +132,7 @@ fn confirmed_source(
         text: selection.text.clone(),
         translation: None,
         status: "confirmed".into(),
+        review_issues: vec![],
     };
     validate_segment(&cue)?;
     Ok(cue)

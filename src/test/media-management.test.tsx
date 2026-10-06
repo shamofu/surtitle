@@ -124,6 +124,46 @@ const card: StudyCard = {
 };
 
 describe('media and card management', () => {
+  it('offers full transcription alongside the uniquely matching embedded subtitle without starting either', async () => {
+    vi.mocked(libraryApi.mediaStreams).mockResolvedValue([
+      { index: 2, kind: 'subtitle', codec: 'subrip', language: 'eng', isDefault: true, supportedText: true },
+      { index: 3, kind: 'subtitle', codec: 'subrip', language: 'jpn', isDefault: false, supportedText: true },
+    ]);
+    const transcribe = vi.fn();
+    mount(<SubtitleSourceDialog media={{ ...media, segmentCount: 0 }} onClose={() => {}} onTranscribe={transcribe} />);
+    await waitFor(() => expect(screen.getByLabelText('Subtitle to extract')).toHaveValue('2'));
+    expect(libraryApi.extractEmbeddedSubtitles).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Transcribe full media' }));
+    expect(transcribe).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Estimate full transcription' }));
+    expect(transcribe).toHaveBeenCalledOnce();
+  });
+
+  it('keeps ambiguous matching subtitles unselected and honors a requested supported track', async () => {
+    vi.mocked(libraryApi.mediaStreams).mockResolvedValue([
+      { index: 2, kind: 'subtitle', codec: 'subrip', language: 'eng', isDefault: true, supportedText: true },
+      { index: 3, kind: 'subtitle', codec: 'subrip', language: 'en', isDefault: false, supportedText: true },
+    ]);
+    const view = mount(<SubtitleSourceDialog media={{ ...media, segmentCount: 0 }} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(3));
+    expect(screen.getByLabelText('Subtitle to extract')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Use these subtitles' })).toBeDisabled();
+    view.unmount();
+    mount(<SubtitleSourceDialog media={{ ...media, segmentCount: 0 }} initialStreamIndex={3} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByLabelText('Subtitle to extract')).toHaveValue('3'));
+  });
+
+  it('does not silently replace a requested image caption track with another text track', async () => {
+    vi.mocked(libraryApi.mediaStreams).mockResolvedValue([
+      { index: 2, kind: 'subtitle', codec: 'subrip', language: 'eng', isDefault: true, supportedText: true },
+      { index: 3, kind: 'subtitle', codec: 'hdmv_pgs_subtitle', language: 'eng', isDefault: false, supportedText: false },
+    ]);
+    mount(<SubtitleSourceDialog media={{ ...media, segmentCount: 0 }} initialStreamIndex={3} onClose={() => {}} />);
+    await screen.findByText(/The playback captions cannot be imported/);
+    expect(screen.getByLabelText('Subtitle to extract')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Use these subtitles' })).toBeDisabled();
+  });
+
   it('returns focus to the phrase menu after Escape and cancelling a delete dialog', async () => {
     context.data = { media: [media], cards: [card] };
     mount(<CardsPage />);

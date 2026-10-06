@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
@@ -19,6 +19,7 @@ import {
 import { queryKeys } from '../../shared/query/keys';
 import type { AiQuote } from '../../shared/contracts/ai';
 import type { SubtitleSegment } from '../../shared/contracts/media';
+import { subtitleUsable } from '../../shared/contracts/media';
 import type { VocabularyCandidate } from '../../shared/contracts/cards';
 import {
   useAppearance,
@@ -32,6 +33,8 @@ import { Button, EmptyState, IconButton, Modal } from '../../shared/ui/index';
 import { libraryApi } from '../library/api';
 import { RemoveMediaDialog, SubtitleSourceDialog } from '../library/MediaManagement';
 import { AiDialog } from '../ai/AiDialog';
+import { continuationApi, type AiContinuation } from '../ai/continuations';
+import { editorDraftApi, flushEditorDrafts } from './editor-drafts/useEditorDraft';
 import { JobActions } from '../ai/JobActions';
 import { TransferDialog } from '../transfer/TransferDialog';
 import { studyApi } from './api';
@@ -79,12 +82,13 @@ function StudyExitDialog({ guard, saving }: { guard: ReturnType<typeof useStudyE
   if (!guard.open) return null;
   return <Modal title={t('入力途中のフレーズがあります', 'You have unfinished phrases')} onClose={guard.keepEditing}>
     <p>{saving ? t('保存が終わるまでお待ちください。', 'Wait for the save to finish.') : t(
-      'この教材を離れると、保存していない入力は消えます。',
-      'Leaving this material will discard your unsaved input.',
+      '下書きの保存を完了できませんでした。再試行するか、保存していない変更を破棄して進めます。',
+      'Your latest changes could not be saved. Retry, or discard unsaved changes to continue.',
     )}</p>
     {guard.error && <p className="notice warning" role="alert">{guard.error}</p>}
     <footer className="modal-footer">
       <Button variant="primary" disabled={guard.closing} onClick={guard.keepEditing}>{t('編集を続ける', 'Keep editing')}</Button>
+      {guard.error && <Button disabled={saving} busy={guard.closing} onClick={() => void guard.retry()}>{t('保存して進む', 'Retry saving and continue')}</Button>}
       <Button variant="danger" disabled={saving} busy={guard.closing} onClick={() => void guard.discard()}>{t('破棄して進む', 'Discard and continue')}</Button>
     </footer>
   </Modal>;
@@ -119,12 +123,14 @@ function sourceSignature(source?: SelectedContext) {
 
 function StudySession({ mediaId }: { mediaId: string }) {
   const navigate = useNavigate();
+  const { resume: resumeId } = useSearch({ from: '/study/$mediaId' });
   const { mutate } = useDataActions();
   const { data } = useSnapshot();
   const { t, locale } = useAppearance();
   const { report } = useNotifications();
   const media = data?.media.find(item => item.id === mediaId);
   const mediaSignature = JSON.stringify([media?.path, media?.audioStreamIndex]);
+  const aiMediaSignature = JSON.stringify([media?.path, media?.audioStreamIndex, media?.learningLanguage, media?.explanationLanguage]);
   const segmentsQuery = useQuery({
     queryKey: queryKeys.segments(mediaId),
     queryFn: () => studyApi.segments(mediaId),
@@ -135,7 +141,13 @@ function StudySession({ mediaId }: { mediaId: string }) {
     queryFn: () => studyApi.candidates(mediaId),
     enabled: nativeAvailable()
   });
+  const transcriptIssuesQuery = useQuery({ queryKey: queryKeys.transcriptIssues(mediaId), queryFn: () => studyApi.transcriptIssues(mediaId), enabled: nativeAvailable() });
+  const continuationsQuery = useQuery({ queryKey: ['ai-continuations'], queryFn: continuationApi.list, enabled: nativeAvailable() });
+  const draftsQuery = useQuery({ queryKey: ['editor-drafts', mediaId], queryFn: () => editorDraftApi.list(mediaId), enabled: nativeAvailable() });
   const segments = segmentsQuery.data || [];
+  const emptyRangeIssues = (transcriptIssuesQuery.data || []).filter(issue =>
+    !segments.some(cue => cue.startMs < issue.endMs && cue.endMs > issue.startMs),
+  );
   const latestSource = useRef({ segments, mediaSignature });
   latestSource.current = { segments, mediaSignature };
   const [positionMs, setPositionMs] = useState(media?.lastPositionMs ?? 0);
@@ -151,6 +163,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const [phraseDrafts, setPhraseDrafts] = useState<Record<string, PhraseDraft>>({});
   const [showDrafts, setShowDrafts] = useState(false);
   const [showMeaning, setShowMeaning] = useState(false);
+  const [meaningRequest, setMeaningRequest] = useState<{ key: string; term: string }>();
   const [showSave, setShowSave] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
@@ -169,8 +182,11 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const [draftPlayback, setDraftPlayback] = useState<SubtitleSegment>();
   const [edit, setEdit] = useState<SubtitleSegment>();
   const [aiKind, setAiKind] = useState<AiQuote['kind']>();
+  const [aiContinuation, setAiContinuation] = useState<AiContinuation>();
+  const [aiRebind, setAiRebind] = useState<AiContinuation>();
   const [transfer, setTransfer] = useState(false);
-  const [subtitleSource, setSubtitleSource] = useState<'embedded' | 'file' | 'versions'>();
+  const [subtitleSource, setSubtitleSource] = useState<'choose' | 'embedded' | 'file' | 'versions' | 'transcribe'>();
+  const [subtitleStreamIndex, setSubtitleStreamIndex] = useState<number>();
   const [removing, setRemoving] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const activeId = activeSegment(segments, positionMs);
@@ -192,8 +208,66 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const draftMode = panel === 'transcript' && tab === 'draft';
   const formKey = inspection ? phraseKey(inspection.source) : undefined;
   const formDraft = formKey ? phraseDrafts[formKey] : undefined;
+  const meaningTerm = inspection?.term.trim() || selected?.text || '';
+  const matchingCandidate = candidatesQuery.data?.find(candidate =>
+    candidate.segmentId === selected?.id && candidate.term === meaningTerm &&
+    (!candidate.sourceCueIds?.length || JSON.stringify(candidate.sourceCueIds) === formKey),
+  ) || inspection?.candidate;
+  const hasMeaning = !!(matchingCandidate?.meaning || matchingCandidate?.explanation || selected?.translation);
+  useEffect(() => {
+    if (meaningRequest && meaningRequest.key === formKey && meaningRequest.term === meaningTerm && hasMeaning && !selectionInvalid) {
+      setShowMeaning(true);
+      setMeaningRequest(undefined);
+    }
+  }, [meaningRequest, formKey, meaningTerm, hasMeaning, selectionInvalid]);
   const dirtyDrafts = Object.entries(phraseDrafts).filter(([, draft]) => draftHasChanges(draft));
-  const exitGuard = useStudyExitGuard(dirtyDrafts.length > 0, saveBusy, () => setPhraseDrafts({}));
+  const exitGuard = useStudyExitGuard(dirtyDrafts.length > 0, saveBusy, () => setPhraseDrafts({}), flushEditorDrafts);
+  const resumed = useRef<string | undefined>(undefined);
+  function continuationSource(item: AiContinuation) {
+    const sourceIds = item.sourceCueIds || [];
+    if (!segmentsQuery.isSuccess || !sourceIds.length || !item.sourceRevision || item.sourceMediaSignature !== aiMediaSignature) return undefined;
+    const source = resolveSourceSelection(segments, mediaId, sourceIds[0], sourceIds).selected;
+    return source && sourceFingerprint(segments, sourceIds) === item.sourceRevision
+      && sourceIds.every(id => segments.some(cue => cue.id === id && subtitleUsable(cue))) ? source : undefined;
+  }
+  const aiSourceInvalid = !!aiContinuation && aiContinuation.kind !== 'transcribe' && !continuationSource(aiContinuation);
+  function resumeAi(item: AiContinuation) {
+    if (!segmentsQuery.isSuccess) return;
+    setAiRebind(undefined);
+    setAiContinuation(item);
+    setAiKind(item.kind);
+    const source = continuationSource(item);
+    setInspection(undefined); setInvalidated(false); setMeaningRequest(undefined); setShowMeaning(false);
+    if (source && item.kind !== 'transcribe') {
+      const restoredIds = source.sourceCueIds?.length ? source.sourceCueIds : [source.id];
+      setInspection({ source, fingerprint: item.sourceRevision || sourceFingerprint(segments, restoredIds), mediaSignature, term: item.focusTerm });
+      setInvalidated(false); setPanel('phrase');
+      setMeaningRequest({ key: phraseKey(source), term: item.focusTerm.trim() || source.text });
+    }
+  }
+  useEffect(() => {
+    const item = continuationsQuery.data?.find(value => value.id === resumeId && value.mediaId === mediaId);
+    if (!segmentsQuery.isSuccess) return;
+    if (item && resumed.current !== item.id) { resumed.current = item.id; resumeAi(item); }
+  }, [resumeId, continuationsQuery.data, mediaId, segmentsQuery.isSuccess]);
+  useEffect(() => {
+    if (!media || !draftsQuery.data) return;
+    setPhraseDrafts(current => {
+      const next = { ...current };
+      for (const draft of draftsQuery.data.filter(item => item.kind === 'phrase')) {
+        if (next[draft.sourceKey]) continue;
+        const ids = draft.sourceCues.map(cue => cue.id);
+        const source = { ...draft.sourceCues[0], sourceCueIds: ids,
+          endMs: Math.max(...draft.sourceCues.map(cue => cue.endMs)),
+          text: draft.sourceCues.map(cue => cue.text).join('\n') };
+        if (!source.id) continue;
+        const value: PhraseFormValues = { term: draft.fields.term || '', meaning: draft.fields.meaning || '', example: draft.fields.example || '', explanation: draft.fields.explanation || '' };
+        next[draft.sourceKey] = { inspection: { source, fingerprint: sourceFingerprint(draft.sourceCues, ids), mediaSignature, term: value.term }, value,
+          initial: { term: '', meaning: '', example: '', explanation: '' }, invalidated: draft.stale || !draft.bindingVerified };
+      }
+      return next;
+    });
+  }, [draftsQuery.data, media?.id]);
 
   useEffect(() => {
     if (!segmentsQuery.isSuccess) return;
@@ -255,7 +329,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
     commandPending.current = true;
     setBusy(true);
     try {
-      await report(action);
+      await report(async () => { await flushEditorDrafts(); await action(); });
     }
     finally {
       commandPending.current = false;
@@ -284,13 +358,21 @@ function StudySession({ mediaId }: { mediaId: string }) {
     setShowSave(true);
   }
 
-  function discardDraft(key: string) {
+  async function discardDraft(key: string) {
+    const success = await report(async () => {
+      await flushEditorDrafts();
+      const stored = (await editorDraftApi.list(mediaId)).find(draft => draft.kind === 'phrase' && draft.sourceKey === key);
+      if (stored) await editorDraftApi.discard(stored);
+      return true;
+    });
+    if (!success) return;
     setPhraseDrafts(current => {
       const next = { ...current };
       delete next[key];
       return next;
     });
     if (formKey === key) setShowSave(false);
+    void draftsQuery.refetch();
   }
 
   async function resumeDraft(draft: PhraseDraft) {
@@ -317,7 +399,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
     });
   }
 
-  function setContext(
+  async function setContext(
     source: SelectedContext,
     term = '',
     candidate?: VocabularyCandidate,
@@ -343,6 +425,16 @@ function StudySession({ mediaId }: { mediaId: string }) {
     setSaved(false);
     setPanel('phrase');
     setSelectionRevision(value => value + 1);
+    if (aiRebind && !stale) {
+      const rebound: AiContinuation = { ...aiRebind, sourceCueIds: sourceIds,
+        sourceMediaSignature: aiMediaSignature,
+        sourceRevision: sourceFingerprint(segments, sourceIds), start: timestamp(source.startMs, true),
+        end: timestamp(source.endMs, true), quoteId: undefined, preparationId: undefined };
+      const persisted = await continuationApi.save(rebound);
+      if (!alive.current) return;
+      setInspection({ ...context, term: persisted.focusTerm, candidate: undefined });
+      setAiContinuation(persisted); setAiRebind(undefined); setAiKind(persisted.kind);
+    }
   }
 
   async function inspect(
@@ -361,7 +453,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
       await playerApi.player({ action: 'seek', value: state.positionMs });
       if (!alive.current) return;
       returnPosition.current ??= state.positionMs;
-      setContext(source, term, candidate, openSave);
+      await setContext(source, term, candidate, openSave);
     });
   }
 
@@ -394,7 +486,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
       if (!alive.current) return;
       returnPosition.current = position;
       if (selected === source) setSelectionRevision(value => value + 1);
-      else setContext(source);
+      else await setContext(source);
     });
   }
 
@@ -485,12 +577,16 @@ function StudySession({ mediaId }: { mediaId: string }) {
     <StudyExitDialog guard={exitGuard} saving={saveBusy} />
   </>;
   const jobs = data?.jobs.filter(job => job.mediaId === mediaId &&
-    (job.status !== 'completed' || (job.pendingResults || 0) > 0 || job.transcriptReview)) ||
+    (job.status !== 'completed' || (job.pendingResults || 0) > 0 || job.needsAttention)) ||
     [];
   const needsAttention = jobs.some(job => ['failed', 'unknown', 'paused'].includes(job.status) || (job.pendingResults || 0) > 0 ||
-    !!job.transcriptReview);
-  const matchingCandidate = inspection?.candidate ||
-    candidatesQuery.data?.find(candidate => candidate.segmentId === selected?.id && candidate.term === inspection?.term);
+    !!job.needsAttention);
+  const completedJobs = data?.jobs.filter(job => job.mediaId === mediaId && job.status === 'completed' && !job.needsAttention && !(job.pendingResults || 0)) || [];
+  function openAi(kind: AiQuote['kind']) {
+    setAiContinuation(undefined);
+    setAiKind(kind);
+    if (kind === 'vocabulary' && formKey && selected) setMeaningRequest({ key: formKey, term: meaningTerm });
+  }
 
   return (
     <div className={`study-page ${panel ? 'has-companion' : ''}`}>
@@ -537,6 +633,23 @@ function StudySession({ mediaId }: { mediaId: string }) {
           </Button>
         </div>
       </header>
+      {emptyRangeIssues.length > 0 && <details className="notice warning">
+        <summary>{t(`字幕がない要確認区間 (${emptyRangeIssues.length})`, `Passages without subtitles to check (${emptyRangeIssues.length})`)}</summary>
+        <p>{t('発話なしと判定された区間などです。再生して確認できます。学習はそのまま続けられます。', 'These include passages detected as having no speech. Play them to check; you can continue studying.')}</p>
+        {emptyRangeIssues.map(issue => <div key={issue.id}>
+          <Button variant="ghost" disabled={!playerReady || busy || saveBusy} onClick={() => void run(async () => { await playerApi.player({ action: 'seek', value: issue.startMs }); await playerApi.player({ action: 'play' }); })}>
+            <Play size={15} />{timestamp(issue.startMs)}–{timestamp(issue.endMs)}
+          </Button>
+          <span>{issue.kind === 'no_speech' ? t('発話なしの判定を確認', 'Check the no-speech result') : t('音声・区切りを確認', 'Check the audio or boundary')}</span>
+          {issue.alternatives.map((alternative, index) => <p key={index}>{timestamp(alternative.startMs)}–{timestamp(alternative.endMs)} {alternative.text}</p>)}
+        </div>)}
+      </details>}
+      {(continuationsQuery.data || []).filter(item => item.mediaId === mediaId).map(item => <div className="notice" key={item.id}>
+        <span>{t('途中のAI依頼があります。', 'You have an unfinished AI request.')}</span>
+        <Button disabled={busy || saveBusy || !segmentsQuery.isSuccess} onClick={() => resumeAi(item)}>{t('続きから再開', 'Continue your request')}</Button>
+        <Button variant="ghost" disabled={busy || saveBusy} onClick={() => void report(async () => { await continuationApi.discard(item.id); await continuationsQuery.refetch(); })}>{t('依頼の入力を破棄', 'Discard request input')}</Button>
+      </div>)}
+      {aiRebind && <p className="notice" role="status">{t('字幕を選ぶと、入力した依頼とモデルを保持して再開します。', 'Select a subtitle to continue with your saved request and model choices.')}</p>}
       {showDrafts && dirtyDrafts.length > 0 && <section className="study-phrase-drafts" aria-label={t('入力途中のフレーズ', 'Unfinished phrases')}>
         {dirtyDrafts.map(([key, draft]) => <div className="study-phrase-draft" key={key}>
           <Button variant="ghost" disabled={busy || saveBusy} onClick={() => void resumeDraft(draft)}>
@@ -555,10 +668,9 @@ function StudySession({ mediaId }: { mediaId: string }) {
             <Settings2 size={16} />
             {t('再生設定', 'Playback settings')}
           </Button>
-          <Button onClick={() => setSubtitleSource('file')}>{t('字幕を読み込む', 'Import subtitles')}</Button>
-          <Button onClick={() => setSubtitleSource('embedded')}>{t('埋め込み字幕を抽出', 'Extract embedded subtitles')}</Button>
+          <Button onClick={() => { setSubtitleStreamIndex(undefined); setSubtitleSource('choose'); }}>{t('字幕を用意する', 'Prepare subtitles')}</Button>
           <Button onClick={() => setSubtitleSource('versions')}>{t('旧版', 'Versions')}</Button>
-          <Button onClick={() => setAiKind(segments.length ? 'vocabulary' : 'transcribe')}>
+          <Button onClick={() => openAi(segments.length ? 'vocabulary' : 'transcribe')}>
             <Sparkles size={16} />
             {t('AI で学ぶ', 'Learn with AI')}
           </Button>
@@ -571,7 +683,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
           </Button>
         </div>}
       {jobs.length > 0 &&
-        <details className={`study-jobs ${needsAttention ? 'needs-attention' : ''}`}>
+        <details open={jobs.some(job => job.status === 'running') || needsAttention} className={`study-jobs ${needsAttention ? 'needs-attention' : ''}`}>
           <summary>
             {needsAttention
               ? t('確認が必要な処理があります', 'Some tasks need attention')
@@ -583,6 +695,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             key={job.id}
           >
             <span>{job.message || job.kind}</span>
+            {job.resultState === 'applied_with_warnings' && <span>{t('完了・注意箇所あり', 'Complete · marked passages')}</span>}
             {job.status === 'running' && <progress
               value={job.progress}
               max={1}
@@ -593,6 +706,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             />
           </div>)}</div>
         </details>}
+      {completedJobs.length > 0 && <details className="study-jobs"><summary>{t('処理履歴', 'Job history')} ({completedJobs.length})</summary>{completedJobs.map(job => <div className="job-status" key={job.id}><span>{job.resultState === 'applied_with_warnings' ? t('完了・注意箇所あり', 'Complete · marked passages') : job.message || job.kind}</span><JobActions job={job} onReviewTranscript={setDraftReview} /></div>)}</details>}
       {(media.status === 'missing' || media.status === 'error') &&
         <div
           className="job-status warning"
@@ -622,6 +736,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             repeatTarget={repeatTarget}
             settingsOpen={playbackSettings}
             onSettingsClose={() => setPlaybackSettings(false)}
+            onUseStudySubtitles={streamIndex => { setSubtitleStreamIndex(streamIndex); setSubtitleSource('embedded'); }}
             interactionsDisabled={busy || saveBusy}
           />
           <CurrentCaption
@@ -634,7 +749,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             error={segmentsQuery.error}
             inspectButton={inspectButton}
             onInspect={(source, term) => void inspect(source, term)}
-            onImport={() => setSubtitleSource('file')}
+            onImport={() => { setSubtitleStreamIndex(undefined); setSubtitleSource('choose'); }}
             hasPrevious={!!previousCaption}
             hasNext={!!nextCaption}
             onPrevious={() => void moveCaption(previousCaption)}
@@ -681,8 +796,8 @@ function StudySession({ mediaId }: { mediaId: string }) {
                 onInspect={(...args) => void inspect(...args)}
                 onReplay={source => void replay(source)}
                 onEdit={setEdit}
-                onImport={() => setSubtitleSource('file')}
-                onEstimate={setAiKind}
+                onImport={() => { setSubtitleStreamIndex(undefined); setSubtitleSource('choose'); }}
+                onEstimate={openAi}
                 onReview={setDraftReview}
                 onDraftPlay={async range => {
                   if (commandPending.current || saveBusy) throw new Error(t('再生操作が完了するまでお待ちください。', 'Wait for playback to finish updating.'));
@@ -729,9 +844,9 @@ function StudySession({ mediaId }: { mediaId: string }) {
                     <Button
                       variant="ghost"
                       aria-expanded={showMeaning}
-                      onClick={() => setShowMeaning(value => !value)}
+                      onClick={() => hasMeaning ? setShowMeaning(value => !value) : openAi('vocabulary')}
                     >
-                      {showMeaning ? t('意味を閉じる', 'Hide meaning') : t('意味を見る', 'Show meaning')}
+                      {hasMeaning ? showMeaning ? t('意味を閉じる', 'Hide meaning') : t('意味を見る', 'Show meaning') : t('意味を調べる', 'Find the meaning')}
                     </Button>
                     {showMeaning &&
                       <div className="context-meaning">
@@ -764,7 +879,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                       <Button
                         variant="ghost"
                         disabled={busy || saveBusy}
-                        onClick={() => setAiKind('vocabulary')}
+                        onClick={() => openAi('vocabulary')}
                       >
                         <Sparkles size={16} />
                         {t('解説を見積もる', 'Estimate explanation')}
@@ -773,7 +888,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                         <Button
                           variant="ghost"
                           disabled={busy || saveBusy}
-                          onClick={() => setAiKind('translate')}
+                          onClick={() => openAi('translate')}
                         >
                           {t('翻訳を見積もる', 'Estimate translation')}
                         </Button>}
@@ -786,7 +901,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                         {t('字幕を編集', 'Edit subtitle')}
                       </Button>
                     </div>
-                    {!!selected.status && selected.status !== 'confirmed' &&
+                    {!subtitleUsable(selected) &&
                       <p className="notice warning">{t(
                         '未確認の字幕です。編集画面で内容を確認すると保存できます。',
                         'Confirm this subtitle in the editor before saving a phrase.'
@@ -796,7 +911,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                   ? <SaveCardForm
                     key={formKey}
                     segment={formDraft.inspection.source}
-                    candidate={inspection?.candidate}
+                    candidate={matchingCandidate}
                     initialTerm={inspection?.term || ''}
                     value={formDraft.value}
                     onChange={value => setPhraseDrafts(current => ({
@@ -804,6 +919,14 @@ function StudySession({ mediaId }: { mediaId: string }) {
                       [formKey]: { ...formDraft, value },
                     }))}
                     sourceInvalid={selectionInvalid || formDraft.invalidated}
+                    sourceCues={(JSON.parse(formDraft.inspection.fingerprint) as (SubtitleSegment | null)[]).filter((cue): cue is SubtitleSegment => !!cue)}
+                    onDraftSaved={() => void draftsQuery.refetch()}
+                    onSourceRebound={cues => {
+                      const source: SelectedContext = { ...cues[0], sourceCueIds: cues.map(cue => cue.id), endMs: Math.max(...cues.map(cue => cue.endMs)), text: cues.map(cue => cue.text).join('\n') };
+                      const next = { ...formDraft.inspection, source, candidate: undefined, fingerprint: sourceFingerprint(cues, cues.map(cue => cue.id)), mediaSignature };
+                      setInspection(next); setInvalidated(false);
+                      setPhraseDrafts(current => { const result = { ...current }; delete result[formKey]; result[phraseKey(source)] = { ...formDraft, inspection: next, invalidated: false }; return result; });
+                    }}
                     onDiscard={() => discardDraft(formKey)}
                     onBusyChange={setSaveBusy}
                     onClose={() => setShowSave(false)}
@@ -815,9 +938,9 @@ function StudySession({ mediaId }: { mediaId: string }) {
                   />
                   : <Button
                     variant="primary"
-                    disabled={!selected || (!!selected.status && selected.status !== 'confirmed') || busy ||
+                    disabled={!selected || !subtitleUsable(selected) || busy ||
                       saveBusy}
-                    onClick={() => inspection && prepareForm(inspection)}
+                    onClick={() => inspection && prepareForm({ ...inspection, candidate: matchingCandidate })}
                   >
                     <BookmarkPlus size={17} />
                     {t('フレーズを保存', 'Save a phrase')}
@@ -851,6 +974,8 @@ function StudySession({ mediaId }: { mediaId: string }) {
         <SubtitleSourceDialog
           media={media}
           initialMode={subtitleSource}
+          initialStreamIndex={subtitleStreamIndex}
+          onTranscribe={() => { setSubtitleSource(undefined); openAi('transcribe'); }}
           onClose={() => setSubtitleSource(undefined)}
         />}
       {removing &&
@@ -872,7 +997,22 @@ function StudySession({ mediaId }: { mediaId: string }) {
           initialKind={aiKind}
           initialRange={selected}
           initialTerm={inspection?.term || selected?.text}
-          onClose={() => setAiKind(undefined)}
+          continuation={aiContinuation}
+          sourceContext={inspection ? { sourceCueIds: ids, sourceRevision: inspection.fingerprint } : undefined}
+          sourceInvalid={aiSourceInvalid}
+          onReselectSource={item => {
+            setAiRebind(item); setAiKind(undefined); setInspection(undefined); setInvalidated(false);
+            setMeaningRequest(undefined); setShowMeaning(false); setShowSave(false);
+            setPanel('transcript'); setTab('transcript');
+          }}
+          onApproved={(kind, term) => {
+            if (kind === 'vocabulary' && selected && formKey) {
+              const requestedTerm = term || selected.text;
+              setInspection(current => current && { ...current, term: requestedTerm });
+              setMeaningRequest({ key: formKey, term: requestedTerm });
+            }
+          }}
+          onClose={() => { setAiKind(undefined); void continuationsQuery.refetch(); void candidatesQuery.refetch(); }}
         />}
       {transfer && <TransferDialog
         mediaId={mediaId}

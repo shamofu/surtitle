@@ -88,6 +88,7 @@ fn approve_for_execution(
         )?;
     }
     drop(review_guard);
+    state.ai.clear_job_issue(quote_id)?;
     Ok(plan)
 }
 
@@ -131,6 +132,7 @@ async fn run_approved_with<E: JobExecutor>(
     plan: PreparedJob,
     make_executor: impl FnOnce(&AppState) -> Result<E>,
 ) -> Result<()> {
+    let mut phase = "source";
     let execution = async {
         if plan.requests.iter().any(|task| {
             matches!(
@@ -148,8 +150,10 @@ async fn run_approved_with<E: JobExecutor>(
             })
             .await??;
         }
+        phase = "execute";
         let service = make_executor(&state)?;
         loop {
+            phase = "source";
             let state_before = state.ai.quote(&quote_id)?.state;
             if ["paused", "cancelled", "completed"].contains(&state_before.as_str()) {
                 break;
@@ -160,6 +164,7 @@ async fn run_approved_with<E: JobExecutor>(
                     .require_review(&quote_id, "source_changed_before_dispatch")?;
                 return Err(error);
             }
+            phase = "execute";
             let Some(result) = service
                 .execute_next_with_guard(&quote_id, || {
                     verify_current_binding(&state, &plan)
@@ -169,6 +174,7 @@ async fn run_approved_with<E: JobExecutor>(
             else {
                 break;
             };
+            phase = "apply";
             let apply =
                 apply_received_output(&state, &quote_id, result.ordinal, &plan, result.output);
             if let Err(error) = apply {
@@ -178,6 +184,8 @@ async fn run_approved_with<E: JobExecutor>(
                 return Err(error);
             }
         }
+        phase = "apply";
+        crate::application::transcript::automatic::apply_completed(&state, &quote_id)?;
         Ok(())
     }
     .await;
@@ -188,7 +196,35 @@ async fn run_approved_with<E: JobExecutor>(
             .ai
             .require_review(&quote_id, "execution_stopped_before_completion")?;
     }
+    if let Err(error) = &execution {
+        record_failure(&state, &quote_id, phase, error)?;
+    }
     execution
+}
+
+pub(crate) fn record_failure(
+    state: &AppState,
+    job_id: &str,
+    phase: &str,
+    error: &anyhow::Error,
+) -> Result<()> {
+    let (code, http, action) = match error.downcast_ref::<AiError>() {
+        Some(AiError::Credentials) => ("credentials", None, "settings"),
+        Some(AiError::BudgetDisabled | AiError::BudgetExceeded(_)) => ("budget", None, "settings"),
+        Some(AiError::Provider(status)) => ("provider", Some(*status), "settings"),
+        Some(AiError::UnknownOutcome | AiError::InFlight) => {
+            ("unknown_outcome", None, "review_unknown")
+        }
+        Some(AiError::PreparationChanged) => ("source_changed", None, "prepare_again"),
+        _ if phase == "apply" => ("local_apply", None, "retry_local"),
+        _ if phase == "source" => ("source_changed", None, "prepare_again"),
+        Some(AiError::Invalid(_)) => ("invalid_output", None, "review_result"),
+        _ => ("execution", None, "resume"),
+    };
+    state
+        .ai
+        .record_job_issue(job_id, code, phase, http, action)?;
+    Ok(())
 }
 
 pub async fn reapprove_quote(
@@ -213,6 +249,34 @@ pub fn pause_ai_job(state: AppState, job_id: String) -> std::result::Result<(), 
     state.ai.pause(&job_id).map_err(|e| e.to_string())
 }
 
+/// Reapply already received output. This path never creates or dispatches a request.
+pub fn retry_ai_application(state: AppState, job_id: String) -> std::result::Result<(), String> {
+    (|| {
+        let result = (|| {
+            let plan = state.ai.prepared_job(&job_id)?;
+            for (ordinal, task) in plan.requests.iter().enumerate() {
+                if matches!(task, RequestTask::Translation { .. })
+                    && let Some(output) = state.ai.response(&job_id, ordinal as u32)?
+                {
+                    apply_received_output(&state, &job_id, ordinal as u32, &plan, output)?;
+                }
+            }
+            crate::application::transcript::automatic::apply_completed(&state, &job_id)?;
+            state.ai.finish_local_application(&job_id)?;
+            Ok::<_, anyhow::Error>(())
+        })();
+        match result {
+            Ok(()) => state.ai.clear_job_issue(&job_id)?,
+            Err(error) => {
+                record_failure(&state, &job_id, "apply", &error)?;
+                return Err(error);
+            }
+        }
+        Ok(())
+    })()
+    .map_err(err)
+}
+
 pub fn cancel_ai_job(state: AppState, job_id: String) -> std::result::Result<(), String> {
     state.ai.cancel(&job_id).map_err(|e| e.to_string())
 }
@@ -221,10 +285,30 @@ pub fn resolve_unknown_attempt(
     state: AppState,
     attempt_id: String,
 ) -> std::result::Result<(), String> {
-    state
-        .ai
-        .acknowledge_unknown(&attempt_id)
-        .map_err(|e| e.to_string())
+    (|| {
+        let job_id = state
+            .ai
+            .summary()?
+            .unknown_attempts
+            .into_iter()
+            .find(|attempt| attempt.id == attempt_id)
+            .context("Unknown request is no longer pending")?
+            .job_id;
+        state.ai.acknowledge_unknown(&attempt_id)?;
+        if !state
+            .ai
+            .summary()?
+            .unknown_attempts
+            .iter()
+            .any(|attempt| attempt.job_id == job_id && attempt.state == "unknown")
+        {
+            state
+                .ai
+                .record_job_issue(&job_id, "interrupted", "recovery", None, "resume")?;
+        }
+        Ok(())
+    })()
+    .map_err(err)
 }
 
 #[cfg(test)]

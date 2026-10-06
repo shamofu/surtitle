@@ -35,6 +35,8 @@ vi.mock('../features/ai/api', () => ({
 }));
 
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
+vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn() }));
+vi.mock('../features/ai/continuations', () => ({ continuationApi: { list: vi.fn().mockResolvedValue([]) } }));
 vi.mock('../app/runtime', () => {
   const useFixture = () => ({
     mutate: (action: () => Promise<unknown>) => action(),
@@ -167,6 +169,7 @@ describe('settings refresh preserves unrelated unsaved edits', () => {
     const initial = settings();
     context.data = snapshot(initial);
     const { rerender } = render(<SettingsPage />);
+    fireEvent.click(screen.getByText('Detailed settings by purpose'));
     fireEvent.change(
       screen.getAllByRole('combobox', { name: /Gemini model ID/ })[1],
       { target: { value: 'gemini-future-model' } },

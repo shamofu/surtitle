@@ -15,6 +15,7 @@ import {
   X
 } from 'lucide-react';
 import type { Media, SubtitleSegment } from '../../shared/contracts/media';
+import { subtitleUsable } from '../../shared/contracts/media';
 import type { VocabularyCandidate } from '../../shared/contracts/cards';
 import type { SelectedContext } from './source-selection';
 import { resolveSourceSelection } from './source-selection';
@@ -206,7 +207,7 @@ export function StudyTranscript({
                           {t('出典を聴く', 'Listen to source')}
                         </Button>
                         <Button
-                          disabled={!ready || !source || (!!source.status && source.status !== 'confirmed')}
+                          disabled={!ready || !source || !subtitleUsable(source)}
                           onClick={() => source &&
                             onInspect({ ...source, sourceCueIds: ids }, candidate.term, candidate, true)}
                         >
@@ -341,7 +342,7 @@ export function StudyTranscript({
                                 </button>
                                 {showTranslations && segment.translation &&
                                   <p className="segment-translation">{segment.translation}</p>}
-                                {segment.status && segment.status !== 'confirmed' &&
+                                {(segment.status === 'generated_review' || !subtitleUsable(segment)) &&
                                   <Badge tone="warning">{t('要確認', 'Needs review')}</Badge>}
                                 <div className="segment-actions">
                                   <IconButton
@@ -352,7 +353,7 @@ export function StudyTranscript({
                                   </IconButton>
                                   <IconButton
                                     label={t('フレーズを保存', 'Save phrase')}
-                                    disabled={!ready || (!!segment.status && segment.status !== 'confirmed')}
+                                    disabled={!ready || !subtitleUsable(segment)}
                                     onClick={() => onInspect(segment, '', undefined, true)}
                                   >
                                     <BookmarkPlus size={16} />

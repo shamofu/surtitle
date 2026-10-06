@@ -24,6 +24,8 @@ pub struct Preferences {
     pub yt_dlp_stable: bool,
     #[serde(default)]
     pub update_checks: HashMap<String, UpdateCheck>,
+    #[serde(default)]
+    pub ai_continuations: HashMap<String, super::continuations::AiContinuation>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateCheck {

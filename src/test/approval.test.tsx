@@ -118,4 +118,15 @@ describe('one-job approval UI', () => {
       screen.getByRole('button', { name: 'Approve this job' }),
     ).toBeDisabled();
   });
+  it('requires acknowledgement again when a same-id same-digest quote gets a new expiry', () => {
+    const approve = vi.fn();
+    const { rerender } = render(<QuoteApproval quote={{ ...fixture, digest: 'unchanged' }} busy={false} onApprove={approve} />);
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(screen.getByRole('button', { name: 'Approve this job' })).toBeEnabled();
+    rerender(<QuoteApproval quote={{ ...fixture, digest: 'unchanged', expiresAt: '2099-01-02T00:00:00Z' }} busy={false} onApprove={approve} />);
+    expect(screen.getByRole('checkbox')).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Approve this job' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve this job' }));
+    expect(approve).not.toHaveBeenCalled();
+  });
 });

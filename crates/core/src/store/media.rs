@@ -46,7 +46,41 @@ impl Store {
             Path::new(&media.path).is_absolute(),
             "media path must be absolute"
         );
+        let previous: Option<String> = self
+            .conn
+            .query_row("SELECT data FROM media WHERE id=?", [&media.id], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        let previous = previous
+            .map(|json| serde_json::from_str::<Media>(&json))
+            .transpose()?;
+        let source_changed = previous.is_some_and(|old| {
+            old.path != media.path
+                || old.learning_language != media.learning_language
+                || old.duration_ms != media.duration_ms
+                || old
+                    .audio_stream_index
+                    .is_some_and(|track| Some(track) != media.audio_stream_index)
+        });
+        let transaction = if self.conn.is_autocommit() {
+            Some(self.conn.unchecked_transaction()?)
+        } else {
+            None
+        };
+        if source_changed {
+            super::transcript_issues::deactivate_transcript_issues_on(
+                &self.conn,
+                &media.id,
+                0,
+                u64::MAX,
+                false,
+            )?;
+        }
         self.conn.execute("INSERT INTO media(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",params![media.id,serde_json::to_string(media)?])?;
+        if let Some(transaction) = transaction {
+            transaction.commit()?;
+        }
         Ok(())
     }
     pub fn set_segments(&mut self, media_id: &str, segments: &[SubtitleSegment]) -> Result<()> {
@@ -55,6 +89,13 @@ impl Store {
             ensure!(segment.media_id == media_id, "wrong media");
         }
         let tx = self.conn.transaction()?;
+        super::transcript_issues::deactivate_transcript_issues_on(
+            &tx,
+            media_id,
+            0,
+            u64::MAX,
+            false,
+        )?;
         tx.execute("DELETE FROM segments WHERE media_id=?", [media_id])?;
         for s in segments {
             tx.execute(
@@ -72,19 +113,41 @@ impl Store {
     }
     pub fn edit_segment(&self, segment: &SubtitleSegment) -> Result<()> {
         validate_segment(segment)?;
+        let mut edited = segment.clone();
+        if edited.status == "confirmed" {
+            edited.review_issues.clear();
+        }
         let old = self.segment(&segment.id)?;
         ensure!(
             old.media_id == segment.media_id,
             "cannot move subtitle to another media"
         );
+        // Draft commits already supply a transaction; direct edits create one.
+        let transaction = if self.conn.is_autocommit() {
+            Some(self.conn.unchecked_transaction()?)
+        } else {
+            None
+        };
         self.conn.execute(
             "UPDATE segments SET start_ms=?,data=? WHERE id=?",
             params![
                 segment.start_ms as i64,
-                serde_json::to_string(segment)?,
+                serde_json::to_string(&edited)?,
                 segment.id
             ],
         )?;
+        if edited.status == "confirmed" {
+            super::transcript_issues::deactivate_transcript_issues_on(
+                &self.conn,
+                &old.media_id,
+                old.start_ms,
+                old.end_ms,
+                true,
+            )?;
+        }
+        if let Some(transaction) = transaction {
+            transaction.commit()?;
+        }
         Ok(())
     }
 }

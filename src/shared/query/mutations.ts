@@ -15,6 +15,7 @@ export function changedKeys(change: DataChange): readonly QueryKey[] {
       return [
         queryKeys.snapshot,
         queryKeys.segments(change.mediaId),
+        queryKeys.transcriptIssues(change.mediaId),
         queryKeys.candidates(change.mediaId),
         queryKeys.versions(change.mediaId),
         queryKeys.drafts(change.mediaId),
@@ -52,6 +53,6 @@ export async function refreshLiveData(client: QueryClient): Promise<void> {
     predicate: ({ queryKey }) =>
       ['snapshot', 'downloads', 'review'].includes(String(queryKey[0])) ||
       (queryKey[0] === 'media' &&
-        ['segments', 'candidates', 'drafts'].includes(String(queryKey[2]))),
+        ['segments', 'candidates', 'drafts', 'transcript-issues'].includes(String(queryKey[2]))),
   });
 }

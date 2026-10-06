@@ -42,6 +42,7 @@ pub(crate) fn seed_ai_recovery_fixture(state: &AppState) -> Result<()> {
             text: "Hello.".into(),
             translation: None,
             status: "confirmed".into(),
+            review_issues: vec![],
         },
         surtitle_core::SubtitleSegment {
             id: "e2e-ai-recovery-2".into(),
@@ -51,6 +52,7 @@ pub(crate) fn seed_ai_recovery_fixture(state: &AppState) -> Result<()> {
             text: "See you tomorrow.".into(),
             translation: None,
             status: "confirmed".into(),
+            review_issues: vec![],
         },
     ];
     {

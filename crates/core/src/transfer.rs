@@ -94,7 +94,7 @@ impl Drop for PendingExport {
 
 pub fn validate(a: &LearningArchive) -> Result<()> {
     ensure!(
-        a.format == "surtitle.learning" && a.schema_version == 1,
+        a.format == "surtitle.learning" && matches!(a.schema_version, 1 | 2),
         "unsupported backup format"
     );
     ensure!(
@@ -112,6 +112,22 @@ pub fn validate(a: &LearningArchive) -> Result<()> {
         Ok(set)
     };
     let media = unique(a.media.iter().map(|x| x.id.as_str()).collect())?;
+    ensure!(a.editor_drafts.len() <= 100_000, "Too many editor drafts");
+    unique(
+        a.editor_drafts
+            .iter()
+            .map(|draft| draft.id.as_str())
+            .collect(),
+    )?;
+    let mut editor_keys = HashSet::new();
+    for draft in &a.editor_drafts {
+        crate::store::editor_drafts::validate(draft)?;
+        ensure!(
+            media.contains(&draft.media_id)
+                && editor_keys.insert((&draft.media_id, &draft.kind, &draft.source_key)),
+            "Orphan or duplicate editor draft"
+        );
+    }
     ensure!(
         a.draft_study_selections.len() <= 1_000_000,
         "Too many draft study selections"
@@ -127,6 +143,26 @@ pub fn validate(a: &LearningArchive) -> Result<()> {
         .iter()
         .map(|item| (item.id.as_str(), item))
         .collect();
+    ensure!(
+        a.transcript_issues.len() <= 100_000,
+        "Too many transcript range notes"
+    );
+    unique(
+        a.transcript_issues
+            .iter()
+            .map(|issue| issue.id.as_str())
+            .collect(),
+    )?;
+    for issue in &a.transcript_issues {
+        crate::store::transcript_issues::validate(issue)?;
+        let source = media_by_id
+            .get(issue.media_id.as_str())
+            .context("Orphan transcript range note")?;
+        ensure!(
+            !issue.active || issue.end_ms <= source.duration_ms,
+            "Transcript range note exceeds media duration"
+        );
+    }
     for selection in &a.draft_study_selections {
         let source = media_by_id
             .get(selection.media_id.as_str())
@@ -177,7 +213,7 @@ pub fn validate(a: &LearningArchive) -> Result<()> {
         for source in &c.source_cues {
             crate::store::validate_segment(source)?;
             ensure!(
-                source.media_id == c.media_id && source.status == "confirmed",
+                source.media_id == c.media_id && crate::is_usable_subtitle_status(&source.status),
                 "invalid card source subtitle"
             );
         }
@@ -229,6 +265,12 @@ fn export_json_with_limits(
 ) -> Result<()> {
     validate(archive)?;
     let mut portable = archive.clone();
+    portable.schema_version = 2;
+    portable.editor_drafts = portable
+        .editor_drafts
+        .iter()
+        .map(EditorDraft::detached)
+        .collect();
     portable.draft_study_selections = portable
         .draft_study_selections
         .iter()
@@ -262,6 +304,12 @@ fn export_zip_with_limits(
 ) -> Result<()> {
     validate(archive)?;
     let mut portable = archive.clone();
+    portable.schema_version = 2;
+    portable.editor_drafts = portable
+        .editor_drafts
+        .iter()
+        .map(EditorDraft::detached)
+        .collect();
     portable.draft_study_selections = portable
         .draft_study_selections
         .iter()
@@ -423,6 +471,11 @@ pub fn read_archive(path: &Path) -> Result<LearningArchive> {
         parsed
     };
     validate(&archive)?;
+    archive.editor_drafts = archive
+        .editor_drafts
+        .iter()
+        .map(EditorDraft::detached)
+        .collect();
     archive.draft_study_selections = archive
         .draft_study_selections
         .iter()
@@ -866,6 +919,35 @@ mod tests {
             updated_at: String::new(),
             source_snapshot: serde_json::json!({"digest":"retained-local-source"}),
         })
+        .unwrap();
+        db.save_editor_draft(&SaveEditorDraft {
+            id: "local-editor".into(),
+            media_id: "m".into(),
+            kind: "phrase".into(),
+            source_key: serde_json::to_string(&vec![&segments[0].id]).unwrap(),
+            expected_version: 0,
+            fields: [
+                ("term", "unfinished"),
+                ("meaning", ""),
+                ("example", "Retained input"),
+                ("explanation", "Notes"),
+            ]
+            .into_iter()
+            .map(|(key, value)| (key.into(), value.into()))
+            .collect(),
+            source_cues: vec![segments[0].clone()],
+        })
+        .unwrap();
+        db.upsert_transcript_issues(&[TranscriptIssueRecord {
+            id: "portable-range-note".into(),
+            media_id: "m".into(),
+            source_id: "preparation".into(),
+            kind: "no_speech".into(),
+            start_ms: 1000,
+            end_ms: 2000,
+            active: true,
+            alternatives: vec![],
+        }])
         .unwrap();
         let mut incoming = db.archive().unwrap();
         incoming.media[0].title = "Replacement media".into();

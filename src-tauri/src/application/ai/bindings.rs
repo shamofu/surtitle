@@ -3,12 +3,7 @@ use super::*;
 pub(crate) fn transcript_fingerprint(
     segments: &[surtitle_core::SubtitleSegment],
 ) -> Result<String> {
-    Ok(sha256_bytes(&serde_json::to_vec(
-        &segments
-            .iter()
-            .map(|s| (&s.id, &s.media_id, s.start_ms, s.end_ms, &s.text, &s.status))
-            .collect::<Vec<_>>(),
-    )?))
+    surtitle_core::store::subtitle_revision(segments)
 }
 
 pub(crate) fn settings_fingerprint(settings: &surtitle_core::AppSettings) -> Result<String> {
@@ -28,7 +23,7 @@ pub(super) fn source_matches(
         && current.start_ms == original.start_ms
         && current.end_ms == original.end_ms
         && current.text == original.text
-        && current.status == "confirmed"
+        && surtitle_core::is_usable_subtitle_status(&current.status)
 }
 
 pub(super) fn verify_task_sources(db: &surtitle_core::Store, plan: &PreparedJob) -> Result<()> {

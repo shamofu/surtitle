@@ -20,6 +20,7 @@ const indexRoute = createRoute({
 const studyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/study/$mediaId',
+  validateSearch: (search: Record<string, unknown>): { resume?: string } => ({ resume: typeof search.resume === 'string' ? search.resume : undefined }),
   component: StudyPage,
 });
 const cardsRoute = createRoute({
@@ -35,6 +36,7 @@ const reviewRoute = createRoute({
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/settings',
+  validateSearch: (search: Record<string, unknown>): { resume?: string } => ({ resume: typeof search.resume === 'string' ? search.resume : undefined }),
   component: SettingsPage,
 });
 export const router = createRouter({

@@ -196,7 +196,11 @@ export function ModelEditor({
           disabled={frozen}
           placeholder="gemini-…"
           onChange={(event) => {
-            onChange({ ...value, modelId: event.target.value, price: null });
+            const modelId = event.target.value;
+            const transcriptionMode = purpose === 'transcription'
+              ? /transcribe/i.test(modelId) ? 'transcribe' : /flash/i.test(modelId) ? 'subtitles' : value.transcriptionMode
+              : value.transcriptionMode;
+            onChange({ ...value, modelId, transcriptionMode, price: null });
             setManual(false);
             setInput('');
             setOutput('');

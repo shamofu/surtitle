@@ -23,11 +23,19 @@ import { studyApi } from '../features/study/api';
 import { playerApi } from '../features/study/playback/api';
 import { settingsApi } from '../features/settings/api';
 import { aiApi } from '../features/ai/api';
+import { continuationApi } from '../features/ai/continuations';
+import type { AiContinuation } from '../features/ai/continuations';
+import { editorDraftApi } from '../features/study/editor-drafts/api';
+import type { EditorDraft } from '../features/study/editor-drafts/api';
+import { clearEditorDraftSessions, flushEditorDrafts } from '../features/study/editor-drafts/session';
 import { cardsApi } from '../features/cards/api';
+import { queryKeys } from '../shared/query/keys';
 import type { PlayerState } from '../shared/contracts/player';
 import type { SubtitleSegment } from '../shared/contracts/media';
 
 const fixture = vi.hoisted(() => ({
+  resumeId: undefined as string | undefined,
+  aiDialogProps: undefined as undefined | { continuation?: AiContinuation; sourceInvalid?: boolean; sourceContext?: { sourceCueIds: string[]; sourceRevision: string }; onReselectSource?: (item: AiContinuation) => void },
   hasMedia: true,
   blockerStatus: 'idle',
   resetBlocker: vi.fn(),
@@ -57,7 +65,7 @@ const fixture = vi.hoisted(() => ({
 }));
 
 vi.mock('../features/study/api', () => ({
-  studyApi: { segments: vi.fn(), candidates: vi.fn() },
+  studyApi: { segments: vi.fn(), candidates: vi.fn(), transcriptIssues: vi.fn().mockResolvedValue([]) },
 }));
 vi.mock('../features/study/playback/api', () => ({
   playerApi: {
@@ -73,6 +81,16 @@ vi.mock('../features/settings/api', () => ({
   settingsApi: { updateSettings: vi.fn() },
 }));
 
+vi.mock('../features/ai/continuations', () => ({ continuationApi: { list: vi.fn().mockResolvedValue([]), save: vi.fn(), discard: vi.fn() } }));
+vi.mock('../features/study/editor-drafts/api', () => ({
+  editorSourceKey: (cues: {id:string}[]) => JSON.stringify(cues.map(cue => cue.id)),
+  editorDraftApi: {
+    list: vi.fn().mockResolvedValue([]),
+    save: vi.fn(async (request) => ({ ...request, version: request.expectedVersion + 1, stale: false, bindingVerified: true, sourceMediaSignature: '', createdAt: '', updatedAt: '' })),
+    discard: vi.fn().mockResolvedValue(undefined), rebind: vi.fn(), commitSubtitle: vi.fn(),
+    savePhrase: vi.fn(async (_reference, request) => cardsApi.saveCard(request)),
+  },
+}));
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
 vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, closeWindow: vi.fn() }));
 vi.mock('@tauri-apps/api/event', () => ({
@@ -83,6 +101,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 }));
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ mediaId: 'media' }),
+  useSearch: () => ({ resume: fixture.resumeId }),
   useNavigate: () => vi.fn(),
   useBlocker: () => ({ status: fixture.blockerStatus, reset: fixture.resetBlocker, proceed: vi.fn() }),
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
@@ -133,7 +152,10 @@ vi.mock('../app/runtime', () => {
     useSurface: useFixture,
   };
 });
-vi.mock('../features/ai/AiDialog', () => ({ AiDialog: () => null }));
+vi.mock('../features/ai/AiDialog', () => ({ AiDialog: (props: NonNullable<typeof fixture.aiDialogProps>) => {
+  fixture.aiDialogProps = props;
+  return props.sourceInvalid && props.continuation ? <button onClick={() => props.onReselectSource?.(props.continuation!)}>Select subtitles again</button> : null;
+} }));
 vi.mock('../features/transfer/TransferDialog', () => ({
   TransferDialog: () => null,
 }));
@@ -201,6 +223,15 @@ beforeAll(() => {
   );
 });
 beforeEach(() => {
+  fixture.resumeId = undefined;
+  fixture.aiDialogProps = undefined;
+  vi.mocked(continuationApi.list).mockResolvedValue([]);
+  vi.mocked(continuationApi.save).mockImplementation(async item => item);
+  vi.mocked(editorDraftApi.list).mockResolvedValue([]);
+  vi.mocked(editorDraftApi.save).mockImplementation(async request => ({ ...request, version: request.expectedVersion + 1, stale: false, bindingVerified: true, sourceMediaSignature: '', createdAt: '', updatedAt: '' }));
+  vi.mocked(editorDraftApi.discard).mockResolvedValue(undefined);
+  vi.mocked(editorDraftApi.savePhrase).mockImplementation(async (_reference, request) => cardsApi.saveCard(request));
+
   state = {
     ready: true,
     positionMs: 0,
@@ -212,6 +243,7 @@ beforeEach(() => {
     sentencePause: false,
   };
   vi.mocked(studyApi.segments).mockResolvedValue(cues);
+  vi.mocked(studyApi.transcriptIssues).mockResolvedValue([]);
   vi.mocked(studyApi.candidates).mockResolvedValue([
     {
       id: 'candidate',
@@ -235,13 +267,17 @@ beforeEach(() => {
   });
   vi.mocked(playerApi.playSourceRange).mockResolvedValue();
 });
-afterEach(() => {
+afterEach(async () => {
   window.getSelection()?.removeAllRanges();
   cleanup();
+  await flushEditorDrafts().catch(() => {});
+  clearEditorDraftSessions();
   clients.splice(0).forEach((client) => client.clear());
   fixture.listener = undefined;
   fixture.media.path = 'C:/fixture.mkv';
   fixture.media.audioStreamIndex = undefined;
+  fixture.media.learningLanguage = 'en';
+  fixture.media.explanationLanguage = 'ja';
   fixture.hasMedia = true;
   fixture.blockerStatus = 'idle';
   vi.resetAllMocks();
@@ -266,6 +302,51 @@ async function inspectCurrent() {
 }
 
 describe('watching and inspecting phrases', () => {
+  it('waits for subtitle loading before restoring an AI request and its exact source context', async () => {
+    const item: AiContinuation = { id: 'return', mediaId: 'media', kind: 'vocabulary', start: '0:00', end: '0:01', wholeMedia: false,
+      focusTerm: 'would like', models: {}, sourceCueIds: ['a'], sourceRevision: JSON.stringify([cues[0]]),
+      sourceMediaSignature: JSON.stringify([fixture.media.path, fixture.media.audioStreamIndex, fixture.media.learningLanguage, fixture.media.explanationLanguage]) };
+    fixture.resumeId = item.id;
+    vi.mocked(continuationApi.list).mockResolvedValue([item]);
+    let finish!: (value: SubtitleSegment[]) => void;
+    vi.mocked(studyApi.segments).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    mount();
+    await screen.findByText('You have an unfinished AI request.');
+    expect(fixture.aiDialogProps).toBeUndefined();
+    await act(async () => finish(cues));
+    await waitFor(() => expect(fixture.aiDialogProps?.sourceContext?.sourceCueIds).toEqual(['a']));
+    expect(fixture.aiDialogProps?.sourceInvalid).toBe(false);
+    expect(document.querySelector('.phrase-panel .context-sentence')).toHaveTextContent(cues[0].text);
+  });
+
+  it.each(['missing', 'changed', 'legacy', 'file', 'audio', 'learningLanguage', 'explanationLanguage', 'legacy-media'])('keeps %s AI source input until explicit reselection, without binding by old timestamps', async source => {
+    const item: AiContinuation = { id: 'return', mediaId: 'media', kind: 'vocabulary', start: '0:00', end: '0:01', wholeMedia: false,
+      focusTerm: 'kept phrase', models: { explanation: {modelId:'custom-model',transcriptionMode:'subtitles',maxOutputTokens:1024} },
+      quoteId:'old-quote',preparationId:'old-preparation', sourceCueIds: source === 'legacy' ? [] : [source === 'missing' ? 'removed' : 'a'],
+      sourceRevision: source === 'changed' ? 'old content' : JSON.stringify([cues[0]]),
+      sourceMediaSignature: source === 'legacy-media' ? undefined : JSON.stringify([fixture.media.path, fixture.media.audioStreamIndex, fixture.media.learningLanguage, fixture.media.explanationLanguage]) };
+    if (source === 'file') fixture.media.path = 'C:/replacement.mkv';
+    if (source === 'audio') fixture.media.audioStreamIndex = 2;
+    if (source === 'learningLanguage') fixture.media.learningLanguage = 'fr';
+    if (source === 'explanationLanguage') fixture.media.explanationLanguage = 'de';
+    fixture.resumeId = item.id;
+    vi.mocked(continuationApi.list).mockResolvedValue([item]);
+    mount();
+    const select = await screen.findByRole('button', { name: 'Select subtitles again' });
+    expect(fixture.aiDialogProps?.sourceInvalid).toBe(true);
+    expect(fixture.aiDialogProps?.sourceContext).toBeUndefined();
+    fireEvent.click(select);
+    await ready();
+    fireEvent.click(await screen.findByRole('button', { name: cues[1].text }));
+    await waitFor(() => expect(fixture.aiDialogProps?.sourceInvalid).toBe(false));
+    expect(continuationApi.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      id:item.id,focusTerm:item.focusTerm,models:item.models,sourceCueIds:['b'],sourceRevision:JSON.stringify([cues[1]]),
+      start:'0:01',end:'0:02',quoteId:undefined,preparationId:undefined,
+      sourceMediaSignature: JSON.stringify([fixture.media.path, fixture.media.audioStreamIndex, fixture.media.learningLanguage, fixture.media.explanationLanguage]),
+    }));
+    expect(fixture.aiDialogProps?.sourceContext?.sourceCueIds).toEqual(['b']);
+    expect(aiApi.createQuote).not.toHaveBeenCalled();
+  });
   it('starts with the current caption, hidden translation and closed transcript, without an AI request', async () => {
     vi.mocked(studyApi.segments).mockResolvedValue([{ ...cues[0], translation: 'お願いします。' }, ...cues.slice(1)]);
     mount();
@@ -407,6 +488,26 @@ describe('watching and inspecting phrases', () => {
     expect(cardsApi.saveCard).not.toHaveBeenCalled();
   });
 
+  it('shows the requested meaning in the same phrase panel when its matching result arrives', async () => {
+    vi.mocked(studyApi.candidates).mockResolvedValue([]);
+    const client = mount();
+    await inspectCurrent();
+    fireEvent.click(screen.getByRole('button', { name: 'Find the meaning' }));
+    const requested = { id: 'new-meaning', mediaId: 'media', segmentId: 'a', sourceCueIds: ['a'],
+      term: cues[0].text, meaning: 'A polite way of saying what you want', example: cues[0].text,
+      explanation: 'Use this to make a courteous request.', startMs: 0, endMs: 1000 };
+    await act(async () => client.setQueryData(queryKeys.candidates('media'), [{ ...requested, sourceCueIds: ['a', 'b'], meaning: 'Different selected source' }]));
+    expect(screen.queryByText('Different selected source')).not.toBeInTheDocument();
+    await act(async () => client.setQueryData(queryKeys.candidates('media'), [requested]));
+    expect(await screen.findByText(requested.meaning)).toBeVisible();
+    expect(screen.getByText(requested.explanation)).toBeVisible();
+    expect(document.querySelector('.phrase-panel .context-sentence')).toHaveTextContent(cues[0].text);
+    expect(screen.getByRole('button', { name: 'Hide meaning' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    expect(screen.getByLabelText('Meaning')).toHaveValue(requested.meaning);
+    expect(screen.getByLabelText('Explanation or notes (optional)')).toHaveValue(requested.explanation);
+  });
+
   it('closes the phrase panel without resuming playback and restores keyboard focus', async () => {
     mount();
     await ready();
@@ -422,12 +523,28 @@ describe('watching and inspecting phrases', () => {
   it('leaves empty subtitles actionable without fabricating a current phrase or requesting AI', async () => {
     vi.mocked(studyApi.segments).mockResolvedValue([]);
     mount();
-    await screen.findByRole('button', { name: 'Add subtitles' });
+    await screen.findByRole('button', { name: 'Prepare subtitles' });
     expect(screen.queryByRole('button', { name: 'Inspect this phrase' })).not.toBeInTheDocument();
     openTranscript();
     expect(screen.getByRole('button', { name: 'Import subtitles' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Estimate transcription' })).toBeEnabled();
     expect(aiApi.createQuote).not.toHaveBeenCalled();
+  });
+
+  it('keeps a valid empty transcription visible as a nonblocking audio passage to check', async () => {
+    vi.mocked(studyApi.segments).mockResolvedValue([]);
+    vi.mocked(studyApi.transcriptIssues).mockResolvedValue([{ id: 'silent', mediaId: 'media', sourceId: 'preparation', kind: 'no_speech', startMs: 0, endMs: 4000, alternatives: [] }]);
+    mount();
+    await screen.findByText('Passages without subtitles to check (1)');
+    fireEvent.click(screen.getByText('Passages without subtitles to check (1)'));
+    await waitFor(() => expect(screen.getByRole('button', { name: '0:00–0:04' })).toBeEnabled());
+    expect(screen.queryByRole('button', { name: 'Inspect this phrase' })).not.toBeInTheDocument();
+    vi.mocked(playerApi.player).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: '0:00–0:04' }));
+    await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' }));
+    expect(playerApi.player).toHaveBeenCalledWith({ action: 'seek', value: 0 });
+    expect(aiApi.createQuote).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Prepare subtitles' })).toBeEnabled();
   });
 
   it('does not issue stale seek or play commands after leaving during a pending pause', async () => {
@@ -531,6 +648,85 @@ describe('study navigation and unfinished phrases', () => {
     expect(cardsApi.saveCard).toHaveBeenCalledWith(expect.objectContaining({ segmentId: 'a', term: 'first phrase' }));
   });
 
+  it('resumes persisted phrase values after a fresh page session and consumes the restored draft on save', async () => {
+    let persisted: EditorDraft[] = [];
+    vi.mocked(editorDraftApi.list).mockImplementation(async () => structuredClone(persisted));
+    vi.mocked(editorDraftApi.save).mockImplementation(async request => {
+      const saved: EditorDraft = { ...request, version: request.expectedVersion + 1, stale: false,
+        bindingVerified: true, sourceMediaSignature: 'local-signature', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' };
+      persisted = [...persisted.filter(item => item.id !== saved.id), structuredClone(saved)];
+      return saved;
+    });
+    vi.mocked(editorDraftApi.savePhrase).mockImplementation(async (reference, request) => {
+      expect(persisted.find(item => item.id === reference.id)?.version).toBe(reference.version);
+      await cardsApi.saveCard(request);
+      persisted = persisted.filter(item => item.id !== reference.id);
+    });
+    mount();
+    await inspectCurrent();
+    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'restart phrase' } });
+    fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'meaning before restart' } });
+    fireEvent.change(screen.getByLabelText('Original context'), { target: { value: 'my retained context' } });
+    fireEvent.change(screen.getByLabelText('Explanation or notes (optional)'), { target: { value: 'unfinished\nnotes' } });
+    await act(flushEditorDrafts);
+    expect(persisted).toHaveLength(1);
+    const storedId = persisted[0].id;
+    cleanup();
+    await flushEditorDrafts();
+    clearEditorDraftSessions();
+    clients.splice(0).forEach(client => client.clear());
+    vi.mocked(editorDraftApi.save).mockClear();
+    mount();
+    await ready();
+    fireEvent.click(await screen.findByRole('button', { name: 'Unfinished phrases (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: /restart phrase 0:00/ }));
+    await waitFor(() => expect(screen.getByLabelText('Word or phrase')).toHaveValue('restart phrase'));
+    expect(screen.getByLabelText('Meaning')).toHaveValue('meaning before restart');
+    expect(screen.getByLabelText('Original context')).toHaveValue('my retained context');
+    expect(screen.getByLabelText('Explanation or notes (optional)')).toHaveValue('unfinished\nnotes');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save phrase' })).toBeEnabled());
+    expect(editorDraftApi.save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save phrase' }));
+    await waitFor(() => expect(cardsApi.saveCard).toHaveBeenCalledWith(expect.objectContaining({
+      term: 'restart phrase', meaning: 'meaning before restart', example: 'my retained context', explanation: 'unfinished\nnotes',
+    })));
+    expect(editorDraftApi.savePhrase).toHaveBeenCalledWith(expect.objectContaining({ id: storedId }), expect.anything());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Unfinished phrases (1)' })).not.toBeInTheDocument());
+    expect(persisted).toEqual([]);
+  });
+
+  it('allows a marked generated subtitle to save a phrase and still opens normal subtitle correction with alternatives', async () => {
+    const generated: SubtitleSegment = { ...cues[0], status: 'generated_review', reviewIssues: [{
+      id: 'warning', kind: 'boundary_conflict', startMs: 0, endMs: 1000,
+      alternatives: [{ startMs: 0, endMs: 1000, text: 'I would live' }],
+    }] };
+    vi.mocked(studyApi.segments).mockResolvedValue([generated, ...cues.slice(1)]);
+    mount();
+    await inspectCurrent();
+    expect(screen.getByRole('button', { name: 'Save a phrase' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Edit subtitle' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'would like' } });
+    fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'want politely' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save phrase' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Save phrase' }));
+    await waitFor(() => expect(cardsApi.saveCard).toHaveBeenCalledWith(expect.objectContaining({ segmentId: 'a', term: 'would like' })));
+    expect(editorDraftApi.commitSubtitle).not.toHaveBeenCalled();
+    expect(editorDraftApi.save).toHaveBeenCalledWith(expect.objectContaining({ sourceCues: [generated] }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit subtitle' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Edit subtitle' }));
+    const editor = await screen.findByRole('dialog', { name: 'Edit subtitle' });
+    fireEvent.click(within(editor).getByText('Automatic subtitle notes and alternatives'));
+    expect(within(editor).getByText('I would live')).toBeVisible();
+    fireEvent.change(within(editor).getByLabelText('Subtitle'), { target: { value: 'I would really like' } });
+    await waitFor(() => expect(within(editor).getByRole('button', { name: 'Confirm and save' })).toBeEnabled());
+    fireEvent.click(within(editor).getByRole('button', { name: 'Confirm and save' }));
+    await waitFor(() => expect(editorDraftApi.commitSubtitle).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      id: 'a', text: 'I would really like', status: 'confirmed', reviewIssues: [], startMs: 0, endMs: 1000,
+    })));
+  });
+
   it('retains edited text but blocks saving after the source changes', async () => {
     const client = mount();
     await inspectCurrent();
@@ -546,7 +742,7 @@ describe('study navigation and unfinished phrases', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save phrase' })).toBeDisabled());
     expect(screen.getByLabelText('Meaning')).toHaveValue('a meaning');
     fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }));
-    expect(screen.queryByRole('button', { name: 'Unfinished phrases (1)' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Unfinished phrases (1)' })).not.toBeInTheDocument());
     expect(cardsApi.saveCard).not.toHaveBeenCalled();
   });
 

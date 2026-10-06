@@ -48,6 +48,7 @@ fn main() -> Result<()> {
                 format!("練習用の文 {i}。")
             }),
             status: "confirmed".into(),
+            review_issues: vec![],
         })
         .collect();
     db.set_segments(&media.id, &segments)?;

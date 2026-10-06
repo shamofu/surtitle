@@ -69,28 +69,22 @@ pub(crate) fn quote_for_ui(state: &AppState, quote: JobQuote, is_retry: bool) ->
             "結果不明の要求を先に確認してください。",
             "Acknowledge requests with unknown outcomes first.",
         ))
-    } else if additional.is_some()
-        && (limits.per_job_microusd == 0
-            || limits.daily_microusd == 0
-            || limits.monthly_microusd == 0)
-    {
-        Some(tr(
-            "金額予算は0です。設定で予算を指定してください。",
-            "The monetary budget is zero. Set a budget in Settings.",
-        ))
     } else if additional.is_some_and(|cost| {
-        quote
-            .already_charged_or_held_microusd
-            .checked_add(cost)
-            .is_none_or(|n| n > limits.per_job_microusd)
-            || summary
-                .daily_charged_or_held_microusd
+        (limits.per_job_microusd > 0
+            && quote
+                .already_charged_or_held_microusd
                 .checked_add(cost)
-                .is_none_or(|n| n > limits.daily_microusd)
-            || summary
-                .monthly_charged_or_held_microusd
-                .checked_add(cost)
-                .is_none_or(|n| n > limits.monthly_microusd)
+                .is_none_or(|n| n > limits.per_job_microusd))
+            || (limits.daily_microusd > 0
+                && summary
+                    .daily_charged_or_held_microusd
+                    .checked_add(cost)
+                    .is_none_or(|n| n > limits.daily_microusd))
+            || (limits.monthly_microusd > 0
+                && summary
+                    .monthly_charged_or_held_microusd
+                    .checked_add(cost)
+                    .is_none_or(|n| n > limits.monthly_microusd))
     }) {
         Some(tr(
             "既発生・保留額と今回の予約額が予算を超えます。",
@@ -121,6 +115,7 @@ pub(crate) fn quote_for_ui(state: &AppState, quote: JobQuote, is_retry: bool) ->
                 None
             }
         });
+    let apply_policy = state.ai.prepared_job(&quote.id)?.apply_policy;
     Ok(AiQuote {
         id: quote.id,
         digest: quote.digest,
@@ -148,6 +143,7 @@ pub(crate) fn quote_for_ui(state: &AppState, quote: JobQuote, is_retry: bool) ->
         blocked_reason: reason,
         is_retry,
         focus_term,
+        apply_policy,
     })
 }
 
@@ -161,7 +157,7 @@ pub async fn create_quote(
         let (media,all)={let db=lock(&state.db)?;(db.media(&request.media_id)?,db.list_segments(&request.media_id)?)};
         let cues:Vec<_>=all.iter().filter(|s|s.start_ms<request.end_ms&&s.end_ms>request.start_ms).map(|s|SourceCue{id:s.id.clone(),start_ms:s.start_ms,end_ms:s.end_ms,text:s.text.clone()}).collect();
         ensure!(!cues.is_empty()&&cues.len()<=1000,"select 1–1000 subtitle cues");
-        ensure!(all.iter().filter(|s|cues.iter().any(|c|c.id==s.id)).all(|s|s.status=="confirmed"),"selected subtitles are not confirmed");
+        ensure!(all.iter().filter(|s|cues.iter().any(|c|c.id==s.id)).all(|s|surtitle_core::is_usable_subtitle_status(&s.status)),"selected subtitles are not usable");
         let p=state.preferences.read()?.clone();
         let credential=p.credential_id.context("設定でサービスアカウント鍵を読み込んでください / Import a service-account key in Settings")?;
         let mut requests=Vec::new();
@@ -187,9 +183,25 @@ pub async fn create_quote(
 }
 
 pub fn create_retry_quote(state: AppState, job_id: String) -> std::result::Result<AiQuote, String> {
+    review_ai_job(state, job_id)
+}
+
+pub fn review_ai_job(state: AppState, job_id: String) -> std::result::Result<AiQuote, String> {
     (|| {
-        verify_current_binding(&state, &state.ai.prepared_job(&job_id)?)?;
-        quote_for_ui(&state, state.ai.refresh_quote(&job_id)?, true)
+        let mut quote = state.ai.quote(&job_id)?;
+        let binding = verify_current_binding(&state, &state.ai.prepared_job(&job_id)?);
+        if binding.is_ok() && quote.quote_expires_at_ms <= chrono::Utc::now().timestamp_millis()
+            && ["prepared", "paused", "needs_review"].contains(&quote.state.as_str()) {
+            quote = state.ai.refresh_quote(&job_id)?;
+        }
+        let retry = quote.state != "prepared";
+        let mut view = quote_for_ui(&state, quote, retry)?;
+        if let Err(error) = binding {
+            jobs::record_failure(&state, &job_id, "source", &error)?;
+            view.can_approve = false;
+            view.blocked_reason = Some("元の字幕または動画が変更されています。現在の内容から準備し直してください。 / The source changed. Prepare a new job from its current content.".into());
+        }
+        Ok(view)
     })()
     .map_err(err)
 }

@@ -970,9 +970,18 @@ async fn budget_reduction_during_authentication_prevents_paid_dispatch() {
     let h = Harness::new(vec![]);
     let store = h.store.clone();
     *h.auth.hook.lock().unwrap() = Some(Box::new(move || {
-        store.set_budget(BudgetLimits::default()).unwrap();
+        store
+            .set_budget(BudgetLimits {
+                per_job_microusd: 1,
+                daily_microusd: 0,
+                monthly_microusd: 0,
+            })
+            .unwrap();
     }));
-    assert!(matches!(h.execute().await, Err(AiError::BudgetDisabled)));
+    assert!(matches!(
+        h.execute().await,
+        Err(AiError::BudgetExceeded("job"))
+    ));
     h.assert_unsent();
 }
 

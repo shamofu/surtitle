@@ -84,6 +84,7 @@ pub async fn prepare_boundary_repair(
             media_id,
             range.start_ms,
             range.end_ms,
+            false,
         )
         .await?;
         tauri::async_runtime::spawn_blocking(move || {

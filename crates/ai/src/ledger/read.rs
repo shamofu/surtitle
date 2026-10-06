@@ -81,6 +81,14 @@ impl AiStore {
             .transpose()
     }
 
+    /// Invalid or partial received evidence is still inspectable after a failed first request.
+    pub fn has_transcript_result(&self, job_id: &str) -> Result<bool> {
+        Ok(self.connect()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM ai_requests WHERE job_id=? AND response_json IS NOT NULL UNION ALL SELECT 1 FROM ai_transcript_evidence e JOIN ai_attempts a ON a.id=e.attempt_id WHERE a.job_id=?)",
+            params![job_id, job_id], |row| row.get(0),
+        )?)
+    }
+
     pub fn summary(&self) -> Result<SpendSummary> {
         let conn = self.connect()?;
         let (day, month) = period_starts(self.now_ms())?;

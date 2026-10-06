@@ -53,6 +53,8 @@ impl AiStore {
             CREATE UNIQUE INDEX IF NOT EXISTS ai_one_outbound_request ON ai_attempts((1)) WHERE state='reserved';
             CREATE INDEX IF NOT EXISTS ai_spend_period ON ai_attempts(created_at_ms);
             CREATE TABLE IF NOT EXISTS ai_audit (id INTEGER PRIMARY KEY, at_ms INTEGER NOT NULL, event TEXT NOT NULL, job_id TEXT, detail TEXT);
+            CREATE TABLE IF NOT EXISTS ai_job_issues (id INTEGER PRIMARY KEY, job_id TEXT NOT NULL REFERENCES ai_jobs(id), data TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1);
+            CREATE TABLE IF NOT EXISTS ai_local_applications (job_id TEXT PRIMARY KEY REFERENCES ai_jobs(id), job_digest TEXT NOT NULL, applied_at_ms INTEGER NOT NULL);
             PRAGMA user_version=2;
         ")?;
         transcript_evidence::initialize(&conn)?;

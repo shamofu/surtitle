@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// SPDX-License-Identifier: GPL-3.0-or-later
 import { useState } from 'react';
 import { Check, FileCheck2, Pause, RotateCw, Square } from 'lucide-react';
 import { aiApi } from './api';
@@ -10,10 +9,12 @@ import {
   useDataActions,
   useAppearance,
   useNotifications,
+  useSnapshot,
 } from '../../app/runtime';
 import { Button, Modal } from '../../shared/ui/index';
 import { QuoteApproval } from './QuoteApproval';
 import { timestamp } from '../../shared/format';
+import { UnknownAttempt } from '../settings/PausedJobs';
 
 export function JobActions({
   job,
@@ -25,6 +26,7 @@ export function JobActions({
   const { mutate } = useDataActions();
   const { t } = useAppearance();
   const { report } = useNotifications();
+  const { data } = useSnapshot();
   const [busy, setBusy] = useState(false);
   const [quote, setQuote] = useState<AiQuote>();
   const [saved, setSaved] = useState<SavedAiResult[]>();
@@ -41,11 +43,17 @@ export function JobActions({
     if (result) setQuote(result);
     setBusy(false);
   }
+  async function openQuote() {
+    setBusy(true);
+    const result = await report(() => mutate(() => aiApi.reviewAiJob(job.id), { kind: 'snapshot' }));
+    if (result) setQuote(result);
+    setBusy(false);
+  }
   async function approve() {
     if (!quote) return;
     setBusy(true);
     const success = await report(async () => {
-      await mutate(() => aiApi.reapproveQuote(quote), { kind: 'snapshot' });
+      await mutate(() => quote.isRetry ? aiApi.reapproveQuote(quote) : aiApi.approveQuote(quote), { kind: 'snapshot' });
       return true;
     });
     setBusy(false);
@@ -75,7 +83,9 @@ export function JobActions({
   return (
     <>
       <div className="inline-actions job-actions">
-        {job.transcriptReview && onReviewTranscript && (
+        {job.issue?.nextAction === 'retry_local' && <Button busy={busy} onClick={() => void perform(() => mutate(() => aiApi.retryAiApplication(job.id), { kind: 'snapshot' }))}>{t('保存結果の反映を再試行', 'Retry applying saved results')}</Button>}
+        {job.status === 'queued' && <Button busy={busy} onClick={() => void openQuote()}>{t('見積もりを開く', 'Open estimate')}</Button>}
+        {(job.hasTranscriptResult ?? job.transcriptReview) && onReviewTranscript && (
           <Button
             data-testid="transcript-review-open"
             data-job-id={job.id}
@@ -83,7 +93,7 @@ export function JobActions({
             onClick={() => onReviewTranscript?.(job.id)}
           >
             <FileCheck2 size={13} />
-            {t('文字起こしを確認', 'Review transcription')}
+            {job.resultState === 'applied' || job.resultState === 'applied_with_warnings' ? t('字幕の記録を見る', 'View subtitle history') : t('文字起こしを確認', 'Review transcription')}
           </Button>
         )}
         {(job.pendingResults || 0) > 0 && (
@@ -118,7 +128,7 @@ export function JobActions({
             {t('中止', 'Cancel')}
           </Button>
         )}
-        {['paused', 'failed', 'unknown'].includes(job.status) && (
+        {['paused', 'failed', 'unknown'].includes(job.status) && job.progress < 1 && (
           <Button busy={busy} onClick={() => void estimateRetry()}>
             <RotateCw size={13} />
             {t('残りを再見積もり', 'Estimate remaining work')}
@@ -178,21 +188,23 @@ export function JobActions({
       )}
       {quote && (
         <Modal
-          title={t(
-            '残りの処理を、あらためて確認。',
-            'Review the remaining work.',
-          )}
+          title={quote.isRetry ? t('残りの処理を確認', 'Review remaining work') : t('実行の見積もり', 'Job estimate')}
           eyebrow="A NEW QUOTE, A NEW DECISION"
           onClose={() => {
             if (!busy) setQuote(undefined);
           }}
         >
-          <p className="notice">
+          {quote.isRetry && <p className="notice">
             {t(
               '未完了の処理だけを新しく承認します。結果不明の送信は、利用額の確認を済ませるまで再実行できません。',
               'This new approval covers unfinished work only. Unknown attempts must be accounted for before retrying.',
             )}
-          </p>
+          </p>}
+          {(data?.budget.unknownAttempts || []).map(attempt => <div key={attempt.id}>
+            {attempt.jobId !== job.id && <p>{t('別の処理の結果確認が必要です。', 'Another job has an unknown outcome to acknowledge.')}</p>}
+            <UnknownAttempt attempt={attempt} onResolved={() => void openQuote()} />
+          </div>)}
+          <Button variant="ghost" busy={busy} onClick={() => void openQuote()}>{t('見積もりを更新', 'Refresh estimate')}</Button>
           <QuoteApproval
             key={quote.id}
             quote={quote}

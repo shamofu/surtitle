@@ -1,4 +1,6 @@
 pub(crate) mod cards;
+pub(crate) mod continuations;
+pub(crate) mod editor_drafts;
 pub(crate) mod subtitles;
 pub(crate) mod transfer;
 // Application services and use cases. IPC adapters live in `crate::commands`.
@@ -87,7 +89,7 @@ impl Services {
         let tools = ToolRuntime::open(root.join("tools"), tool_path)?;
         let downloads = download::DownloadManager::open(&root)?;
         ai.recover_interrupted()?;
-        Ok(Arc::new(Self {
+        let state = Arc::new(Self {
             _instance_lock: instance_lock,
             root,
             db: Mutex::new(db),
@@ -100,7 +102,9 @@ impl Services {
             runtime_dir: Mutex::new(PathBuf::new()),
             ai_session: AiSession::default(),
             downloads,
-        }))
+        });
+        transcript::automatic::recover(&state)?;
+        Ok(state)
     }
     pub fn settings(&self) -> Result<AppSettings> {
         let p = self.preferences.read()?;

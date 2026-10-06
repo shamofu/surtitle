@@ -58,6 +58,7 @@ impl Fixture {
                 text: format!("Source sentence {index:02}."),
                 translation: None,
                 status: "confirmed".into(),
+                review_issues: vec![],
             })
             .collect::<Vec<_>>();
         {
@@ -170,6 +171,42 @@ impl Fixture {
         cue.text = "Source changed while execution was waiting.".into();
         db.edit_segment(&cue).unwrap();
     }
+}
+
+#[tokio::test]
+async fn queued_quote_reopens_with_same_identity_and_refreshes_only_after_expiry() {
+    let fixture = Fixture::new().await;
+    let original = fixture.state.ai.quote(&fixture.quote.id).unwrap();
+    let first =
+        super::super::quotes::review_ai_job(fixture.state.clone(), fixture.quote.id.clone())
+            .unwrap();
+    assert_eq!(first.id, original.id);
+    assert_eq!(first.digest, original.digest);
+    assert!(!first.is_retry);
+    assert_eq!(
+        fixture
+            .state
+            .ai
+            .quote(&first.id)
+            .unwrap()
+            .quote_expires_at_ms,
+        original.quote_expires_at_ms
+    );
+    fixture
+        .connection()
+        .execute(
+            "UPDATE ai_jobs SET quote_expires_at_ms=0 WHERE id=?",
+            [&first.id],
+        )
+        .unwrap();
+    let refreshed =
+        super::super::quotes::review_ai_job(fixture.state.clone(), first.id.clone()).unwrap();
+    assert_eq!(refreshed.id, original.id);
+    assert_eq!(refreshed.digest, original.digest);
+    assert!(!refreshed.is_retry);
+    assert!(refreshed.can_approve);
+    fixture.assert_attempts(&[]);
+    assert_eq!(fixture.state.ai.list_jobs().unwrap().len(), 1);
 }
 
 async fn reached(checkpoint: &mut Checkpoint) {
@@ -392,6 +429,14 @@ async fn failed_application_rolls_back_then_recovers_without_resending_paid_outp
     assert!(finished(worker).await.is_err());
     assert_eq!(service.sent_ordinals(), [0]);
     fixture.assert_attempts(&["settled"]);
+    let issue = fixture
+        .state
+        .ai
+        .job_issue(&fixture.quote.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(issue.phase, "apply");
+    assert_eq!(issue.ordinal, None);
     assert_eq!(
         fixture.state.ai.quote(&fixture.quote.id).unwrap().state,
         "needs_review"
@@ -424,8 +469,12 @@ async fn failed_application_rolls_back_then_recovers_without_resending_paid_outp
     } = fixture;
     drop(state);
     let reopened = Services::open(directory.path().to_path_buf()).unwrap();
-    super::super::results::apply_saved_ai_result(reopened.clone(), quote.id.clone(), 0).unwrap();
-    super::super::results::apply_saved_ai_result(reopened.clone(), quote.id.clone(), 0).unwrap();
+    let issue = reopened.ai.job_issue(&quote.id).unwrap().unwrap();
+    assert_eq!(issue.code, "local_apply");
+    assert_eq!(issue.next_action, "retry_local");
+    retry_ai_application(reopened.clone(), quote.id.clone()).unwrap();
+    retry_ai_application(reopened.clone(), quote.id.clone()).unwrap();
+    assert!(reopened.ai.job_issue(&quote.id).unwrap().is_none());
     assert_applied(&reopened, &quote.id, 0);
     assert_eq!(
         reopened.ai.summary().unwrap().daily_actual_charged_microusd,
@@ -514,6 +563,15 @@ async fn unknown_send_outcome_holds_the_reservation_and_never_sends_another_batc
     assert_eq!(summary.daily_actual_charged_microusd, 0);
     assert!(summary.daily_held_microusd > 0);
     assert_eq!(summary.unknown_attempts.len(), 1);
+    let issue = fixture
+        .state
+        .ai
+        .job_issue(&fixture.quote.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(issue.code, "unknown_outcome");
+    assert_eq!(issue.phase, "execute");
+    assert_eq!(issue.ordinal, Some(0));
     assert!(fixture.translations().iter().all(Option::is_none));
     assert!(
         fixture
@@ -537,6 +595,16 @@ async fn executor_initialization_failure_does_not_leave_an_idle_approved_job() {
     )
     .await;
     assert_eq!(result.unwrap_err().to_string(), "offline factory failure");
+    assert_eq!(
+        fixture
+            .state
+            .ai
+            .job_issue(&fixture.quote.id)
+            .unwrap()
+            .unwrap()
+            .ordinal,
+        None
+    );
     fixture.assert_attempts(&[]);
     assert_eq!(
         fixture.state.ai.quote(&fixture.quote.id).unwrap().state,

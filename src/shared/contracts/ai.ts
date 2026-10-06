@@ -61,6 +61,10 @@ export interface JobSummary {
   createdAt: string;
   pendingResults?: number;
   transcriptReview?: boolean;
+  hasTranscriptResult?: boolean;
+  needsAttention?: boolean;
+  resultState?: 'none' | 'ready' | 'applied' | 'applied_with_warnings';
+  issue?: { code: string; phase: string; occurredAt: string; ordinal?: number; httpStatus?: number; nextAction: string };
 }
 
 export interface TranscriptionPreparation {
@@ -74,6 +78,7 @@ export interface TranscriptionPreparation {
   jobId?: string;
   repairParentJobId?: string;
   repairBoundaryId?: string;
+  wholeMedia?: boolean;
 }
 
 export interface SavedAiResult {
@@ -114,4 +119,5 @@ export interface AiQuote {
   pricingSource?: string | null;
   unpriced?: boolean;
   location?: string;
+  applyPolicy?: 'manual' | 'auto';
 }

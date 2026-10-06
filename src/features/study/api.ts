@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { call } from '../../shared/native/transport';
 import type { SubtitleSegment } from '../../shared/contracts/media';
+import type { TranscriptIssueRecord } from '../../shared/contracts/media';
 import type { VocabularyCandidate } from '../../shared/contracts/cards';
 import type {
   ManualTranscriptContent,
@@ -15,6 +16,8 @@ export const studyApi = {
     call<void>('edit_segment', { segment }),
   segments: (mediaId: string) =>
     call<SubtitleSegment[]>('list_segments', { mediaId }),
+  transcriptIssues: (mediaId: string) =>
+    call<TranscriptIssueRecord[]>('list_transcript_issues', { mediaId }),
   candidates: (mediaId: string) =>
     call<VocabularyCandidate[]>('list_vocabulary_candidates', { mediaId }),
   transcriptReview: (jobId: string) =>

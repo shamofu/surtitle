@@ -58,6 +58,7 @@ pub(super) fn draft_segments(draft: &TranscriptDraft) -> Vec<surtitle_core::Subt
             text: cue.text.clone(),
             translation: None,
             status: cue.status.clone(),
+            review_issues: vec![],
         })
         .collect()
 }
@@ -332,6 +333,7 @@ pub(super) fn apply_review(
     )?;
     drop(db);
     crate::application::playback::refresh_current_subtitles(state, &draft.media_id)?;
+    state.ai.clear_job_issue(job_id)?;
     view(state, job_id)
 }
 pub async fn apply_transcript_review(

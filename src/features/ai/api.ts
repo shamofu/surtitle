@@ -32,11 +32,12 @@ export const aiApi = {
     focusTerm?: string;
     model?: AiModelPreference;
   }) => call<AiQuote>('create_quote', { request }),
-  prepareTranscription: (mediaId: string, startMs: number, endMs: number) =>
+  prepareTranscription: (mediaId: string, startMs: number, endMs: number, wholeMedia = false) =>
     call<TranscriptionPreparation>('prepare_transcription', {
       mediaId,
       startMs,
       endMs,
+      wholeMedia,
     }),
   transcriptionPreparations: (mediaId: string) =>
     call<TranscriptionPreparation[]>('list_transcription_preparations', {
@@ -73,6 +74,8 @@ export const aiApi = {
     }),
   createRetryQuote: (jobId: string) =>
     call<AiQuote>('create_retry_quote', { jobId }),
+  reviewAiJob: (jobId: string) => call<AiQuote>('review_ai_job', { jobId }),
+  retryAiApplication: (jobId: string) => call<void>('retry_ai_application', { jobId }),
   savedAiResults: (jobId: string) =>
     call<SavedAiResult[]>('list_saved_ai_results', { jobId }),
   applySavedAiResult: (jobId: string, ordinal: number) =>

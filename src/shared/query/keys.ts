@@ -4,6 +4,7 @@ export const queryKeys = {
   downloads: ['downloads'] as const,
   media: (id: string) => ['media', id] as const,
   segments: (id: string) => ['media', id, 'segments'] as const,
+  transcriptIssues: (id: string) => ['media', id, 'transcript-issues'] as const,
   candidates: (id: string) => ['media', id, 'candidates'] as const,
   streams: (id: string) => ['media', id, 'streams'] as const,
   versions: (id: string) => ['media', id, 'versions'] as const,

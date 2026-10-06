@@ -14,6 +14,8 @@ import { AppProviders } from '../app/providers';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import type { AppSnapshot } from '../shared/contracts/snapshot';
 
+vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn() }));
+
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,
   invoke: vi.fn(),
@@ -62,6 +64,7 @@ function mount(locale: 'ja' | 'en', check: () => Promise<void>) {
   vi.mocked(invoke).mockImplementation(async (command) => {
     if (command === 'get_app_snapshot') return structuredClone(data);
     if (command === 'scan_external_tools') return [];
+    if (command === 'list_ai_continuations') return [];
     if (command === 'check_tool_updates') return check();
     throw new Error(`Unexpected IPC during metadata discovery: ${command}`);
   });

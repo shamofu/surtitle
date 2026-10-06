@@ -3,6 +3,13 @@ use anyhow::{Context, bail};
 use surtitle_core::SaveCard;
 type IpcResult<T> = std::result::Result<T, String>;
 pub async fn save_card(state: AppState, request: SaveCard) -> IpcResult<()> {
+    save_card_with_editor_draft(state, request, None).await
+}
+pub async fn save_card_with_editor_draft(
+    state: AppState,
+    request: SaveCard,
+    draft: Option<surtitle_core::EditorDraftVersion>,
+) -> IpcResult<()> {
     let state = state.clone();
     async {
         crate::application::media_tools::ensure_audio_stream(&state, &request.media_id).await?;
@@ -38,11 +45,12 @@ pub async fn save_card(state: AppState, request: SaveCard) -> IpcResult<()> {
             let _ = std::fs::remove_file(audio);
             bail!("The subtitle or media changed while preparing card audio. Save it again.");
         }
-        let saved = db.save_card_with_audio_range(
-            &request,
-            Some(audio.to_string_lossy().into_owned()),
-            Some(clip_range),
-        );
+        let audio_path = Some(audio.to_string_lossy().into_owned());
+        let saved = if let Some(reference) = &draft {
+            db.save_card_from_editor_draft(reference, &request, audio_path, Some(clip_range))
+        } else {
+            db.save_card_with_audio_range(&request, audio_path, Some(clip_range))
+        };
         if saved.is_err() {
             let _ = std::fs::remove_file(&audio);
         }

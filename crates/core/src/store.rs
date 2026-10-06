@@ -1,7 +1,9 @@
 mod archive;
 mod cards;
+pub(crate) mod editor_drafts;
 mod media;
 mod transcript;
+pub(crate) mod transcript_issues;
 use crate::*;
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -39,6 +41,8 @@ impl Store {
             PRAGMA user_version=1;")?;
         transcript_ranges::initialize(&conn)?;
         draft_study::initialize(&conn)?;
+        editor_drafts::initialize(&conn)?;
+        transcript_issues::initialize(&conn)?;
         Ok(Self { conn, path })
     }
     fn all<T: DeserializeOwned>(&self, sql: &str) -> Result<Vec<T>> {
@@ -60,12 +64,21 @@ impl Store {
 
 pub fn subtitle_revision(segments: &[SubtitleSegment]) -> Result<String> {
     use sha2::{Digest, Sha256};
-    let bytes = serde_json::to_vec(
+    let mut bytes = serde_json::to_vec(
         &segments
             .iter()
             .map(|s| (&s.id, &s.media_id, s.start_ms, s.end_ms, &s.text, &s.status))
             .collect::<Vec<_>>(),
     )?;
+    // Preserve legacy revisions exactly while binding new review metadata to edits.
+    if segments.iter().any(|s| !s.review_issues.is_empty()) {
+        bytes.extend(serde_json::to_vec(
+            &segments
+                .iter()
+                .map(|s| &s.review_issues)
+                .collect::<Vec<_>>(),
+        )?);
+    }
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 pub fn validate_transcript_range(
@@ -90,7 +103,7 @@ pub fn validate_transcript_range(
         validate_segment(segment)?;
         ensure!(
             segment.media_id == media_id
-                && segment.status == "confirmed"
+                && crate::is_usable_subtitle_status(&segment.status)
                 && segment.start_ms >= start_ms
                 && segment.end_ms <= end_ms,
             "replacement subtitle lies outside the reviewed selection"
@@ -109,6 +122,31 @@ pub fn validate_segment(s: &SubtitleSegment) -> Result<()> {
         !s.text.trim().is_empty() && s.text.len() < 1024 * 1024,
         "invalid subtitle text"
     );
+    ensure!(
+        s.review_issues.len() <= 1000,
+        "too many subtitle review issues"
+    );
+    for issue in &s.review_issues {
+        ensure!(
+            !issue.id.is_empty()
+                && issue.id.len() <= 256
+                && !issue.kind.is_empty()
+                && issue.kind.len() <= 128
+                && issue.start_ms < issue.end_ms
+                && issue.end_ms < 360_000_000_000
+                && issue.alternatives.len() <= 100_000,
+            "invalid subtitle review issue"
+        );
+        for alternative in &issue.alternatives {
+            ensure!(
+                alternative.start_ms < alternative.end_ms
+                    && alternative.end_ms < 360_000_000_000
+                    && !alternative.text.trim().is_empty()
+                    && alternative.text.len() < 1024 * 1024,
+                "invalid subtitle review alternative"
+            );
+        }
+    }
     Ok(())
 }
 

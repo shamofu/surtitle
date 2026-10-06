@@ -93,7 +93,7 @@ export function CurrentCaption({
           <p>{loading ? t('字幕を読み込み中…', 'Loading subtitles…') : hasSubtitles
             ? t('音声に合わせて、ここに字幕を表示します。', 'Subtitles appear here as you watch.')
             : t('字幕を追加すると、気になる言葉を選んで確認できます。', 'Add subtitles to inspect a phrase while you watch.')}</p>
-          {!hasSubtitles && <Button variant="ghost" onClick={onImport}>{t('字幕を追加', 'Add subtitles')}</Button>}
+          {!hasSubtitles && <Button variant="ghost" onClick={onImport}>{t('字幕を用意する', 'Prepare subtitles')}</Button>}
         </div>
       )}
       {hasSubtitles && !draftMode && (

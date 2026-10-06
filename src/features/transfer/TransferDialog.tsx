@@ -19,6 +19,7 @@ import {
   useNotifications,
 } from '../../app/runtime';
 import { Button, Modal } from '../../shared/ui/index';
+import { clearEditorDraftSessions, flushEditorDrafts } from '../study/editor-drafts/useEditorDraft';
 
 export function TransferDialog({
   onClose,
@@ -31,7 +32,8 @@ export function TransferDialog({
   const { t } = useAppearance();
   const { report } = useNotifications();
   const [tab, setTab] = useState<'export' | 'restore'>('export');
-  const [format, setFormat] = useState<ExportFormat>('zip');
+  const [format, setFormat] = useState<ExportFormat>(mediaId ? 'srt' : 'zip');
+  const [exportedPaths, setExportedPaths] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<RestorePreview | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
@@ -62,8 +64,8 @@ export function TransferDialog({
       icon: FileArchive,
       title: t('音声付きバックアップ', 'Portable backup'),
       description: t(
-        '学習データ・復習履歴・保存した音声を ZIP に。',
-        'Learning, review history, and saved audio in a ZIP.',
+        '全作品の学習データ・復習履歴・保存した音声を ZIP に。',
+        'All media, learning records, review history, and saved audio in a ZIP.',
       ),
     },
     {
@@ -80,8 +82,8 @@ export function TransferDialog({
       icon: FileSpreadsheet,
       title: 'CSV',
       description: t(
-        '表計算アプリで使えるフレーズ一覧。',
-        'A phrase collection for spreadsheets.',
+        '全作品のフレーズ一覧。表計算アプリで使えます。',
+        'Phrases from all media for spreadsheets.',
       ),
     },
     {
@@ -89,8 +91,8 @@ export function TransferDialog({
       icon: FileSpreadsheet,
       title: 'TSV',
       description: t(
-        '他の学習ツールへ移せるタブ区切りテキスト。',
-        'Tab-separated phrases for other learning tools.',
+        '全作品のフレーズ一覧。他の学習ツールへ移せます。',
+        'Tab-separated phrases from all media for other learning tools.',
       ),
     },
     ...(mediaId
@@ -118,16 +120,11 @@ export function TransferDialog({
   ];
   async function exportData() {
     setBusy(true);
-    const path = await report(() =>
-      transferApi.exportLearning(format, mediaId),
-    );
-    if (path) {
-      await report(
-        async () => true,
-        t('学習データを書き出しました。', 'Learning data exported.'),
-      );
-      onClose();
-    }
+    const paths = await report(async () => {
+      await flushEditorDrafts();
+      return transferApi.exportLearning(format, mediaId);
+    });
+    if (paths?.length) setExportedPaths(paths);
     setBusy(false);
   }
   async function chooseBackup() {
@@ -150,7 +147,11 @@ export function TransferDialog({
     setBusy(true);
     const result = await report(
       async () => {
-        await mutate(() => transferApi.restoreLearning(preview.token), {
+        await flushEditorDrafts();
+        await mutate(async () => {
+          await transferApi.restoreLearning(preview.token);
+          clearEditorDraftSessions();
+        }, {
           kind: 'restore',
         });
         return true;
@@ -171,6 +172,7 @@ export function TransferDialog({
       <div className="segmented-control">
         <button
           className={tab === 'export' ? 'selected' : ''}
+          disabled={busy}
           onClick={() => setTab('export')}
         >
           <Download size={15} />
@@ -178,14 +180,24 @@ export function TransferDialog({
         </button>
         <button
           className={tab === 'restore' ? 'selected' : ''}
+          disabled={busy}
           onClick={() => setTab('restore')}
         >
           <Upload size={15} />
           {t('復元', 'Restore')}
         </button>
       </div>
-      {tab === 'export' ? (
+      {tab === 'export' && exportedPaths.length > 0 ? <section aria-label={t('書き出し完了', 'Export complete')}>
+        <p role="status">{t('書き出しました。', 'Your export is ready.')}</p>
+        <ul>{exportedPaths.map(path => <li key={path}><p style={{ overflowWrap: 'anywhere' }}>{path}</p><Button onClick={() => void report(() => transferApi.revealExportFile(path))}><FolderOpen size={16} />{t('保存先を開く', 'Open containing folder')}</Button></li>)}</ul>
+        <footer className="modal-footer"><Button onClick={() => setExportedPaths([])}>{t('別の形式で書き出す', 'Export another format')}</Button><Button variant="primary" onClick={onClose}>{t('完了', 'Done')}</Button></footer>
+      </section> : tab === 'export' ? (
         <>
+          <p className="notice" role="status">{format === 'srt' || format === 'vtt'
+            ? t('対象：この作品の字幕（翻訳があれば別ファイルも作成）', 'Scope: subtitles for this media, plus a separate translation file when available')
+            : format === 'csv' || format === 'tsv'
+              ? t('対象：すべての作品のフレーズ', 'Scope: phrases from all media')
+              : t('対象：すべての学習データ', 'Scope: all learning data')}</p>
           <div className="format-list">
             {formats.map((item) => (
               <button
@@ -193,6 +205,7 @@ export function TransferDialog({
                 className={`format-option ${format === item.id ? 'selected' : ''}`}
                 onClick={() => setFormat(item.id)}
                 aria-pressed={format === item.id}
+                disabled={busy}
               >
                 <item.icon size={21} />
                 <span>

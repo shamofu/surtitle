@@ -363,7 +363,13 @@ fn dispatch_rechecks_current_budget_price_state_and_reservation_identity() {
         let mut r = s.reserve_next(&q.id).unwrap().unwrap();
         s.validate_dispatch(&r).unwrap();
         match scenario {
-            "budget" => s.set_budget(BudgetLimits::default()).unwrap(),
+            "budget" => s
+                .set_budget(BudgetLimits {
+                    per_job_microusd: 1,
+                    daily_microusd: 0,
+                    monthly_microusd: 0,
+                })
+                .unwrap(),
             "price" => {
                 r.execution
                     .price

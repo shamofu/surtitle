@@ -22,7 +22,7 @@ export function QuoteApproval({
   const [acknowledgedQuote, setAcknowledgedQuote] = useState<string | null>(
     null,
   );
-  const approvalIdentity = `${quote.id}:${quote.digest || ''}`;
+  const approvalIdentity = `${quote.id}:${quote.digest || ''}:${quote.expiresAt}`;
   const acknowledged = acknowledgedQuote === approvalIdentity;
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -55,6 +55,7 @@ export function QuoteApproval({
         </small>
       </div>
       <dl className="details-list">
+        {quote.applyPolicy === 'auto' && <div><dt>{t('完成後', 'After completion')}</dt><dd>{t('字幕を自動表示', 'Apply subtitles automatically')}</dd></div>}
         {quote.focusTerm && (
           <div>
             <dt>{t('解説する表現', 'Phrase to explain')}</dt>

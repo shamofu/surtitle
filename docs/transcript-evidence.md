@@ -1,5 +1,11 @@
 # Transcript response evidence and local review
 
+This guide describes saved evidence and manual transcript review, including
+range jobs, older jobs and local recovery. New whole-recording jobs can apply
+completed subtitles automatically while retaining original results, warnings
+and alternatives; see [AI behavior](ai.md#application-workflow). Manual adoption
+uses the explicit review steps below.
+
 Production audio requests retain allowlisted provider evidence in the paid-work
 SQLite database before settlement. The record binds the attempt, ordinal, model,
 immutable input hash, frozen request hash, task hash, and parser revision. It is
@@ -34,7 +40,7 @@ An incomplete snapshot or a parser-invalid candidate cannot be selected.
 
 Selecting a valid candidate for the draft requires a separate action and current
 draft digest. Unresolved attempts cannot contribute a selected reparse candidate. The
-native layer revalidates its binding and output on each use, and the normal
+native layer revalidates its binding and output on each use, and the manual
 source, boundary, VAD-warning, and explicit-adoption gates still apply. Selection
 does not replace subtitles or alter saved study cards. No clamping, interpolation,
 text rewrite, model fallback, or paid retry is performed by this workflow.
@@ -74,14 +80,16 @@ hold may remain while local corrections are saved and adopted: neither action
 settles, refunds, acknowledges, or resends that attempt. This does not relax the
 settlement requirement for selecting a provider-derived reparse candidate.
 
-Adoption requires every range to have a validated effective result or a manual
+Manual adoption requires every range to have a validated effective result or a manual
 revision, including explicit no-speech confirmation, and all remaining boundary
 and warning reviews to be complete. Source identity, current digest, and the
 existing subtitle replacement interval are checked again. Adoption is separate
 from saving, never resumes the job, and blocks further native approval of that
 adopted job. Original responses, reservations, and saved study cards are unchanged.
 
-Revision history and selections live in operational learning-database tables.
+Transcript-review revision history and selections live in operational learning-database tables.
 Portable learning exports omit them, and learning restore clears them instead of
-importing a review or approval from another backup. See the [test guide](testing.md)
+importing a review or approval from another backup. This is separate from phrase
+and subtitle editor drafts, which JSON/ZIP archives preserve with detached source
+bindings. See [learning data transfer](data-transfer.md) and the [test guide](testing.md)
 for regression and integration checks.

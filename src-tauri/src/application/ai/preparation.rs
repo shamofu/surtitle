@@ -6,10 +6,12 @@ pub async fn prepare_transcription(
     media_id: String,
     start_ms: u64,
     end_ms: u64,
+    whole_media: bool,
 ) -> std::result::Result<PreparationSummary, String> {
-    let receipt = prepare_transcription_receipt(app, state.clone(), media_id, start_ms, end_ms)
-        .await
-        .map_err(err)?;
+    let receipt =
+        prepare_transcription_receipt(app, state.clone(), media_id, start_ms, end_ms, whole_media)
+            .await
+            .map_err(err)?;
     let range = build_transcript_draft(&receipt, &[]).map_err(|e| e.to_string())?;
     Ok(PreparationSummary {
         id: receipt.id,
@@ -23,6 +25,7 @@ pub async fn prepare_transcription(
             .map(AudioChunk::request_duration_ms)
             .sum(),
         chunk_count: receipt.chunks.len(),
+        whole_media,
     })
 }
 
@@ -32,6 +35,7 @@ pub(crate) async fn prepare_transcription_receipt(
     media_id: String,
     start_ms: u64,
     end_ms: u64,
+    whole_media: bool,
 ) -> Result<AudioPreparationReceipt> {
     async {
         ensure!(end_ms > start_ms, "select an audio interval");
@@ -49,6 +53,11 @@ pub(crate) async fn prepare_transcription_receipt(
                     transcript_fingerprint(&db.list_segments(&media_id)?)?,
                 )
             };
+            ensure!(
+                !whole_media
+                    || (start_ms == 0 && media.duration_ms > 0 && end_ms == media.duration_ms),
+                "Whole-media transcription requires the complete known media duration"
+            );
             let audio_stream_index =
                 crate::application::media_tools::ensure_audio_stream(&state, &media_id).await?;
             let model = install_silero_model(&state.root.join("models")).await?;
@@ -79,7 +88,7 @@ pub(crate) async fn prepare_transcription_receipt(
                 audio_stream_index: Some(audio_stream_index),
             };
             let root = state.root.join("prepared");
-            let receipt = tauri::async_runtime::spawn_blocking(move || {
+            let mut receipt = tauri::async_runtime::spawn_blocking(move || {
                 let _lease = lease;
                 prepare_audio(
                     std::path::Path::new(&media.path),
@@ -94,6 +103,15 @@ pub(crate) async fn prepare_transcription_receipt(
                 )
             })
             .await??;
+            if whole_media {
+                receipt.prepared_job = receipt
+                    .prepared_job
+                    .with_apply_policy(TranscriptApplyPolicy::Auto)?;
+                surtitle_core::store::write_json_atomic(
+                    &receipt.directory.join("receipt.json"),
+                    &receipt,
+                )?;
+            }
             Ok::<_, anyhow::Error>(receipt)
         }
         .await;

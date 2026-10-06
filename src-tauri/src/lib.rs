@@ -70,6 +70,16 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::continuations::save_ai_continuation,
+            commands::continuations::list_ai_continuations,
+            commands::continuations::discard_ai_continuation,
+            commands::editor_drafts::list_editor_drafts,
+            commands::editor_drafts::save_editor_draft,
+            commands::editor_drafts::delete_editor_draft,
+            commands::editor_drafts::rebind_editor_draft,
+            commands::editor_drafts::commit_subtitle_editor_draft,
+            commands::editor_drafts::save_phrase_editor_draft,
+            commands::transfer::reveal_export_file,
             commands::ai::get_app_snapshot,
             commands::models::list_vertex_models,
             commands::models::update_appearance,
@@ -103,6 +113,9 @@ pub fn run() {
             commands::transcript::acknowledge_transcript_warning,
             commands::transcript::prepare_boundary_repair,
             commands::ai::create_retry_quote,
+            commands::ai::review_ai_job,
+            commands::ai::retry_ai_application,
+            commands::ai::list_transcript_issues,
             commands::ai::reapprove_quote,
             commands::ai::pause_ai_job,
             commands::ai::cancel_ai_job,

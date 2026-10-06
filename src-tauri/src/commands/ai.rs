@@ -88,6 +88,33 @@ pub async fn reapprove_quote(
 }
 
 #[tauri::command]
+pub fn review_ai_job(
+    state: State<'_, AppState>,
+    job_id: String,
+) -> std::result::Result<AiQuote, String> {
+    crate::application::ai::quotes::review_ai_job(state.inner().clone(), job_id)
+}
+
+#[tauri::command]
+pub fn retry_ai_application(
+    state: State<'_, AppState>,
+    job_id: String,
+) -> std::result::Result<(), String> {
+    crate::application::ai::jobs::retry_ai_application(state.inner().clone(), job_id)
+}
+
+#[tauri::command]
+pub fn list_transcript_issues(
+    state: State<'_, AppState>,
+    media_id: String,
+) -> std::result::Result<Vec<surtitle_core::TranscriptIssueRecord>, String> {
+    crate::application::transcript::automatic::list_transcript_issues(
+        state.inner().clone(),
+        media_id,
+    )
+}
+
+#[tauri::command]
 pub fn pause_ai_job(state: State<'_, AppState>, job_id: String) -> std::result::Result<(), String> {
     crate::application::ai::jobs::pause_ai_job(state.inner().clone(), job_id)
 }
@@ -123,6 +150,7 @@ pub async fn prepare_transcription(
     media_id: String,
     start_ms: u64,
     end_ms: u64,
+    whole_media: Option<bool>,
 ) -> std::result::Result<PreparationSummary, String> {
     crate::application::ai::preparation::prepare_transcription(
         app,
@@ -130,6 +158,7 @@ pub async fn prepare_transcription(
         media_id,
         start_ms,
         end_ms,
+        whole_media.unwrap_or(false),
     )
     .await
 }

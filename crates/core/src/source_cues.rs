@@ -27,8 +27,8 @@ pub fn confirmed_cue_range<'a>(
     ensure!(
         cues.iter().zip(ids).all(|(cue, id)| cue.id == *id
             && cue.media_id == media_id
-            && cue.status == "confirmed"),
-        "Source subtitles must be confirmed, ordered and adjacent"
+            && crate::is_usable_subtitle_status(&cue.status)),
+        "Source subtitles must be usable, ordered and adjacent"
     );
     let start_ms = cues[0].start_ms;
     let end_ms = cues
@@ -59,6 +59,7 @@ mod tests {
             text: id.into(),
             translation: None,
             status: "confirmed".into(),
+            review_issues: vec![],
         }
     }
     fn ids(values: &[&str]) -> Vec<String> {

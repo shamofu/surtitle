@@ -47,6 +47,7 @@ export function NativePlayer({
   repeatTarget = null,
   settingsOpen = false,
   onSettingsClose = () => {},
+  onUseStudySubtitles,
   interactionsDisabled = false,
 }: {
   media: Media;
@@ -54,6 +55,7 @@ export function NativePlayer({
   repeatTarget?: HTMLElement | null;
   settingsOpen?: boolean;
   onSettingsClose?: () => void;
+  onUseStudySubtitles?: (streamIndex: number) => void;
   interactionsDisabled?: boolean;
   selected?: SubtitleSegment;
   selectionRevision: number;
@@ -68,6 +70,8 @@ export function NativePlayer({
   const [state, setState] = useState<PlayerState>();
   const [loadStatus, setLoadStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [loadError, setLoadError] = useState('');
+  const [surfaceError, setSurfaceError] = useState('');
+  const [surfaceAttempt, setSurfaceAttempt] = useState(0);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [loadPending, setLoadPending] = useState(false);
   const loadBusy = useRef(false);
@@ -212,6 +216,8 @@ export function NativePlayer({
     if (!nativeAvailable()) return;
     let frame = 0;
     let last = '';
+    let disposed = false;
+    setSurfaceError('');
     const update = () => {
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
@@ -244,7 +250,13 @@ export function NativePlayer({
         const signature = JSON.stringify(request);
         if (signature !== last) {
           last = signature;
-          void playerApi.player(request).catch(() => {});
+          void playerApi.player(request).then(() => {
+            if (!disposed && !hidden) setSurfaceError('');
+          }).catch(error => {
+            if (disposed) return;
+            last = '';
+            setSurfaceError(String(error));
+          });
         }
       });
     };
@@ -257,13 +269,14 @@ export function NativePlayer({
     document.addEventListener('visibilitychange', update);
     update();
     return () => {
+      disposed = true;
       window.cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener('resize', update);
       window.removeEventListener('scroll', update, true);
       document.removeEventListener('visibilitychange', update);
     };
-  }, [loaded, surfaceHidden, media.id]);
+  }, [loaded, surfaceHidden, media.id, surfaceAttempt]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (
@@ -436,6 +449,10 @@ export function NativePlayer({
           {!repeatTarget && draftMode && selected && repeatButton}
         </fieldset>
       </section>
+      {surfaceError && <div className="notice warning" role="alert">
+        <span>{t('映像を表示できませんでした。', 'The video could not be displayed.')} {surfaceError}</span>
+        <Button onClick={() => setSurfaceAttempt(value => value + 1)}>{t('映像表示を再試行', 'Retry video display')}</Button>
+      </div>}
       {repeatTarget && createPortal(repeatButton, repeatTarget)}
       {settingsOpen && (
         <Modal title={t('再生設定', 'Playback settings')} onClose={onSettingsClose}>
@@ -460,6 +477,13 @@ export function NativePlayer({
                       </option>
                     ))}
                   </select>
+                  {kind === 'sub' && onUseStudySubtitles && (() => {
+                    const selectedTrack = tracks.find(track => track.selected);
+                    return selectedTrack && !selectedTrack.external && selectedTrack.ffIndex != null && <Button
+                      disabled={controlsDisabled}
+                      onClick={() => onUseStudySubtitles(selectedTrack.ffIndex!)}
+                    >{t('この字幕を学習に使う', 'Use these captions for study')}</Button>;
+                  })()}
                 </label>
               );
             })}

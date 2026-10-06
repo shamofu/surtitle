@@ -9,59 +9,88 @@ pub async fn export_learning(
     state: AppState,
     format: String,
     media_id: Option<String>,
-) -> IpcResult<String> {
+) -> IpcResult<Vec<String>> {
     ensure_export_format(&format).map_err(err)?;
     let Some(path) = transfer_dialog::export_path(&state, &format)
         .await
         .map_err(err)?
     else {
-        return Ok(String::new());
+        return Ok(vec![]);
     };
-    (|| {
-        let db = lock(&state.db)?;
-        let archive = db.archive()?;
-        let path = path.as_path();
-        match format.as_str() {
-            "json" => surtitle_core::transfer::export_json(&archive, path)?,
-            "zip" => {
-                surtitle_core::transfer::export_zip(&archive, &state.root.join("card-audio"), path)?
-            }
-            "csv" | "tsv" => std::fs::write(
+    export_to_path(&state, &format, media_id.as_deref(), path.as_path()).map_err(err)
+}
+fn export_to_path(
+    state: &AppState,
+    format: &str,
+    media_id: Option<&str>,
+    path: &Path,
+) -> Result<Vec<String>> {
+    let db = lock(&state.db)?;
+    let archive = db.archive()?;
+    let mut paths = vec![path.to_string_lossy().into_owned()];
+    match format {
+        "json" => surtitle_core::transfer::export_json(&archive, path)?,
+        "zip" => {
+            surtitle_core::transfer::export_zip(&archive, &state.root.join("card-audio"), path)?
+        }
+        "csv" | "tsv" => std::fs::write(
+            path,
+            surtitle_core::transfer::export_delimited(
+                &archive.cards,
+                if format == "csv" { ',' } else { '\t' },
+            ),
+        )?,
+        "srt" | "vtt" => {
+            let media_id = media_id.context("select a media item for subtitle export")?;
+            let segments = db.list_segments(media_id)?;
+            let translated = if segments.iter().any(|s| s.translation.is_some()) {
+                let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+                let translated = path.with_file_name(format!("{stem}.translation.{format}"));
+                ensure!(
+                    !translated.exists(),
+                    "translation output already exists; choose a different filename"
+                );
+                Some(translated)
+            } else {
+                None
+            };
+            // Validate both destinations before modifying the chosen original output.
+            std::fs::write(
                 path,
-                surtitle_core::transfer::export_delimited(
-                    &archive.cards,
-                    if format == "csv" { ',' } else { '\t' },
-                ),
-            )?,
-            "srt" | "vtt" => {
-                let media_id = media_id.context("select a media item for subtitle export")?;
-                let segments = db.list_segments(&media_id)?;
-                let translated = if segments.iter().any(|s| s.translation.is_some()) {
-                    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-                    let translated = path.with_file_name(format!("{stem}.translation.{format}"));
-                    ensure!(
-                        !translated.exists(),
-                        "translation output already exists; choose a different filename"
-                    );
-                    Some(translated)
-                } else {
-                    None
-                };
-                // Validate both destinations before modifying the chosen original output.
+                surtitle_core::subtitles::format(&segments, format == "vtt", false),
+            )?;
+            if let Some(translated) = translated {
                 std::fs::write(
-                    path,
-                    surtitle_core::subtitles::format(&segments, format == "vtt", false),
+                    &translated,
+                    surtitle_core::subtitles::format(&segments, format == "vtt", true),
                 )?;
-                if let Some(translated) = translated {
-                    std::fs::write(
-                        &translated,
-                        surtitle_core::subtitles::format(&segments, format == "vtt", true),
-                    )?;
-                }
+                paths.push(translated.to_string_lossy().into_owned());
             }
-            _ => bail!("invalid export format"),
-        };
-        Ok(path.to_string_lossy().into_owned())
+        }
+        _ => bail!("invalid export format"),
+    };
+    Ok(paths)
+}
+
+pub fn reveal_export_file(path: String) -> IpcResult<()> {
+    (|| -> Result<()> {
+        let path = std::path::PathBuf::from(path);
+        ensure!(
+            path.is_absolute() && path.is_file(),
+            "Exported file could not be found"
+        );
+        #[cfg(windows)]
+        {
+            let windows = std::env::var_os("WINDIR").context("Windows directory is unavailable")?;
+            std::process::Command::new(Path::new(&windows).join("explorer.exe"))
+                .arg(path.parent().context("Export folder could not be found")?)
+                .spawn()
+                .context("Could not open the export folder")?;
+        }
+        #[cfg(not(windows))]
+        bail!("Opening the export folder is only available in the Windows desktop app");
+        #[cfg(windows)]
+        Ok(())
     })()
     .map_err(err)
 }
@@ -165,5 +194,7 @@ fn materialize_restore_plan(
     Ok(plan.archive)
 }
 
+#[cfg(test)]
+mod export_tests;
 #[cfg(test)]
 mod restore_tests;

@@ -153,6 +153,7 @@ mod tests {
             text: text.into(),
             translation: None,
             status: "confirmed".into(),
+            review_issues: vec![],
         }
     }
 

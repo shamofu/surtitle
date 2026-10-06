@@ -8,6 +8,7 @@ fn segment(id: &str, start_ms: u64, end_ms: u64, text: &str) -> SubtitleSegment 
         text: text.into(),
         translation: None,
         status: "confirmed".into(),
+        review_issues: vec![],
     }
 }
 fn fixture() -> (tempfile::TempDir, Store) {
@@ -41,6 +42,84 @@ fn fixture() -> (tempfile::TempDir, Store) {
     )
     .unwrap();
     (dir, db)
+}
+
+#[test]
+fn generated_subtitles_are_usable_portable_and_remain_distinct_from_human_review() {
+    let (_dir, mut db) = fixture();
+    let mut cue = segment("generated", 1000, 2000, "Automatic result");
+    cue.status = "generated_review".into();
+    cue.review_issues.push(SubtitleReviewIssue {
+        id: "boundary".into(),
+        kind: "boundary_conflict".into(),
+        start_ms: 900,
+        end_ms: 2100,
+        alternatives: vec![SubtitleReviewAlternative {
+            start_ms: 1000,
+            end_ms: 2000,
+            text: "Other candidate".into(),
+        }],
+    });
+    let old = db.list_segments("media").unwrap();
+    let revision = subtitle_revision(&old).unwrap();
+    let job = "a".repeat(64);
+    db.adopt_transcript_once(
+        "auto",
+        &job,
+        &"b".repeat(64),
+        "media",
+        &revision,
+        0,
+        8000,
+        &[cue.clone()],
+    )
+    .unwrap();
+    let stored = db.segment("generated").unwrap();
+    assert!(is_usable_subtitle_status(&stored.status));
+    assert_eq!(stored.status, "generated_review");
+    assert_eq!(
+        stored.review_issues[0].alternatives[0].text,
+        "Other candidate"
+    );
+    assert_eq!(db.subtitle_versions("media").unwrap().len(), 1);
+    let archive = db.archive().unwrap();
+    let portable: LearningArchive =
+        serde_json::from_slice(&serde_json::to_vec(&archive).unwrap()).unwrap();
+    assert_eq!(
+        portable
+            .segments
+            .iter()
+            .find(|s| s.id == "generated")
+            .unwrap()
+            .review_issues
+            .len(),
+        1
+    );
+    let before = subtitle_revision(std::slice::from_ref(&stored)).unwrap();
+    let mut reviewed = stored.clone();
+    reviewed.review_issues.clear();
+    assert_ne!(
+        before,
+        subtitle_revision(std::slice::from_ref(&reviewed)).unwrap()
+    );
+    reviewed = stored;
+    reviewed.status = "confirmed".into();
+    db.edit_segment(&reviewed).unwrap();
+    assert!(db.segment("generated").unwrap().review_issues.is_empty());
+    assert!(
+        !db.adopt_transcript_once(
+            "auto",
+            &job,
+            &"b".repeat(64),
+            "media",
+            &revision,
+            0,
+            8000,
+            &[cue]
+        )
+        .unwrap()
+    );
+    assert_eq!(db.segment("generated").unwrap().status, "confirmed");
 }
 #[test]
 fn explicit_adoption_is_atomic_and_idempotent_across_restart_without_changing_cards() {

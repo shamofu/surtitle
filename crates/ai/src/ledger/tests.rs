@@ -124,14 +124,49 @@ fn untimed_diagnostic_cannot_use_an_ordinary_store_after_feature_unification() {
     assert_eq!(store.summary().unwrap().monthly_charged_or_held_microusd, 0);
 }
 #[test]
-fn zero_is_closed_and_preparation_is_deduplicated() {
+fn zero_is_unlimited_and_preparation_is_deduplicated() {
     let (_d, s) = store();
     let q = s.prepare_at(plan(), AT).unwrap();
     assert_eq!(q.id, s.prepare_at(plan(), AT).unwrap().id);
-    assert!(matches!(
-        s.approve_at(&q.id, &q.digest, AT, false),
-        Err(AiError::BudgetDisabled)
-    ));
+    s.approve_at(&q.id, &q.digest, AT, false).unwrap();
+    assert!(s.reserve_next_at(&q.id, AT).unwrap().is_some());
+}
+
+#[test]
+fn positive_caps_are_enforced_when_other_caps_are_unlimited() {
+    for (limits, expected) in [
+        (
+            BudgetLimits {
+                per_job_microusd: 1,
+                daily_microusd: 0,
+                monthly_microusd: 0,
+            },
+            "job",
+        ),
+        (
+            BudgetLimits {
+                per_job_microusd: 0,
+                daily_microusd: 1,
+                monthly_microusd: 0,
+            },
+            "daily",
+        ),
+        (
+            BudgetLimits {
+                per_job_microusd: 0,
+                daily_microusd: 0,
+                monthly_microusd: 1,
+            },
+            "monthly",
+        ),
+    ] {
+        let (_d, s) = store();
+        s.set_budget(limits).unwrap();
+        let q = s.prepare_at(plan(), AT).unwrap();
+        assert!(
+            matches!(s.approve_at(&q.id, &q.digest, AT, false), Err(AiError::BudgetExceeded(label)) if label == expected)
+        );
+    }
 }
 #[test]
 fn digest_and_expiry_are_enforced() {

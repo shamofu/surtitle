@@ -19,8 +19,10 @@ import { JobActions } from '../ai/JobActions';
 
 export function UnknownAttempt({
   attempt,
+  onResolved,
 }: {
   attempt: NonNullable<BudgetSummary['unknownAttempts']>[number];
+  onResolved?: () => void;
 }) {
   const { mutate } = useDataActions();
   const { t } = useAppearance();
@@ -31,17 +33,19 @@ export function UnknownAttempt({
   async function resolve() {
     if (!acknowledged) return;
     setBusy(true);
-    await report(
-      () =>
-        mutate(() => aiApi.resolveUnknownAttempt(attempt.id), {
+    const success = await report(
+      async () => {
+        await mutate(() => aiApi.resolveUnknownAttempt(attempt.id), {
           kind: 'snapshot',
-        }),
+        }); return true;
+      },
       t(
         '課金の可能性を了承しました。未確定の利用記録を保持します。再実行には別の承認が必要です。',
         'Possible charge acknowledged. Unresolved accounting is retained. Any retry requires a separate approval.',
       ),
     );
     setBusy(false);
+    if (success) onResolved?.();
   }
   return (
     <article className="unknown-attempt">
@@ -107,7 +111,7 @@ export function PausedJobs() {
       (job) =>
         ['paused', 'failed', 'unknown'].includes(job.status) ||
         (job.pendingResults || 0) > 0 ||
-        job.transcriptReview,
+        (job.needsAttention ?? job.transcriptReview),
     ) || [];
   if (!attempts.length && !jobs.length) return null;
   return (

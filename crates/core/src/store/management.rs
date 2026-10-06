@@ -74,6 +74,13 @@ impl Store {
         }
         ensure!(!segments.is_empty(), "subtitle source contains no cues");
         let tx = self.conn.transaction()?;
+        super::transcript_issues::deactivate_transcript_issues_on(
+            &tx,
+            media_id,
+            0,
+            u64::MAX,
+            false,
+        )?;
         if !previous.is_empty() {
             let version = SubtitleVersion {
                 id: id(),
@@ -154,6 +161,7 @@ mod tests {
             text: "Original example".into(),
             translation: None,
             status: "confirmed".into(),
+            review_issues: vec![],
         };
         db.put_media(&media).unwrap();
         db.set_segments(&media.id, std::slice::from_ref(&segment))

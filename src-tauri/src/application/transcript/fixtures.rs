@@ -212,6 +212,7 @@ pub(super) fn seed_fixture_data(state: &AppState) -> Result<()> {
                 text: "Original subtitle".into(),
                 translation: Some("元の訳".into()),
                 status: "confirmed".into(),
+                review_issues: vec![],
             }],
         )?;
         drop(db);

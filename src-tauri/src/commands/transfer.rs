@@ -8,8 +8,12 @@ pub async fn export_learning(
     state: State<'_, AppState>,
     format: String,
     media_id: Option<String>,
-) -> IpcResult<String> {
+) -> IpcResult<Vec<String>> {
     crate::application::transfer::export_learning(state.inner().clone(), format, media_id).await
+}
+#[tauri::command]
+pub fn reveal_export_file(path: String) -> IpcResult<()> {
+    crate::application::transfer::reveal_export_file(path)
 }
 #[tauri::command]
 pub async fn preview_restore(state: State<'_, AppState>) -> IpcResult<Option<RestorePreview>> {

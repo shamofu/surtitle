@@ -73,6 +73,7 @@ pub fn parse(input: &str, media_id: &str) -> Result<Vec<SubtitleSegment>> {
             text,
             translation: None,
             status: "confirmed".into(),
+            review_issues: vec![],
         });
     }
     segments.sort_by_key(|s| s.start_ms);

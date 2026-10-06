@@ -172,6 +172,10 @@ pub(super) fn receipt_for_job(
             && plan.binding.transcript_revision == receipt.prepared_job.binding.transcript_revision,
         "quoted audio differs from its local preparation"
     );
+    ensure!(
+        binding.repair_parent.is_some() || plan.apply_policy == receipt.prepared_job.apply_policy,
+        "Quoted application policy differs from preparation"
+    );
     receipt.prepared_job = plan;
     Ok(receipt)
 }

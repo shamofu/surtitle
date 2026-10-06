@@ -38,6 +38,7 @@ fn seed(state: &AppState, source: &Path) -> LearningArchive {
                 text: "Restored original.".into(),
                 translation: None,
                 status: "confirmed".into(),
+                review_issues: vec![],
             },
             SubtitleSegment {
                 id: "restore-b".into(),
@@ -47,6 +48,7 @@ fn seed(state: &AppState, source: &Path) -> LearningArchive {
                 text: "Restored next sentence.".into(),
                 translation: None,
                 status: "confirmed".into(),
+                review_issues: vec![],
             },
         ],
     )
