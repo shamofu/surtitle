@@ -56,13 +56,24 @@ test('rejects wrong version or evidence from a different installer even with upd
 const releaseEnv = { GITHUB_REPOSITORY: 'example/surtitle', GITHUB_REF: 'refs/tags/v0.1.0',
   GITHUB_EVENT_NAME: 'push', GITHUB_SHA: 'a'.repeat(40) };
 function publisher(directory, { existing = null, remoteStates = ['lightweight'], assets,
-  draft = true, gitFailure = false, createdReleases, createFailure = false } = {}) {
+  draft = true, gitFailure = false, createdReleases, createFailure = false, shallow = false } = {}) {
   const calls = [], uploads = [];
   let remoteRead = 0, created = false;
   const run = (program, args, options) => {
     calls.push({ program, args });
     assert.equal(options.shell, false);
     if (program === 'git') {
+      if (args[0] === 'rev-parse') {
+        if (args[1] === '--is-shallow-repository') return { status: 0, stdout: `${shallow}\n` };
+        assert.equal(args[1], '--verify');
+        assert.ok([`${releaseEnv.GITHUB_SHA}^{commit}`, 'refs/tags/v0.1.0^{commit}'].includes(args[2]));
+        return { status: 0, stdout: `${releaseEnv.GITHUB_SHA}\n` };
+      }
+      if (args[0] === 'log') {
+        assert.equal(args.at(-2), releaseEnv.GITHUB_SHA);
+        assert.equal(args.at(-1), '--');
+        return { status: 0, stdout: `${releaseEnv.GITHUB_SHA}\0feat: initial release\0` };
+      }
       assert.deepEqual(args, ['ls-remote', 'origin', 'refs/tags/v0.1.0', 'refs/tags/v0.1.0^{}']);
       if (gitFailure) return { status: 128, stderr: 'Remote access failed' };
       const state = remoteStates[Math.min(remoteRead++, remoteStates.length - 1)];
@@ -87,7 +98,8 @@ function publisher(directory, { existing = null, remoteStates = ['lightweight'],
     }
     assert.equal(args[0], 'release');
     if (args[1] === 'create') {
-      for (const path of args.slice(args.indexOf('--notes') + 2)) {
+      calls.at(-1).notes = readFileSync(args[args.indexOf('--notes-file') + 1], 'utf8');
+      for (const path of args.slice(args.indexOf('--notes-file') + 2)) {
         uploads.push({ path, name: basename(path), size: statSync(path).size,
           content: basename(path) === 'SHA256SUMS.txt' ? readFileSync(path, 'utf8') : undefined });
       }
@@ -106,7 +118,7 @@ test.for(['lightweight', 'annotated'])('publishes an existing %s tag when its dr
   assert.ok(create.includes('--draft'));
   assert.ok(create.includes('--verify-tag'));
   assert.equal(create.includes('--target'), false);
-  assert.equal(calls.filter(call => call.program === 'git').length, 2);
+  assert.equal(calls.filter(call => call.program === 'git' && call.args[0] === 'ls-remote').length, 2);
   assert.equal(calls.filter(call => call.args.includes('--paginate')).length, 2);
   assert.equal(calls.some(call => call.args.includes('repos/example/surtitle/releases/tags/v0.1.0')), false);
   assert.ok(calls.at(-1).args.includes('--draft=false'));
@@ -131,10 +143,20 @@ test('uploads only installer, corresponding source and public checksums while pr
   for (const file of uploads.filter(file => file.name !== 'SHA256SUMS.txt')) assert.equal(file.path, join(directory, file.name));
   assert.deepEqual(readdirSync(directory).sort(), [...before.keys()].sort());
   for (const [name, content] of before) assert.deepEqual(readFileSync(join(directory, name)), content);
-  const create = calls.find(call => call.args[1] === 'create').args;
-  const notes = create[create.indexOf('--notes') + 1];
+  const create = calls.find(call => call.args[1] === 'create');
+  const notes = create.notes;
+  assert.ok(create.args.includes('--notes-file'));
+  assert.equal(existsSync(create.args[create.args.indexOf('--notes-file') + 1]), false);
+  assert.match(notes, /## Changes/);
+  assert.ok(notes.includes(`- [aaaaaaa](https://github.com/example/surtitle/commit/${releaseEnv.GITHUB_SHA}) feat: initial release`));
   assert.match(notes, /installer, SHA-256 checksums and corresponding source/);
   assert.doesNotMatch(notes, /SBOM/);
+});
+
+test('does not upload when full release history is unavailable', t => {
+  const directory = fixture(t), { calls, run } = publisher(directory, { shallow: true });
+  assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), /history|shallow/i);
+  assert.equal(calls.some(call => call.args[1] === 'create'), false);
 });
 
 test.for([false, true])('rejects tampered internal JSON before upload even with resealed checksums=%s', (reseal, t) => {

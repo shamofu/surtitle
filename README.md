@@ -81,6 +81,8 @@ Each GitHub Release uploads three assets: the Windows installer (`.exe`), `surti
 
 ### Releasing a version
 
+Release notes are generated in English and list each commit since the previous published stable release in the selected commit's history, with commit links and a comparison link. The initial release lists its complete commit history. Unpublished tags and draft releases are not used as the comparison baseline.
+
 1. On `main` or a work branch, explicitly set the same stable version in `package.json`, `[workspace.package].version` in `Cargo.toml`, and `src-tauri/tauri.conf.json`. Run `pnpm rust update --workspace --offline` to update workspace package entries in `Cargo.lock`, then `node scripts/check-version.mjs`. Commit the lockfile changes with the version changes. Keep independently versioned crates, including `surtitle-ai`, unchanged unless they need their own version change. Dependency changes and prereleases are outside this procedure.
 2. Push the changes directly to `main` or merge a PR into `main` (Squash merge recommended), then wait for that commit's `main` push CI to succeed before creating a release tag.
 3. As `shamofu`, use the following PowerShell commands from the repository root with authenticated Git and GitHub CLI. They select the current remote `main` commit, verify its latest push workflow succeeded, derive the tag from that commit's version, and push only that annotated tag. A previously tested commit in `main` history can also be released by setting `$releaseCommit` to its full SHA before checking its ancestry, run and version, provided it includes this tag-triggered workflow. Commits from before this migration do not support tag-triggered releases, even if their main CI succeeded.

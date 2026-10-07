@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { validateRelease } from './release-contract.mjs';
 import { validateTagEvent } from './check-release.mjs';
 import { sha256File } from './file-content.mjs';
+import { generateReleaseNotes } from './release-notes.mjs';
 
 export function publishRelease({ directory = 'artifacts/release', version = JSON.parse(readFileSync('package.json')).version,
   env = process.env, run = spawnSync } = {}) {
@@ -37,10 +38,12 @@ export function publishRelease({ directory = 'artifacts/release', version = JSON
       throw new Error('Remote release tag differs from the tested commit.');
     }
   }
-  if (pages(`repos/${repo}/releases`).some(release => release.tag_name === tag)) {
+  const releases = pages(`repos/${repo}/releases`);
+  if (releases.some(release => release.tag_name === tag)) {
     throw new Error('This release already exists, including drafts. Artifacts are never overwritten.');
   }
   verifyRemoteTag();
+  const notes = generateReleaseNotes({ repo, version, tag, sha, releases, run });
   const payloads = files.filter(file => file.name.endsWith('.exe') || file.name === 'surtitle-source.zip');
   const temporary = mkdtempSync(join(tmpdir(), 'surtitle-public-release-'));
   try {
@@ -49,9 +52,10 @@ export function publishRelease({ directory = 'artifacts/release', version = JSON
     const checksumPath = join(temporary, 'SHA256SUMS.txt');
     writeFileSync(checksumPath, checksum);
     const publicFiles = [...payloads, { name: 'SHA256SUMS.txt', path: checksumPath, size: Buffer.byteLength(checksum) }];
-    const notes = `Surtitle ${version}\n\nWindows 11 x64. Unsigned NSIS installer.\nThe installer, SHA-256 checksums and corresponding source accompany this release.`;
+    const notesPath = join(temporary, 'release-notes.md');
+    writeFileSync(notesPath, notes);
     // Leave incomplete uploads as drafts; only publish the complete public asset set.
-    gh(['release', 'create', tag, '--repo', repo, '--draft', '--verify-tag', '--title', `Surtitle ${version}`, '--notes', notes, ...publicFiles.map(file => file.path)]);
+    gh(['release', 'create', tag, '--repo', repo, '--draft', '--verify-tag', '--title', `Surtitle ${version}`, '--notes-file', notesPath, ...publicFiles.map(file => file.path)]);
     // The by-tag endpoint only returns published releases; authenticated lists include drafts.
     const matching = pages(`repos/${repo}/releases`).filter(release => release.tag_name === tag);
     if (matching.length !== 1) throw new Error('New release draft is missing or ambiguous; publication stopped');

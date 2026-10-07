@@ -25,3 +25,5 @@ libmpv と ORT の source archive は `native/build/native_source_archive.py` �
 公開処理でアップロードする asset は Windows installer（`.exe`）・`surtitle-source.zip`・`SHA256SUMS.txt` の 3 ファイルです。公開処理は同じ Actions 実行の `release-<commit SHA>` artifact にある内部 bundle 全体を検証した後、installer と source ZIP の 2 件だけを記載した公開用 `SHA256SUMS.txt` を生成してアップロードします。内部 bundle の全ファイル用チェックサム、manifest、依存関係・SBOM、installer audit/smoke の JSON 証跡はそのまま保持し、追加の診断情報は `package-evidence-<commit SHA>` artifact に残します。CI の検証項目は変わりません。Actions artifact の保存期間はリポジトリ設定に従います。
 
 一時的な失敗は同じタグの workflow を再実行します。不完全な draft が残った場合は draft だけを手動削除し、タグを残して再実行します。タグの移動・削除は所有者にも許可されません。コード修正や誤ったタグの訂正には新しいバージョンとタグを使います。
+
+リリース文は英語で、前の公開済み stable release からの差分コミットを SHA リンクと件名で列挙します。初回は全履歴を列挙します。`release-notes.mjs` が完全な Git 履歴から生成し、未公開タグ・draft・prerelease は比較元にしません。公開ジョブの checkout は全履歴を取得します。
