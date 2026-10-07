@@ -33,6 +33,7 @@ fn main() -> Result<()> {
     db.put_media(&media)?;
     let segments: Vec<_> = (0..20_000)
         .map(|i| SubtitleSegment {
+            timing_precision: "cue".into(),
             id: format!("fixture-{i}"),
             media_id: media.id.clone(),
             start_ms: i * 1000,

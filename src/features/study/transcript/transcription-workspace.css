@@ -1,0 +1,24 @@
+.transcription-workspace { padding: 14px 18px; border-bottom: 1px solid var(--border); flex: 0 0 auto; max-height: 58vh; overflow: auto; }
+.transcription-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.transcription-heading h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; }
+.transcription-setup { display: grid; gap: 12px; padding-top: 12px; }
+.transcription-setup p, .transcription-job p { margin: 0; line-height: 1.65; }
+.transcription-setup > p { font-size: 13px; }
+.transcription-source { overflow-wrap: anywhere; color: var(--muted); }
+.transcription-source strong { color: var(--text); font-weight: 500; }
+.transcription-workspace details { margin-top: 10px; }
+.transcription-workspace summary { cursor: pointer; font-size: 13px; }
+.transcription-workspace .quote-cost { padding: 12px; gap: 6px; }
+.transcription-workspace .quote-cost strong { font-size: 28px; }
+.transcription-workspace .details-list { margin: 10px 0; }
+.transcription-workspace .quote-review > .button { margin-top: 10px; }
+.transcription-job { display: grid; gap: 10px; padding: 12px 0; font-size: 13px; }
+.transcription-job progress { width: 100%; height: 5px; }
+.transcription-ranges { display: flex; gap: 3px; }
+.transcription-ranges span { flex: 1; min-width: 2px; height: 6px; border-radius: 2px; background: var(--border); }
+.transcription-ranges .range-received { background: var(--accent); }
+.transcription-ranges .range-source_block { background: #b89b56; }
+.transcription-ranges .range-failed { background: #c36c61; }
+.transcription-history-result pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font-size: 11px; }
+.transcription-history-result { border-top: 1px solid var(--border); padding-top: 10px; }
+.source-block-note { font-size: 11px; opacity: .72; margin: 5px 0; }

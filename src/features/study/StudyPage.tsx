@@ -46,6 +46,7 @@ import { StudyTranscript } from './StudyTranscript';
 import { CurrentCaption } from './CurrentCaption';
 import type { TranscriptTab, TranscriptViewState } from './StudyTranscript';
 import { TranscriptReviewDialog } from './transcript/TranscriptReview';
+import { TranscriptionWorkspace, type TranscriptionRequest } from './transcript/TranscriptionWorkspace';
 import { resolveSourceSelection } from './source-selection';
 import type { SelectedContext } from './source-selection';
 import { useStudyExitGuard } from './useStudyExitGuard';
@@ -118,6 +119,7 @@ function sourceSignature(source?: SelectedContext) {
     source.text,
     source.translation,
     source.status,
+    source.timingPrecision,
   ]);
 }
 
@@ -182,6 +184,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const [draftPlayback, setDraftPlayback] = useState<SubtitleSegment>();
   const [edit, setEdit] = useState<SubtitleSegment>();
   const [aiKind, setAiKind] = useState<AiQuote['kind']>();
+  const [transcriptionRequest, setTranscriptionRequest] = useState<TranscriptionRequest>();
   const [aiContinuation, setAiContinuation] = useState<AiContinuation>();
   const [aiRebind, setAiRebind] = useState<AiContinuation>();
   const [transfer, setTransfer] = useState(false);
@@ -189,13 +192,14 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const [subtitleStreamIndex, setSubtitleStreamIndex] = useState<number>();
   const [removing, setRemoving] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
-  const activeId = activeSegment(segments, positionMs);
+  const timedSegments = segments.filter(segment => segment.timingPrecision !== 'source_block');
+  const activeId = activeSegment(timedSegments, positionMs);
   const active = segments.find(item => item.id === activeId);
-  const activeIndex = segments.findIndex(item => item.id === activeId);
-  const previousCaption = activeIndex >= 0 ? segments[activeIndex - 1]
-    : segments.filter(item => item.endMs <= positionMs).at(-1);
-  const nextCaption = activeIndex >= 0 ? segments[activeIndex + 1]
-    : segments.find(item => item.startMs > positionMs);
+  const activeIndex = timedSegments.findIndex(item => item.id === activeId);
+  const previousCaption = activeIndex >= 0 ? timedSegments[activeIndex - 1]
+    : timedSegments.filter(item => item.endMs <= positionMs).at(-1);
+  const nextCaption = activeIndex >= 0 ? timedSegments[activeIndex + 1]
+    : timedSegments.find(item => item.startMs > positionMs);
   const ids = inspection?.source.sourceCueIds ?? (inspection ? [inspection.source.id] : []);
   const resolved = resolveSourceSelection(segments, mediaId, inspection?.source.id, ids);
   const sourceChanged = !!inspection && (
@@ -233,12 +237,17 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const aiSourceInvalid = !!aiContinuation && aiContinuation.kind !== 'transcribe' && !continuationSource(aiContinuation);
   function resumeAi(item: AiContinuation) {
     if (!segmentsQuery.isSuccess) return;
+    if (item.kind === 'transcribe') {
+      setAiKind(undefined); setPanel('transcript'); setTab('transcript');
+      setTranscriptionRequest({ id: item.id, continuation: item });
+      return;
+    }
     setAiRebind(undefined);
     setAiContinuation(item);
     setAiKind(item.kind);
     const source = continuationSource(item);
     setInspection(undefined); setInvalidated(false); setMeaningRequest(undefined); setShowMeaning(false);
-    if (source && item.kind !== 'transcribe') {
+    if (source) {
       const restoredIds = source.sourceCueIds?.length ? source.sourceCueIds : [source.id];
       setInspection({ source, fingerprint: item.sourceRevision || sourceFingerprint(segments, restoredIds), mediaSignature, term: item.focusTerm });
       setInvalidated(false); setPanel('phrase');
@@ -261,7 +270,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
           endMs: Math.max(...draft.sourceCues.map(cue => cue.endMs)),
           text: draft.sourceCues.map(cue => cue.text).join('\n') };
         if (!source.id) continue;
-        const value: PhraseFormValues = { term: draft.fields.term || '', meaning: draft.fields.meaning || '', example: draft.fields.example || '', explanation: draft.fields.explanation || '' };
+        const value: PhraseFormValues = { term: draft.fields.term || '', meaning: draft.fields.meaning || '', example: draft.fields.example || '', explanation: draft.fields.explanation || '', ...(draft.fields.audioStart ? { audioStart: draft.fields.audioStart, audioEnd: draft.fields.audioEnd } : {}) };
         next[draft.sourceKey] = { inspection: { source, fingerprint: sourceFingerprint(draft.sourceCues, ids), mediaSignature, term: value.term }, value,
           initial: { term: '', meaning: '', example: '', explanation: '' }, invalidated: draft.stale || !draft.bindingVerified };
       }
@@ -481,7 +490,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
           'The source subtitles or audio changed. Select the passage again.',
         ));
       }
-      if (source.sourceCueIds?.length) await playerApi.playSourceRange(mediaId, source.sourceCueIds);
+      if (source.sourceCueIds?.length || source.timingPrecision === 'source_block') await playerApi.playSourceRange(mediaId, source.sourceCueIds?.length ? source.sourceCueIds : [source.id]);
       else await playerApi.player({ action: 'source-seek', startMs: source.startMs, endMs: source.endMs });
       if (!alive.current) return;
       returnPosition.current = position;
@@ -576,13 +585,19 @@ function StudySession({ mediaId }: { mediaId: string }) {
     </section>}
     <StudyExitDialog guard={exitGuard} saving={saveBusy} />
   </>;
-  const jobs = data?.jobs.filter(job => job.mediaId === mediaId &&
+  const jobs = data?.jobs.filter(job => job.mediaId === mediaId && job.kind !== 'transcribe' && !job.automaticTranscript &&
     (job.status !== 'completed' || (job.pendingResults || 0) > 0 || job.needsAttention)) ||
     [];
   const needsAttention = jobs.some(job => ['failed', 'unknown', 'paused'].includes(job.status) || (job.pendingResults || 0) > 0 ||
     !!job.needsAttention);
-  const completedJobs = data?.jobs.filter(job => job.mediaId === mediaId && job.status === 'completed' && !job.needsAttention && !(job.pendingResults || 0)) || [];
+  const completedJobs = data?.jobs.filter(job => job.mediaId === mediaId && job.kind !== 'transcribe' && !job.automaticTranscript && job.status === 'completed' && !job.needsAttention && !(job.pendingResults || 0)) || [];
+  function openTranscription(range?: { startMs: number; endMs: number }) {
+    setPanel('transcript'); setTab('transcript'); setAiKind(undefined);
+    const running = data?.jobs.some(job => job.mediaId === mediaId && (job.kind === 'transcribe' || job.automaticTranscript) && ['running', 'paused', 'queued'].includes(job.status));
+    if (range || !running) setTranscriptionRequest({ id: crypto.randomUUID(), range });
+  }
   function openAi(kind: AiQuote['kind']) {
+    if (kind === 'transcribe') { openTranscription(); return; }
     setAiContinuation(undefined);
     setAiKind(kind);
     if (kind === 'vocabulary' && formKey && selected) setMeaningRequest({ key: formKey, term: meaningTerm });
@@ -644,7 +659,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
           {issue.alternatives.map((alternative, index) => <p key={index}>{timestamp(alternative.startMs)}–{timestamp(alternative.endMs)} {alternative.text}</p>)}
         </div>)}
       </details>}
-      {(continuationsQuery.data || []).filter(item => item.mediaId === mediaId).map(item => <div className="notice" key={item.id}>
+      {(continuationsQuery.data || []).filter(item => item.mediaId === mediaId && item.kind !== 'transcribe').map(item => <div className="notice" key={item.id}>
         <span>{t('途中のAI依頼があります。', 'You have an unfinished AI request.')}</span>
         <Button disabled={busy || saveBusy || !segmentsQuery.isSuccess} onClick={() => resumeAi(item)}>{t('続きから再開', 'Continue your request')}</Button>
         <Button variant="ghost" disabled={busy || saveBusy} onClick={() => void report(async () => { await continuationApi.discard(item.id); await continuationsQuery.refetch(); })}>{t('依頼の入力を破棄', 'Discard request input')}</Button>
@@ -749,7 +764,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             error={segmentsQuery.error}
             inspectButton={inspectButton}
             onInspect={(source, term) => void inspect(source, term)}
-            onImport={() => { setSubtitleStreamIndex(undefined); setSubtitleSource('choose'); }}
+            onImport={() => openTranscription()}
             hasPrevious={!!previousCaption}
             hasNext={!!nextCaption}
             onPrevious={() => void moveCaption(previousCaption)}
@@ -779,6 +794,8 @@ function StudySession({ mediaId }: { mediaId: string }) {
             </header>
             {panel === 'transcript'
               ? <StudyTranscript
+                transcriptionWorkspace={<TranscriptionWorkspace media={media} request={transcriptionRequest} onRequest={openTranscription} continuations={continuationsQuery.data} onResume={resumeAi} onOpenEarlierDrafts={() => setTab('draft')} onDone={() => { setTranscriptionRequest(undefined); void continuationsQuery.refetch(); }} />}
+                onTranscribeRange={openTranscription}
                 media={media}
                 segments={segments}
                 candidates={candidatesQuery.data || []}
@@ -989,6 +1006,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
         />}
       {edit && <EditDialog
         segment={edit}
+        onRetranscribe={range => { setEdit(undefined); openTranscription(range); }}
         onClose={() => setEdit(undefined)}
       />}
       {aiKind &&

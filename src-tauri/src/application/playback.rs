@@ -190,6 +190,7 @@ pub(super) fn refresh_current_subtitles_locked(
         return Ok(());
     }
     let mut segments = lock(&state.db)?.list_segments(media_id)?;
+    segments.retain(|cue| cue.timing_precision == "cue");
     configure_sentence_pause(playback, &segments, state.settings()?.sentence_pause)?;
     if segments.is_empty() {
         return playback.player()?.clear_subtitle();
@@ -226,7 +227,12 @@ pub(super) fn configure_sentence_pause(
     segments: &[SubtitleSegment],
     enabled: bool,
 ) -> Result<()> {
-    let ends = surtitle_core::sentence_ranges(segments)?
+    let timed = segments
+        .iter()
+        .filter(|cue| cue.timing_precision == "cue")
+        .cloned()
+        .collect::<Vec<_>>();
+    let ends = surtitle_core::sentence_ranges(&timed)?
         .into_iter()
         .map(|range| range.end_ms)
         .collect();
@@ -263,12 +269,25 @@ pub async fn play_source_range(
             snapshot.ready,
             "Wait for the media player to finish loading"
         );
-        let range = surtitle_core::replay_range(
-            start,
-            end,
-            snapshot.duration_ms,
-            state.settings()?.replay_context_ms,
-        )?;
+        let context = state.settings()?.replay_context_ms;
+        let range = if source_cue_ids.len() == 1
+            && segments
+                .iter()
+                .any(|cue| cue.id == source_cue_ids[0] && cue.timing_precision == "source_block")
+        {
+            ensure!(
+                start < end && end <= snapshot.duration_ms && context <= 1000,
+                "Source audio range is outside the recording"
+            );
+            surtitle_core::AudioClipRange {
+                start_ms: start.saturating_sub(u64::from(context)),
+                end_ms: end
+                    .saturating_add(u64::from(context))
+                    .min(snapshot.duration_ms),
+            }
+        } else {
+            surtitle_core::replay_range(start, end, snapshot.duration_ms, context)?
+        };
         player.control(&Control {
             action: "seek".into(),
             value: None,
@@ -415,6 +434,7 @@ pub(super) fn restore_learning_archive(
     archive: &surtitle_core::LearningArchive,
 ) -> Result<()> {
     surtitle_core::transfer::validate(archive)?;
+    let _review = lock(&state.ai_session.transcript_review)?;
     let mut playback = state.playback.operation()?;
     if let Some(player) = playback.optional_player() {
         player.stop()?;
@@ -426,6 +446,7 @@ pub(super) fn restore_learning_archive(
         .join(format!("before-restore-{}.sqlite", surtitle_core::id()));
     let restored = lock(&state.db)?.restore(archive, &backup);
     if restored.is_ok() {
+        crate::application::transcript::automatic::detach_publications(state, None)?;
         state.preferences.update(|preferences| {
             preferences.ai_continuations.clear();
             Ok(())
@@ -462,6 +483,7 @@ mod source_playback_tests {
     use surtitle_core::AppSettings;
     fn cue(id: &str, start_ms: u64, end_ms: u64) -> SubtitleSegment {
         SubtitleSegment {
+            timing_precision: "cue".into(),
             id: id.into(),
             media_id: "media".into(),
             start_ms,

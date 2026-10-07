@@ -134,11 +134,11 @@ fn quote_plan(state: &AppState, selected: &DraftStudySelection) -> PreparedJob {
 }
 
 #[test]
-fn unadoptable_whole_transcript_can_supply_explicit_local_study_without_canonical_changes() {
+fn optional_local_draft_study_does_not_require_canonical_changes() {
     let (directory, state) = fixture();
     let job = job(&state, COMPLETE);
     let original = view(&state, &job).unwrap();
-    assert!(!original.draft.can_adopt);
+    assert!(original.draft.can_adopt);
     assert!(!original.applied);
     let canonical = lock(&state.db)
         .unwrap()
@@ -249,6 +249,8 @@ fn manually_recovered_source_block_bookmark_keeps_selected_text_and_separate_raw
         0,
         ManualTranscriptContent::Subtitles {
             segments: vec![ReviewText {
+                timing_precision: "cue".into(),
+                word_anchors: vec![],
                 start_ms: 7500,
                 end_ms: 7900,
                 text: corrected_text.into(),
@@ -417,6 +419,8 @@ fn unrelated_later_result_does_not_stale_a_local_range_but_new_relevant_raw_evid
     let charges = rusqlite::Connection::open(directory.path().join("charges.sqlite")).unwrap();
     let output = serde_json::to_string(&ParsedOutput::Transcript {
         cues: vec![GeneratedCue {
+            timing_precision: "cue".into(),
+            word_anchors: vec![],
             start_ms: 7500,
             end_ms: 7900,
             text: "Later provider result.".into(),

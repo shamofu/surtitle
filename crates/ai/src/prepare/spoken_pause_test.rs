@@ -150,16 +150,19 @@ fn real_spoken_audio_and_interior_pause_require_only_local_warning_review() {
             start_ms: 1330,
             end_ms: 3800,
             text: first_text.into(),
+            ..Default::default()
         },
         GeneratedCue {
             start_ms: 5500,
             end_ms: 6500,
             text: "This subtitle was deliberately invented for the local test.".into(),
+            ..Default::default()
         },
         GeneratedCue {
             start_ms: 8705,
             end_ms: 10735,
             text: second_text.into(),
+            ..Default::default()
         },
     ];
     let draft = build_transcript_draft(
@@ -192,8 +195,8 @@ fn real_spoken_audio_and_interior_pause_require_only_local_warning_review() {
         );
     }
     assert_eq!(draft.chunks[0].segments.len(), raw.len());
-    assert!(!draft.can_adopt);
-    assert!(validate_transcript_adoption(&draft, &draft.digest).is_err());
+    assert!(draft.can_adopt);
+    assert!(validate_transcript_adoption(&draft, &draft.digest).is_ok());
     assert!(acknowledge_transcript_warning(&draft, "stale", &draft.warnings[0].id).is_err());
     let reviewed =
         acknowledge_transcript_warning(&draft, &draft.digest, &draft.warnings[0].id).unwrap();

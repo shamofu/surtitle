@@ -23,6 +23,7 @@ const segments = id => invoke('list_segments', { mediaId: id });
 const review = jobId => invoke('get_transcript_review', { jobId });
 const preparations = id => invoke('list_transcription_preparations', { mediaId: id });
 const dialog = () => $('dialog.modal.wide');
+const history = () => $('.transcription-history-result');
 let jobId, pendingJobId, originalDigest, originalConflict, adoptedDigest;
 let ledgerBefore;
 
@@ -50,13 +51,42 @@ async function ready() {
   await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__), { timeoutMsg: 'Native transcript review IPC was not ready' });
   await $('h1').waitForDisplayed();
 }
-async function openReview(id, targetMediaId = mediaId) {
+async function clickVisible(element) {
+  await element.waitForExist();
+  await browser.execute(node => node.scrollIntoView({ block: 'center', behavior: 'instant' }), await element);
+  await element.waitForClickable();
+  await element.click();
+}
+async function openWorkspace(targetMediaId = mediaId) {
   await browser.execute(path => { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, `/study/${targetMediaId}`);
-  await $('.study-jobs').waitForExist();
-  if ((await $('.study-jobs').getAttribute('open')) === null) await $('.study-jobs summary').click();
+  const transcript = $('.study-top-actions button');
+  await transcript.waitForClickable();
+  if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
+  await $('.transcription-workspace').waitForDisplayed();
+  await clickVisible($('.transcript-tabs').$('button=Transcript'));
+  const saved = $('.transcription-workspace > details');
+  if ((await saved.getAttribute('open')) === null) await clickVisible(saved.$('summary'));
+}
+async function openHistory(id, targetMediaId = mediaId) {
+  await openWorkspace(targetMediaId);
   const button = $(`[data-testid="transcript-review-open"][data-job-id="${id}"]`);
-  await button.waitForDisplayed();
-  await button.click();
+  const job = $(`.transcription-job:has([data-job-id="${id}"])`);
+  if (!(await job.$('.transcription-history-result').isExisting())) await clickVisible(button);
+  await history().waitForDisplayed();
+  await browser.waitUntil(async () => (await history().getText()).includes('This is the original transcription record.'), { timeoutMsg: 'Saved transcript history did not load' });
+  await expect($('dialog')).not.toExist();
+}
+async function closeHistory(id) {
+  await clickVisible($(`[data-testid="transcript-review-open"][data-job-id="${id}"]`));
+  await expect(history()).not.toExist();
+}
+async function openReview(id, targetMediaId = mediaId) {
+  await openWorkspace(targetMediaId);
+  await clickVisible($('button=Open earlier drafts'));
+  const panel = $('[aria-label="Study from drafts"]');
+  await panel.$('select').waitForDisplayed();
+  await panel.$('select').selectByAttribute('value', id);
+  await clickVisible(panel.$('button=Review or adopt the full result'));
   await dialog().waitForDisplayed();
   await dialog().$('button=Refresh saved results').waitForDisplayed();
   assert.equal(await dialog().$('h2').getText(), 'Review transcription');
@@ -90,7 +120,7 @@ async function closeReview() {
     assert.equal((await snapshot()).settings.credentialConfigured, false);
   });
 
-  it('shows missing ranges and rejects adoption before every chunk is received', async () => {
+  it('shows pending legacy ranges without offering them as complete saved results', async () => {
     const initial = await review(pendingJobId);
     const unchanged = await segments(pendingMediaId);
     assert.equal(initial.draft.pendingRanges.length, 1);
@@ -98,44 +128,42 @@ async function closeReview() {
     assert.equal(initial.draft.canAdopt, false);
     assert.equal(initial.canApply, false);
     await assert.rejects(invoke('apply_transcript_review', { jobId: pendingJobId, draftDigest: initial.draft.digest }));
-    await openReview(pendingJobId, pendingMediaId);
-    assert((await dialog().getText()).includes('Unresolved ranges prevent adoption.'));
-    await expect(dialog().$('button=Adopt these subtitles')).toBeDisabled();
-    await expect(dialog().$('input[type="checkbox"]')).toBeDisabled();
+    await openHistory(pendingJobId, pendingMediaId);
+    assert((await history().getText()).includes('Not received'));
+    await expect(history().$('button=Use saved results')).not.toExist();
+    await expect(history().$('input[type="checkbox"]')).not.toExist();
     await browser.saveScreenshot(resolve('test-results/native/transcript-pending.png'));
-    await closeReview();
+    await closeHistory(pendingJobId);
     assert.deepEqual(await segments(pendingMediaId), unchanged);
     assert.deepEqual(ledger(), ledgerBefore);
   });
 
-  it('displays both original alternatives and blocks an unresolved boundary', async () => {
+  it('retains both boundary alternatives while making complete saved text usable immediately', async () => {
     const initial = await review(jobId);
-    assert.equal(initial.canApply, false);
-    assert.equal(initial.draft.canAdopt, false);
+    assert.equal(initial.canApply, true);
+    assert.equal(initial.draft.canAdopt, true);
     assert.equal(originalConflict.resolution, null);
     assert.deepEqual(originalConflict.leftAlternative.map(cue => cue.text), ['No, no.']);
     assert.deepEqual(originalConflict.rightAlternative.map(cue => cue.text), ['No.']);
-    await assert.rejects(invoke('apply_transcript_review', { jobId, draftDigest: originalDigest }));
-    await openReview(jobId);
-    const alternatives = await dialog().$$('.boundary-alternatives .boundary-alternative');
+    await openHistory(jobId);
+    await clickVisible(history().$('summary=Saved boundary alternatives'));
+    const alternatives = await history().$$('blockquote');
     assert.equal(alternatives.length, 2);
-    assert((await alternatives[0].getText()).includes('Earlier chunk result'));
     assert((await alternatives[0].getText()).includes('No, no.'));
-    assert((await alternatives[1].getText()).includes('Later chunk result'));
     assert((await alternatives[1].getText()).includes('No.'));
-    await dialog().$('summary=Original audio ranges and preview status').click();
-    const originals = await dialog().$$('summary=Show subtitles for this range');
-    assert.equal(originals.length, 2);
-    for (const original of originals) await original.click();
-    const originalTexts = [];
-    for (const original of originals) {
-      originalTexts.push(await (await original.parentElement()).getText());
+    const originals = [];
+    for (const detail of await history().$$(':scope > details')) {
+      if ((await detail.$('summary').getText()).includes('Received')) originals.push(detail);
     }
+    assert.equal(originals.length, 2);
+    for (const original of originals) await clickVisible(original.$('summary'));
+    const originalTexts = await Promise.all(originals.map(original => original.getText()));
     assert(originalTexts[0].includes('Hello.'));
     assert(originalTexts[1].includes('Goodbye.'));
-    await expect(dialog().$('button=Adopt these subtitles')).toBeDisabled();
+    await expect(history().$('button=Use saved results')).toBeEnabled();
+    await expect(history().$('input[type="checkbox"]')).not.toExist();
     await browser.saveScreenshot(resolve('test-results/native/transcript-raw-alternatives.png'));
-    await closeReview();
+    await closeHistory(jobId);
     assert.deepEqual(ledger(), ledgerBefore);
   });
 
@@ -168,47 +196,39 @@ async function closeReview() {
     await closeReview();
   });
 
-  it('requires an explicit boundary decision and rejects the previous draft digest', async () => {
-    await openReview(jobId);
-    await dialog().$('button=Use earlier result').click();
-    await browser.waitUntil(async () => (await review(jobId)).draft.digest !== originalDigest);
-    const resolved = await review(jobId);
-    assert.equal(resolved.draft.conflicts[0].resolution.kind, 'left');
-    assert.equal(resolved.draft.canAdopt, true);
-    assert.equal(resolved.canApply, true);
-    assert.deepEqual(resolved.draft.conflicts[0].leftAlternative, originalConflict.leftAlternative);
-    assert.deepEqual(resolved.draft.conflicts[0].rightAlternative, originalConflict.rightAlternative);
-    assert.deepEqual(resolved.draft.segments.map(cue => cue.text), ['Hello.', 'No, no.', 'Goodbye.']);
-    adoptedDigest = resolved.draft.digest;
-    await assert.rejects(invoke('apply_transcript_review', { jobId, draftDigest: originalDigest }));
-    await assert.rejects(invoke('resolve_transcript_boundary', { jobId, draftDigest: originalDigest, boundaryId: originalConflict.id, choice: { kind: 'right' } }));
-    await assert.rejects(invoke('prepare_boundary_repair', { jobId, draftDigest: originalDigest, boundaryId: originalConflict.id }));
-    assert.equal((await review(jobId)).draft.digest, adoptedDigest);
-    await expect(dialog().$('input[type="checkbox"]')).toBeEnabled();
-    await expect(dialog().$('button=Adopt these subtitles')).toBeDisabled();
-    await closeReview();
+  it('rejects a mismatched saved-result digest without requiring a boundary decision', async () => {
+    const mismatched = `${originalDigest.slice(0, -1)}${originalDigest.endsWith('0') ? '1' : '0'}`;
+    await assert.rejects(invoke('apply_transcript_review', { jobId, draftDigest: mismatched }));
+    await assert.rejects(invoke('resolve_transcript_boundary', { jobId, draftDigest: mismatched, boundaryId: originalConflict.id, choice: { kind: 'right' } }));
+    await assert.rejects(invoke('prepare_boundary_repair', { jobId, draftDigest: mismatched, boundaryId: originalConflict.id }));
+    const unchanged = await review(jobId);
+    assert.equal(unchanged.draft.digest, originalDigest);
+    assert.equal(unchanged.draft.conflicts[0].resolution, null);
+    assert.equal(unchanged.canApply, true);
     assert.deepEqual(ledger(), ledgerBefore);
   });
 
-  it('adopts reviewed subtitles only after confirmation and preserves raw results across restart', async () => {
+  it('uses complete saved results with one local action and preserves optional alternatives across restart', async () => {
     const before = await segments(mediaId);
-    await openReview(jobId);
-    await dialog().$('input[type="checkbox"]').click();
-    await dialog().$('button=Adopt these subtitles').waitForEnabled();
-    await dialog().$('button=Adopt these subtitles').click();
-    await dialog().$('button=Adopted').waitForDisplayed();
-    await expect(dialog().$('button=Adopted')).toBeDisabled();
+    const original = await review(jobId);
+    adoptedDigest = original.draft.digest;
+    await openHistory(jobId);
+    await clickVisible(history().$('button=Use saved results'));
+    await browser.waitUntil(async () => (await review(jobId)).applied);
+    await expect(history().$('button=Use saved results')).not.toExist();
     const adopted = await segments(mediaId);
     const inside = adopted.filter(cue => cue.startMs >= 0 && cue.endMs <= 8000);
-    assert.deepEqual(inside.map(cue => cue.text), ['Hello.', 'No, no.', 'Goodbye.']);
-    assert(inside.every(cue => cue.status === 'confirmed'));
+    assert.deepEqual(inside.map(cue => cue.text), original.draft.segments.map(cue => cue.text));
+    assert(inside.every(cue => ['generated', 'generated_review'].includes(cue.status)));
+    assert(inside.some(cue => cue.reviewIssues?.some(issue => issue.kind === 'boundary_conflict')));
     assert.deepEqual(adopted.filter(cue => cue.startMs >= 8000), before.filter(cue => cue.startMs >= 8000));
-    await closeReview();
+    await closeHistory(jobId);
     await browser.reloadSession();
     await ready();
     const after = await review(jobId);
     assert.equal(after.applied, true); assert.equal(after.canApply, false);
     assert.equal(after.draft.digest, adoptedDigest);
+    assert.equal(after.draft.conflicts[0].resolution, null, 'Optional quality review must not gate local use');
     assert.deepEqual(after.draft.conflicts[0].leftAlternative, originalConflict.leftAlternative);
     assert.deepEqual(after.draft.conflicts[0].rightAlternative, originalConflict.rightAlternative);
     assert.deepEqual(await segments(mediaId), adopted);
@@ -216,15 +236,17 @@ async function closeReview() {
   });
 
   it('keeps subsequent manual edits and the zero-charge ledger when adoption is repeated', async () => {
-    const source = (await segments(mediaId)).find(cue => cue.text === 'No, no.');
-    assert(source, 'Natural repetition disappeared during adoption');
-    const edited = { ...source, text: 'No, no. Reviewed manually.', translation: '手動で確認した訳。' };
+    const source = (await segments(mediaId)).find(cue => cue.reviewIssues?.some(issue => issue.id === originalConflict.id));
+    assert(source, 'The published boundary row must retain its optional alternatives');
+    assert([...originalConflict.leftAlternative, ...originalConflict.rightAlternative].some(cue => cue.text === source.text));
+    const edited = { ...source, text: 'No, no. Reviewed manually.', translation: '手動で確認した訳。', status: 'confirmed', reviewIssues: [] };
     await invoke('edit_segment', { segment: edited });
     await browser.reloadSession();
     await ready();
     const alreadyApplied = await invoke('apply_transcript_review', { jobId, draftDigest: adoptedDigest });
     assert.equal(alreadyApplied.applied, true);
-    assert.deepEqual((await segments(mediaId)).find(cue => cue.id === source.id), edited);
+    const preserved = (await segments(mediaId)).find(cue => cue.id === source.id);
+    assert.deepEqual({ ...preserved, reviewIssues: preserved.reviewIssues ?? [] }, edited);
     await assert.rejects(invoke('resolve_transcript_boundary', { jobId, draftDigest: adoptedDigest, boundaryId: originalConflict.id, choice: { kind: 'right' } }));
     await assert.rejects(invoke('prepare_boundary_repair', { jobId, draftDigest: adoptedDigest, boundaryId: originalConflict.id }));
     assert.deepEqual(ledger(), ledgerBefore);
@@ -267,16 +289,15 @@ async function closeReview() {
     await browser.reloadSession();
     await ready();
     assert.deepEqual((await review(pendingJobId)).rangeEdits, saved.rangeEdits);
-    await openReview(pendingJobId, pendingMediaId);
+    await openHistory(pendingJobId, pendingMediaId);
     // The identical overlap should join without requiring any paid repair.
     assert.equal((await review(pendingJobId)).draft.conflicts.length, 0);
-    await dialog().$('input[type="checkbox"]').click();
-    await dialog().$('button=Adopt these subtitles').click();
-    await dialog().$('button=Adopted').waitForDisplayed();
+    await clickVisible(history().$('button=Use saved results'));
+    await browser.waitUntil(async () => (await review(pendingJobId)).applied);
     assert((await segments(pendingMediaId)).some(cue => cue.text === 'Recovered locally.'));
     assert.deepEqual(ledger(), ledgerBefore);
     await browser.saveScreenshot(resolve('test-results/native/transcript-manual-recovery.png'));
-    await closeReview();
+    await closeHistory(pendingJobId);
   });
 
   it('learns and reviews an adopted manual recovery with a retained PATH-FFmpeg audio clip and no AI usage', async () => {
@@ -285,7 +306,7 @@ async function closeReview() {
     assert.equal(initial.budget.spentUsd, 0); assert.equal(initial.budget.reservedUsd, 0);
     assert.equal(initial.budget.limitUsd, 0);
     const repaired = (await segments(pendingMediaId)).find(cue => cue.text === 'Recovered locally.');
-    assert(repaired && repaired.status === 'confirmed', 'The previous manual recovery must be adopted first');
+    assert(repaired && ['confirmed', 'generated'].includes(repaired.status), 'The previous manual recovery must be applied first');
     const adopted = await review(pendingJobId);
     assert.equal(adopted.applied, true);
     assert.equal(adopted.draft.chunks[1].source, 'manual');

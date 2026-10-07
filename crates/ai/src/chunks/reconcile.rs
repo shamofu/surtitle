@@ -10,6 +10,26 @@ pub struct TimedText {
     pub start_ms: u64,
     pub end_ms: u64,
     pub text: String,
+    #[serde(
+        rename = "timingPrecision",
+        default = "crate::cue_precision",
+        skip_serializing_if = "crate::is_cue_precision"
+    )]
+    pub timing_precision: String,
+    #[serde(rename = "wordAnchors", default, skip_serializing_if = "Vec::is_empty")]
+    pub word_anchors: Vec<crate::WordAnchor>,
+}
+
+impl Default for TimedText {
+    fn default() -> Self {
+        Self {
+            start_ms: 0,
+            end_ms: 0,
+            text: String::new(),
+            timing_precision: crate::cue_precision(),
+            word_anchors: vec![],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +95,13 @@ pub fn stitch_chunks(mut transcripts: Vec<ChunkTranscript>) -> Result<StitchedTr
                 || s.start_ms < previous
                 || s.start_ms < c.request_start_ms()
                 || s.end_ms > c.request_start_ms() + c.request_duration_ms() + 1
+                || !crate::valid_timing_metadata(
+                    &s.text,
+                    s.start_ms,
+                    s.end_ms,
+                    &s.timing_precision,
+                    &s.word_anchors,
+                )
             {
                 return Err(AiError::Invalid(
                     "Transcript timestamps lie outside the prepared request".into(),
@@ -82,6 +109,14 @@ pub fn stitch_chunks(mut transcripts: Vec<ChunkTranscript>) -> Result<StitchedTr
             }
             previous = s.start_ms;
         }
+    }
+    if transcripts.iter().any(|chunk| {
+        chunk
+            .segments
+            .iter()
+            .any(|cue| !cue.word_anchors.is_empty())
+    }) {
+        return super::word_reconcile::stitch(&transcripts);
     }
     let mut conflicts = Vec::new();
     let mut context_fragments = HashSet::new();
@@ -201,12 +236,73 @@ pub fn stitch_chunks(mut transcripts: Vec<ChunkTranscript>) -> Result<StitchedTr
         }
     }
     output.extend(group_joins.iter().map(|join| join.joined.clone()));
+    select_legacy_overlaps(&mut output, &conflicts, &transcripts);
     output.sort_by_key(|s| s.start_ms);
     Ok(StitchedTranscript {
         segments: output,
         boundary_conflicts: conflicts,
         group_joins,
     })
+}
+
+/// Older results have cue timing but no word anchors. Select only complete cues
+/// inside the shared context; crossing cues cannot be split without inventing
+/// word positions, so their non-overlap tails remain intact.
+fn select_legacy_overlaps(
+    output: &mut Vec<TimedText>,
+    conflicts: &[BoundaryConflict],
+    transcripts: &[ChunkTranscript],
+) {
+    for conflict in conflicts {
+        let left = transcripts
+            .iter()
+            .find(|chunk| chunk.chunk.index == conflict.left_chunk)
+            .unwrap();
+        let right = transcripts
+            .iter()
+            .find(|chunk| chunk.chunk.index == conflict.right_chunk)
+            .unwrap();
+        let lo = right.chunk.request_start_ms();
+        let hi = left.chunk.request_start_ms() + left.chunk.request_duration_ms();
+        let mut candidates = conflict
+            .left_alternative
+            .iter()
+            .map(|cue| (true, cue))
+            .chain(conflict.right_alternative.iter().map(|cue| (false, cue)))
+            .collect::<Vec<_>>();
+        candidates.sort_by_key(|(_, cue)| cue.start_ms);
+        let mut cursor = 0;
+        while cursor < candidates.len() {
+            let start = cursor;
+            let begin = candidates[cursor].1.start_ms;
+            let mut end = candidates[cursor].1.end_ms;
+            cursor += 1;
+            while cursor < candidates.len() && candidates[cursor].1.start_ms < end {
+                end = end.max(candidates[cursor].1.end_ms);
+                cursor += 1;
+            }
+            let group = &candidates[start..cursor];
+            if !group.iter().any(|(side, _)| *side)
+                || !group.iter().any(|(side, _)| !side)
+                || group.iter().any(|(_, cue)| {
+                    cue.timing_precision == "source_block" || cue.start_ms < lo || cue.end_ms > hi
+                })
+            {
+                continue;
+            }
+            let at = begin + (end - begin) / 2;
+            let choose_left = super::word_reconcile::ranking(left, at)
+                >= super::word_reconcile::ranking(right, at);
+            output.retain(|cue| {
+                !group
+                    .iter()
+                    .any(|(side, alternative)| *side != choose_left && *alternative == cue)
+                    || group
+                        .iter()
+                        .any(|(side, alternative)| *side == choose_left && *alternative == cue)
+            });
+        }
+    }
 }
 
 struct GroupUnit {
@@ -256,6 +352,13 @@ fn reconcile_edge_group(
     lo: u64,
     hi: u64,
 ) -> Option<(TimedText, usize)> {
+    if left
+        .iter()
+        .chain(right)
+        .any(|cue| cue.timing_precision == "source_block")
+    {
+        return None;
+    }
     if left.is_empty() || right.is_empty() || left.len() > 4 || right.len() > 4 || hi <= lo {
         return None;
     }
@@ -330,6 +433,7 @@ fn reconcile_edge_group(
             start_ms: a0.start_ms,
             end_ms: bz.end_ms,
             text: format!("{prefix} {b_text}"),
+            ..Default::default()
         },
         // The published count remains word units; matched punctuation and
         // symbols add evidence, not words toward the minimum overlap length.
@@ -412,6 +516,9 @@ enum ContextMatch {
 }
 
 fn context_match(left: &TimedText, right: &TimedText, lo: u64, hi: u64) -> Option<ContextMatch> {
+    if left.timing_precision == "source_block" || right.timing_precision == "source_block" {
+        return None;
+    }
     if same_spoken_interval(left, right) {
         return Some(ContextMatch::Exact);
     }
@@ -476,6 +583,9 @@ fn match_boundary_cues(
     Some(matches)
 }
 pub(super) fn same_spoken_interval(a: &TimedText, b: &TimedText) -> bool {
+    if a.timing_precision == "source_block" || b.timing_precision == "source_block" {
+        return false;
+    }
     let overlap = a
         .end_ms
         .min(b.end_ms)

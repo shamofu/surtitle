@@ -2,6 +2,7 @@
 //! VAD supplies pause candidates only; no detected "silence" is deleted from audio.
 mod planning;
 mod reconcile;
+mod word_reconcile;
 
 pub use planning::{
     plan_chunks, total_request_samples, AudioChunk, BoundaryKind, ChunkOptions, Pause,

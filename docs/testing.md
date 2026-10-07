@@ -25,6 +25,11 @@ The maintained regressions cover:
 
 - Immutable request approval, zero/unknown pricing, concurrent reservations, cancellation before dispatch, communication failure, crash recovery and settlement exactly once.
 - Parser/citation validation, literal source preservation, pending/conflicting transcript ranges, local corrections, stale adoption and saved-card independence.
+- Priced transcription start without duplicate consent, unpriced acknowledgement, automatic preparation, range re-transcription and setup restoration in the shared transcript panel.
+- Transcribe text retained when word timing is missing, reversed, out of range or unaligned; source-block bounds preserve submitted context and never become synchronized captions or subtitle exports.
+- Word-anchor boundary deduplication and deterministic conflict choice, while retaining repeated words elsewhere and original alternatives.
+- Progressive publication across restart, original-edition saving once, unreceived whole-cue preservation, edit/translation/delete/move protection, newer-request ownership and injected transaction rollback.
+- Source-block card audio subranges, persisted incomplete audio-range input, immutable source snapshots and version-3 archive compatibility with versions 1 and 2.
 - Credential boundaries, learning export/restore, archive size limits, missing audio, atomic destination replacement and original media retention.
 - Restore validation rejection, backup creation failure and an injected write failure after replacement has started, with database reopen and native playback reconciliation.
 - Selected tool/audio-track identity, process cleanup, resource-scoped query invalidation, stale asynchronous results and failed preference writes.

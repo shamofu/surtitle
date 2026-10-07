@@ -728,12 +728,13 @@ mod tests {
                         start_ms: 1500,
                         end_ms: 2000,
                         text: "Review this generated speech.".into(),
+                        ..Default::default()
                     }],
                 },
             }],
         )
         .unwrap();
-        assert!(!draft.can_adopt);
+        assert!(draft.can_adopt);
         assert_eq!(draft.warnings.len(), 1);
         assert!(draft.chunks[0].vad_pause_evidence.is_some());
         assert_eq!(

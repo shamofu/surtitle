@@ -194,7 +194,7 @@ mod tests {
         assert!(store.list_segments("media").unwrap().is_empty());
         assert_eq!(store.list_transcript_issues("media").unwrap().len(), 2);
         let archive = store.archive().unwrap();
-        assert_eq!(archive.schema_version, 2);
+        assert_eq!(archive.schema_version, 3);
         for extension in ["json", "zip"] {
             let path = directory.path().join(format!("notes.{extension}"));
             if extension == "json" {

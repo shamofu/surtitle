@@ -174,12 +174,20 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
       await navigate(`/study/${job.mediaId}`);
       await $('.play-button').waitForEnabled();
       await control({ action: 'pause' });
-      const summary = $('.study-jobs summary');
+      const transcription = job.kind === 'transcribe' || job.automaticTranscript;
+      if (transcription) {
+        const transcript = $('.study-top-actions button');
+        if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
+        await $('.transcription-workspace').waitForDisplayed();
+      }
+      const details = transcription ? $('.transcription-workspace > details') : $('.study-jobs');
+      const summary = details.$('summary');
+      await browser.execute(node => node.scrollIntoView({ block: 'center', behavior: 'instant' }), await summary);
       await summary.waitForDisplayed();
-      const wasOpen = await $('.study-jobs').getAttribute('open');
+      const wasOpen = await details.getAttribute('open');
       await browser.execute(node => node.focus(), await summary);
       await browser.keys(Key.Space);
-      await browser.waitUntil(async () => (await $('.study-jobs').getAttribute('open')) !== wasOpen);
+      await browser.waitUntil(async () => (await details.getAttribute('open')) !== wasOpen);
       assert.equal((await player()).paused, true, 'Opening the job summary started playback');
     } finally {
       await navigate(`/study/${mediaId}`);

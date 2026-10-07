@@ -37,6 +37,7 @@ export const editorDraftApi = {
     call<string | null>('commit_subtitle_editor_draft', { reference: versionReference(reference), segment }),
   savePhrase: (reference: EditorDraftReference, request: {
     mediaId: string; segmentId: string; sourceCueIds?: string[];
+    sourceRange?: { startMs: number; endMs: number };
     term: string; meaning: string; example: string; explanation?: string; translation?: string;
   }) => call<void>('save_phrase_editor_draft', { reference: versionReference(reference), request }),
 };

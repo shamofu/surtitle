@@ -1,10 +1,12 @@
 # Transcript response evidence and local review
 
-This guide describes saved evidence and manual transcript review, including
-range jobs, older jobs and local recovery. New whole-recording jobs can apply
-completed subtitles automatically while retaining original results, warnings
-and alternatives; see [AI behavior](ai.md#application-workflow). Manual adoption
-uses the explicit review steps below.
+This guide describes retained provider evidence, timing recovery and optional
+local transcript review. New whole-recording, range and re-transcription jobs
+publish received text in the ordinary subtitle list. No complete-transcript
+adoption, VAD acknowledgement or boundary review is required before learning.
+The default path uses one Transcribe VERBATIM request with word timestamps per
+prepared chunk; no failure automatically invokes another model or paid retry.
+See [AI behavior](ai.md#application-workflow) for the two-action start flow.
 
 Production audio requests retain allowlisted provider evidence in the paid-work
 SQLite database before settlement. The record binds the attempt, ordinal, model,
@@ -25,11 +27,16 @@ mistaken for complete output. Such evidence cannot be reparsed. A malformed JSON
 body records only a fixed rejection state; its bytes and parser diagnostics are
 not retained. Missing/invalid usage keeps the reservation.
 
-The review API distinguishes pending, invalid, valid empty, and received valid
-results. Fixed reason codes describe missing candidates, incomplete responses,
-invalid structure, reversed or out-of-range times, word alignment failures, and
-unresolved settlement. Listing results returns metadata only. Response bodies and
-candidate text are loaded for one ordinal through a separate bounded detail IPC.
+The review API distinguishes pending, invalid, valid empty and received results.
+Text validity and word timing are separate: a complete response part with
+usable text but unusable anchors produces a `source_block` with its actual
+submitted audio bounds, including context. It remains readable and usable for
+study without inventing word, sentence or subtitle times. Only precise `cue`
+rows participate in synchronized captions, caption-group pause and SRT/VTT.
+Fixed reason codes retain structural, completion, timing and settlement failures
+in original evidence. Listing results returns metadata only; response bodies and
+candidate text are loaded for one ordinal through a bounded detail IPC. A valid
+empty response counts as received coverage, while an absent response stays pending.
 
 An explicit local reparse uses the saved task and sanitized response, without
 reading audio again, obtaining credentials, sending HTTP, or settling an attempt.
@@ -38,16 +45,41 @@ revision. Repeating the same revision is idempotent; at most ten parser revision
 are retained per attempt. Original failed results and their cost records are unchanged.
 An incomplete snapshot or a parser-invalid candidate cannot be selected.
 
-Selecting a valid candidate for the draft requires a separate action and current
-draft digest. Unresolved attempts cannot contribute a selected reparse candidate. The
-native layer revalidates its binding and output on each use, and the manual
-source, boundary, VAD-warning, and explicit-adoption gates still apply. Selection
-does not replace subtitles or alter saved study cards. No clamping, interpolation,
-text rewrite, model fallback, or paid retry is performed by this workflow.
+Opening an older saved job's history can locally reparse complete evidence and
+select a usable settled candidate, including recoverable source-block text.
+This preserves the original failed result, approved job digest and cost records;
+it does not send a request or automatically replace the current subtitles.
+**Use saved results** is the explicit local application action for an eligible
+complete older result. Separate advanced reparse/selection commands remain
+bound to the current evidence and draft digests. Unresolved attempts cannot
+contribute a selected provider reparse candidate. No clamping, interpolation,
+model fallback or paid retry is performed.
 
-Evidence persistence failure prevents settlement and provider-derived adoptable output, retaining
-the reservation. Settlement failure leaves the evidence intact; interruption
-recovery retains the hold, and a local reparse candidate cannot bypass it.
+Evidence persistence failure prevents settlement and provider-derived publication,
+retaining the reservation. Settlement failure leaves evidence inspectable and
+retains the hold; local reparsing never settles or acknowledges the attempt.
+
+## Publication and original alternatives
+
+Adjacent results are reconciled inside their shared submitted-audio interval
+using word anchors. Repetition outside that interval is preserved. Conflicting
+words select the chunk owning the time, then the candidate farther from the
+submitted edge, then the smaller ordinal. Original alternatives remain in review
+history. Time-based selection does not apply to untimed source-block text.
+
+Each new approved job publishes locally as results arrive. Its device-local
+session stores the original edition, expected complete row contents, generated
+ownership, received coverage, deferred candidates and protected edit intervals.
+Subtitle rows and the publication record commit atomically. The original edition
+is saved once, unreceived old cues stay whole, and changed or deleted rows are
+protected from later results. A final completion marker does not replace the
+whole list. Restoring an edition or importing another subtitle source detaches
+that session; learning restore removes its operational authority.
+
+VAD observations remain in detailed preparation/review evidence. They guide
+chunking and neither delete Transcribe text nor block publication. Normal
+corrections use the subtitle editor. **Transcribe this range again** opens a new
+estimate through the same transcription workspace.
 
 ## Manual range recovery
 
@@ -80,14 +112,17 @@ hold may remain while local corrections are saved and adopted: neither action
 settles, refunds, acknowledges, or resends that attempt. This does not relax the
 settlement requirement for selecting a provider-derived reparse candidate.
 
-Manual adoption requires every range to have a validated effective result or a manual
-revision, including explicit no-speech confirmation, and all remaining boundary
-and warning reviews to be complete. Source identity, current digest, and the
-existing subtitle replacement interval are checked again. Adoption is separate
-from saving, never resumes the job, and blocks further native approval of that
-adopted job. Original responses, reservations, and saved study cards are unchanged.
+Explicit application of a complete older result requires every range to have a
+validated effective result or manual revision. A valid empty provider result
+needs no additional no-speech confirmation; manually deleting all content still
+requires that authored decision. Boundary alternatives and VAD observations are
+optional reviews. Source identity, current digest and the subtitle replacement
+interval are checked again. Applying the result uses the publication mechanism,
+then records adoption without reapplying the whole list. Adoption never resumes
+the job and blocks further sending from it. Original responses, reservations and
+saved study cards are unchanged.
 
-Transcript-review revision history and selections live in operational learning-database tables.
+Transcript-review revision history, selections and publication sessions live in operational learning-database tables.
 Portable learning exports omit them, and learning restore clears them instead of
 importing a review or approval from another backup. This is separate from phrase
 and subtitle editor drafts, which JSON/ZIP archives preserve with detached source

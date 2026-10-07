@@ -23,7 +23,13 @@ pub fn sentence_ranges(segments: &[SubtitleSegment]) -> Result<Vec<SentenceRange
             "Sentence playback requires valid, unique subtitles from one media item"
         );
     }
-    let mut ordered: Vec<_> = segments.iter().collect();
+    let mut ordered: Vec<_> = segments
+        .iter()
+        .filter(|cue| cue.timing_precision == "cue")
+        .collect();
+    if ordered.is_empty() {
+        return Ok(Vec::new());
+    }
     ordered.sort_by(|a, b| (a.start_ms, a.end_ms, &a.id).cmp(&(b.start_ms, b.end_ms, &b.id)));
     let mut ranges = Vec::new();
     let mut terminal_at_end = false;
@@ -146,6 +152,7 @@ mod tests {
 
     fn cue(id: &str, start: u64, end: u64, text: &str) -> SubtitleSegment {
         SubtitleSegment {
+            timing_precision: "cue".into(),
             id: id.into(),
             media_id: "media".into(),
             start_ms: start,

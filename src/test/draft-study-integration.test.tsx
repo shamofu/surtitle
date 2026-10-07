@@ -363,7 +363,8 @@ describe('draft study in the real study page', () => {
     );
     vi.mocked(playerApi.player).mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Transcript' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Study a draft' }));
+    fireEvent.click(screen.getByText('Transcription history'));
+    fireEvent.click(screen.getByRole('button', { name: 'Open earlier drafts' }));
     await screen.findByRole('list', { name: 'Available draft subtitles' });
     await waitFor(() =>
       expect(playerApi.player).toHaveBeenCalledWith({
@@ -431,7 +432,8 @@ describe('draft study in the real study page', () => {
       ).toBeEnabled(),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Transcript' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Study a draft' }));
+    fireEvent.click(screen.getByText('Transcription history'));
+    fireEvent.click(screen.getByRole('button', { name: 'Open earlier drafts' }));
     fireEvent.click(
       await screen.findByRole('checkbox', {
         name: `Select subtitle: ${draftCue.text}`,

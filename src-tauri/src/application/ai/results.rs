@@ -7,6 +7,10 @@ pub(super) fn apply_received_output(
     plan: &PreparedJob,
     output: ParsedOutput,
 ) -> Result<()> {
+    if matches!(&output, ParsedOutput::Transcript { .. }) {
+        crate::application::transcript::automatic::apply_progress(state, job_id)?;
+        return Ok(());
+    }
     let response_hash = sha256_bytes(&serde_json::to_vec(&output)?);
     // An already applied response is a completed local operation. Its durable
     // marker takes precedence over later source edits, and this path writes nothing.

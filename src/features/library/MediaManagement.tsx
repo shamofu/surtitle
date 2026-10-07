@@ -231,6 +231,7 @@ export function SubtitleSourceDialog({
             disabled={busy}
             className={mode === id ? 'selected' : ''}
             onClick={() => {
+              if (id === 'transcribe' && onTranscribe) { onTranscribe(); return; }
               setMode(id);
               setReplace(false);
             }}

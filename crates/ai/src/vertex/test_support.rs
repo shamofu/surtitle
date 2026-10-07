@@ -11,6 +11,8 @@ use tokio::sync::oneshot;
 #[derive(Clone, Copy)]
 pub enum Scenario {
     Translation,
+    Transcription,
+    TranscriptionCoarseFirst,
     SendFailure,
 }
 
@@ -116,7 +118,9 @@ impl Transport for OfflineTransport {
             .push((reply.ordinal, body.clone()));
         self.gate.wait(Stage::AfterSend, reply.ordinal).await;
         match self.scenario {
-            Scenario::Translation => Ok(OfflineResponse(Some(reply.bytes))),
+            Scenario::Translation
+            | Scenario::Transcription
+            | Scenario::TranscriptionCoarseFirst => Ok(OfflineResponse(Some(reply.bytes))),
             Scenario::SendFailure => Err(()),
         }
     }
@@ -134,7 +138,7 @@ impl ResponseBody for OfflineResponse {
     }
 }
 
-/// Two fixed authored translation batches for fixture-cue-00 through -30.
+/// Two fixed authored translation batches or bounded silent-audio transcriptions.
 /// Existing job preparation and approval must be performed by the application.
 pub struct OfflineVertexService {
     store: AiStore,
@@ -148,49 +152,67 @@ impl OfflineVertexService {
         let plan = store.prepared_job(job_id)?;
         if plan.requests.len() != 2 {
             return Err(AiError::Invalid(
-                "Offline fixture requires two translation batches".into(),
+                "Offline fixture requires two fixed requests".into(),
             ));
         }
         let mut replies = VecDeque::new();
         let remaining = store.quote(job_id)?.remaining_ordinals;
         for (ordinal, task) in plan.requests.iter().enumerate() {
-            let RequestTask::Translation {
-                target_language,
-                cues,
-            } = task
-            else {
-                return Err(AiError::Invalid(
-                    "Offline fixture only supports translation".into(),
-                ));
-            };
-            let indices = if ordinal == 0 { 0..30 } else { 30..31 };
-            let expected_ids = indices
-                .clone()
-                .map(|index| format!("fixture-cue-{index:02}"))
-                .collect::<Vec<_>>();
-            if target_language != "ja" || cues.iter().map(|cue| &cue.id).ne(expected_ids.iter()) {
-                return Err(AiError::Invalid(
-                    "Offline fixture cue identities differ".into(),
-                ));
-            }
-            let translations = indices
-                .map(|index| {
-                    serde_json::json!({
-                        "id": format!("fixture-cue-{index:02}"),
-                        "translation": format!("固定の翻訳 {index:02}。")
+            let response = if matches!(
+                scenario,
+                Scenario::Transcription | Scenario::TranscriptionCoarseFirst
+            ) {
+                transcription_response(task, ordinal, scenario)?
+            } else {
+                let RequestTask::Translation {
+                    target_language,
+                    cues,
+                } = task
+                else {
+                    return Err(AiError::Invalid(
+                        "Offline fixture only supports translation".into(),
+                    ));
+                };
+                let indices = if ordinal == 0 { 0..30 } else { 30..31 };
+                let expected_ids = indices
+                    .clone()
+                    .map(|index| format!("fixture-cue-{index:02}"))
+                    .collect::<Vec<_>>();
+                if target_language != "ja" || cues.iter().map(|cue| &cue.id).ne(expected_ids.iter())
+                {
+                    return Err(AiError::Invalid(
+                        "Offline fixture cue identities differ".into(),
+                    ));
+                }
+                let translations = indices
+                    .map(|index| {
+                        serde_json::json!({
+                            "id": format!("fixture-cue-{index:02}"),
+                            "translation": format!("固定の翻訳 {index:02}。")
+                        })
                     })
+                    .collect::<Vec<_>>();
+                serde_json::json!({
+                    "candidates": [{"finishReason": "STOP", "content": {"parts": [{
+                        "text": serde_json::to_string(&serde_json::json!({"translations": translations}))?
+                    }]}}],
+                    "usageMetadata": {"promptTokenCount": 100, "candidatesTokenCount": 20}
                 })
-                .collect::<Vec<_>>();
-            let response = serde_json::json!({
-                "candidates": [{"finishReason": "STOP", "content": {"parts": [{
-                    "text": serde_json::to_string(&serde_json::json!({"translations": translations}))?
-                }]}}],
-                "usageMetadata": {"promptTokenCount": 100, "candidatesTokenCount": 20}
-            });
+            };
             if remaining.contains(&(ordinal as u32)) {
+                let mut expected_body = plan.request_body_snapshot(ordinal as u32)?.clone();
+                if let Some(audio) = task.audio_attachment() {
+                    use base64::Engine;
+                    let data = expected_body
+                        .pointer_mut("/contents/0/parts/0/inlineData/data")
+                        .ok_or(AiError::PreparationChanged)?;
+                    *data = base64::engine::general_purpose::STANDARD
+                        .encode(audio.verified_bytes()?)
+                        .into();
+                }
                 replies.push_back(Reply {
                     ordinal: ordinal as u32,
-                    expected_body: plan.request_body_snapshot(ordinal as u32)?.clone(),
+                    expected_body,
                     bytes: serde_json::to_vec(&response)?,
                 });
             }
@@ -255,4 +277,53 @@ impl OfflineVertexService {
         )
         .await
     }
+}
+
+/// Only authored fixture audio and responses are accepted. This seam cannot
+/// substitute arbitrary audio, arbitrary provider JSON, or a remote endpoint.
+fn transcription_response(task: &RequestTask, ordinal: usize, scenario: Scenario) -> Result<Value> {
+    let RequestTask::TranscribePreview { language, audio } = task else {
+        return Err(AiError::Invalid(
+            "Offline transcription requires TranscribePreview".into(),
+        ));
+    };
+    let length = 7u32 * 32000;
+    let mut wav = b"RIFF".to_vec();
+    wav.extend_from_slice(&(length + 36).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt \x10\0\0\0\x01\0\x01\0\x80\x3e\0\0\0\x7d\0\0\x02\0\x10\0data");
+    wav.extend_from_slice(&length.to_le_bytes());
+    wav.resize(length as usize + 44, 0);
+    if ordinal > 1
+        || language != "en"
+        || !audio.path.is_absolute()
+        || audio.source_start_ms != ordinal as u64 * 1000
+        || audio.duration_ms != 7000
+        || audio.mime_type != "audio/wav"
+        || audio.verified_bytes()? != wav
+    {
+        return Err(AiError::Invalid(
+            "Offline transcription requires its fixed seven-second silence inputs".into(),
+        ));
+    }
+    let transcription = if ordinal == 0 {
+        let first_start = if matches!(scenario, Scenario::TranscriptionCoarseFirst) {
+            "2s"
+        } else {
+            "0.5s"
+        };
+        serde_json::json!({"text":"Hello. No, no.","finished":true,"words":[
+            {"word":"Hello","startOffset":first_start,"endOffset":"1s"},
+            {"word":"No","startOffset":"3.5s","endOffset":"3.9s"},
+            {"word":"no","startOffset":"4s","endOffset":"4.5s"}
+        ]})
+    } else {
+        serde_json::json!({"text":"No. Goodbye.","finished":true,"words":[
+            {"word":"No","startOffset":"2.5s","endOffset":"3.5s"},
+            {"word":"Goodbye","startOffset":"6.5s","endOffset":"6.9s"}
+        ]})
+    };
+    Ok(serde_json::json!({
+        "candidates":[{"finishReason":"STOP","content":{"parts":[{"audioTranscription":transcription}]}}],
+        "usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":20}
+    }))
 }

@@ -40,6 +40,8 @@ pub struct SubtitleSegment {
     pub end_ms: u64,
     pub text: String,
     pub translation: Option<String>,
+    #[serde(default = "cue_timing", skip_serializing_if = "is_cue_timing")]
+    pub timing_precision: String,
     #[serde(default = "confirmed")]
     pub status: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -67,6 +69,12 @@ pub fn is_usable_subtitle_status(status: &str) -> bool {
 }
 fn confirmed() -> String {
     "confirmed".into()
+}
+fn cue_timing() -> String {
+    "cue".into()
+}
+fn is_cue_timing(value: &str) -> bool {
+    value == "cue"
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -246,6 +254,8 @@ pub struct SaveCard {
     pub segment_id: String,
     #[serde(default)]
     pub source_cue_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_range: Option<AudioClipRange>,
     pub term: String,
     pub meaning: String,
     pub example: String,

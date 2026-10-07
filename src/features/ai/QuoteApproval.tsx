@@ -13,10 +13,12 @@ export function QuoteApproval({
   quote,
   busy,
   onApprove,
+  transcription = false,
 }: {
   quote: AiQuote;
   busy: boolean;
   onApprove: () => void;
+  transcription?: boolean;
 }) {
   const { t } = useAppearance();
   const [acknowledgedQuote, setAcknowledgedQuote] = useState<string | null>(
@@ -31,6 +33,7 @@ export function QuoteApproval({
   }, []);
   const expired = new Date(quote.expiresAt).getTime() <= now;
   const unpriced = quote.unpriced === true || quote.maximumUsd == null;
+  const requiresAcknowledgement = !transcription || unpriced;
   return (
     <div className="quote-review">
       <div className="quote-cost">
@@ -55,7 +58,7 @@ export function QuoteApproval({
         </small>
       </div>
       <dl className="details-list">
-        {quote.applyPolicy === 'auto' && <div><dt>{t('完成後', 'After completion')}</dt><dd>{t('字幕を自動表示', 'Apply subtitles automatically')}</dd></div>}
+        {quote.applyPolicy === 'auto' && !transcription && <div><dt>{t('完成後', 'After completion')}</dt><dd>{t('字幕を自動表示', 'Apply subtitles automatically')}</dd></div>}
         {quote.focusTerm && (
           <div>
             <dt>{t('解説する表現', 'Phrase to explain')}</dt>
@@ -68,12 +71,18 @@ export function QuoteApproval({
             {timestamp(quote.startMs, true)} — {timestamp(quote.endMs, true)}
           </dd>
         </div>
-        <div>
+        {!transcription && <div>
           <dt>{t('モデル', 'Model')}</dt>
           <dd>
             {quote.model} · {quote.location || 'global'}
           </dd>
-        </div>
+        </div>}
+      </dl>
+      <details open={!transcription}>
+        <summary>{t('料金・送信の詳細', 'Cost and request details')}</summary>
+        <dl className="details-list">
+        {transcription && <div><dt>{t('モデル', 'Model')}</dt><dd>{quote.model} · {quote.location || 'global'}</dd></div>}
+        {transcription && quote.applyPolicy === 'auto' && <div><dt>{t('受信後', 'As results arrive')}</dt><dd>{t('字幕を自動表示', 'Apply subtitles automatically')}</dd></div>}
         <div>
           <dt>{t('要求数 / 同時送信', 'Requests / concurrency')}</dt>
           <dd>{quote.requestCount ?? 1} / 1</dd>
@@ -107,6 +116,7 @@ export function QuoteApproval({
           </div>
         )}
       </dl>
+      </details>
       {quote.warnings.map((warning, index) => (
         <p className="notice warning" key={index}>
           {warning}
@@ -126,7 +136,7 @@ export function QuoteApproval({
               )}
         </p>
       )}
-      <label className="check-field">
+      {requiresAcknowledgement && <label className="check-field">
         <input
           type="checkbox"
           checked={acknowledged}
@@ -136,7 +146,7 @@ export function QuoteApproval({
           disabled={!quote.canApprove || expired || busy}
         />
         <span>
-          {unpriced
+          {unpriced && transcription ? t('料金を事前に確定できないことを了承し、この範囲の文字起こしを開始します。', 'I understand the price cannot be determined in advance and authorize transcription of this range.') : unpriced
             ? t(
                 '料金と品質が未確認であることを理解し、この範囲・要求数・音声時間・出力設定で今回の実行を承認します。',
                 'I understand that pricing and quality are unverified and approve this job for the displayed scope, request count, audio duration, and output settings.',
@@ -146,24 +156,24 @@ export function QuoteApproval({
                 'I approve this AI job for the displayed scope and reservation, and will review the model output before use.',
               )}
         </span>
-      </label>
+      </label>}
       <Button
         variant="primary"
         className="full-width"
         busy={busy}
-        disabled={!quoteCanBeApproved(quote, acknowledged, now)}
+        disabled={!quoteCanBeApproved(quote, !requiresAcknowledgement || acknowledged, now)}
         onClick={onApprove}
       >
         <Check size={16} />
-        {t('この実行を承認する', 'Approve this job')}
+        {transcription ? t('この内容で文字起こしを開始', 'Start transcription') : t('この実行を承認する', 'Approve this job')}
       </Button>
-      <p className="helper-text centered">
+      {!transcription && <p className="helper-text centered">
         <ShieldCheck size={13} />
         {t(
           '以後の実行や結果不明の再試行を、自動で承認することはありません。',
           'This does not authorize future jobs or retries with an unknown result.',
         )}
-      </p>
+      </p>}
     </div>
   );
 }

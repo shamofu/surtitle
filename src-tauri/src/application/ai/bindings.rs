@@ -29,12 +29,14 @@ pub(super) fn source_matches(
 pub(super) fn verify_task_sources(db: &surtitle_core::Store, plan: &PreparedJob) -> Result<()> {
     let media = db.media(&plan.binding.media_id)?;
     let draft_study = crate::application::transcript::study::verify_quote_cues(db, plan)?;
-    if plan.requests.iter().any(|task| {
-        matches!(
-            task,
-            RequestTask::AudioTranscription { .. } | RequestTask::TranscribePreview { .. }
-        )
-    }) {
+    if plan.apply_policy != TranscriptApplyPolicy::Auto
+        && plan.requests.iter().any(|task| {
+            matches!(
+                task,
+                RequestTask::AudioTranscription { .. } | RequestTask::TranscribePreview { .. }
+            )
+        })
+    {
         ensure!(
             transcript_fingerprint(&db.list_segments(&media.id)?)?
                 == plan.binding.transcript_revision,

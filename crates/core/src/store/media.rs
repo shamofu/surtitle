@@ -55,19 +55,23 @@ impl Store {
         let previous = previous
             .map(|json| serde_json::from_str::<Media>(&json))
             .transpose()?;
-        let source_changed = previous.is_some_and(|old| {
+        let source_identity_changed = previous.as_ref().is_some_and(|old| {
             old.path != media.path
                 || old.learning_language != media.learning_language
-                || old.duration_ms != media.duration_ms
                 || old
                     .audio_stream_index
                     .is_some_and(|track| Some(track) != media.audio_stream_index)
         });
+        let source_changed = source_identity_changed
+            || previous.is_some_and(|old| old.duration_ms != media.duration_ms);
         let transaction = if self.conn.is_autocommit() {
             Some(self.conn.unchecked_transaction()?)
         } else {
             None
         };
+        if source_identity_changed {
+            super::transcript_publication::detach_on(&self.conn, &media.id)?;
+        }
         if source_changed {
             super::transcript_issues::deactivate_transcript_issues_on(
                 &self.conn,
@@ -89,6 +93,7 @@ impl Store {
             ensure!(segment.media_id == media_id, "wrong media");
         }
         let tx = self.conn.transaction()?;
+        super::transcript_publication::detach_on(&tx, media_id)?;
         super::transcript_issues::deactivate_transcript_issues_on(
             &tx,
             media_id,
@@ -136,6 +141,13 @@ impl Store {
                 segment.id
             ],
         )?;
+        if serde_json::to_value(&old)? != serde_json::to_value(&edited)? {
+            super::transcript_publication::protect_changes_on(
+                &self.conn,
+                &old.media_id,
+                &[&old, &edited],
+            )?;
+        }
         if edited.status == "confirmed" {
             super::transcript_issues::deactivate_transcript_issues_on(
                 &self.conn,

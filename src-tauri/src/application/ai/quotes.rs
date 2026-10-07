@@ -93,10 +93,14 @@ pub(crate) fn quote_for_ui(state: &AppState, quote: JobQuote, is_retry: bool) ->
     } else {
         None
     };
-    let mut warnings = vec![tr(
-        "モデルの品質は保証されません。生成された内容を確認して利用してください。",
-        "Model quality is not guaranteed. Review generated content before using it.",
-    )];
+    let mut warnings = if context.kind == "transcribe" {
+        Vec::new()
+    } else {
+        vec![tr(
+            "モデルの品質は保証されません。生成された内容を確認して利用してください。",
+            "Model quality is not guaranteed. Review generated content before using it.",
+        )]
+    };
     if additional.is_none() {
         warnings.push(tr("料金不明です。要求数・音声時間・出力設定で範囲を制限しますが、ドル上限は保証できません。", "Pricing is unknown. Request count, audio duration, and output settings bound this scope; a dollar limit cannot be guaranteed."));
     }

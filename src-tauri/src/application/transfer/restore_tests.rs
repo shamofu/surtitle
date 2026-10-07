@@ -31,6 +31,7 @@ fn seed(state: &AppState, source: &Path) -> LearningArchive {
         "restore-media",
         &[
             SubtitleSegment {
+                timing_precision: "cue".into(),
                 id: "restore-a".into(),
                 media_id: "restore-media".into(),
                 start_ms: 0,
@@ -41,6 +42,7 @@ fn seed(state: &AppState, source: &Path) -> LearningArchive {
                 review_issues: vec![],
             },
             SubtitleSegment {
+                timing_precision: "cue".into(),
                 id: "restore-b".into(),
                 media_id: "restore-media".into(),
                 start_ms: 1100,
@@ -147,6 +149,7 @@ fn zip_preview_tokens_are_single_use_and_restore_independent_audio_and_reviews()
         .unwrap()
         .save_card_with_audio_range(
             &SaveCard {
+                source_range: None,
                 media_id: "restore-media".into(),
                 segment_id: "restore-a".into(),
                 source_cue_ids: vec!["restore-a".into()],

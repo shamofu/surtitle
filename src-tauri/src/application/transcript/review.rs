@@ -46,43 +46,15 @@ pub(super) fn load_draft(
     Ok((receipt, draft, base_digest))
 }
 
-pub(super) fn draft_segments(draft: &TranscriptDraft) -> Vec<surtitle_core::SubtitleSegment> {
-    draft
-        .segments
-        .iter()
-        .map(|cue| surtitle_core::SubtitleSegment {
-            id: format!("{}-{}", draft.id, cue.id),
-            media_id: draft.media_id.clone(),
-            start_ms: cue.start_ms,
-            end_ms: cue.end_ms,
-            text: cue.text.clone(),
-            translation: None,
-            status: cue.status.clone(),
-            review_issues: vec![],
-        })
-        .collect()
-}
-pub(super) fn require_explicit_empty_range_confirmation(draft: &TranscriptDraft) -> Result<()> {
-    ensure!(
-        draft.chunks.iter().all(|chunk| !chunk.segments.is_empty()
-            || chunk
-                .manual_revision
-                .as_ref()
-                .is_some_and(|revision| matches!(
-                    revision.content,
-                    ManualTranscriptContent::ConfirmedNoSpeech
-                ))),
-        "Empty ranges require an explicit no-speech confirmation in the range editor before adoption"
-    );
-    Ok(())
-}
-
 pub(super) fn view(state: &AppState, job_id: &str) -> Result<TranscriptReview> {
     let binding = load_binding(state, job_id)?;
     let (receipt, draft, _) = load_draft(state, &binding)?;
-    let applied = lock(&state.db)?
-        .transcript_adopted(job_id, &binding.job_digest)?
-        .is_some();
+    let applied = state
+        .ai
+        .transcript_application_recorded(job_id, &binding.job_digest)?
+        || lock(&state.db)?
+            .transcript_adopted(job_id, &binding.job_digest)?
+            .is_some();
     let checked = if applied {
         Ok(())
     } else if binding.repair_parent.is_some() {
@@ -93,16 +65,8 @@ pub(super) fn view(state: &AppState, job_id: &str) -> Result<TranscriptReview> {
         (|| {
             manual_editing_allowed(state, &binding)?;
             validate_transcript_adoption(&draft, &draft.digest)?;
-            require_explicit_empty_range_confirmation(&draft)?;
             verify_source(state, &receipt, true)?;
-            let db = lock(&state.db)?;
-            surtitle_core::store::validate_transcript_range(
-                &db.list_segments(&draft.media_id)?,
-                draft.start_ms,
-                draft.end_ms,
-                &draft_segments(&draft),
-                &draft.media_id,
-            )
+            Ok(())
         })()
     };
     let mut repair_alternatives = Vec::new();
@@ -139,11 +103,67 @@ pub async fn get_transcript_review(
     let state = state.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _review = lock(&state.ai_session.transcript_review)?;
+        recover_saved_text(&state, &job_id)?;
         view(&state, &job_id)
     })
     .await
     .map_err(|_| "transcript review was interrupted".to_string())?
     .map_err(err)
+}
+
+/// Opening saved results can recover text locally, without changing original charges.
+fn recover_saved_text(state: &AppState, job_id: &str) -> Result<()> {
+    let binding = load_binding(state, job_id)?;
+    if state.ai.quote(job_id)?.state == "approved" {
+        return Ok(());
+    }
+    if state
+        .ai
+        .transcript_application_recorded(job_id, &binding.job_digest)?
+        || lock(&state.db)?
+            .transcript_adopted(job_id, &binding.job_digest)?
+            .is_some()
+    {
+        return Ok(());
+    }
+    for result in state.ai.transcript_result_reviews(job_id)? {
+        if result.state != TranscriptResultState::Invalid
+            || state
+                .ai
+                .selected_transcript_reparse(job_id, result.ordinal)?
+                .is_some()
+        {
+            continue;
+        }
+        let Some(hash) = result.evidence_sha256 else {
+            continue;
+        };
+        let detail = state.ai.transcript_result_detail(job_id, result.ordinal)?;
+        if detail.attempt_state.as_deref() != Some("settled")
+            || !detail
+                .evidence
+                .as_ref()
+                .is_some_and(|evidence| evidence.complete)
+        {
+            continue;
+        }
+        let candidate = state
+            .ai
+            .reparse_transcript_evidence(job_id, result.ordinal, &hash)?;
+        if matches!(
+            candidate.state,
+            TranscriptResultState::Received | TranscriptResultState::Empty
+        ) {
+            match state
+                .ai
+                .select_transcript_reparse(job_id, result.ordinal, &candidate.id)
+            {
+                Ok(()) | Err(AiError::InFlight) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+    Ok(())
 }
 
 pub async fn get_transcript_result_detail(
@@ -312,25 +332,40 @@ pub(super) fn apply_review(
     let (receipt, draft, _) = load_draft(state, &binding)?;
     manual_editing_allowed(state, &binding)?;
     validate_transcript_adoption(&draft, expected_digest)?;
-    require_explicit_empty_range_confirmation(&draft)?;
     let source_identity = verify_source_identity(state, &receipt, true)?;
     let mut db = lock(&state.db)?;
     let current_media = db.media(&draft.media_id)?;
     ensure!(
         current_media.path == source_identity.path
-            && current_media.learning_language == source_identity.language,
+            && current_media.learning_language == source_identity.language
+            && current_media.audio_stream_index == receipt.audio_stream_index,
         "media was relinked or its language changed during transcript verification"
     );
-    db.adopt_transcript_once(
+    db.begin_transcript_publication(
         job_id,
         &binding.job_digest,
-        &draft.digest,
         &draft.media_id,
         &draft.source_revision,
         draft.start_ms,
         draft.end_ms,
-        &draft_segments(&draft),
     )?;
+    db.activate_transcript_publication(job_id, &binding.job_digest)?;
+    let received = draft
+        .chunks
+        .iter()
+        .map(|chunk| surtitle_core::store::TranscriptPublicationRange {
+            start_ms: chunk.core_start_ms,
+            end_ms: chunk.core_end_ms,
+        })
+        .collect::<Vec<_>>();
+    db.publish_transcript_progress(
+        job_id,
+        &binding.job_digest,
+        &received,
+        &automatic::generated_segments(job_id, &draft),
+        &automatic::issue_records(job_id, &draft),
+    )?;
+    db.record_published_transcript_adoption(job_id, &binding.job_digest, &draft.digest)?;
     drop(db);
     crate::application::playback::refresh_current_subtitles(state, &draft.media_id)?;
     state.ai.clear_job_issue(job_id)?;

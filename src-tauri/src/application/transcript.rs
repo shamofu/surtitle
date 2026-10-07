@@ -27,6 +27,10 @@ struct TranscriptJob {
     preparation_id: String,
     receipt_sha256: String,
     repair_parent: Option<RepairParent>,
+    #[serde(default)]
+    progressive: bool,
+    #[serde(default)]
+    publication_detached: bool,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -81,5 +85,7 @@ pub(crate) mod fixtures;
 #[cfg(all(test, feature = "e2e-test"))]
 use fixtures::*;
 
+#[cfg(all(test, feature = "e2e-test"))]
+mod progressive_tests;
 #[cfg(all(test, feature = "e2e-test"))]
 mod tests;

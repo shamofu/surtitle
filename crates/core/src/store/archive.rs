@@ -4,7 +4,7 @@ impl Store {
     pub fn archive(&self) -> Result<LearningArchive> {
         Ok(LearningArchive {
             format: "surtitle.learning".into(),
-            schema_version: 2,
+            schema_version: 3,
             exported_at: now(),
             media: self.list_media()?,
             segments: self.all("SELECT data FROM segments ORDER BY media_id,start_ms")?,
@@ -36,7 +36,7 @@ impl Store {
         self.backup(backup_path)?;
         let tx = self.conn.transaction()?;
         tx.execute_batch(
-            "DELETE FROM transcript_issues; DELETE FROM editor_drafts; DELETE FROM draft_study_selections; DELETE FROM transcript_range_selections; DELETE FROM transcript_range_revisions; DELETE FROM transcript_draft_heads; DELETE FROM transcript_adoptions; DELETE FROM transcript_drafts; DELETE FROM ai_result_applications; DELETE FROM reviews; DELETE FROM cards; DELETE FROM segments; DELETE FROM media;",
+            "DELETE FROM transcript_publications; DELETE FROM transcript_issues; DELETE FROM editor_drafts; DELETE FROM draft_study_selections; DELETE FROM transcript_range_selections; DELETE FROM transcript_range_revisions; DELETE FROM transcript_draft_heads; DELETE FROM transcript_adoptions; DELETE FROM transcript_drafts; DELETE FROM ai_result_applications; DELETE FROM reviews; DELETE FROM cards; DELETE FROM segments; DELETE FROM media;",
         )?;
         for m in &archive.media {
             tx.execute(

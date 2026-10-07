@@ -246,6 +246,11 @@ impl Store {
             "source subtitles changed; review a new preparation"
         );
         validate_transcript_range(&current, start_ms, end_ms, segments, media_id)?;
+        super::transcript_publication::protect_ranges_on(
+            &tx,
+            media_id,
+            &[TranscriptPublicationRange { start_ms, end_ms }],
+        )?;
         ensure!(
             issues.iter().all(|issue| issue.media_id == media_id
                 && issue.start_ms >= start_ms

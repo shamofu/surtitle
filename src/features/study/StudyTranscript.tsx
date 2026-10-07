@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useCallback, useLayoutEffect, useRef } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { VirtualItem } from '@tanstack/react-virtual';
 import {
@@ -9,6 +9,7 @@ import {
   Edit3,
   Languages,
   Play,
+  RefreshCw,
   Search,
   Sparkles,
   Subtitles,
@@ -58,6 +59,8 @@ export function StudyTranscript({
   onEstimate,
   onReview,
   onDraftPlay,
+  transcriptionWorkspace,
+  onTranscribeRange,
 }: {
   media: Media;
   segments: SubtitleSegment[];
@@ -83,9 +86,12 @@ export function StudyTranscript({
   onEstimate: (kind: 'transcribe' | 'vocabulary') => void;
   onReview: (jobId: string) => void;
   onDraftPlay: PlayRange;
+  transcriptionWorkspace?: ReactNode;
+  onTranscribeRange?: (range: { startMs: number; endMs: number }) => void;
 }) {
   const { t } = useAppearance();
   const { search, following, showTranslations } = viewState;
+  const [markedOnly, setMarkedOnly] = useState(false);
   const viewStateRef = useRef(viewState);
   viewStateRef.current = viewState;
   const updateView = useCallback((patch: Partial<TranscriptViewState>) => {
@@ -94,7 +100,7 @@ export function StudyTranscript({
     onViewStateChange(next);
   }, [onViewStateChange]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const filtered = segments.filter(item => `${item.text} ${item.translation || ''}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+  const filtered = segments.filter(item => (!markedOnly || item.status === 'generated_review' || item.timingPrecision === 'source_block' || !!item.reviewIssues?.length) && `${item.text} ${item.translation || ''}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
   const cached = viewState.measurementCache;
   const initialMeasurements = cached?.search === search && cached.showTranslations === showTranslations ? cached : undefined;
   const previousLayout = useRef({ search, showTranslations, width: initialMeasurements?.width });
@@ -133,6 +139,7 @@ export function StudyTranscript({
 
   return (
     <>
+      {transcriptionWorkspace}
       <div
         className="transcript-tabs"
         aria-label={t('字幕の表示内容', 'Transcript content')}
@@ -141,7 +148,7 @@ export function StudyTranscript({
           ['transcript', t('字幕', 'Transcript')],
           ['vocabulary', t('AI の提案', 'Suggestions')],
           ['draft', t('下書きから学ぶ', 'Study a draft')],
-        ] as const).map(([id, label]) => (
+        ] as const).filter(([id]) => id !== 'draft' || transcriptionWorkspace === undefined).map(([id, label]) => (
           <button
             key={id}
             type="button"
@@ -247,6 +254,7 @@ export function StudyTranscript({
                   <Languages size={18} />
                 </IconButton>
               </div>
+              {segments.some(cue => cue.status === 'generated_review' || cue.timingPrecision === 'source_block') && <label className="check-field source-block-note"><input type="checkbox" checked={markedOnly} onChange={event => setMarkedOnly(event.target.checked)} />{t('注意のある箇所だけ表示', 'Show marked passages only')}</label>}
               {error && <p
                 className="notice warning"
                 role="alert"
@@ -263,12 +271,12 @@ export function StudyTranscript({
                       'Import subtitles to inspect a phrase while you watch.'
                     )}
                   >
-                    <Button onClick={onImport}>{t('字幕を読み込む', 'Import subtitles')}</Button>
+                    <Button onClick={() => onEstimate('transcribe')}>{t('字幕を作成', 'Create subtitles')}</Button>
                     <Button
                       variant="ghost"
-                      onClick={() => onEstimate('transcribe')}
+                      onClick={onImport}
                     >
-                      {t('文字起こしを見積もる', 'Estimate transcription')}
+                      {t('字幕を読み込む', 'Import subtitles')}
                     </Button>
                   </EmptyState>
                 )
@@ -317,7 +325,7 @@ export function StudyTranscript({
                                 type="button"
                                 className="segment-time"
                                 disabled={!ready}
-                                aria-label={`${t('この字幕を再生', 'Play subtitle')} ${timestamp(segment.startMs)}`}
+                                aria-label={`${segment.timingPrecision === 'source_block' ? t('取得元の音声範囲を再生', 'Play source audio range') : t('この字幕を再生', 'Play subtitle')} ${timestamp(segment.startMs)}`}
                                 onClick={() => onReplay(segment)}
                               >
                                 {activeId === segment.id ? <AudioLines size={16} /> : <Play size={15} />}
@@ -342,9 +350,11 @@ export function StudyTranscript({
                                 </button>
                                 {showTranslations && segment.translation &&
                                   <p className="segment-translation">{segment.translation}</p>}
+                                {segment.timingPrecision === 'source_block' && <p className="source-block-note">{t('本文は取得済み・字幕の時刻は未確定', 'Text received · subtitle timing unavailable')}<br />{t('取得元の音声範囲', 'Source audio range')}: {timestamp(segment.startMs)}–{timestamp(segment.endMs)}</p>}
                                 {(segment.status === 'generated_review' || !subtitleUsable(segment)) &&
                                   <Badge tone="warning">{t('要確認', 'Needs review')}</Badge>}
                                 <div className="segment-actions">
+                                  {onTranscribeRange && <IconButton label={t('この区間を再文字起こし', 'Transcribe this range again')} onClick={() => onTranscribeRange({ startMs: segment.startMs, endMs: segment.endMs })}><RefreshCw size={15} /></IconButton>}
                                   <IconButton
                                     label={t('字幕を編集', 'Edit subtitle')}
                                     onClick={() => onEdit(segment)}

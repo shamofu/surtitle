@@ -42,7 +42,15 @@ fn export_to_path(
         )?,
         "srt" | "vtt" => {
             let media_id = media_id.context("select a media item for subtitle export")?;
-            let segments = db.list_segments(media_id)?;
+            let segments = db
+                .list_segments(media_id)?
+                .into_iter()
+                .filter(|cue| cue.timing_precision == "cue")
+                .collect::<Vec<_>>();
+            ensure!(
+                !segments.is_empty(),
+                "No timed subtitles are available. Export the learning data as JSON or ZIP to retain the received text."
+            );
             let translated = if segments.iter().any(|s| s.translation.is_some()) {
                 let stem = path.file_stem().unwrap_or_default().to_string_lossy();
                 let translated = path.with_file_name(format!("{stem}.translation.{format}"));

@@ -75,6 +75,7 @@ fn response(ordinal: u32, rows: &[(u64, u64, &str)]) -> ChunkResponse {
                     start_ms: *start,
                     end_ms: *end,
                     text: (*text).into(),
+                    ..Default::default()
                 })
                 .collect(),
         },
@@ -85,6 +86,93 @@ fn contradictory() -> Vec<ChunkResponse> {
         response(0, &[(119000, 119500, "Yes."), (120000, 120800, "wrong")]),
         response(1, &[(119000, 119500, "Yes."), (120000, 120800, "correct")]),
     ]
+}
+
+#[test]
+fn timing_failure_keeps_full_submitted_block_and_allows_progressive_study() {
+    let source = receipt(2);
+    let result = ChunkResponse {
+        ordinal: 1,
+        output: ParsedOutput::Transcript {
+            cues: vec![GeneratedCue {
+                start_ms: 117_000,
+                end_ms: 240_000,
+                text: "Text survives invalid word timing.".into(),
+                timing_precision: "source_block".into(),
+                word_anchors: vec![],
+            }],
+        },
+    };
+    let draft = build_transcript_draft(&source, &[result]).unwrap();
+    let cue = &draft.segments[0];
+    assert_eq!((cue.start_ms, cue.end_ms), (117_000, 240_000));
+    assert_eq!(cue.timing_precision, "source_block");
+    assert_eq!(draft.pending_ranges.len(), 1);
+    let snapshot = build_study_selection_snapshot(
+        &draft,
+        &StudySelectionRequest::Cues {
+            cue_ids: vec![cue.id.clone()],
+        },
+    )
+    .unwrap();
+    assert_eq!(snapshot.precision, StudySelectionPrecision::SourceBlock);
+    confirm_study_selection_snapshot(&draft, &snapshot).unwrap();
+    validate_transcript_draft(&draft).unwrap();
+}
+
+#[test]
+fn word_boundary_default_and_explicit_override_preserve_outside_tails() {
+    let source = receipt(2);
+    let create = |ordinal: usize, text: &str, words: serde_json::Value| {
+        let audio = source.prepared_job.requests[ordinal]
+            .audio_attachment()
+            .unwrap();
+        ChunkResponse {
+            ordinal: ordinal as u32,
+            output: crate::transcribe::parse_transcribe_parts(
+                audio,
+                &[serde_json::json!({"audioTranscription":{"text":text,"words":words}})],
+            )
+            .unwrap(),
+        }
+    };
+    let draft = build_transcript_draft(
+        &source,
+        &[
+            create(
+                0,
+                "Before wrong.",
+                serde_json::json!([
+                    {"word":"Before","startOffset":"115s","endOffset":"116s"},
+                    {"word":"wrong","startOffset":"120.1s","endOffset":"120.6s"}
+                ]),
+            ),
+            create(
+                1,
+                "right. After.",
+                serde_json::json!([
+                    {"word":"right","startOffset":"3.1s","endOffset":"3.6s"},
+                    {"word":"After","startOffset":"8s","endOffset":"9s"}
+                ]),
+            ),
+        ],
+    )
+    .unwrap();
+    assert!(draft.can_adopt);
+    assert!(draft.segments.iter().any(|cue| cue.text == "right."));
+    assert!(!draft.segments.iter().any(|cue| cue.text == "wrong."));
+    let selected = resolve_transcript_boundary(
+        &draft,
+        &draft.digest,
+        &draft.conflicts[0].id,
+        BoundaryChoice::Left,
+    )
+    .unwrap();
+    assert!(selected.segments.iter().any(|cue| cue.text == "wrong."));
+    assert!(!selected.segments.iter().any(|cue| cue.text == "right."));
+    assert!(selected.segments.iter().any(|cue| cue.text == "Before"));
+    assert!(selected.segments.iter().any(|cue| cue.text == "After."));
+    assert_eq!(draft.chunks, selected.chunks);
 }
 
 fn receipt_with_pause() -> AudioPreparationReceipt {
@@ -125,7 +213,7 @@ fn within_chunk_pause_flags_complete_cues_and_preserves_raw_text_and_timing() {
         ],
     );
     let draft = build_transcript_draft(&source, &[raw]).unwrap();
-    assert!(!draft.can_adopt);
+    assert!(draft.can_adopt);
     assert_eq!(draft.warnings.len(), 1);
     let warning = &draft.warnings[0];
     assert_eq!(warning.kind, "speech_in_vad_pause_range");
@@ -143,7 +231,8 @@ fn within_chunk_pause_flags_complete_cues_and_preserves_raw_text_and_timing() {
         ReviewText {
             start_ms: 1500,
             end_ms: 2500,
-            text: "Quiet speech or invented?".into()
+            text: "Quiet speech or invented?".into(),
+            ..Default::default()
         }
     );
     let checked = acknowledge_transcript_warning(&draft, &draft.digest, &warning.id).unwrap();
@@ -275,6 +364,7 @@ fn local_range_recovery_is_explicit_bound_and_preserves_missing_originals() {
                 start_ms: 0,
                 end_ms: 120_015,
                 text: "Do not clamp me.".into(),
+                ..Default::default()
             }],
         },
     );
@@ -300,7 +390,7 @@ fn manual_revision_rebuilds_neighbor_decisions_even_when_text_matches() {
     );
     let updated =
         apply_manual_transcript_ranges(&base, &[], &[revision], &[], Some(&resolved)).unwrap();
-    assert!(!updated.can_adopt);
+    assert!(updated.can_adopt);
     assert!(updated.conflicts[0].resolution.is_none());
     assert_ne!(updated.conflicts[0].id, resolved.conflicts[0].id);
     assert_eq!(updated.chunks[1].original_segments, base.chunks[1].segments);
@@ -319,6 +409,7 @@ fn manual_choice_survives_later_provider_result_and_resets_warning_ack() {
                 start_ms: 100,
                 end_ms: 500,
                 text: "Authored".into(),
+                ..Default::default()
             }],
         },
     );
@@ -461,18 +552,18 @@ fn group_join_provenance_is_derived_from_preserved_raw_chunks_and_digest_bound()
 }
 
 #[test]
-fn vad_disagreement_keeps_raw_speech_and_requires_digest_bound_acknowledgment() {
+fn vad_disagreement_is_optional_and_acknowledgment_stays_digest_bound() {
     let mut source = receipt(1);
     source.vad_no_speech_ordinals = vec![0];
     let original = response(0, &[(100, 2000, "Invented or quiet speech?")]);
     let draft = build_transcript_draft(&source, &[original]).unwrap();
-    assert!(!draft.can_adopt);
+    assert!(draft.can_adopt);
     assert_eq!(draft.warnings.len(), 1);
     assert_eq!(draft.warnings[0].kind, "speech_in_vad_no_speech_range");
     assert_eq!(draft.segments[0].text, "Invented or quiet speech?");
     assert_eq!(draft.segments[0].status, "provisional");
     assert_eq!(draft.chunks[0].segments[0].text, draft.segments[0].text);
-    assert!(validate_transcript_adoption(&draft, &draft.digest).is_err());
+    assert!(validate_transcript_adoption(&draft, &draft.digest).is_ok());
     assert!(acknowledge_transcript_warning(&draft, "stale", &draft.warnings[0].id).is_err());
     let accepted =
         acknowledge_transcript_warning(&draft, &draft.digest, &draft.warnings[0].id).unwrap();
@@ -507,7 +598,7 @@ fn vad_silence_is_not_a_substitute_for_a_missing_response() {
 fn partial_agreement_does_not_hide_other_conflicting_speech() {
     let draft = build_transcript_draft(&receipt(2), &contradictory()).unwrap();
     assert_eq!(draft.conflicts.len(), 1);
-    assert!(!draft.can_adopt);
+    assert!(draft.can_adopt);
     assert!(draft.segments.iter().any(|s| s.status == "provisional"));
     assert_eq!(draft.conflicts[0].left_alternative.len(), 2);
     assert_eq!(draft.conflicts[0].right_alternative.len(), 2);
@@ -594,16 +685,19 @@ fn manual_review_validates_time_and_text_without_discarding_raw_chunks() {
             start_ms: 0,
             end_ms: 1,
             text: "outside".into(),
+            ..Default::default()
         },
         ReviewText {
             start_ms: 119000,
             end_ms: 119100,
             text: " ".into(),
+            ..Default::default()
         },
         ReviewText {
             start_ms: 120000,
             end_ms: 119000,
             text: "reversed".into(),
+            ..Default::default()
         },
     ] {
         assert!(resolve_transcript_boundary(
@@ -625,6 +719,7 @@ fn manual_review_validates_time_and_text_without_discarding_raw_chunks() {
                 start_ms: 119000,
                 end_ms: 120800,
                 text: "Yes. Correct.".into(),
+                ..Default::default()
             }],
         },
     )
@@ -658,6 +753,7 @@ fn six_hour_twenty_thousand_cue_draft_is_bounded_and_complete() {
             start_ms: start,
             end_ms: start + 700,
             text: format!("word {i}"),
+            ..Default::default()
         });
     }
     let draft = build_transcript_draft(&receipt, &responses).unwrap();
@@ -705,6 +801,7 @@ fn overlapping_boundary_regions_are_reviewed_together_without_erasing_originals(
                 start_ms: 119000,
                 end_ms: 241000,
                 text: "Reviewed continuous sentence.".into(),
+                ..Default::default()
             }],
         },
     )

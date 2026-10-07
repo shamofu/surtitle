@@ -131,17 +131,20 @@ fn natural_repeated_words_are_not_deleted() {
             start_ms: 119_000,
             end_ms: 119_200,
             text: "no".into(),
+            ..Default::default()
         },
         TimedText {
             start_ms: 119_300,
             end_ms: 119_500,
             text: "no".into(),
+            ..Default::default()
         },
     ];
     ts[1].segments = vec![TimedText {
         start_ms: 120_100,
         end_ms: 120_300,
         text: "no".into(),
+        ..Default::default()
     }];
     let out = stitch_chunks(ts).unwrap();
     assert_eq!(out.segments.len(), 3);
@@ -153,6 +156,7 @@ fn duplicate_context_not_duplicate_sentence() {
         start_ms: 119_000,
         end_ms: 121_000,
         text: "続けて説明します。".into(),
+        ..Default::default()
     };
     ts[0].segments = vec![s.clone()];
     ts[1].segments = vec![s];
@@ -184,7 +188,7 @@ fn exact_overlap_preserves_word_boundaries_numbers_and_meaningful_symbols() {
         let expected: Vec<_> = ts.iter().flat_map(|t| t.segments.clone()).collect();
         let out = stitch_chunks(ts).unwrap();
         assert_eq!(out.boundary_conflicts.len(), 1, "{left} / {right}");
-        assert_eq!(out.segments, expected);
+        assert_eq!(out.segments, expected[1..]);
         assert_eq!(out.boundary_conflicts[0].left_alternative, expected[..1]);
         assert_eq!(out.boundary_conflicts[0].right_alternative, expected[1..]);
     }
@@ -208,6 +212,7 @@ fn cue(start_ms: u64, end_ms: u64, text: &str) -> TimedText {
         start_ms,
         end_ms,
         text: text.into(),
+        ..Default::default()
     }
 }
 #[test]
@@ -276,7 +281,9 @@ fn matched_fragment_does_not_hide_a_separate_contradiction_or_lose_repeats() {
     ];
     let out = stitch_chunks(ts).unwrap();
     assert_eq!(out.boundary_conflicts.len(), 1);
-    assert_eq!(out.segments.len(), 4);
+    assert_eq!(out.segments.len(), 3);
+    assert!(out.segments.iter().any(|cue| cue.text == "a cat"));
+    assert!(!out.segments.iter().any(|cue| cue.text == "a cap"));
     assert_eq!(out.boundary_conflicts[0].left_alternative[1].text, "no no");
     assert_eq!(
         out.boundary_conflicts[0].right_alternative[1].text,
@@ -453,11 +460,13 @@ fn conflicts_retain_both_source_versions() {
         start_ms: 119_000,
         end_ms: 120_000,
         text: "a cat".into(),
+        ..Default::default()
     }];
     ts[1].segments = vec![TimedText {
         start_ms: 119_000,
         end_ms: 120_000,
         text: "a cap".into(),
+        ..Default::default()
     }];
     let out = stitch_chunks(ts).unwrap();
     assert_eq!(out.boundary_conflicts.len(), 1);

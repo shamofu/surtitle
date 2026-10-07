@@ -1,20 +1,29 @@
-# Study from an incomplete transcript
+# Study from received text and earlier draft bookmarks
 
-Open **Transcript** on the Study page, then choose **Study a draft**. A learner can inspect received text,
-replay source audio and save a local bookmark while the rest of a transcription
-job is incomplete or disputed. This does not replace the active subtitle track.
-Embedded captions and SRT/VTT imports are also available without cloud
-transcription. Review source text and timing before saving a card.
+New transcription jobs put received text directly into the Study page's
+**Transcript** list while remaining audio is processed. Use those rows for
+reading, replay, explanations, translation and cards without a draft-confirmation
+or complete-transcript adoption step. Whole-recording, selected-range and
+re-transcription jobs use the same flow. Embedded captions and SRT/VTT imports
+also remain available without cloud transcription.
 
-New whole-recording jobs apply subtitles automatically when complete. This draft
-study workflow is for working with available excerpts before then, or recovering
-useful portions of an incomplete job. Phrase and subtitle editor drafts are a
-separate autosave feature; [learning backups](data-transfer.md) preserve both kinds
-of draft without transferring their old source authority.
+Rows marked **Audio range** contain Transcribe text whose word timings were
+unusable. Their bounds are the actual submitted source audio, including context,
+and do not imply sentence or word synchronization. They remain readable in the
+ordinary list and are omitted from synchronized captions, caption-group pause
+and SRT/VTT. The card form lets you choose audio inside this original range;
+card audio must span at most 180 seconds, and unfinished range input is saved
+with the phrase draft. A saved card retains the original text and bounds as well
+as its selected audio subrange.
 
-## Learning workflow
+## Earlier draft bookmarks
 
-1. Open media, then **Transcript → Study a draft**, and select a transcription job.
+The separate excerpt-bookmark workflow remains for earlier drafts and local
+recovery. Phrase and subtitle editor drafts are a separate autosave feature;
+[learning backups](data-transfer.md) preserve both kinds without transferring
+their old source authority.
+
+1. Open media, then **Transcript → Transcription history → Open earlier drafts**, and select a transcription job.
 2. Select contiguous received cues, or open the original source block if timing
    is unusable or no response was received. Available text remains inspectable.
 3. Save a bookmark. Edit its text and positive audio range inside the recorded
@@ -62,9 +71,10 @@ retained even if its source subsequently becomes unavailable.
 ## Export and restore
 
 An excerpt JSON export identifies selected-range-only coverage. SRT/VTT export
-requires a current confirmed excerpt, writes real subtitle text only and adds a
-uniquely named coverage receipt. It does not claim to cover unselected recording
-time or insert artificial speech for missing ranges.
+requires current confirmed text with usable cue timing or explicitly authored
+times; enclosing source-block bounds are not synchronized cues. Subtitle export
+adds a uniquely named coverage receipt. It does not claim to cover unselected
+recording time or insert artificial speech for missing ranges.
 
 General JSON/ZIP learning backups include bookmarks. Operational source snapshots,
 job bindings and confirmation authority are removed from exported bookmarks and

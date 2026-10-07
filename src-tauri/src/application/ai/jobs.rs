@@ -68,6 +68,11 @@ fn approve_for_execution(
         quote_for_ui(state, quote.clone(), retry)?.can_approve,
         "Review the current quote and budget before approval"
     );
+    if plan.apply_policy == TranscriptApplyPolicy::Auto {
+        crate::application::transcript::automatic::verify_publication_binding(
+            state, quote_id, digest,
+        )?;
+    }
     if retry {
         state.ai.reapprove_scope(
             quote_id,
@@ -86,6 +91,12 @@ fn approve_for_execution(
             acknowledge_unpriced,
             acknowledge_unqualified,
         )?;
+    }
+    if plan.apply_policy == TranscriptApplyPolicy::Auto {
+        let mut db = lock(&state.db)?;
+        if db.transcript_publication_exists(quote_id, digest)? {
+            db.activate_transcript_publication(quote_id, digest)?;
+        }
     }
     drop(review_guard);
     state.ai.clear_job_issue(quote_id)?;
@@ -254,6 +265,7 @@ pub fn retry_ai_application(state: AppState, job_id: String) -> std::result::Res
     (|| {
         let result = (|| {
             let plan = state.ai.prepared_job(&job_id)?;
+            crate::application::transcript::automatic::apply_progress(&state, &job_id)?;
             for (ordinal, task) in plan.requests.iter().enumerate() {
                 if matches!(task, RequestTask::Translation { .. })
                     && let Some(output) = state.ai.response(&job_id, ordinal as u32)?
@@ -313,3 +325,5 @@ pub fn resolve_unknown_attempt(
 
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, feature = "e2e-test"))]
+mod transcription_tests;

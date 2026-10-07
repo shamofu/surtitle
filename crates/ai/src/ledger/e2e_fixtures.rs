@@ -49,11 +49,13 @@ impl AiStore {
                         start_ms: 500,
                         end_ms: 1000,
                         text: "Hello.".into(),
+                        ..Default::default()
                     },
                     GeneratedCue {
                         start_ms: 3500,
                         end_ms: 4500,
                         text: "No, no.".into(),
+                        ..Default::default()
                     },
                 ],
             },
@@ -63,11 +65,13 @@ impl AiStore {
                         start_ms: 3500,
                         end_ms: 4500,
                         text: "No.".into(),
+                        ..Default::default()
                     },
                     GeneratedCue {
                         start_ms: 7500,
                         end_ms: 7900,
                         text: "Goodbye.".into(),
+                        ..Default::default()
                     },
                 ],
             },

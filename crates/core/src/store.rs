@@ -11,7 +11,9 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::path::{Path, PathBuf};
 pub(crate) mod draft_study;
 mod management;
+mod transcript_publication;
 mod transcript_ranges;
+pub use transcript_publication::{TranscriptPublicationRange, TranscriptPublicationReport};
 pub use transcript_ranges::TranscriptRangeEdit;
 
 /// Learning data only. Credentials, executable selections and charge ledgers live elsewhere.
@@ -43,6 +45,7 @@ impl Store {
         draft_study::initialize(&conn)?;
         editor_drafts::initialize(&conn)?;
         transcript_issues::initialize(&conn)?;
+        transcript_publication::initialize(&conn)?;
         Ok(Self { conn, path })
     }
     fn all<T: DeserializeOwned>(&self, sql: &str) -> Result<Vec<T>> {
@@ -76,6 +79,14 @@ pub fn subtitle_revision(segments: &[SubtitleSegment]) -> Result<String> {
             &segments
                 .iter()
                 .map(|s| &s.review_issues)
+                .collect::<Vec<_>>(),
+        )?);
+    }
+    if segments.iter().any(|s| s.timing_precision != "cue") {
+        bytes.extend(serde_json::to_vec(
+            &segments
+                .iter()
+                .map(|s| &s.timing_precision)
                 .collect::<Vec<_>>(),
         )?);
     }
@@ -114,6 +125,10 @@ pub fn validate_transcript_range(
 }
 
 pub fn validate_segment(s: &SubtitleSegment) -> Result<()> {
+    ensure!(
+        matches!(s.timing_precision.as_str(), "cue" | "source_block"),
+        "invalid subtitle timing precision"
+    );
     ensure!(
         s.start_ms < s.end_ms && s.end_ms < 360_000_000_000,
         "invalid subtitle range"

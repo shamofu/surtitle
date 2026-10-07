@@ -30,6 +30,16 @@ pub struct JobSummary {
     needs_attention: bool,
     result_state: String,
     issue: Option<surtitle_ai::JobIssue>,
+    automatic_transcript: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    transcription_ranges: Vec<TranscriptionRangeSummary>,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TranscriptionRangeSummary {
+    pub(crate) start_ms: u64,
+    pub(crate) end_ms: u64,
+    pub(crate) state: String,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

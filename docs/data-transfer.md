@@ -3,7 +3,9 @@
 JSON preserves learning records and review history without audio. ZIP contains
 the same records and every registered card-audio clip. CSV/TSV export the phrase
 collection; SRT/VTT export a selected media item's source subtitles and, when
-available, a separate translation file.
+available, a separate translation file. They include only precise timed cues.
+Rows marked **Audio range** (`source_block`) are omitted because their enclosing
+source bounds are not subtitle timings; JSON/ZIP preserve their original text.
 
 Export from a media item defaults to SRT for that item's subtitles. Export from
 the library defaults to a ZIP backup. JSON/ZIP always cover the whole learning
@@ -11,9 +13,9 @@ collection, and CSV/TSV always cover all cards. The dialog describes the selecte
 scope before export, then lists the files actually written, including any
 translation file, and offers to open their containing folder.
 
-JSON/ZIP archives use version 2, preserving phrase and subtitle editor drafts as
-well as generated-subtitle status, warnings and alternatives. Restore accepts
-both version 1 and version 2 archives. Restored drafts keep their text but are
+JSON/ZIP archives use version 3, preserving subtitle timing precision, phrase and
+subtitle editor drafts, generated status and retained review alternatives. Restore
+accepts versions 1 through 3; older rows default to precise `cue` timing. Restored drafts keep their text but are
 detached from the old source; choose current subtitles explicitly to reconnect
 them before saving a card or subtitle edit.
 
@@ -24,6 +26,12 @@ default, up to 1,000 ms), bounded by the media duration. JSON/ZIP preserve this
 Changing playback context or editing subtitles does not regenerate existing
 clips or rewrite their saved source context. JSON retains the range as provenance
 even though it does not include audio bytes.
+
+For a source-block card, the nominal card range can be an explicitly chosen
+subrange of at most 180 seconds within the original audio block. Its immutable
+`sourceCues` snapshot keeps the complete original text, source bounds and timing
+precision. The extracted clip's context is validated around that chosen subrange,
+without relabeling the source block as a synchronized cue.
 
 ZIP export fails if a registered clip is missing, unreadable, outside managed
 audio storage, or no longer a regular file. The error identifies its card and
@@ -52,6 +60,10 @@ Pending editor changes are saved before restore, and old editing sessions are
 cleared after it succeeds so they cannot overwrite the restored drafts.
 It does not import credentials, cost ledgers, paid jobs, execution approvals, or
 external-tool selections. Original media files are not bundled in backups.
+Publication sessions and operational transcript-review decisions are excluded
+and cleared on restore. Pending background output cannot automatically replace
+the restored subtitles, while existing paid-job digests and cost records remain
+in their separate store.
 
 See the [application test guide](testing.md) for export and restore regression
 coverage.

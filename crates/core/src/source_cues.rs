@@ -37,7 +37,9 @@ pub fn confirmed_cue_range<'a>(
         .max()
         .context("Source subtitle is missing")?;
     ensure!(
-        end_ms > start_ms && end_ms - start_ms <= 180_000,
+        end_ms > start_ms
+            && (end_ms - start_ms <= 180_000
+                || (cues.len() == 1 && cues[0].timing_precision == "source_block")),
         "Source range must be at most 180 seconds"
     );
     Ok(ConfirmedCueRange {
@@ -52,6 +54,7 @@ mod tests {
     use super::*;
     fn cue(id: &str, start_ms: u64, end_ms: u64) -> SubtitleSegment {
         SubtitleSegment {
+            timing_precision: "cue".into(),
             id: id.into(),
             media_id: "media".into(),
             start_ms,

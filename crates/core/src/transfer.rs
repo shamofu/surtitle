@@ -94,7 +94,7 @@ impl Drop for PendingExport {
 
 pub fn validate(a: &LearningArchive) -> Result<()> {
     ensure!(
-        a.format == "surtitle.learning" && matches!(a.schema_version, 1 | 2),
+        a.format == "surtitle.learning" && matches!(a.schema_version, 1..=3),
         "unsupported backup format"
     );
     ensure!(
@@ -218,10 +218,20 @@ pub fn validate(a: &LearningArchive) -> Result<()> {
             );
         }
         if let Some(first) = c.source_cues.first() {
+            let source_end_ms = c.source_cues.iter().map(|s| s.end_ms).max().unwrap();
+            let block_subset = c.source_cues.len() == 1
+                && first.timing_precision == "source_block"
+                && c.start_ms >= first.start_ms
+                && c.end_ms <= first.end_ms
+                && c.start_ms < c.end_ms
+                && c.end_ms - c.start_ms <= 180_000;
             ensure!(
                 first.id == c.segment_id
-                    && first.start_ms == c.start_ms
-                    && c.source_cues.iter().map(|s| s.end_ms).max() == Some(c.end_ms),
+                    && (block_subset
+                        || (first.start_ms == c.start_ms
+                            && source_end_ms == c.end_ms
+                            && c.start_ms < c.end_ms
+                            && c.end_ms - c.start_ms <= 180_000)),
                 "card source range mismatch"
             );
         }
@@ -265,7 +275,7 @@ fn export_json_with_limits(
 ) -> Result<()> {
     validate(archive)?;
     let mut portable = archive.clone();
-    portable.schema_version = 2;
+    portable.schema_version = 3;
     portable.editor_drafts = portable
         .editor_drafts
         .iter()
@@ -304,7 +314,7 @@ fn export_zip_with_limits(
 ) -> Result<()> {
     validate(archive)?;
     let mut portable = archive.clone();
-    portable.schema_version = 2;
+    portable.schema_version = 3;
     portable.editor_drafts = portable
         .editor_drafts
         .iter()
@@ -606,6 +616,7 @@ mod tests {
         db.set_segments("m", &s).unwrap();
         db.save_card(
             &SaveCard {
+                source_range: None,
                 media_id: "m".into(),
                 segment_id: s[0].id.clone(),
                 source_cue_ids: vec![],
@@ -900,6 +911,17 @@ mod tests {
             &segments,
         )
         .unwrap();
+        db.begin_transcript_publication(
+            "local-publication-job",
+            &"f".repeat(64),
+            "m",
+            &crate::store::subtitle_revision(&db.list_segments("m").unwrap()).unwrap(),
+            1000,
+            2000,
+        )
+        .unwrap();
+        db.activate_transcript_publication("local-publication-job", &"f".repeat(64))
+            .unwrap();
         db.insert_draft_study_selection(&DraftStudySelection {
             id: "local-selection".into(),
             media_id: "m".into(),

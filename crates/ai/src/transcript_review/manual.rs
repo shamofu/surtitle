@@ -206,8 +206,12 @@ pub fn apply_manual_transcript_ranges(
     }
     let (_, mut conflicts, joins) = assemble(&draft.chunks)?;
     let mut warnings = warnings_for_chunks(&draft.chunks);
-    if let Some(previous) = previous {
-        validate_transcript_draft(previous)?;
+    if let Some(saved) = previous {
+        // Derived IDs and quality eligibility can change after an upgrade;
+        // verify the saved hash and immutable evidence before rebuilding them.
+        verify_digest(saved, &saved.digest)?;
+        let mut previous = saved.clone();
+        refresh(&mut previous)?;
         if previous.id != draft.id
             || previous.source_sha256 != draft.source_sha256
             || previous.source_revision != draft.source_revision

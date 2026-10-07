@@ -46,6 +46,7 @@ export function resolveSourceSelection(
               : selectedCues.some(cue => cue.status === 'generated') ? 'generated' : 'confirmed'
             : 'provisional',
           reviewIssues: selectedCues.flatMap(cue => cue.reviewIssues || []),
+          timingPrecision: selectedCues.some(cue => cue.timingPrecision === 'source_block') ? 'source_block' : selectedFirst.timingPrecision,
         }
       : selectedFirst;
 

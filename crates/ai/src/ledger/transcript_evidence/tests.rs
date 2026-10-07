@@ -60,7 +60,7 @@ fn allowlist_drops_thoughts_secrets_and_oversized_fields_without_prefixes() {
 }
 
 #[test]
-fn invalid_response_is_durable_and_reparse_never_releases_cost_or_overwrites_original() {
+fn historical_timing_failure_recovers_text_without_charging_or_resending() {
     let (_directory, store, request) = setup();
     let mut raw = response();
     raw["candidates"][0]["content"]["parts"][0]["audioTranscription"]["words"][0]["endOffset"] =
@@ -77,7 +77,7 @@ fn invalid_response_is_durable_and_reparse_never_releases_cost_or_overwrites_ori
         .unwrap();
     let before = serde_json::to_value(store.summary().unwrap()).unwrap();
     let review = store.transcript_result_detail(&request.job_id, 0).unwrap();
-    assert_eq!(review.state, TranscriptResultState::Invalid);
+    assert_eq!(review.state, TranscriptResultState::Received);
     assert_eq!(
         review.evidence.as_ref().unwrap().response["candidates"][0]["content"]["parts"][0]
             ["audioTranscription"]["words"][0]["endOffset"],
@@ -86,11 +86,31 @@ fn invalid_response_is_durable_and_reparse_never_releases_cost_or_overwrites_ori
     let derived = store
         .reparse_transcript_evidence(&request.job_id, 0, review.evidence_sha256.as_ref().unwrap())
         .unwrap();
-    assert_eq!(derived.state, TranscriptResultState::Invalid);
-    assert!(derived.output.is_none());
-    assert!(store
+    assert_eq!(derived.state, TranscriptResultState::Received);
+    let Some(ParsedOutput::Transcript { cues }) = &derived.output else {
+        panic!()
+    };
+    assert_eq!(cues[0].text, "Hello.");
+    assert_eq!(cues[0].timing_precision, "source_block");
+    store
         .select_transcript_reparse(&request.job_id, 0, &derived.id)
-        .is_err());
+        .unwrap();
+    let quote = store.quote(&request.job_id).unwrap();
+    assert!(quote.remaining_ordinals.is_empty());
+    assert_eq!(quote.completed_requests, 1);
+    assert_eq!(quote.state, "completed");
+    assert_eq!(
+        store
+            .connect()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM ai_attempts WHERE job_id=?",
+                [&request.job_id],
+                |row| row.get::<_, u32>(0)
+            )
+            .unwrap(),
+        1
+    );
     assert!(store.response(&request.job_id, 0).unwrap().is_none());
     assert_eq!(
         serde_json::to_value(store.summary().unwrap()).unwrap(),

@@ -30,7 +30,12 @@ pub fn list_transcription_preparations(
                         .map(|b| b.job_id.clone()),
                     repair_parent_job_id: parent.as_ref().map(|p| p.job_id.clone()),
                     repair_boundary_id: parent.map(|p| p.boundary_id),
-                    whole_media: receipt.prepared_job.apply_policy == TranscriptApplyPolicy::Auto,
+                    whole_media: if receipt.directory.join("whole-media.json").exists() {
+                        read_json(&receipt.directory.join("whole-media.json"))?
+                    } else {
+                        range.start_ms == 0
+                            && range.end_ms == lock(&state.db)?.media(&media_id)?.duration_ms
+                    },
                 })
             })
             .collect::<Result<Vec<_>>>()
@@ -125,6 +130,20 @@ pub(super) fn create_audio_quote_selected(
             {
                 quote = state.ai.refresh_quote(&binding.job_id)?;
             }
+            if binding.progressive && !binding.publication_detached && quote.state == "prepared" {
+                let range = build_transcript_draft(&receipt, &[])?;
+                let mut db = lock(&state.db)?;
+                let revision =
+                    surtitle_core::store::subtitle_revision(&db.list_segments(&range.media_id)?)?;
+                db.begin_transcript_publication(
+                    &quote.id,
+                    &quote.digest,
+                    &range.media_id,
+                    &revision,
+                    range.start_ms,
+                    range.end_ms,
+                )?;
+            }
             let retry = quote.state != "prepared";
             return crate::application::ai::quotes::quote_for_ui(state, quote, retry);
         }
@@ -155,9 +174,25 @@ pub(super) fn create_audio_quote_selected(
             preparation_id: receipt.id.clone(),
             receipt_sha256: hash_file(&receipt.directory.join("receipt.json"))?,
             repair_parent: parent,
+            progressive: policy == TranscriptApplyPolicy::Auto,
+            publication_detached: false,
         },
     )?;
     save_quote_context(state, &receipt, &quote.id)?;
+    if policy == TranscriptApplyPolicy::Auto {
+        let range = build_transcript_draft(&receipt, &[])?;
+        let mut db = lock(&state.db)?;
+        let revision =
+            surtitle_core::store::subtitle_revision(&db.list_segments(&range.media_id)?)?;
+        db.begin_transcript_publication(
+            &quote.id,
+            &quote.digest,
+            &range.media_id,
+            &revision,
+            range.start_ms,
+            range.end_ms,
+        )?;
+    }
     crate::application::ai::quotes::quote_for_ui(state, quote, false)
 }
 pub(super) fn save_quote_context(

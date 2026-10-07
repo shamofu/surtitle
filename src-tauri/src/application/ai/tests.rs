@@ -1,6 +1,7 @@
 use super::*;
 fn segment() -> surtitle_core::SubtitleSegment {
     surtitle_core::SubtitleSegment {
+        timing_precision: "cue".into(),
         id: "cue".into(),
         media_id: "media".into(),
         start_ms: 0,
@@ -213,4 +214,34 @@ fn translation_language_change_blocks_local_application() {
             .translation
             .is_none()
     );
+}
+
+#[test]
+fn transcription_selection_expands_whole_existing_cues_before_preparation() {
+    let mut first = segment();
+    first.start_ms = 0;
+    first.end_ms = 1000;
+    let mut second = first.clone();
+    second.id = "second".into();
+    second.start_ms = 900;
+    second.end_ms = 2000;
+    let mut third = first.clone();
+    third.id = "third".into();
+    third.start_ms = 1800;
+    third.end_ms = 3000;
+    let mut coarse = first.clone();
+    coarse.id = "coarse".into();
+    coarse.timing_precision = "source_block".into();
+    coarse.end_ms = 8000;
+    let cues = vec![third, second, first, coarse];
+    assert_eq!(
+        preparation::transcription_range(&cues, 400, 1200, 8000).unwrap(),
+        (0, 3000)
+    );
+    assert_eq!(
+        preparation::transcription_range(&cues, 3500, 4000, 8000).unwrap(),
+        (3500, 4000)
+    );
+    assert!(preparation::transcription_range(&cues, 400, 1200, 2500).is_err());
+    assert!(preparation::transcription_range(&cues, 8000, 8000, 8000).is_err());
 }

@@ -28,7 +28,7 @@ pub(super) fn fixture_wav(seconds: u32) -> Vec<u8> {
     bytes
 }
 #[cfg(feature = "e2e-test")]
-pub(super) fn fixture_receipt(
+pub(crate) fn fixture_receipt(
     state: &AppState,
     media_id: &str,
     preparation_id: &str,
@@ -133,12 +133,14 @@ pub(super) fn register_fixture_job(
             preparation_id: receipt.id.clone(),
             receipt_sha256: hash_file(&receipt.directory.join("receipt.json"))?,
             repair_parent: parent,
+            progressive: false,
+            publication_detached: false,
         },
     )?;
     save_quote_context(state, receipt, &quote.id)
 }
 #[cfg(feature = "e2e-test")]
-pub(super) fn seed_fixture_data(state: &AppState) -> Result<()> {
+pub(crate) fn seed_fixture_data(state: &AppState) -> Result<()> {
     {
         let execution = crate::application::models::fixture_execution();
         let price = execution.price.unwrap();
@@ -205,6 +207,7 @@ pub(super) fn seed_fixture_data(state: &AppState) -> Result<()> {
         db.set_segments(
             media_id,
             &[surtitle_core::SubtitleSegment {
+                timing_precision: "cue".into(),
                 id: format!("{media_id}-old"),
                 media_id: media_id.into(),
                 start_ms: 0,

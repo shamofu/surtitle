@@ -65,6 +65,8 @@ export interface JobSummary {
   needsAttention?: boolean;
   resultState?: 'none' | 'ready' | 'applied' | 'applied_with_warnings';
   issue?: { code: string; phase: string; occurredAt: string; ordinal?: number; httpStatus?: number; nextAction: string };
+  automaticTranscript?: boolean;
+  transcriptionRanges?: { startMs: number; endMs: number; state: 'pending' | 'received' | 'failed' | 'source_block' }[];
 }
 
 export interface TranscriptionPreparation {

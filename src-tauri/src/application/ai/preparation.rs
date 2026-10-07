@@ -1,5 +1,33 @@
 use super::*;
 
+pub(super) fn transcription_range(
+    segments: &[surtitle_core::SubtitleSegment],
+    mut start_ms: u64,
+    mut end_ms: u64,
+    duration_ms: u64,
+) -> Result<(u64, u64)> {
+    ensure!(
+        start_ms < end_ms && end_ms <= duration_ms,
+        "Select a range inside the recording"
+    );
+    loop {
+        let previous = (start_ms, end_ms);
+        for cue in segments.iter().filter(|cue| cue.timing_precision == "cue") {
+            if cue.start_ms < end_ms && cue.end_ms > start_ms {
+                start_ms = start_ms.min(cue.start_ms);
+                end_ms = end_ms.max(cue.end_ms);
+            }
+        }
+        if previous == (start_ms, end_ms) {
+            ensure!(
+                end_ms <= duration_ms,
+                "Subtitle range exceeds the recording"
+            );
+            return Ok((start_ms, end_ms));
+        }
+    }
+}
+
 pub async fn prepare_transcription(
     app: tauri::AppHandle,
     state: AppState,
@@ -46,12 +74,13 @@ pub(crate) async fn prepare_transcription_receipt(
             *current = Some(cancel.clone());
         }
         let operation = async {
-            let (media, revision) = {
+            let (media, revision, start_ms, end_ms) = {
                 let db = lock(&state.db)?;
-                (
-                    db.media(&media_id)?,
-                    transcript_fingerprint(&db.list_segments(&media_id)?)?,
-                )
+                let media = db.media(&media_id)?;
+                let segments = db.list_segments(&media_id)?;
+                let (start_ms, end_ms) =
+                    transcription_range(&segments, start_ms, end_ms, media.duration_ms)?;
+                (media, transcript_fingerprint(&segments)?, start_ms, end_ms)
             };
             ensure!(
                 !whole_media
@@ -103,15 +132,17 @@ pub(crate) async fn prepare_transcription_receipt(
                 )
             })
             .await??;
-            if whole_media {
-                receipt.prepared_job = receipt
-                    .prepared_job
-                    .with_apply_policy(TranscriptApplyPolicy::Auto)?;
-                surtitle_core::store::write_json_atomic(
-                    &receipt.directory.join("receipt.json"),
-                    &receipt,
-                )?;
-            }
+            receipt.prepared_job = receipt
+                .prepared_job
+                .with_apply_policy(TranscriptApplyPolicy::Auto)?;
+            surtitle_core::store::write_json_atomic(
+                &receipt.directory.join("receipt.json"),
+                &receipt,
+            )?;
+            surtitle_core::store::write_json_atomic(
+                &receipt.directory.join("whole-media.json"),
+                &whole_media,
+            )?;
             Ok::<_, anyhow::Error>(receipt)
         }
         .await;

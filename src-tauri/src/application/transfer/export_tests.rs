@@ -67,3 +67,36 @@ fn subtitle_translation_collision_does_not_replace_existing_original() {
     assert!(export_to_path(&state, "srt", Some("first"), &path).is_err());
     assert_eq!(std::fs::read_to_string(path).unwrap(), "Keep original");
 }
+
+#[test]
+fn source_blocks_are_retained_in_learning_exports_but_not_timed_subtitles() {
+    let temporary = tempfile::tempdir().unwrap();
+    let state = Services::open(temporary.path().join("data")).unwrap();
+    seed(&state, "first", "Timed sentence.", None);
+    let mut db = lock(&state.db).unwrap();
+    let timed = db.list_segments("first").unwrap().remove(0);
+    let mut block = timed.clone();
+    block.id = "source-block".into();
+    block.text = "Received text with uncertain timing.".into();
+    block.timing_precision = "source_block".into();
+    db.set_segments("first", &[timed, block.clone()]).unwrap();
+    drop(db);
+    let subtitle = temporary.path().join("result.srt");
+    export_to_path(&state, "srt", Some("first"), &subtitle).unwrap();
+    let text = std::fs::read_to_string(&subtitle).unwrap();
+    assert!(text.contains("Timed sentence."));
+    assert!(!text.contains(&block.text));
+    lock(&state.db)
+        .unwrap()
+        .set_segments("first", &[block])
+        .unwrap();
+    assert!(export_to_path(&state, "srt", Some("first"), &subtitle).is_err());
+    assert_eq!(std::fs::read_to_string(&subtitle).unwrap(), text);
+    let learning = temporary.path().join("learning.json");
+    export_to_path(&state, "json", Some("first"), &learning).unwrap();
+    assert!(
+        std::fs::read_to_string(learning)
+            .unwrap()
+            .contains("Received text with uncertain timing.")
+    );
+}

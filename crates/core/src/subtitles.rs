@@ -66,6 +66,7 @@ pub fn parse(input: &str, media_id: &str) -> Result<Vec<SubtitleSegment>> {
             continue;
         }
         segments.push(SubtitleSegment {
+            timing_precision: "cue".into(),
             id: uuid::Uuid::new_v4().to_string(),
             media_id: media_id.to_owned(),
             start_ms,
@@ -97,7 +98,11 @@ pub fn format(segments: &[SubtitleSegment], vtt: bool, translated: bool) -> Stri
     } else {
         String::new()
     };
-    for (index, segment) in segments.iter().enumerate() {
+    for (index, segment) in segments
+        .iter()
+        .filter(|segment| segment.timing_precision == "cue")
+        .enumerate()
+    {
         if !vtt {
             out.push_str(&format!("{}\n", index + 1));
         }

@@ -18,6 +18,34 @@ impl Store {
             .cues
             .to_vec())
     }
+    /// Exact card source selected by the user inside a provider audio block.
+    /// The immutable cue snapshot keeps the provider's original block bounds.
+    pub fn card_source_range(&self, request: &SaveCard) -> Result<AudioClipRange> {
+        let cues = self.card_source_cues(request)?;
+        let start_ms = cues[0].start_ms;
+        let end_ms = cues
+            .iter()
+            .map(|cue| cue.end_ms)
+            .max()
+            .context("missing card source")?;
+        let range = request
+            .source_range
+            .unwrap_or(AudioClipRange { start_ms, end_ms });
+        ensure!(
+            range.start_ms < range.end_ms && range.end_ms - range.start_ms <= 180_000,
+            "Source range must be at most 180 seconds"
+        );
+        if request.source_range.is_some() {
+            ensure!(
+                cues.len() == 1
+                    && cues[0].timing_precision == "source_block"
+                    && range.start_ms >= start_ms
+                    && range.end_ms <= end_ms,
+                "Only an audio source block can use a selected card range"
+            );
+        }
+        Ok(range)
+    }
     pub fn save_card(&self, request: &SaveCard, audio_path: Option<String>) -> Result<StudyCard> {
         self.save_card_with_audio_range(request, audio_path, None)
     }
@@ -47,14 +75,11 @@ impl Store {
         let media = self.media(&request.media_id)?;
         let source_cues = self.card_source_cues(request)?;
         let segment = &source_cues[0];
-        let end_ms = source_cues
-            .iter()
-            .map(|s| s.end_ms)
-            .max()
-            .context("missing card source")?;
+        let source_range = self.card_source_range(request)?;
+        let end_ms = source_range.end_ms;
         if let Some(range) = audio_clip_range {
             ensure!(audio_path.is_some(), "Clip range requires saved audio");
-            range.validate_source(segment.start_ms, end_ms)?;
+            range.validate_source(source_range.start_ms, end_ms)?;
             ensure!(
                 range.end_ms <= media.duration_ms,
                 "Clip exceeds media duration"
@@ -91,7 +116,7 @@ impl Store {
             explanation: request.explanation.clone(),
             source_title: media.title,
             source_url: media.source_url,
-            start_ms: segment.start_ms,
+            start_ms: source_range.start_ms,
             end_ms,
             source_cues,
             memory: None,

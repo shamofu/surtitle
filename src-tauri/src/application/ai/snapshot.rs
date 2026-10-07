@@ -24,7 +24,12 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                 let applied = has_audio && (lock(&state.db)?.transcript_adopted(&q.id, &q.digest)?.is_some()
                     || state.ai.transcript_application_recorded(&q.id, &q.digest)?);
                 let automatic = has_audio && state.ai.prepared_job(&q.id)?.apply_policy == TranscriptApplyPolicy::Auto;
-                let transcript_review = has_transcript_result && !applied && (!automatic || q.state != "approved");
+                let transcript_review = has_transcript_result && !applied && !automatic;
+                let transcription_ranges = if has_audio {
+                    // Damaged or unavailable local preparation metadata must
+                    // not hide the library or the independently stored ledger.
+                    crate::application::transcript::automatic::progress_ranges(&state, &q.id).unwrap_or_default()
+                } else { Vec::new() };
                 let result_state = if applied {
                     let has_warnings = crate::application::transcript::automatic::applied_has_warnings(&state, &q.id)?;
                     if has_warnings { "applied_with_warnings" } else { "applied" }
@@ -62,10 +67,11 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                     "failed" => ("処理または元字幕の確認が必要です。受信済み結果と費用は保存されています。", "Review the job or source subtitles. Received results and accounting have been retained."),
                     _ if pending_results > 0 => ("受信済み翻訳を保存しています。確認して適用できます。追加送信はありません。", "Received translations are saved. Review and apply them without another request."),
                     "queued" => ("実行の承認を待っています。", "Waiting for your approval."),
-                    "completed" if applied => ("字幕に反映しました。注意箇所は字幕の印から修正できます。", "Subtitles were applied. You can edit marked passages later."),
+                    "completed" if applied => ("文字起こしが完了しました。字幕はそのまま使えます。", "Transcription is complete. Your subtitles are ready to use."),
                     "completed" if transcript_review => ("結果を受信しました。字幕への反映を確認してください。", "Results received. Review them to apply the subtitles."),
                     "completed" => ("承認された処理が完了しました。", "The approved work is complete."),
                     "cancelled" => ("キャンセルしました。受信済み結果と費用記録は保持します。", "Cancelled. Received results and accounting are retained."),
+                    _ if automatic => ("文字起こし中です。届いた字幕から学習できます。", "Transcribing. You can study the subtitles as they arrive."),
                     _ => ("承認された範囲を処理しています。", "Processing the approved scope."),
                     },
                 };
@@ -86,6 +92,8 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                     needs_attention,
                     result_state: result_state.into(),
                     issue,
+                    automatic_transcript: automatic,
+                    transcription_ranges,
                 })
             })
             .collect::<Result<Vec<_>>>()?;

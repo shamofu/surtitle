@@ -34,6 +34,7 @@ pub async fn import_subtitles(
         let segments =
             surtitle_core::subtitles::parse(&std::fs::read_to_string(file.path())?, &media_id)?;
         ensure!(!segments.is_empty(), "subtitle file contains no cues");
+        let _review = lock(&state.ai_session.transcript_review)?;
         let mut playback = state.playback.operation()?;
         {
             let mut db = lock(&state.db)?;
@@ -50,6 +51,7 @@ pub async fn import_subtitles(
                 "Before importing an external subtitle file",
             )?;
         }
+        crate::application::transcript::automatic::detach_publications(&state, Some(&media_id))?;
         refresh_current_subtitles_locked(&state, &mut playback, &media_id)
     })()
     .map_err(err)
@@ -76,8 +78,10 @@ pub fn restore_subtitle_version(
     version_id: String,
 ) -> IpcResult<()> {
     (|| {
+        let _review = lock(&state.ai_session.transcript_review)?;
         let mut playback = state.playback.operation()?;
         lock(&state.db)?.restore_subtitle_version(&media_id, &version_id)?;
+        crate::application::transcript::automatic::detach_publications(&state, Some(&media_id))?;
         refresh_current_subtitles_locked(&state, &mut playback, &media_id)
     })()
     .map_err(err)

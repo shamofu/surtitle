@@ -134,8 +134,6 @@ describe('media and card management', () => {
     await waitFor(() => expect(screen.getByLabelText('Subtitle to extract')).toHaveValue('2'));
     expect(libraryApi.extractEmbeddedSubtitles).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Transcribe full media' }));
-    expect(transcribe).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Estimate full transcription' }));
     expect(transcribe).toHaveBeenCalledOnce();
   });
 

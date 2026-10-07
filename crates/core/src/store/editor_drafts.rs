@@ -28,6 +28,18 @@ pub(crate) fn validate(draft: &EditorDraft) -> Result<()> {
         "Invalid editor draft identity"
     );
     let keys: &[&str] = match draft.kind.as_str() {
+        "phrase"
+            if draft.fields.contains_key("audioStart") || draft.fields.contains_key("audioEnd") =>
+        {
+            &[
+                "term",
+                "meaning",
+                "example",
+                "explanation",
+                "audioStart",
+                "audioEnd",
+            ]
+        }
         "phrase" => &["term", "meaning", "example", "explanation"],
         "subtitle" => &["start", "end", "text", "translation"],
         _ => anyhow::bail!("Unknown editor draft kind"),
@@ -70,6 +82,47 @@ fn signature(media: &Media) -> Result<String> {
         &media.learning_language,
         media.audio_stream_index,
     ))?)
+}
+
+fn audio_field_timestamp(value: &str) -> Result<u64> {
+    let value = value.trim();
+    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+    ensure!(
+        fraction.is_empty()
+            || (fraction.len() <= 3 && fraction.bytes().all(|byte| byte.is_ascii_digit())),
+        "Invalid card audio timestamp"
+    );
+    ensure!(!value.ends_with('.'), "Invalid card audio timestamp");
+    let parts = whole.split(':').collect::<Vec<_>>();
+    ensure!(
+        (1..=3).contains(&parts.len()),
+        "Invalid card audio timestamp"
+    );
+    let mut seconds = 0_u64;
+    for (index, part) in parts.iter().enumerate() {
+        ensure!(
+            !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()),
+            "Invalid card audio timestamp"
+        );
+        let amount = part.parse::<u64>()?;
+        ensure!(
+            index == 0 || (part.len() <= 2 && amount < 60),
+            "Invalid card audio timestamp"
+        );
+        seconds = seconds
+            .checked_mul(60)
+            .and_then(|seconds| seconds.checked_add(amount))
+            .context("Card audio timestamp is too large")?;
+    }
+    let milliseconds = if fraction.is_empty() {
+        0
+    } else {
+        fraction.parse::<u64>()? * 10_u64.pow(3 - fraction.len() as u32)
+    };
+    seconds
+        .checked_mul(1000)
+        .and_then(|whole| whole.checked_add(milliseconds))
+        .context("Card audio timestamp is too large")
 }
 
 impl Store {
@@ -295,6 +348,16 @@ impl Store {
                 && draft.source_cues.iter().map(|cue| &cue.id).eq(ids.iter()),
             "Phrase editor source changed"
         );
+        if let Some(start) = draft.fields.get("audioStart") {
+            let persisted_range = AudioClipRange {
+                start_ms: audio_field_timestamp(start)?,
+                end_ms: audio_field_timestamp(&draft.fields["audioEnd"])?,
+            };
+            ensure!(
+                request.source_range == Some(persisted_range),
+                "Card audio range changed; save the current draft before creating the card"
+            );
+        }
         let card = self.save_card_with_audio_range(request, audio_path, range)?;
         self.delete_editor_draft(reference)?;
         tx.commit()?;
@@ -416,7 +479,7 @@ mod tests {
         let (directory, mut db, cue) = fixture();
         db.save_editor_draft(&request(&cue)).unwrap();
         let archive = db.archive().unwrap();
-        assert_eq!(archive.schema_version, 2);
+        assert_eq!(archive.schema_version, 3);
         assert!(!archive.editor_drafts[0].binding_verified);
         for extension in ["json", "zip"] {
             let path = directory.path().join(format!("learning.{extension}"));

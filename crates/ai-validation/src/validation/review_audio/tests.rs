@@ -177,7 +177,7 @@ fn review_rejects_changed_audio_and_preserves_unreceived_chunk_and_vad_warning()
         json!([{"startMs":10,"endMs":900,"text":"hallucination?"}])
     )]);
     let warning = review(&manifest, &results).unwrap();
-    assert_eq!(warning["cases"][0]["draft"]["canAdopt"], false);
+    assert_eq!(warning["cases"][0]["draft"]["canAdopt"], true);
     assert_eq!(
         warning["cases"][0]["draft"]["warnings"][0]["kind"],
         "speech_in_vad_no_speech_range"

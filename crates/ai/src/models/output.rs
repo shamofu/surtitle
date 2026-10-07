@@ -24,6 +24,75 @@ pub struct GeneratedCue {
     #[serde(rename = "endMs")]
     pub end_ms: u64,
     pub text: String,
+    #[serde(
+        rename = "timingPrecision",
+        default = "cue_precision",
+        skip_serializing_if = "is_cue_precision"
+    )]
+    pub timing_precision: String,
+    #[serde(rename = "wordAnchors", default, skip_serializing_if = "Vec::is_empty")]
+    pub word_anchors: Vec<WordAnchor>,
+}
+
+/// Original provider anchors, in source time and UTF-8 byte offsets into cue text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WordAnchor {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub text_start: usize,
+    pub text_end: usize,
+}
+
+pub fn cue_precision() -> String {
+    "cue".into()
+}
+pub fn is_cue_precision(value: &str) -> bool {
+    value == "cue"
+}
+
+impl Default for GeneratedCue {
+    fn default() -> Self {
+        Self {
+            start_ms: 0,
+            end_ms: 0,
+            text: String::new(),
+            timing_precision: cue_precision(),
+            word_anchors: vec![],
+        }
+    }
+}
+
+pub(crate) fn valid_timing_metadata(
+    text: &str,
+    start_ms: u64,
+    end_ms: u64,
+    precision: &str,
+    words: &[WordAnchor],
+) -> bool {
+    if !["cue", "source_block"].contains(&precision)
+        || precision == "source_block" && !words.is_empty()
+    {
+        return false;
+    }
+    let mut previous_byte = 0;
+    let mut previous_start = start_ms;
+    words.iter().all(|word| {
+        let valid = word.text_start >= previous_byte
+            && word.text_start < word.text_end
+            && word.text_end <= text.len()
+            && text.is_char_boundary(word.text_start)
+            && text.is_char_boundary(word.text_end)
+            && text
+                .get(word.text_start..word.text_end)
+                .is_some_and(|token| !token.is_empty() && token.trim() == token)
+            && word.start_ms >= previous_start
+            && word.start_ms <= word.end_ms
+            && word.end_ms <= end_ms;
+        previous_byte = word.text_end;
+        previous_start = word.start_ms;
+        valid
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,6 +224,9 @@ pub(crate) fn parse_output(task: &RequestTask, text: &str) -> Result<ParsedOutpu
             )?;
             let mut previous_start = 0;
             for c in &mut cues {
+                // General audio JSON cannot assert word-level provenance.
+                c.timing_precision = cue_precision();
+                c.word_anchors.clear();
                 if c.start_ms >= c.end_ms
                     || c.end_ms > audio.duration_ms
                     || c.start_ms < previous_start

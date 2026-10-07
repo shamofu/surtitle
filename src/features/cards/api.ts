@@ -17,6 +17,7 @@ export const cardsApi = {
     mediaId: string;
     segmentId: string;
     sourceCueIds?: string[];
+    sourceRange?: { startMs: number; endMs: number };
     term: string;
     meaning: string;
     example: string;

@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 const MAX_EVIDENCE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
-const PARSER_REVISION: &str = "transcript-response-v1";
+const PARSER_REVISION: &str = "transcript-response-v2";
 
 pub(super) fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -652,6 +652,21 @@ impl AiStore {
             "UPDATE ai_transcript_reparses SET selected=1 WHERE id=?",
             [candidate_id],
         )?;
+        // Local recovery completes the request's work without rewriting the
+        // original response, settled attempt, charge, or usage. Quote and
+        // dispatch already exclude completed requests, so it cannot be resent.
+        let in_flight: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM ai_attempts WHERE job_id=? AND (state='reserved' OR (ordinal=? AND state='unknown')))",
+            params![job_id, ordinal], |row| row.get(0),
+        )?;
+        if in_flight {
+            return Err(AiError::InFlight);
+        }
+        tx.execute(
+            "UPDATE ai_requests SET state='completed',error_code=NULL WHERE job_id=? AND ordinal=?",
+            params![job_id, ordinal],
+        )?;
+        tx.execute("UPDATE ai_jobs SET state='completed' WHERE id=? AND state!='cancelled' AND NOT EXISTS(SELECT 1 FROM ai_requests WHERE job_id=? AND state!='completed')", params![job_id, job_id])?;
         tx.commit()?;
         Ok(())
     }
@@ -692,9 +707,25 @@ impl AiStore {
             .get(ordinal as usize)
             .cloned()
             .ok_or_else(invalid)?;
-        let (_, _, output) = classified(&task, &evidence.response);
+        let (_, _, mut output) = classified(&task, &evidence.response);
+        if candidate.parser_revision == "transcript-response-v1" {
+            // V1 timed candidates remain readable with their original wire shape.
+            if let Some(ParsedOutput::Transcript { cues }) = &mut output {
+                if cues
+                    .iter()
+                    .any(|cue| cue.timing_precision == "source_block")
+                {
+                    output = None;
+                } else {
+                    for cue in cues {
+                        cue.word_anchors.clear();
+                    }
+                }
+            }
+        }
         if !evidence.complete
-            || candidate.parser_revision != PARSER_REVISION
+            || ![PARSER_REVISION, "transcript-response-v1"]
+                .contains(&candidate.parser_revision.as_str())
             || serde_json::to_value(&candidate.output)? != serde_json::to_value(output)?
         {
             return Err(invalid());

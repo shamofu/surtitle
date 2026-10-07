@@ -1,6 +1,7 @@
 use super::*;
 fn segment(id: &str, start_ms: u64, end_ms: u64, text: &str) -> SubtitleSegment {
     SubtitleSegment {
+        timing_precision: "cue".into(),
         id: id.into(),
         media_id: "media".into(),
         start_ms,
@@ -127,6 +128,7 @@ fn explicit_adoption_is_atomic_and_idempotent_across_restart_without_changing_ca
     let card = db
         .save_card(
             &SaveCard {
+                source_range: None,
                 media_id: "media".into(),
                 segment_id: "old".into(),
                 source_cue_ids: vec![],

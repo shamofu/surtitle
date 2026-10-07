@@ -126,6 +126,8 @@ fn cue_anchor(cue: &ReviewCue) -> ReviewText {
         start_ms: cue.start_ms,
         end_ms: cue.end_ms,
         text: cue.text.clone(),
+        timing_precision: cue.timing_precision.clone(),
+        word_anchors: cue.word_anchors.clone(),
     }
 }
 
@@ -202,7 +204,14 @@ fn build_from_identity(
                     start_ms: anchors[0].start_ms,
                     end_ms: anchors.iter().map(|cue| cue.end_ms).max().unwrap(),
                 },
-                StudySelectionPrecision::CueRange,
+                if anchors
+                    .iter()
+                    .any(|cue| cue.timing_precision == "source_block")
+                {
+                    StudySelectionPrecision::SourceBlock
+                } else {
+                    StudySelectionPrecision::CueRange
+                },
                 anchors.clone(),
             )
         }
@@ -301,36 +310,18 @@ fn build_from_identity(
         .filter(|join| intersects(join.joined.start_ms, join.joined.end_ms, &range))
         .cloned()
         .collect();
-    let mut confirmation_blockers = Vec::new();
-    if precision == StudySelectionPrecision::SourceBlock {
-        confirmation_blockers.push(StudyConfirmationBlocker::SourceBlockOnly);
-    }
-    confirmation_blockers.extend(intersecting_pending_chunks.iter().map(|chunk| {
-        StudyConfirmationBlocker::PendingChunk {
-            ordinal: chunk.ordinal,
-        }
-    }));
-    confirmation_blockers.extend(
-        intersecting_boundaries
+    // Review observations and neighboring pending context never block usable text.
+    let confirmation_blockers = if rows.is_empty() {
+        intersecting_pending_chunks
             .iter()
-            .filter(|conflict| conflict.resolution.is_none())
-            .map(|conflict| StudyConfirmationBlocker::UnresolvedBoundary {
-                id: conflict.id.clone(),
-            }),
-    );
-    // A warning acknowledgment alone does not correct text or timing. An
-    // immutable local manual range is an explicit resolution with provenance.
-    confirmation_blockers.extend(
-        intersecting_warnings
-            .iter()
-            .filter(|warning| {
-                let chunk = &draft.chunks[warning.ordinal as usize];
-                chunk.source != TranscriptRangeSource::Manual || chunk.manual_revision.is_none()
+            .map(|chunk| StudyConfirmationBlocker::PendingChunk {
+                ordinal: chunk.ordinal,
             })
-            .map(|warning| StudyConfirmationBlocker::UnresolvedWarning {
-                id: warning.id.clone(),
-            }),
-    );
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let can_confirm = !selected_text.trim().is_empty() && confirmation_blockers.is_empty();
     let mut snapshot = StudySelectionSnapshot {
         schema_version: STUDY_SCHEMA_VERSION,
         draft_id: draft.id.clone(),
@@ -358,7 +349,7 @@ fn build_from_identity(
         intersecting_warnings,
         intersecting_pending_chunks,
         intersecting_joins,
-        can_confirm: confirmation_blockers.is_empty(),
+        can_confirm,
         confirmation_blockers,
         fingerprint: StudySelectionFingerprint(String::new()),
     };
@@ -394,7 +385,7 @@ pub fn confirm_study_selection_snapshot(
     snapshot: &StudySelectionSnapshot,
 ) -> Result<()> {
     validate_study_selection_snapshot(current, snapshot)?;
-    if !snapshot.can_confirm || snapshot.precision != StudySelectionPrecision::CueRange {
+    if !snapshot.can_confirm {
         return Err(invalid(
             "Resolve the selected range locally before study confirmation",
         ));
@@ -451,6 +442,7 @@ mod tests {
                         start_ms,
                         end_ms,
                         text: text.into(),
+                        ..Default::default()
                     })
                     .collect(),
             },
@@ -493,7 +485,7 @@ mod tests {
             &source,
             &[response(0, &[(1000, 1500, "Arrived later.")]), selected],
         );
-        assert_ne!(before.segments[0].id, after.segments[1].id);
+        assert_eq!(before.segments[0].id, after.segments[1].id);
         assert_ne!(before.digest, after.digest);
         confirm_study_selection_snapshot(&after, &snapshot).unwrap();
         let changed_elsewhere = build(
@@ -577,7 +569,7 @@ mod tests {
     }
 
     #[test]
-    fn touching_pending_context_blocks_confirmation_but_source_block_remains_inspectable() {
+    fn received_text_is_usable_while_missing_source_block_has_no_text() {
         let source = input(2);
         let draft = build(
             &source,
@@ -587,10 +579,8 @@ mod tests {
             )],
         );
         let snapshot = select(&draft, "Neighbor can still change this.");
-        assert!(snapshot
-            .confirmation_blockers
-            .contains(&StudyConfirmationBlocker::PendingChunk { ordinal: 1 }));
-        assert!(confirm_study_selection_snapshot(&draft, &snapshot).is_err());
+        assert!(snapshot.confirmation_blockers.is_empty());
+        confirm_study_selection_snapshot(&draft, &snapshot).unwrap();
         let block = build_study_selection_snapshot(
             &draft,
             &StudySelectionRequest::SourceChunk { ordinal: 1 },
@@ -636,7 +626,7 @@ mod tests {
     }
 
     #[test]
-    fn neighboring_conflicts_block_confirmation_and_resolutions_invalidate_old_snapshots() {
+    fn neighboring_conflicts_are_optional_but_resolutions_invalidate_old_snapshots() {
         let source = input(2);
         let draft = build(
             &source,
@@ -646,9 +636,9 @@ mod tests {
             ],
         );
         assert_eq!(draft.conflicts.len(), 1);
-        let local = select(&draft, "Left.");
+        let local = select(&draft, "Right.");
         assert_eq!(local.intersecting_boundaries.len(), 1);
-        assert!(confirm_study_selection_snapshot(&draft, &local).is_err());
+        confirm_study_selection_snapshot(&draft, &local).unwrap();
         let unrelated = select(&draft, "Unrelated.");
         assert!(unrelated.intersecting_boundaries.is_empty());
         confirm_study_selection_snapshot(&draft, &unrelated).unwrap();
@@ -673,7 +663,7 @@ mod tests {
     }
 
     #[test]
-    fn acknowledgment_is_not_warning_resolution_but_valid_immutable_manual_content_is() {
+    fn warnings_are_optional_and_manual_revisions_keep_their_provenance() {
         let mut source = input(1);
         source.vad_no_speech_ordinals = vec![0];
         let draft = build(&source, &[response(0, &[(1000, 1500, "Claimed speech.")])]);
@@ -681,8 +671,8 @@ mod tests {
             acknowledge_transcript_warning(&draft, &draft.digest, &draft.warnings[0].id).unwrap();
         let snapshot = select(&acknowledged, "Claimed speech.");
         assert!(acknowledged.can_adopt);
-        assert!(!snapshot.can_confirm);
-        assert!(confirm_study_selection_snapshot(&acknowledged, &snapshot).is_err());
+        assert!(snapshot.can_confirm);
+        confirm_study_selection_snapshot(&acknowledged, &snapshot).unwrap();
         let revision = ManualRangeRevision {
             id: uuid::Uuid::new_v4().to_string(),
             ordinal: 0,
@@ -704,6 +694,7 @@ mod tests {
                     start_ms: 1000,
                     end_ms: 1500,
                     text: "Locally checked speech.".into(),
+                    ..Default::default()
                 }],
             },
         };

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Check, FileCheck2, Pause, RotateCw, Square } from 'lucide-react';
 import { aiApi } from './api';
 import type { AiQuote } from '../../shared/contracts/ai';
@@ -19,9 +19,11 @@ import { UnknownAttempt } from '../settings/PausedJobs';
 export function JobActions({
   job,
   onReviewTranscript,
+  inlineTranscription = false,
 }: {
   job: JobSummary;
   onReviewTranscript?: (jobId: string) => void;
+  inlineTranscription?: boolean;
 }) {
   const { mutate } = useDataActions();
   const { t } = useAppearance();
@@ -93,7 +95,7 @@ export function JobActions({
             onClick={() => onReviewTranscript?.(job.id)}
           >
             <FileCheck2 size={13} />
-            {job.resultState === 'applied' || job.resultState === 'applied_with_warnings' ? t('字幕の記録を見る', 'View subtitle history') : t('文字起こしを確認', 'Review transcription')}
+            {inlineTranscription || job.resultState === 'applied' || job.resultState === 'applied_with_warnings' ? t('字幕の記録を見る', 'View subtitle history') : t('文字起こしを確認', 'Review transcription')}
           </Button>
         )}
         {(job.pendingResults || 0) > 0 && (
@@ -131,7 +133,7 @@ export function JobActions({
         {['paused', 'failed', 'unknown'].includes(job.status) && job.progress < 1 && (
           <Button busy={busy} onClick={() => void estimateRetry()}>
             <RotateCw size={13} />
-            {t('残りを再見積もり', 'Estimate remaining work')}
+            {inlineTranscription ? t('残りを再開', 'Resume remaining work') : t('残りを再見積もり', 'Estimate remaining work')}
           </Button>
         )}
       </div>
@@ -187,9 +189,9 @@ export function JobActions({
         </Modal>
       )}
       {quote && (
-        <Modal
+        <JobQuoteSurface
+          inline={inlineTranscription}
           title={quote.isRetry ? t('残りの処理を確認', 'Review remaining work') : t('実行の見積もり', 'Job estimate')}
-          eyebrow="A NEW QUOTE, A NEW DECISION"
           onClose={() => {
             if (!busy) setQuote(undefined);
           }}
@@ -209,10 +211,17 @@ export function JobActions({
             key={quote.id}
             quote={quote}
             busy={busy}
+            transcription={inlineTranscription}
             onApprove={() => void approve()}
           />
-        </Modal>
+        </JobQuoteSurface>
       )}
     </>
   );
+}
+
+function JobQuoteSurface({ inline, title, onClose, children }: { inline: boolean; title: string; onClose: () => void; children: ReactNode }) {
+  const { t } = useAppearance();
+  return inline ? <section aria-label={title}><h4>{title}</h4>{children}<Button variant="ghost" onClick={onClose}>{t('閉じる', 'Close')}</Button></section>
+    : <Modal title={title} eyebrow="A NEW QUOTE, A NEW DECISION" onClose={onClose}>{children}</Modal>;
 }

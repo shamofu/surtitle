@@ -26,6 +26,24 @@ pub struct ReviewText {
     pub start_ms: u64,
     pub end_ms: u64,
     pub text: String,
+    #[serde(
+        default = "crate::cue_precision",
+        skip_serializing_if = "crate::is_cue_precision"
+    )]
+    pub timing_precision: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub word_anchors: Vec<crate::WordAnchor>,
+}
+impl Default for ReviewText {
+    fn default() -> Self {
+        Self {
+            start_ms: 0,
+            end_ms: 0,
+            text: String::new(),
+            timing_precision: crate::cue_precision(),
+            word_anchors: vec![],
+        }
+    }
 }
 impl From<TimedText> for ReviewText {
     fn from(value: TimedText) -> Self {
@@ -33,6 +51,8 @@ impl From<TimedText> for ReviewText {
             start_ms: value.start_ms,
             end_ms: value.end_ms,
             text: value.text,
+            timing_precision: value.timing_precision,
+            word_anchors: value.word_anchors,
         }
     }
 }
@@ -42,6 +62,8 @@ impl From<ReviewText> for TimedText {
             start_ms: value.start_ms,
             end_ms: value.end_ms,
             text: value.text,
+            timing_precision: value.timing_precision,
+            word_anchors: value.word_anchors,
         }
     }
 }
@@ -54,6 +76,26 @@ pub struct ReviewCue {
     pub end_ms: u64,
     pub text: String,
     pub status: String,
+    #[serde(
+        default = "crate::cue_precision",
+        skip_serializing_if = "crate::is_cue_precision"
+    )]
+    pub timing_precision: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub word_anchors: Vec<crate::WordAnchor>,
+}
+impl Default for ReviewCue {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            start_ms: 0,
+            end_ms: 0,
+            text: String::new(),
+            status: String::new(),
+            timing_precision: crate::cue_precision(),
+            word_anchors: vec![],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -285,6 +327,8 @@ pub fn build_transcript_draft_from_input(
                     start_ms: cue.start_ms,
                     end_ms: cue.end_ms,
                     text: cue.text.clone(),
+                    timing_precision: cue.timing_precision.clone(),
+                    word_anchors: cue.word_anchors.clone(),
                 });
             }
             "received"
@@ -691,10 +735,10 @@ fn refresh(draft: &mut TranscriptDraft) -> Result<()> {
             end_ms: c.core_end_ms,
         })
         .collect();
+    let mut identities = std::collections::HashMap::<String, u32>::new();
     draft.segments = segments
         .into_iter()
-        .enumerate()
-        .map(|(index, s)| {
+        .map(|s| {
             let conflict = draft
                 .conflicts
                 .iter()
@@ -707,18 +751,23 @@ fn refresh(draft: &mut TranscriptDraft) -> Result<()> {
             let warning = draft.warnings.iter().any(|warning| {
                 !warning.acknowledged && s.start_ms < warning.end_ms && s.end_ms > warning.start_ms
             });
-            let id = sha256_bytes(
+            let identity = sha256_bytes(
                 format!(
-                    "{}:{index}:{}:{}:{}",
-                    draft.id, s.start_ms, s.end_ms, s.text
+                    "{}:{}:{}:{}:{}",
+                    draft.id, s.start_ms, s.end_ms, s.timing_precision, s.text
                 )
                 .as_bytes(),
             );
+            let occurrence = identities.entry(identity.clone()).or_default();
+            let id = sha256_bytes(format!("{identity}:{occurrence}").as_bytes());
+            *occurrence += 1;
             ReviewCue {
                 id,
                 start_ms: s.start_ms,
                 end_ms: s.end_ms,
                 text: s.text,
+                timing_precision: s.timing_precision,
+                word_anchors: s.word_anchors,
                 status: if conflict || pending || warning {
                     "provisional"
                 } else {
@@ -728,9 +777,8 @@ fn refresh(draft: &mut TranscriptDraft) -> Result<()> {
             }
         })
         .collect();
-    draft.can_adopt = draft.pending_ranges.is_empty()
-        && draft.conflicts.iter().all(|c| c.resolution.is_some())
-        && draft.warnings.iter().all(|warning| warning.acknowledged);
+    // Quality observations remain inspectable, but do not block use of received text.
+    draft.can_adopt = draft.pending_ranges.is_empty();
     draft.digest = String::new();
     draft.digest = sha256_bytes(&serde_json::to_vec(draft)?);
     Ok(())
@@ -770,6 +818,9 @@ fn warnings_for_chunks(chunks: &[ReviewChunk]) -> Vec<ReviewWarning> {
         // Each cue can be wholly inside at most one ordered, disjoint pause.
         // Binary lookup avoids scanning every pause for every subtitle.
         for cue in &chunk.segments {
+            if cue.timing_precision == "source_block" {
+                continue;
+            }
             let after = evidence
                 .pauses
                 .partition_point(|pause| evidence.guarded_range(pause).0 <= cue.start_ms);
@@ -846,7 +897,14 @@ fn validate_texts(segments: &[ReviewText], start: u64, end: u64) -> Result<()> {
             || segment.start_ms >= segment.end_ms
             || segment.end_ms > end
             || segment.text.trim().is_empty()
-            || segment.text.len() > 64 * 1024
+            || segment.text.len() > 1024 * 1024
+            || !crate::valid_timing_metadata(
+                &segment.text,
+                segment.start_ms,
+                segment.end_ms,
+                &segment.timing_precision,
+                &segment.word_anchors,
+            )
         {
             return Err(invalid("Invalid subtitle text or timestamp in review"));
         }

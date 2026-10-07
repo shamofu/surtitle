@@ -25,6 +25,7 @@ export interface SubtitleSegment {
   endMs: number;
   text: string;
   translation?: string;
+  timingPrecision?: 'cue' | 'source_block';
   status?: 'confirmed' | 'generated' | 'generated_review' | 'provisional' | 'review';
   reviewIssues?: { id: string; kind: string; startMs: number; endMs: number; alternatives: { startMs: number; endMs: number; text: string }[] }[];
 }

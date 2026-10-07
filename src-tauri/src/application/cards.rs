@@ -1,5 +1,5 @@
 use super::*;
-use anyhow::{Context, bail};
+use anyhow::bail;
 use surtitle_core::SaveCard;
 type IpcResult<T> = std::result::Result<T, String>;
 pub async fn save_card(state: AppState, request: SaveCard) -> IpcResult<()> {
@@ -13,16 +13,17 @@ pub async fn save_card_with_editor_draft(
     let state = state.clone();
     async {
         crate::application::media_tools::ensure_audio_stream(&state, &request.media_id).await?;
-        let (media, source_cues) = {
+        let (media, source_cues, selected_range) = {
             let db = lock(&state.db)?;
-            (db.media(&request.media_id)?, db.card_source_cues(&request)?)
+            (
+                db.media(&request.media_id)?,
+                db.card_source_cues(&request)?,
+                db.card_source_range(&request)?,
+            )
         };
         let mut segment = source_cues[0].clone();
-        segment.end_ms = source_cues
-            .iter()
-            .map(|cue| cue.end_ms)
-            .max()
-            .context("missing card source")?;
+        segment.start_ms = selected_range.start_ms;
+        segment.end_ms = selected_range.end_ms;
         let clip_range = surtitle_core::replay_range(
             segment.start_ms,
             segment.end_ms,

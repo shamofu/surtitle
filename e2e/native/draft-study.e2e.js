@@ -92,8 +92,10 @@ async function openDraft(id = mediaId) {
   const transcript = $('.study-top-actions button');
   await transcript.waitForClickable();
   if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
-  await $('button=Study a draft').waitForDisplayed();
-  await clickVisible($('button=Study a draft'));
+  const history = $('.transcription-workspace > details');
+  await history.waitForDisplayed();
+  if ((await history.getAttribute('open')) === null) await clickVisible(history.$('summary'));
+  await clickVisible($('button=Open earlier drafts'));
   await panel().waitForDisplayed();
   await panel().$('select').waitForDisplayed();
   await scrollVisible(panel().$('select'));
@@ -150,7 +152,7 @@ function assertPcm(path, expectedMilliseconds) {
   return hash(bytes);
 }
 
-(process.env.SURTITLE_E2E_TRANSCRIPT_REVIEW === 'boundary' ? describe : describe.skip)('study a useful draft without adopting its full transcript', () => {
+(process.env.SURTITLE_E2E_TRANSCRIPT_REVIEW === 'boundary' ? describe : describe.skip)('open earlier draft excerpts as an optional compatibility workflow', () => {
   before(async () => {
     await ready();
     const state = await snapshot();
@@ -171,8 +173,9 @@ function assertPcm(path, expectedMilliseconds) {
     assert.equal(originalViews[1][1].draft.pendingRanges.length, 1);
   });
 
-  it('01 shows available draft text while the full result cannot be adopted', async () => {
-    assert.equal((await review(jobId)).draft.canAdopt, false);
+  it('01 retains earlier draft text independently of whether the full result is ready to use', async () => {
+    assert.equal((await review(jobId)).draft.canAdopt, true);
+    assert.equal((await review(jobId)).canApply, true);
     assert.equal((await review(pendingJobId)).draft.canAdopt, false);
     await openDraft();
     await panel().$('input[aria-label="Select subtitle: Hello."]').waitForDisplayed();

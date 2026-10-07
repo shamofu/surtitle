@@ -35,6 +35,7 @@ pub(crate) fn seed_ai_recovery_fixture(state: &AppState) -> Result<()> {
     let media_id = "e2e-ai-recovery";
     let segments = vec![
         surtitle_core::SubtitleSegment {
+            timing_precision: "cue".into(),
             id: "e2e-ai-recovery-1".into(),
             media_id: media_id.into(),
             start_ms: 0,
@@ -45,6 +46,7 @@ pub(crate) fn seed_ai_recovery_fixture(state: &AppState) -> Result<()> {
             review_issues: vec![],
         },
         surtitle_core::SubtitleSegment {
+            timing_precision: "cue".into(),
             id: "e2e-ai-recovery-2".into(),
             media_id: media_id.into(),
             start_ms: 1000,

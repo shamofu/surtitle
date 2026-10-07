@@ -5,6 +5,7 @@ import { AudioLines, BookmarkPlus, Check } from 'lucide-react';
 
 import { cardsApi } from '../cards/api';
 import { studyApi } from './api';
+import { playerApi } from './playback/api';
 
 import { subtitleUsable, type SubtitleSegment } from '../../shared/contracts/media';
 import { editorDraftApi, editorSourceKey, flushEditorDrafts, useEditorDraft } from './editor-drafts/useEditorDraft';
@@ -25,6 +26,8 @@ export interface PhraseFormValues {
   meaning: string;
   example: string;
   explanation: string;
+  audioStart?: string;
+  audioEnd?: string;
 }
 
 export function phraseFormValues(
@@ -37,15 +40,21 @@ export function phraseFormValues(
     meaning: candidate?.meaning || '',
     example: candidate?.example || segment.text,
     explanation: candidate?.explanation || '',
+    ...(segment.timingPrecision === 'source_block' ? {
+      audioStart: timestamp(segment.startMs, true),
+      audioEnd: timestamp(Math.min(segment.endMs, segment.startMs + 180000), true),
+    } : {}),
   };
 }
 
 export function EditDialog({
   segment,
   onClose,
+  onRetranscribe,
 }: {
   segment: SubtitleSegment;
   onClose: () => void;
+  onRetranscribe?: (range: { startMs: number; endMs: number }) => void;
 }) {
   const { mutate } = useDataActions();
   const { t } = useAppearance();
@@ -92,6 +101,13 @@ export function EditDialog({
     const success = await report(async () => { if (discard) await draft.discard(); else await draft.flush(); return true; });
     if (success) onClose();
   }
+  async function retranscribe() {
+    if (busy || !onRetranscribe) return;
+    setBusy(true);
+    const saved = await report(async () => { await draft.flush(); return true; });
+    setBusy(false);
+    if (saved) onRetranscribe({ startMs: segment.startMs, endMs: segment.endMs });
+  }
   return (
     <Modal
       title={t('字幕を編集', 'Edit subtitle')}
@@ -107,9 +123,12 @@ export function EditDialog({
           {issue.alternatives.map((alternative, index) => <blockquote key={index}>
             <small>{timestamp(alternative.startMs)}–{timestamp(alternative.endMs)}</small>
             <p>{alternative.text}</p>
+            <Button variant="ghost" disabled={busy || draft.stale} onClick={() => change({ text: alternative.text, start: timestamp(alternative.startMs, true), end: timestamp(alternative.endMs, true) })}>{t('この候補を使う', 'Use this alternative')}</Button>
           </blockquote>)}
         </div>)}
       </details>}
+      {segment.timingPrecision === 'source_block' && <p className="helper-text">{t('この時刻は取得元の音声範囲です。本文の修正だけでは正確な字幕時刻には変わりません。', 'These times identify the source audio range. Editing the text does not establish precise subtitle timing.')}</p>}
+      {onRetranscribe && <Button variant="ghost" disabled={busy} onClick={() => void retranscribe()}>{t('この区間を再文字起こし', 'Transcribe this range again')}</Button>}
       <div className="field-row">
         <Field label={t('開始', 'From')}>
           <input
@@ -239,8 +258,18 @@ export function SaveCardForm({
   const pending = useRef(false);
   const [saveError, setSaveError] = useState('');
   const confirmed = subtitleUsable(segment);
+  const sourceBlock = segment.timingPrecision === 'source_block';
+  const audioStart = parseTimestamp(values.audioStart ?? timestamp(segment.startMs, true));
+  const audioEnd = parseTimestamp(values.audioEnd ?? timestamp(Math.min(segment.endMs, segment.startMs + 180000), true));
+  const audioValid = !sourceBlock || (audioStart !== null && audioEnd !== null && audioStart >= segment.startMs && audioEnd <= segment.endMs && audioEnd > audioStart && audioEnd - audioStart <= 180000);
+  async function previewAudio() {
+    if (!audioValid || audioStart === null || audioEnd === null || invalidSource || busy) return;
+    setBusy(true); onBusyChange?.(true);
+    await report(() => playerApi.player({ action: 'source-seek', startMs: audioStart, endMs: audioEnd }));
+    setBusy(false); onBusyChange?.(false);
+  }
   async function save() {
-    if (invalidSource || !confirmed || pending.current || !term.trim() || !meaning.trim() || !example.trim()) return;
+    if (invalidSource || !confirmed || !audioValid || pending.current || !term.trim() || !meaning.trim() || !example.trim()) return;
     pending.current = true;
     setBusy(true);
     setSaveError('');
@@ -252,6 +281,7 @@ export function SaveCardForm({
           const request = {
             mediaId: segment.mediaId, segmentId: segment.id,
             sourceCueIds: candidate?.sourceCueIds ?? segment.sourceCueIds,
+            ...(sourceBlock && audioStart !== null && audioEnd !== null ? { sourceRange: { startMs: audioStart, endMs: audioEnd } } : {}),
             term: term.trim(), meaning: meaning.trim(), example: example.trim(),
             explanation: explanation.trim() || undefined,
             translation: candidate ? candidate.translation : segment.translation,
@@ -314,12 +344,20 @@ export function SaveCardForm({
           rows={2}
         />
       </Field>
+      {sourceBlock && <section className="source-block-audio">
+        <p className="helper-text">{t('本文は取得済みですが、発話の正確な時刻は未確定です。取得元の音声から、再生・保存する範囲を選べます（3分以内）。', 'The text is available; exact speech timing is unavailable. Choose up to 3 minutes of the source audio to replay and save.')}</p>
+        <p className="helper-text">{t('取得元の音声範囲', 'Source audio range')}: {timestamp(segment.startMs)}–{timestamp(segment.endMs)}</p>
+        <div className="field-row"><Field label={t('音声の開始', 'Audio from')}><input value={values.audioStart ?? timestamp(segment.startMs, true)} onChange={event => change({ audioStart: event.target.value })} /></Field>
+          <Field label={t('音声の終了', 'Audio to')}><input value={values.audioEnd ?? timestamp(Math.min(segment.endMs, segment.startMs + 180000), true)} onChange={event => change({ audioEnd: event.target.value })} /></Field></div>
+        {!audioValid && <p className="field-error">{t('取得元の範囲内で3分以内の音声を選んでください。', 'Select up to 3 minutes within the source audio range.')}</p>}
+        <Button disabled={invalidSource || !audioValid} onClick={() => void previewAudio()}>{t('選んだ音声範囲を再生', 'Play selected audio range')}</Button>
+      </section>}
       <p className="notice">
         <AudioLines size={17} />
         <span>
           {t(
-            `${timestamp(candidate?.startMs ?? segment.startMs)}–${timestamp(candidate?.endMs ?? segment.endMs)} の音声と文脈を残して復習します。`,
-            `Review with audio and context from ${timestamp(candidate?.startMs ?? segment.startMs)}–${timestamp(candidate?.endMs ?? segment.endMs)}.`,
+            `${timestamp(sourceBlock ? audioStart ?? segment.startMs : candidate?.startMs ?? segment.startMs)}–${timestamp(sourceBlock ? audioEnd ?? segment.endMs : candidate?.endMs ?? segment.endMs)} の音声と文脈を残して復習します。`,
+            `Review with audio and context from ${timestamp(sourceBlock ? audioStart ?? segment.startMs : candidate?.startMs ?? segment.startMs)}–${timestamp(sourceBlock ? audioEnd ?? segment.endMs : candidate?.endMs ?? segment.endMs)}.`,
           )}
         </span>
       </p>
@@ -346,7 +384,7 @@ export function SaveCardForm({
           variant="primary"
           busy={busy}
           disabled={
-            invalidSource || draft.status === 'loading' || !confirmed || !term.trim() || !meaning.trim() || !example.trim()
+            invalidSource || draft.status === 'loading' || !confirmed || !audioValid || !term.trim() || !meaning.trim() || !example.trim()
           }
           onClick={() => void save()}
         >

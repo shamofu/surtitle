@@ -30,6 +30,22 @@ fn automatic_job(state: &AppState) -> JobQuote {
         .seed_transcript_review_fixture(receipt.prepared_job.clone(), false)
         .unwrap();
     register_fixture_job(state, &receipt, &quote, None).unwrap();
+    let mut binding = load_binding(state, &quote.id).unwrap();
+    binding.progressive = true;
+    save_binding(state, &binding).unwrap();
+    let range = build_transcript_draft(&receipt, &[]).unwrap();
+    let mut db = lock(&state.db).unwrap();
+    db.begin_transcript_publication(
+        &quote.id,
+        &quote.digest,
+        &range.media_id,
+        &range.source_revision,
+        range.start_ms,
+        range.end_ms,
+    )
+    .unwrap();
+    db.activate_transcript_publication(&quote.id, &quote.digest)
+        .unwrap();
     quote
 }
 
@@ -126,7 +142,7 @@ fn completed_auto_transcript_recovers_once_with_portable_conflicts_and_preserves
 }
 
 #[test]
-fn automatic_application_rejects_source_changes_without_losing_received_candidates() {
+fn automatic_application_preserves_subtitle_edits_without_losing_received_candidates() {
     let (_directory, state) = fixture();
     let quote = automatic_job(&state);
     let mut old = lock(&state.db)
@@ -135,7 +151,7 @@ fn automatic_application_rejects_source_changes_without_losing_received_candidat
         .unwrap();
     old.text = "Changed while transcription was running".into();
     lock(&state.db).unwrap().edit_segment(&old).unwrap();
-    assert!(automatic::apply_completed(&state, &quote.id).is_err());
+    automatic::apply_completed(&state, &quote.id).unwrap();
     assert_eq!(
         lock(&state.db).unwrap().segment(&old.id).unwrap().text,
         old.text
@@ -188,7 +204,7 @@ fn restoring_pre_application_learning_data_does_not_reactivate_completed_auto_jo
 }
 
 #[test]
-fn complete_silence_is_applied_with_portable_range_records_without_fabricating_subtitles() {
+fn complete_silence_is_applied_without_fabricating_subtitles_or_review_gates() {
     let (directory, state) = fixture();
     let quote = automatic_job(&state);
     let connection = rusqlite::Connection::open(directory.path().join("charges.sqlite")).unwrap();
@@ -209,12 +225,9 @@ fn complete_silence_is_applied_with_portable_range_records_without_fabricating_s
             .is_empty()
     );
     let issues = db.list_transcript_issues("e2e-transcript-review").unwrap();
-    assert_eq!(issues.len(), 2);
-    assert!(issues.iter().all(|issue| issue.kind == "no_speech"));
-    assert_eq!(issues[0].start_ms, 0);
-    assert_eq!(issues.last().unwrap().end_ms, 8000);
+    assert!(issues.is_empty());
     let archive = db.archive().unwrap();
-    assert_eq!(archive.transcript_issues.len(), 2);
+    assert!(archive.transcript_issues.is_empty());
     drop(db);
     let (_, draft, _) = load_draft(&state, &load_binding(&state, &quote.id).unwrap()).unwrap();
     assert!(draft.segments.is_empty());
@@ -231,7 +244,7 @@ fn retry_after_committed_adoption_refreshes_the_player_before_clearing_the_failu
         .attach("e2e-transcript-review".into());
     let failure = automatic::apply_completed(&state, &quote.id).unwrap_err();
     assert!(
-        state
+        !state
             .ai
             .transcript_application_recorded(&quote.id, &quote.digest)
             .unwrap()
@@ -261,11 +274,15 @@ fn authored_range() -> ManualTranscriptContent {
     ManualTranscriptContent::Subtitles {
         segments: vec![
             ReviewText {
+                timing_precision: "cue".into(),
+                word_anchors: vec![],
                 start_ms: 3500,
                 end_ms: 4500,
                 text: "No, no.".into(),
             },
             ReviewText {
+                timing_precision: "cue".into(),
+                word_anchors: vec![],
                 start_ms: 7500,
                 end_ms: 7900,
                 text: "Locally corrected.".into(),
@@ -519,6 +536,8 @@ fn manual_edits_require_pause_and_inflight_completion_but_survive_later_results(
     // selection. No production recovery path automatically performs this.
     let output = serde_json::to_string(&ParsedOutput::Transcript {
         cues: vec![GeneratedCue {
+            timing_precision: "cue".into(),
+            word_anchors: vec![],
             start_ms: 6000,
             end_ms: 6500,
             text: "Later provider result.".into(),
@@ -552,7 +571,7 @@ fn manual_edits_require_pause_and_inflight_completion_but_survive_later_results(
     assert_eq!(charge_snapshot(&charges), after_provider);
 }
 #[test]
-fn valid_empty_provider_results_require_explicit_no_speech_for_every_range() {
+fn valid_empty_provider_results_are_locally_usable_without_extra_confirmation() {
     let (directory, state) = fixture();
     let pending = job(&state, PENDING);
     let charges = rusqlite::Connection::open(directory.path().join("charges.sqlite")).unwrap();
@@ -565,39 +584,10 @@ fn valid_empty_provider_results_require_explicit_no_speech_for_every_range() {
         .unwrap();
     let before = charge_snapshot(&charges);
     let original = view(&state, &pending).unwrap();
-    // Provider parsing remains valid. Only the new application adoption
-    // contract requires an explicit local decision about each empty range.
     assert!(original.draft.can_adopt);
-    assert!(!original.can_apply);
+    assert!(original.can_apply, "{:?}", original.blocked_reason);
     assert!(
-        original
-            .blocked_reason
-            .unwrap()
-            .contains("no-speech confirmation")
-    );
-    assert!(apply_review(&state, &pending, &original.draft.digest).is_err());
-    let first = save_manual_range(
-        &state,
-        &pending,
-        &original.draft.digest,
-        0,
-        0,
-        ManualTranscriptContent::ConfirmedNoSpeech,
-    )
-    .unwrap();
-    assert!(!first.can_apply);
-    let complete = save_manual_range(
-        &state,
-        &pending,
-        &first.draft.digest,
-        1,
-        0,
-        ManualTranscriptContent::ConfirmedNoSpeech,
-    )
-    .unwrap();
-    assert!(complete.can_apply, "{:?}", complete.blocked_reason);
-    assert!(
-        apply_review(&state, &pending, &complete.draft.digest)
+        apply_review(&state, &pending, &original.draft.digest)
             .unwrap()
             .applied
     );
@@ -670,7 +660,7 @@ fn vad_warning_acknowledgement_survives_restart_and_requires_current_digest_for_
     register_fixture_job(&state, &receipt, &state.ai.quote(&complete).unwrap(), None).unwrap();
     let original = view(&state, &complete).unwrap();
     assert_eq!(original.draft.warnings.len(), 1);
-    assert!(!original.can_apply);
+    assert!(original.can_apply);
     let warning_id = original.draft.warnings[0].id.clone();
     assert!(!original.draft.warnings[0].acknowledged);
     assert!(acknowledge_review_warning(&state, &complete, "stale", &warning_id).is_err());
@@ -684,11 +674,8 @@ fn vad_warning_acknowledgement_survives_restart_and_requires_current_digest_for_
         BoundaryChoice::Left,
     )
     .unwrap();
-    assert!(
-        !boundary.can_apply,
-        "A resolved boundary must not silently acknowledge a VAD warning"
-    );
-    assert!(apply_review(&state, &complete, &boundary.draft.digest).is_err());
+    assert!(boundary.can_apply);
+    assert!(!boundary.draft.warnings[0].acknowledged);
     assert!(
         acknowledge_review_warning(&state, &complete, &original.draft.digest, &warning_id).is_err()
     );
@@ -729,14 +716,13 @@ fn vad_warning_acknowledgement_survives_restart_and_requires_current_digest_for_
     assert_eq!(state.ai.quote(&complete).unwrap().completed_requests, 2);
 }
 #[test]
-fn local_review_requires_all_chunks_and_explicit_resolution_then_preserves_edits_after_restart() {
+fn local_review_requires_all_chunks_but_optional_resolution_preserves_edits_after_restart() {
     let (directory, state) = fixture();
     let complete = job(&state, COMPLETE);
     let pending = job(&state, PENDING);
     let original = view(&state, &complete).unwrap();
-    assert!(!original.can_apply);
+    assert!(original.can_apply);
     assert_eq!(original.draft.conflicts.len(), 1);
-    assert!(apply_review(&state, &complete, &original.draft.digest).is_err());
     let partial = view(&state, &pending).unwrap();
     assert!(!partial.can_apply);
     assert_eq!(partial.draft.pending_ranges.len(), 1);

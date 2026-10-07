@@ -51,6 +51,7 @@ impl Fixture {
             .unwrap();
         let cues = (0..31)
             .map(|index| SubtitleSegment {
+                timing_precision: "cue".into(),
                 id: format!("fixture-cue-{index:02}"),
                 media_id: "offline-app-media".into(),
                 start_ms: index * 1000,

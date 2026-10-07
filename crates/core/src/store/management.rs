@@ -74,6 +74,7 @@ impl Store {
         }
         ensure!(!segments.is_empty(), "subtitle source contains no cues");
         let tx = self.conn.transaction()?;
+        super::transcript_publication::detach_on(&tx, media_id)?;
         super::transcript_issues::deactivate_transcript_issues_on(
             &tx,
             media_id,
@@ -154,6 +155,7 @@ mod tests {
             subtitle_stream_index: Some(5),
         };
         let segment = SubtitleSegment {
+            timing_precision: "cue".into(),
             id: "cue".into(),
             media_id: media.id.clone(),
             start_ms: 1000,
@@ -174,6 +176,7 @@ mod tests {
         let card = db
             .save_card(
                 &SaveCard {
+                    source_range: None,
                     media_id: media.id.clone(),
                     segment_id: segment.id,
                     source_cue_ids: vec![],
@@ -235,6 +238,7 @@ mod tests {
         db.set_segments(&media.id, &[first.clone(), second.clone(), third.clone()])
             .unwrap();
         let request = SaveCard {
+            source_range: None,
             media_id: media.id.clone(),
             segment_id: first.id.clone(),
             source_cue_ids: vec![first.id.clone(), second.id.clone()],
@@ -280,6 +284,7 @@ mod tests {
             assert!(
                 db.save_card(
                     &SaveCard {
+                        source_range: None,
                         source_cue_ids: ids,
                         ..request.clone()
                     },

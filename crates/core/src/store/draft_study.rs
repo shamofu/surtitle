@@ -125,6 +125,12 @@ fn confirmed_source(
         "Card audio must be at most 180 seconds"
     );
     let cue = SubtitleSegment {
+        timing_precision: if selection.timing == "source_block" {
+            "source_block"
+        } else {
+            "cue"
+        }
+        .into(),
         id: format!("draft:{}:{}", selection.id, selection.version),
         media_id: selection.media_id.clone(),
         start_ms: selection.start_ms,

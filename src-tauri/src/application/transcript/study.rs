@@ -641,6 +641,11 @@ pub async fn export_draft_selection(
 ) -> std::result::Result<(), String> {
     async {
         ensure!(["json", "srt", "vtt"].contains(&request.format.as_str()), "Unsupported excerpt format");
+        if request.format != "json" {
+            let _guard = lock(&state.ai_session.transcript_review)?;
+            let (_, cue) = confirmed_selection(&state, &request.id, request.version, false)?;
+            ensure!(cue.timing_precision == "cue", "Subtitle timing is unavailable. Export this text as JSON or set precise excerpt times first.");
+        }
         let Some(file) = rfd::AsyncFileDialog::new().set_file_name(format!("study-excerpt.{}", request.format)).save_file().await else { return Ok(()); };
         let _guard = lock(&state.ai_session.transcript_review)?;
         let selected = lock(&state.db)?.draft_study_selection(&request.id)?;
@@ -651,6 +656,7 @@ pub async fn export_draft_selection(
         let coverage = json!({ "format":"surtitle.study-excerpt", "schemaVersion":1, "coverage":"selected_range_only", "wholeTranscriptAdopted":false, "selection":portable });
         let contents = if request.format == "json" { serde_json::to_string_pretty(&coverage)? } else {
             let (_, cue) = confirmed_selection(&state, &request.id, request.version, false)?;
+            ensure!(cue.timing_precision == "cue", "Subtitle timing is unavailable. Export this text as JSON or set precise excerpt times first.");
             surtitle_core::subtitles::format(&[cue], request.format == "vtt", false)
         };
         // Explicit subtitle exports include coverage in a separately named receipt.

@@ -128,6 +128,68 @@ pub(crate) fn parse_transcribe_parts(
     parts: &[Value],
 ) -> Result<ParsedOutput> {
     let mut cues = Vec::new();
+    let mut found = false;
+    for part in parts {
+        if part.get("thought").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        let Some(tx) = part.get("audioTranscription") else {
+            continue;
+        };
+        found = true;
+        if !tx.is_object()
+            || tx
+                .get("finished")
+                .is_some_and(|v| v.as_bool() != Some(true))
+        {
+            return Err(invalid("incomplete or malformed transcription"));
+        }
+        let text = tx
+            .get("text")
+            .and_then(Value::as_str)
+            .or_else(|| part.get("text").and_then(Value::as_str))
+            .ok_or_else(|| invalid("transcription text is absent"))?;
+        if text.len() > 1024 * 1024
+            || tx
+                .get("words")
+                .and_then(Value::as_array)
+                .is_some_and(|words| words.len() > 20_000)
+        {
+            return Err(invalid("transcription is excessive"));
+        }
+        if text.trim().is_empty() {
+            if tx
+                .get("words")
+                .and_then(Value::as_array)
+                .is_some_and(|words| !words.is_empty())
+            {
+                return Err(invalid("words without transcript text"));
+            }
+            continue;
+        }
+        match parse_timed_transcribe_parts(audio, std::slice::from_ref(part)) {
+            Ok(ParsedOutput::Transcript { cues: timed }) => cues.extend(timed),
+            _ => cues.push(GeneratedCue {
+                start_ms: audio.source_start_ms,
+                end_ms: audio
+                    .source_start_ms
+                    .checked_add(audio.duration_ms)
+                    .ok_or_else(|| invalid("timestamp overflow"))?,
+                text: text.to_owned(),
+                timing_precision: "source_block".into(),
+                word_anchors: vec![],
+            }),
+        }
+    }
+    if !found {
+        return Err(invalid("structured audioTranscription is absent"));
+    }
+    cues.sort_by_key(|cue| cue.start_ms);
+    Ok(ParsedOutput::Transcript { cues })
+}
+
+fn parse_timed_transcribe_parts(audio: &AudioAttachment, parts: &[Value]) -> Result<ParsedOutput> {
+    let mut cues = Vec::new();
     let mut previous_ns = 0;
     let mut saw_transcription = false;
     for part in parts {
@@ -261,6 +323,20 @@ pub(crate) fn parse_transcribe_parts(
                     .checked_add(group_end)
                     .ok_or_else(|| invalid("timestamp overflow"))?,
                 text: cue_text,
+                timing_precision: "cue".into(),
+                word_anchors: {
+                    let raw = &text[start_byte..next_byte];
+                    let trimmed_start = start_byte + raw.len() - raw.trim_start().len();
+                    anchors[group_start..=i]
+                        .iter()
+                        .map(|anchor| crate::WordAnchor {
+                            start_ms: audio.source_start_ms + anchor.0,
+                            end_ms: audio.source_start_ms + anchor.1,
+                            text_start: anchor.2 - trimmed_start,
+                            text_end: anchor.3 - trimmed_start,
+                        })
+                        .collect()
+                },
             });
         }
     }
@@ -446,7 +522,7 @@ mod tests {
         assert_eq!(cues[0].end_ms, 7_200_900);
     }
     #[test]
-    fn all_point_subtitles_reversed_submillisecond_times_and_unaligned_text_still_fail() {
+    fn invalid_word_timing_preserves_complete_text_as_source_block() {
         for tx in [
             json!({"text":"No, no.","words":[{"word":"No","startOffset":"1s","endOffset":"1s"},{"word":"no","startOffset":"1s","endOffset":"1s"}]}),
             json!({"text":"No.","words":[{"word":"No","startOffset":"0.1009s","endOffset":"0.1001s"}]}),
@@ -454,25 +530,41 @@ mod tests {
             json!({"text":"No.","words":[{"word":"No","startOffset":"3.1s","endOffset":"3.1s"}]}),
             json!({"text":"No extra.","words":[{"word":"No","startOffset":"0s","endOffset":"0.5s"}]}),
         ] {
-            assert!(
-                parse_transcribe_parts(&attachment(), &[json!({"audioTranscription":tx})]).is_err()
-            );
+            let text = tx["text"].as_str().unwrap().to_owned();
+            let ParsedOutput::Transcript { cues } =
+                parse_transcribe_parts(&attachment(), &[json!({"audioTranscription":tx})]).unwrap()
+            else {
+                panic!()
+            };
+            assert_eq!(cues.len(), 1);
+            assert_eq!(cues[0].text, text);
+            assert_eq!(cues[0].timing_precision, "source_block");
+            assert!(cues[0].word_anchors.is_empty());
+            assert_eq!((cues[0].start_ms, cues[0].end_ms), (7_200_000, 7_203_000));
         }
     }
     #[test]
-    fn missing_timing_or_unanchored_speech_is_review_required() {
+    fn missing_timing_or_unanchored_speech_remains_usable() {
         for tx in [
             json!({"text":"hello"}),
             json!({"text":"well hello","words":[{"word":"hello","startOffset":"0s","endOffset":"1s"}]}),
             json!({"text":"hello","words":[{"word":"hello","startOffset":"-1s","endOffset":"1s"}]}),
         ] {
-            assert!(
-                parse_transcribe_parts(&attachment(), &[json!({"audioTranscription":tx})]).is_err()
-            );
+            let text = tx["text"].as_str().unwrap().to_owned();
+            let ParsedOutput::Transcript { cues } =
+                parse_transcribe_parts(&attachment(), &[json!({"audioTranscription":tx})]).unwrap()
+            else {
+                panic!()
+            };
+            assert_eq!(cues.len(), 1);
+            assert_eq!(cues[0].text, text);
+            assert_eq!(cues[0].timing_precision, "source_block");
+            assert!(cues[0].word_anchors.is_empty());
+            assert_eq!((cues[0].start_ms, cues[0].end_ms), (7_200_000, 7_203_000));
         }
     }
     #[test]
-    fn historical_reversed_japanese_and_fifteen_ms_overrun_are_never_repaired() {
+    fn historical_bad_timings_keep_text_without_inventing_word_times() {
         // Sanitized lexical fixtures retain the observed failure shapes without
         // redistributing evaluation recordings or provider responses.
         for tx in [
@@ -481,7 +573,14 @@ mod tests {
         ] {
             let parts = vec![json!({"audioTranscription":tx})];
             let original = parts.clone();
-            assert!(parse_transcribe_parts(&attachment(), &parts).is_err());
+            let ParsedOutput::Transcript { cues } =
+                parse_transcribe_parts(&attachment(), &parts).unwrap()
+            else {
+                panic!()
+            };
+            assert_eq!(cues[0].text, original[0]["audioTranscription"]["text"]);
+            assert_eq!(cues[0].timing_precision, "source_block");
+            assert!(cues[0].word_anchors.is_empty());
             assert_eq!(parts, original);
         }
     }

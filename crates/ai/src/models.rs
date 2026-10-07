@@ -6,7 +6,11 @@ mod task;
 
 pub use audio::{hash_file, AudioAttachment};
 pub(crate) use output::parse_output;
-pub use output::{CueTranslation, GeneratedCue, ParsedOutput, VocabularyItem};
+pub(crate) use output::valid_timing_metadata;
+pub use output::{
+    cue_precision, is_cue_precision, CueTranslation, GeneratedCue, ParsedOutput, VocabularyItem,
+    WordAnchor,
+};
 pub use plan::{PreparationBinding, PreparedJob, RequestEstimate, TranscriptApplyPolicy};
 pub use task::{RequestTask, SourceCue};
 #[cfg(any(test, feature = "development-validation", feature = "e2e-fixtures"))]

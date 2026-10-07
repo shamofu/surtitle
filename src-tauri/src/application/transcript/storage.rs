@@ -191,8 +191,9 @@ pub(super) fn verify_source_identity(
     let db = lock(&state.db)?;
     let media = db.media(&receipt.prepared_job.binding.media_id)?;
     ensure!(
-        surtitle_core::store::subtitle_revision(&db.list_segments(&media.id)?)?
-            == receipt.prepared_job.binding.transcript_revision,
+        receipt.prepared_job.apply_policy == TranscriptApplyPolicy::Auto
+            || surtitle_core::store::subtitle_revision(&db.list_segments(&media.id)?)?
+                == receipt.prepared_job.binding.transcript_revision,
         "元字幕が変わっています。新しい準備を確認してください。"
     );
     for task in &receipt.prepared_job.requests {
@@ -209,6 +210,15 @@ pub(super) fn verify_source_identity(
     ensure!(
         media.audio_stream_index == receipt.audio_stream_index,
         "Selected audio track changed; review a new preparation"
+    );
+    ensure!(
+        receipt.chunks.iter().all(|chunk| {
+            chunk
+                .request_start_ms()
+                .checked_add(chunk.request_duration_ms())
+                .is_some_and(|end_ms| end_ms <= media.duration_ms)
+        }),
+        "Prepared audio range exceeds the current media duration. Prepare a new transcription."
     );
     drop(db);
     ensure!(
@@ -253,5 +263,9 @@ pub(super) fn verify_audio_plan_inner(
     if let Some(parent) = &binding.repair_parent {
         validate_repair_parent(state, &receipt, parent)?;
     }
-    verify_source(state, &receipt, hash)
+    verify_source(state, &receipt, hash)?;
+    if plan.apply_policy == TranscriptApplyPolicy::Auto {
+        super::automatic::verify_publication_binding(state, &binding.job_id, &digest)?;
+    }
+    Ok(())
 }
