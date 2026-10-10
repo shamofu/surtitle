@@ -36,7 +36,7 @@ import {
 } from '../../../app/runtime';
 import { timestamp } from '../../../shared/format';
 import { shouldIgnoreShortcut } from '../../../shared/keyboard';
-import { Button, IconButton, Modal } from '../../../shared/ui/index';
+import { Button, IconButton, Modal, useModalExit } from '../../../shared/ui/index';
 
 export function NativePlayer({
   media,
@@ -67,6 +67,7 @@ export function NativePlayer({
   const { notify } = useNotifications();
   const { surfaceHidden } = useSurface();
   const { refresh } = useDataActions();
+  const settingsExit = useModalExit(settingsOpen);
   const viewport = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<PlayerState>();
   const [loadStatus, setLoadStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -452,7 +453,7 @@ export function NativePlayer({
       </div>}
       {repeatTarget && createPortal(repeatButton, repeatTarget)}
       {settingsOpen && (
-        <Modal title={t('再生設定', 'Playback settings')} onClose={onSettingsClose}>
+        <Modal {...settingsExit.modalProps} title={t('再生設定', 'Playback settings')} onClose={() => void settingsExit.close(onSettingsClose)}>
           <div className="track-controls">
             {(['audio', 'sub'] as const).map((kind) => {
               const tracks = state?.tracks.filter((track) => track.kind === kind) || [];
@@ -478,7 +479,7 @@ export function NativePlayer({
                     const selectedTrack = tracks.find(track => track.selected);
                     return selectedTrack && !selectedTrack.external && selectedTrack.ffIndex != null && <Button
                       disabled={controlsDisabled}
-                      onClick={() => onUseStudySubtitles(selectedTrack.ffIndex!)}
+                      onClick={() => void settingsExit.close(() => onUseStudySubtitles(selectedTrack.ffIndex!))}
                     >{t('この字幕を学習に使う', 'Use these captions for study')}</Button>;
                   })()}
                 </label>

@@ -103,6 +103,7 @@ describe('source playback context settings', () => {
       await waitFor(() =>
         expect(settingsApi.updateSettings).toHaveBeenCalledExactlyOnceWith({
           ...before,
+          motionPreference: 'system',
           replayContextMs: value,
         }),
       );

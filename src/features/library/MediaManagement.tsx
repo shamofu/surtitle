@@ -12,7 +12,8 @@ import {
   useAppearance,
   useNotifications,
 } from '../../app/runtime';
-import { Button, Field, Modal } from '../../shared/ui/index';
+import { Button, Field, Modal, useModalExit } from '../../shared/ui/index';
+import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { useActivities } from '../../app/providers/Activities';
 
@@ -88,10 +89,10 @@ export function DownloadJobs() {
               <ProgressStatus key={activity.id} {...activity} compact />,
             )}
             {job.error && (
-              <details>
+              <AnimatedDetails>
                 <summary>{t('詳細', 'Details')}</summary>
                 <p>{job.error}</p>
-              </details>
+              </AnimatedDetails>
             )}
           </div>
           {job.status === 'running' ? (
@@ -169,6 +170,8 @@ export function SubtitleSourceDialog({
   const [version, setVersion] = useState('');
   const [replace, setReplace] = useState(false);
   const [busy, setBusy] = useState(false);
+  const exit = useModalExit();
+  const close = () => { if (!busy) void exit.close(onClose); };
   const streams = useQuery({
     queryKey: queryKeys.streams(media.id),
     queryFn: () => {
@@ -193,8 +196,8 @@ export function SubtitleSourceDialog({
     mode === 'transcribe' ? !!onTranscribe : (!hasExisting || replace) &&
     (mode === 'file' || (mode === 'embedded' ? streams.data?.some(item => String(item.index) === stream && item.supportedText) : version !== ''));
   async function submit() {
-    if (!canSubmit) return;
-    if (mode === 'transcribe') { onTranscribe?.(); return; }
+    if (!canSubmit || busy || exit.exiting) return;
+    if (mode === 'transcribe') { await exit.close(() => onTranscribe?.()); return; }
     setBusy(true);
     const operationId = `local:${crypto.randomUUID()}`;
     const success = await report(
@@ -226,16 +229,15 @@ export function SubtitleSourceDialog({
     setBusy(false);
     if (success) {
       notify(t('字幕を更新しました。', 'Subtitles updated.'));
-      onClose();
+      await exit.close(onClose);
     }
   }
   return (
     <Modal
+      {...exit.modalProps}
       title={t('字幕を用意する', 'Set up study subtitles')}
-      closeDisabled={busy}
-      onClose={() => {
-        if (!busy) onClose();
-      }}
+      closeDisabled={busy || exit.exiting}
+      onClose={close}
     >
       <div className="segmented-control">
         {(
@@ -251,7 +253,7 @@ export function SubtitleSourceDialog({
             disabled={busy}
             className={mode === id ? 'selected' : ''}
             onClick={() => {
-              if (id === 'transcribe' && onTranscribe) { onTranscribe(); return; }
+              if (id === 'transcribe' && onTranscribe) { void exit.close(onTranscribe); return; }
               setMode(id);
               setReplace(false);
             }}
@@ -313,7 +315,7 @@ export function SubtitleSourceDialog({
           {streams.data?.some(item => item.kind === 'subtitle') && !streams.data.some(item => item.kind === 'subtitle' && item.supportedText) && <p className="notice">
             {t('画像の字幕は学習用に読み込めません。全編の文字起こしか字幕ファイルを利用してください。', 'Image captions cannot be used for study. Transcribe the full media or choose a subtitle file.')}
           </p>}
-          {streams.data && <details><summary>{t('字幕の詳細', 'Subtitle details')}</summary><ul>{streams.data.filter(item => item.kind === 'subtitle').map(item => <li key={item.index}>{item.title || item.language || t('字幕', 'Subtitle')} · {item.codec} · #{item.index}</li>)}</ul></details>}
+          {streams.data && <AnimatedDetails><summary>{t('字幕の詳細', 'Subtitle details')}</summary><ul>{streams.data.filter(item => item.kind === 'subtitle').map(item => <li key={item.index}>{item.title || item.language || t('字幕', 'Subtitle')} · {item.codec} · #{item.index}</li>)}</ul></AnimatedDetails>}
         </>
       )}
       {mode === 'transcribe' && <p>{t('動画・音声の全編から字幕を作成します。全体の見積もりを一度承認すると、最後まで自動で処理します。', 'Create subtitles for the entire video or recording. Review one estimate, then processing continues to the end automatically.')}</p>}
@@ -374,7 +376,7 @@ export function SubtitleSourceDialog({
       </p>
       {busy && <ProgressStatus label={media.title} phase={mode === 'embedded' ? 'extracting_subtitles' : mode === 'file' ? 'importing' : 'restoring'} />}
       <footer className="modal-footer">
-        <Button disabled={busy} onClick={onClose}>
+        <Button disabled={busy} onClick={close}>
           {t('キャンセル', 'Cancel')}
         </Button>
         <Button
@@ -405,7 +407,10 @@ export function RemoveMediaDialog({
   const { t } = useAppearance();
   const { report } = useNotifications();
   const [busy, setBusy] = useState(false);
+  const exit = useModalExit();
+  const close = () => { if (!busy) void exit.close(onClose); };
   async function remove() {
+    if (busy || exit.exiting) return;
     setBusy(true);
     const ok = await report(async () => {
       await mutate(() => libraryApi.removeMedia(media.id), {
@@ -415,15 +420,14 @@ export function RemoveMediaDialog({
       return true;
     });
     setBusy(false);
-    if (ok) onRemoved();
+    if (ok) await exit.close(onRemoved);
   }
   return (
     <Modal
+      {...exit.modalProps}
       title={t('ライブラリから除外', 'Remove from library')}
-      closeDisabled={busy}
-      onClose={() => {
-        if (!busy) onClose();
-      }}
+      closeDisabled={busy || exit.exiting}
+      onClose={close}
     >
       <p>{media.title}</p>
       <p className="notice">
@@ -433,7 +437,7 @@ export function RemoveMediaDialog({
         )}
       </p>
       <footer className="modal-footer">
-        <Button disabled={busy} onClick={onClose}>
+        <Button disabled={busy} onClick={close}>
           {t('キャンセル', 'Cancel')}
         </Button>
         <Button variant="danger" busy={busy} onClick={() => void remove()}>

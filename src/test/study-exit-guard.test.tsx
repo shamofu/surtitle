@@ -62,7 +62,7 @@ it('resolves blocked navigation only on an explicit discard', async () => {
 it('does not discard during a pending save', async () => {
   fixture.status = 'blocked';
   const { result } = renderHook(() => useStudyExitGuard(false, true, fixture.discard));
-  await act(() => result.current.discard());
+  await act(async () => expect(await result.current.discard()).toBe(false));
   expect(fixture.discard).not.toHaveBeenCalled();
   expect(fixture.proceed).not.toHaveBeenCalled();
   expect(closeWindow).not.toHaveBeenCalled();
@@ -105,7 +105,17 @@ it('keeps navigation blocked after failed persistence and retries without discar
   });
   expect(result.current.error).toBe('disk full');
   expect(fixture.proceed).not.toHaveBeenCalled();
-  await act(() => result.current.retry());
+  await act(async () => expect(await result.current.retry()).toBe(true));
   expect(fixture.proceed).toHaveBeenCalledOnce();
   expect(fixture.discard).not.toHaveBeenCalled();
+});
+
+it('reports a failed retry to the dialog so its exit can be reversed', async () => {
+  fixture.status = 'blocked';
+  const flush = vi.fn().mockRejectedValue(new Error('still full'));
+  const { result } = renderHook(() => useStudyExitGuard(true, false, fixture.discard, flush));
+  await act(async () => expect(await result.current.retry()).toBe(false));
+  expect(result.current.open).toBe(true);
+  expect(result.current.error).toBe('still full');
+  expect(fixture.proceed).not.toHaveBeenCalled();
 });

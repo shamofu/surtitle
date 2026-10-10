@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { createBrowserHistory, createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider, useNavigate } from '@tanstack/react-router';
 import { useSettingsExitGuard } from '../features/settings/useSettingsExitGuard';
 
@@ -10,6 +10,7 @@ const fixture = vi.hoisted(() => ({
   close: vi.fn<() => Promise<void>>(),
   onClose: undefined as undefined | (() => boolean),
   notify: vi.fn(),
+  holdExit: false,
 }));
 vi.mock('../app/runtime', () => ({
   useAppearance: () => ({ t: (_ja: string, en: string) => en }),
@@ -34,6 +35,9 @@ function SettingsHarness() {
     } finally { setSaving(false); }
   }
   const guard = useSettingsExitGuard(dirty, saving, save);
+  useLayoutEffect(() => {
+    if (guard.open && !guard.modalProps.open && !fixture.holdExit) guard.modalProps.onExited();
+  }, [guard.open, guard.modalProps.open, guard.modalProps.onExited]);
   return <>
     <h1>Settings</h1>
     <p>{dirty ? 'Unsaved draft' : 'Saved draft'}</p>
@@ -43,6 +47,7 @@ function SettingsHarness() {
     <button onClick={() => void save()}>Save normally</button>
     <button onClick={async () => { if (await save()) { guard.allowSavedNavigation(); void navigate({ to: '/' }); } }}>Save and return</button>
     {guard.open && <section role="dialog" aria-label="Unsaved settings">
+      {!guard.modalProps.open && <button onClick={guard.modalProps.onExited}>Finish exit animation</button>}
       {guard.error && <p role="alert">{guard.error}</p>}
       <button disabled={guard.busy} onClick={guard.keepEditing}>Keep editing</button>
       <button disabled={guard.busy} onClick={() => void guard.saveAndLeave()}>Save and leave</button>
@@ -67,10 +72,25 @@ beforeEach(() => {
   window.scrollTo = vi.fn();
   fixture.save.mockResolvedValue(true);
   fixture.close.mockResolvedValue(undefined);
+  fixture.holdExit = false;
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('settings exit protection', () => {
+  it('waits for dialog exit before navigation and prevents repeated actions during exit', async () => {
+    fixture.holdExit = true;
+    const router = await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Go to library' }));
+    await screen.findByRole('dialog');
+    fireEvent.click(screen.getByRole('button', { name: 'Discard and leave' }));
+    expect(router.state.location.pathname).toBe('/settings');
+    expect(screen.getByRole('button', { name: 'Discard and leave' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Keep editing' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Finish exit animation' }));
+    await screen.findByRole('heading', { name: 'Library' });
+  });
+
   it('allows clean navigation and clean native closure', async () => {
     await mount();
     expect(fixture.onClose?.()).toBe(false);
@@ -88,6 +108,7 @@ describe('settings exit protection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Go to library' }));
     await screen.findByRole('dialog');
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.getByText('Unsaved draft')).toBeVisible();
     expect(router.state.location.pathname).toBe('/settings');
     fireEvent.click(screen.getByRole('button', { name: 'Go to library' }));
@@ -161,9 +182,11 @@ describe('settings exit protection', () => {
     expect(dirtyUnload.defaultPrevented).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Save normally' }));
     await screen.findByText('Saved draft');
-    const cleanUnload = new Event('beforeunload', { cancelable: true });
-    window.dispatchEvent(cleanUnload);
-    expect(cleanUnload.defaultPrevented).toBe(false);
+    await waitFor(() => {
+      const cleanUnload = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(cleanUnload);
+      expect(cleanUnload.defaultPrevented).toBe(false);
+    });
     router.history.destroy();
   });
 

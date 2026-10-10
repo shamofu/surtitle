@@ -17,7 +17,7 @@ vi.mock('../features/library/api', () => ({ libraryApi: {
 } }));
 vi.mock('../features/library/MediaManagement', () => ({ DownloadJobs: () => null }));
 vi.mock('../features/transfer/TransferDialog', () => ({ TransferDialog: ({ onClose }: { onClose: () => void }) => <div role="dialog" aria-label="Your data"><button onClick={onClose}>Close data</button></div> }));
-vi.mock('@tanstack/react-router', () => ({ Link: ({ children, to, params, ...props }: { children: ReactNode; to: string; params?: { mediaId: string }; className?: string }) => <a href={params ? `/study/${params.mediaId}` : to} {...props}>{children}</a> }));
+vi.mock('@tanstack/react-router', () => ({ useNavigate: () => async () => {}, Link: ({ children, to, params, ...props }: { children: ReactNode; to: string; params?: { mediaId: string }; className?: string }) => <a href={params ? `/study/${params.mediaId}` : to} {...props}>{children}</a> }));
 const registerModal = () => () => {};
 vi.mock('../app/runtime', () => ({
   useAppearance: () => ({ t: (_ja: string, en: string) => en, locale: 'en' }),

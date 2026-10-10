@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Languages, RotateCcw } from 'lucide-react';
 import { useAppearance } from '../../app/runtime';
 import type { SubtitleSegment } from '../../shared/contracts/media';
 import { Button } from '../../shared/ui/index';
+import { StudyRegion } from './StudyPresence';
 
 export function CurrentCaption({
   active, language, loading, hasSubtitles, draftMode, enabled, error,
@@ -73,11 +74,11 @@ export function CurrentCaption({
             onPointerUp={finishSelection}>
             {source.text}
           </p>
-          {showTranslation && (
+          <StudyRegion open={showTranslation} className="study-motion-inline">
             <p className="caption-translation">
               {source.translation || t('翻訳はまだありません。言葉を確認して翻訳を見積もれます。', 'No translation yet. Inspect this phrase to estimate one.')}
             </p>
-          )}
+          </StudyRegion>
           <div className="caption-actions">
             <Button variant="ghost" aria-pressed={showTranslation} onClick={() => setShowTranslation(value => !value)}>
               <Languages size={17} />

@@ -54,7 +54,7 @@ export function useStudyExitGuard(dirty: boolean, saving: boolean, onDiscard: ()
     if (blocker.status === 'blocked') blocker.reset();
   }
   async function discard() {
-    if (saving || closePending.current) return;
+    if (saving || closePending.current) return false;
     if (nativeClose) {
       closePending.current = true;
       setClosing(true);
@@ -62,8 +62,10 @@ export function useStudyExitGuard(dirty: boolean, saving: boolean, onDiscard: ()
       try {
         // Keep the drafts if native closure fails; destroy bypasses this close request.
         await closeWindow();
+        return true;
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
+        return false;
       } finally {
         closePending.current = false;
         setClosing(false);
@@ -71,16 +73,19 @@ export function useStudyExitGuard(dirty: boolean, saving: boolean, onDiscard: ()
     } else if (blocker.status === 'blocked') {
       onDiscard();
       blocker.proceed();
+      return true;
     }
+    return false;
   }
   async function retry() {
-    if (saving || closePending.current || !beforeLeave) return;
+    if (saving || closePending.current || !beforeLeave) return false;
     setClosing(true); setError(''); closePending.current = true;
     try {
       await beforeLeave();
       if (nativeClose) await closeWindow();
       else if (blocker.status === 'blocked') blocker.proceed();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+      return true;
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); return false; }
     finally { closePending.current = false; setClosing(false); }
   }
   return { open: nativeClose || blocker.status === 'blocked', closing, error, keepEditing, discard, retry };

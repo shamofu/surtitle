@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useId, useRef, useState } from 'react';
+import { AnimatedDetails, openAnimatedDetails } from '../../shared/ui/AnimatedDetails';
 import { RefreshCw } from 'lucide-react';
 import { aiApi } from './api';
 import { nativeAvailable } from '../../shared/native/transport';
@@ -308,7 +309,7 @@ export function ModelEditor({
               onChange({ ...value, maxOutputTokens: recommendedTokens });
             } else {
               setEditingCustomOutput(true);
-              if (details.current) details.current.open = true;
+              if (details.current) openAnimatedDetails(details.current);
             }
           }}
         >
@@ -318,7 +319,7 @@ export function ModelEditor({
           <option value="custom">{t('カスタム', 'Custom')}</option>
         </select>
       </Field>
-      <details ref={details} className="model-editor-details">
+      <AnimatedDetails ref={details} className="model-editor-details">
         <summary>
           {t('出力・思考・料金の設定', 'Output, thinking, and pricing')}
         </summary>
@@ -471,7 +472,7 @@ export function ModelEditor({
             </>
           )}
         </div>
-      </details>
+      </AnimatedDetails>
       <p className="helper-text">
         {value.price
           ? t(

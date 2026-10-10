@@ -11,11 +11,13 @@ import { useSnapshot, useNotifications } from '../../../app/runtime';
 import { draftStudyApi } from './api';
 import { savedDraftText } from './saved-text';
 import type { DraftSelection } from './api';
+import { useStudyRegionActive } from '../StudyPresence';
 
 export const PAGE_SIZE = 40;
 export const BLOCK_PAGE_SIZE = 8;
 
 export function useDraftStudy(media: Media) {
+  const regionActive = useStudyRegionActive();
   const { data } = useSnapshot();
   const { report } = useNotifications();
   const mounted = useMounted();
@@ -59,6 +61,7 @@ export function useDraftStudy(media: Media) {
   }, [jobId]);
 
   useEffect(() => {
+    if (!regionActive) return;
     if (!nativeAvailable()) {
       setLoading(false);
       return;
@@ -97,14 +100,14 @@ export function useDraftStudy(media: Media) {
       disposed = true;
       if (timer) clearTimeout(timer);
     };
-  }, [jobId, media.id, refresh]);
+  }, [jobId, media.id, refresh, regionActive]);
 
   async function prepare(request: {
     jobId: string;
     cueIds?: string[];
     ordinal?: number;
   }) {
-    if (preparing.current) return;
+    if (!regionActive || preparing.current) return;
     preparing.current = true;
     setBusy(true);
     mutation.current++;
@@ -122,7 +125,7 @@ export function useDraftStudy(media: Media) {
     }
   }
   async function readSource(ordinal: number) {
-    if (!jobId || reading !== undefined) return;
+    if (!regionActive || !jobId || reading !== undefined) return;
     const requestedJob = jobId;
     setReading(ordinal);
     const result = await report(() =>

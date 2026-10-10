@@ -25,6 +25,7 @@ import { timestamp } from '../../shared/format';
 import { Badge, Button, EmptyState, IconButton } from '../../shared/ui/index';
 import { DraftStudyPanel } from './drafts/DraftStudyPanel';
 import type { PlayRange } from './drafts/lifecycle';
+import { StudyRegion } from './StudyPresence';
 export type TranscriptTab = 'transcript' | 'transcription' | 'vocabulary' | 'draft';
 export interface TranscriptViewState {
   search: string;
@@ -181,15 +182,14 @@ export function StudyTranscript({
           </button>
         ))}
       </div>
-      {transcriptionWorkspace && <div
+      <div className="transcript-tab-content">
+      {transcriptionWorkspace && <StudyRegion open={tab === 'transcription'} keepMounted freezeOnExit={false}><div
         className="transcription-view"
         role="tabpanel"
         id={`${tabsId}-transcription-panel`}
         aria-labelledby={`${tabsId}-transcription-tab`}
-        hidden={tab !== 'transcription'}
-      >{transcriptionWorkspace}</div>}
-      {tab === 'draft'
-        ? (
+      >{transcriptionWorkspace}</div></StudyRegion>}
+      <StudyRegion open={tab === 'draft'}>
           <div className="transcript-draft-view" role="tabpanel" id={`${tabsId}-draft-panel`} aria-labelledby={`${tabsId}-${transcriptionWorkspace ? 'transcription' : 'draft'}-tab`}>
           {transcriptionWorkspace && <Button variant="ghost" onClick={() => {
             onTab('transcription');
@@ -204,9 +204,8 @@ export function StudyTranscript({
             onEstimate={() => onEstimate('transcribe')}
           />
           </div>
-        )
-        : tab === 'vocabulary'
-          ? (
+      </StudyRegion>
+      <StudyRegion open={tab === 'vocabulary'}>
             <div className="suggestions-panel" role="tabpanel" id={`${tabsId}-vocabulary-panel`} aria-labelledby={`${tabsId}-vocabulary-tab`}>
               {candidatesError &&
                 <p
@@ -260,8 +259,8 @@ export function StudyTranscript({
                   );
                 })}
             </div>
-          )
-          : tab === 'transcript' ? (
+      </StudyRegion>
+      <StudyRegion open={tab === 'transcript'}>
             <div className="transcript-view" role="tabpanel" id={`${tabsId}-transcript-panel`} aria-labelledby={`${tabsId}-transcript-tab`}>
               {transcriptionStatus}
               <div className="transcript-tools">
@@ -429,7 +428,8 @@ export function StudyTranscript({
                 </button>
               </footer>
             </div>
-          ) : null}
+      </StudyRegion>
+      </div>
     </>
   );
 }

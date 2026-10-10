@@ -21,7 +21,8 @@ import {
   useNotifications,
 } from '../../../app/runtime';
 import { timestamp } from '../../../shared/format';
-import { Badge, Button, Field, Modal } from '../../../shared/ui/index';
+import { Badge, Button, Field, Modal, useModalExit } from '../../../shared/ui/index';
+import { AnimatedDetails } from '../../../shared/ui/AnimatedDetails';
 import { QuoteApproval } from '../../ai/QuoteApproval';
 
 import { TranscriptRangeEditor } from './TranscriptRangeEditor';
@@ -42,6 +43,9 @@ export function TranscriptReviewDialog({
   const [rangeOrdinal, setRangeOrdinal] = useState<number>();
   const [acknowledged, setAcknowledged] = useState(false);
   const [repairQuote, setRepairQuote] = useState<AiQuote>();
+  const exit = useModalExit();
+  const repairExit = useModalExit(!!repairQuote);
+  const close = () => { if (!busy) void exit.close(onClose); };
   const [loadFailed, setLoadFailed] = useState(false);
   useEffect(() => {
     let active = true;
@@ -56,6 +60,7 @@ export function TranscriptReviewDialog({
     };
   }, [jobId, report]);
   async function update(operation: () => Promise<TranscriptReview>) {
+    if (busy || exit.exiting || repairExit.exiting) return;
     setBusy(true);
     const result = await report(operation);
     if (result) {
@@ -66,7 +71,7 @@ export function TranscriptReviewDialog({
     setBusy(false);
   }
   async function play(cue: ReviewText) {
-    if (!view || busy) return;
+    if (!view || busy || exit.exiting || repairExit.exiting) return;
     setBusy(true);
     await report(async () => {
       await playerApi.loadMedia(view.mediaId);
@@ -96,7 +101,7 @@ export function TranscriptReviewDialog({
     setBusy(false);
   }
   async function repair(id: string) {
-    if (!view) return;
+    if (!view || busy || exit.exiting || repairExit.exiting) return;
     setBusy(true);
     const result = await report(() =>
       mutate(() => aiApi.prepareBoundaryRepair(jobId, view.draft.digest, id), {
@@ -118,13 +123,12 @@ export function TranscriptReviewDialog({
   );
   return (
     <Modal
+      {...exit.modalProps}
       title={t('文字起こしを確認', 'Review transcription')}
-      closeDisabled={busy}
+      closeDisabled={busy || exit.exiting || repairExit.exiting}
       eyebrow="LISTEN, REVIEW, THEN KEEP"
       wide
-      onClose={() => {
-        if (!busy) onClose();
-      }}
+      onClose={close}
     >
       {!view || !draft ? (
         loadFailed ? (
@@ -252,7 +256,7 @@ export function TranscriptReviewDialog({
             </section>
           )}
           {!!view.results?.length && (
-            <details className="draft-chunks">
+            <AnimatedDetails className="draft-chunks">
               <summary>
                 {t('保存応答の検証状態', 'Saved response validation status')}
               </summary>
@@ -268,7 +272,7 @@ export function TranscriptReviewDialog({
                   play={(cue) => void play(cue)}
                 />
               ))}
-            </details>
+            </AnimatedDetails>
           )}
           {draft.warnings?.map((warning) => (
             <section className="notice warning" key={warning.id}>
@@ -341,7 +345,7 @@ export function TranscriptReviewDialog({
               </p>
             </section>
           ))}
-          <details className="draft-chunks">
+          <AnimatedDetails className="draft-chunks">
             <summary>
               {t(
                 '元の音声区間とプレビューの状態',
@@ -360,7 +364,7 @@ export function TranscriptReviewDialog({
                     : t('プレビューあり', 'Preview available')}
                 </Badge>
                 {chunk.status === 'received' && (
-                  <details>
+                  <AnimatedDetails>
                     <summary>
                       {t('区間の字幕を表示', 'Show subtitles for this range')}
                     </summary>
@@ -372,11 +376,11 @@ export function TranscriptReviewDialog({
                       segments={chunk.segments}
                       play={(cue) => void play(cue)}
                     />
-                  </details>
+                  </AnimatedDetails>
                 )}
               </div>
             ))}
-          </details>
+          </AnimatedDetails>
           <JoinedSubtitles
             draft={draft}
             disabled={busy}
@@ -468,7 +472,7 @@ export function TranscriptReviewDialog({
             </label>
           )}
           <footer className="modal-footer">
-            <Button disabled={busy} onClick={onClose}>
+            <Button disabled={busy} onClick={close}>
               {t('閉じる', 'Close')}
             </Button>
             <Button
@@ -493,10 +497,11 @@ export function TranscriptReviewDialog({
       )}
       {repairQuote && (
         <Modal
+          {...repairExit.modalProps}
           title={t('境界修復の見積もり', 'Boundary repair estimate')}
-          closeDisabled={busy}
+          closeDisabled={busy || repairExit.exiting}
           onClose={() => {
-            if (!busy) setRepairQuote(undefined);
+            if (!busy) void repairExit.close(() => setRepairQuote(undefined));
           }}
         >
           <QuoteApproval
@@ -504,6 +509,7 @@ export function TranscriptReviewDialog({
             quote={repairQuote}
             busy={busy}
             onApprove={() => {
+              if (busy || repairExit.exiting) return;
               setBusy(true);
               void report(async () => {
                 await mutate(() => aiApi.approveQuote(repairQuote), {
@@ -513,7 +519,7 @@ export function TranscriptReviewDialog({
               }).then((result) => {
                 if (result) {
                   setView(result);
-                  setRepairQuote(undefined);
+                  void repairExit.close(() => setRepairQuote(undefined));
                   setAcknowledged(false);
                 }
                 setBusy(false);

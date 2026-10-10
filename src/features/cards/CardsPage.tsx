@@ -31,11 +31,11 @@ import {
 } from '../../shared/ui/index';
 import { TransferDialog } from '../transfer/TransferDialog';
 import { EditCardDialog, DeleteCardDialog } from './CardManagement';
+import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
 
 function closePhraseMenu(element: HTMLElement, restoreFocus = true) {
   const menu = element.closest('details');
   if (!menu) return;
-  menu.removeAttribute('open');
   if (restoreFocus) menu.querySelector('summary')?.focus({ preventScroll: true });
 }
 
@@ -192,7 +192,7 @@ export function CardsPage() {
                       <Volume2 size={18} />
                       {t('原音を聴く', 'Listen')}
                     </Button>
-                    <details
+                    <AnimatedDetails
                       className="phrase-options"
                       open={openMenu === card.id}
                       onBlur={(event) => {
@@ -234,7 +234,7 @@ export function CardsPage() {
                           {t('削除', 'Delete')}
                         </Button>
                       </div>
-                    </details>
+                    </AnimatedDetails>
                   </div>
                 </header>
                 <p className="phrase-meaning">{card.meaning}</p>

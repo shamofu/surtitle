@@ -14,6 +14,12 @@ import type { StudyCard } from '../shared/contracts/cards';
 
 let cards: StudyCard[];
 let surfaceHidden = false;
+const motion = vi.hoisted(() => ({ reduced: true }));
+
+vi.mock('../shared/motion', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../shared/motion')>(),
+  useAppMotion: () => ({ reducedMotion: motion.reduced }),
+}));
 
 vi.mock('../features/cards/api', () => ({ cardsApi: { rateCard: vi.fn() } }));
 
@@ -47,6 +53,7 @@ vi.mock('../app/runtime', () => {
 
 beforeEach(() => {
   surfaceHidden = false;
+  motion.reduced = true;
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-09-09T00:00:00Z'));
   cards = [
@@ -165,4 +172,55 @@ it('does not reveal or rate behind a modal or from focused disclosure and editab
   view.rerender(<ReviewPage />);
   fireEvent.keyDown(document.body, { key: '1' });
   expect(cardsApi.rateCard).not.toHaveBeenCalled();
+});
+
+it('retains an inert rated card until its bounded exit finishes, then enables only the next card', async () => {
+  motion.reduced = false;
+  cards.push({ ...cards[0], id: 'next', term: 'Another phrase' });
+  render(<ReviewPage />);
+  await rateAgain();
+  const outgoing = screen.getByText('look into').closest('.review-transition');
+  expect(outgoing).toHaveAttribute('inert');
+  expect(outgoing).toHaveAttribute('aria-hidden', 'true');
+  expect(screen.queryByText('Another phrase')).not.toBeInTheDocument();
+  fireEvent.keyDown(window, { key: '1' });
+  expect(cardsApi.rateCard).toHaveBeenCalledOnce();
+  await act(async () => { vi.advanceTimersByTime(120); });
+  expect(screen.queryByText('look into')).not.toBeInTheDocument();
+  expect(screen.getByText('Another phrase')).toBeInTheDocument();
+  fireEvent.keyDown(window, { key: '1' });
+  expect(cardsApi.rateCard).toHaveBeenCalledOnce();
+  fireEvent.keyDown(window, { code: 'Space', key: ' ' });
+  await act(async () => { fireEvent.keyDown(window, { key: '1' }); });
+  expect(cardsApi.rateCard).toHaveBeenCalledTimes(2);
+  expect(screen.queryByText('Review complete')).not.toBeInTheDocument();
+  await act(async () => { vi.advanceTimersByTime(120); });
+  expect(screen.getByText('Review complete')).toBeInTheDocument();
+});
+
+it('finishes an active review exit immediately when motion is reduced', async () => {
+  motion.reduced = false;
+  const view = render(<ReviewPage />);
+  await rateAgain();
+  expect(screen.getByText('look into')).toBeInTheDocument();
+  motion.reduced = true;
+  view.rerender(<ReviewPage />);
+  expect(screen.queryByText('look into')).not.toBeInTheDocument();
+  expect(screen.getByText('Review complete')).toBeInTheDocument();
+});
+
+it('cancels an old exit when the same schedule becomes present again', async () => {
+  motion.reduced = false;
+  const original = cards;
+  const view = render(<ReviewPage />);
+  cards = [];
+  view.rerender(<ReviewPage />);
+  expect(screen.getByText('look into').closest('.review-transition')).toHaveAttribute('inert');
+  cards = original;
+  view.rerender(<ReviewPage />);
+  await act(async () => { vi.advanceTimersByTime(120); });
+  expect(screen.getByText('look into').closest('.review-transition')).not.toHaveAttribute('inert');
+  fireEvent.keyDown(window, { code: 'Space', key: ' ' });
+  expect(screen.getByText('investigate')).toBeInTheDocument();
+  expect(screen.queryByText('Review complete')).not.toBeInTheDocument();
 });

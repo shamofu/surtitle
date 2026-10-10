@@ -23,7 +23,7 @@ vi.mock('../app/runtime', async () => ({
   useNotifications: () => ({ report: (action: () => Promise<unknown>) => action() }),
   useDataActions: () => ({ mutate: (action: () => Promise<unknown>) => action() }),
 }));
-vi.mock('@tanstack/react-router', () => ({ Link: ({ children, onClick, to, params }: { children: React.ReactNode; onClick?: () => void; to: string; params?: { mediaId: string } }) => <a href={to.replace('$mediaId', params?.mediaId ?? '')} onClick={onClick}>{children}</a> }));
+vi.mock('@tanstack/react-router', () => ({ useNavigate: () => async () => {}, Link: ({ children, onClick, to, params }: { children: React.ReactNode; onClick?: () => void; to: string; params?: { mediaId: string } }) => <a href={to.replace('$mediaId', params?.mediaId ?? '')} onClick={onClick}>{children}</a> }));
 
 let clients: QueryClient[] = [];
 beforeEach(() => {

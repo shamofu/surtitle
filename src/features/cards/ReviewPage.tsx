@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { AnimatePresence, useIsPresent, usePresence } from 'motion/react';
+import * as m from 'motion/react-m';
 import { Link } from '@tanstack/react-router';
 import {
   ArrowLeft,
@@ -21,8 +23,54 @@ import {
 import { shouldIgnoreShortcut } from '../../shared/keyboard';
 import { dueCards, languageName } from '../../shared/format';
 import { Badge, Button } from '../../shared/ui/index';
+import { motionDurations, motionEase, useAppMotion } from '../../shared/motion';
 
 export type Rating = 'again' | 'hard' | 'good' | 'easy';
+
+function ReviewTransition({ children }: { children: ReactNode }) {
+  const [present, safeToRemove] = usePresence();
+  const { reducedMotion } = useAppMotion();
+  const revision = useRef(0);
+
+  useEffect(() => {
+    const generation = ++revision.current;
+    if (present) return;
+    const finish = () => {
+      if (revision.current === generation) safeToRemove?.();
+    };
+    if (reducedMotion) {
+      finish();
+      return;
+    }
+    // Removing the old card must not depend on animation frames in a hidden window.
+    const timer = window.setTimeout(finish, motionDurations.exit * 1000);
+    return () => {
+      ++revision.current;
+      window.clearTimeout(timer);
+    };
+  }, [present, reducedMotion, safeToRemove]);
+
+  return (
+    <m.div
+      className="review-transition"
+      data-state={present ? 'open' : 'closing'}
+      inert={!present}
+      aria-hidden={!present || undefined}
+      initial={reducedMotion ? false : 'hidden'}
+      animate={present ? 'shown' : 'hidden'}
+      variants={{ shown: { opacity: 1 }, hidden: { opacity: 0 } }}
+      transition={{ duration: reducedMotion ? 0 : present ? motionDurations.enter : motionDurations.exit, ease: motionEase }}
+      onClickCapture={(event) => {
+        if (!present) { event.preventDefault(); event.stopPropagation(); }
+      }}
+      onKeyDownCapture={(event) => {
+        if (!present) { event.preventDefault(); event.stopPropagation(); }
+      }}
+    >
+      {children}
+    </m.div>
+  );
+}
 
 export function ReviewCard({
   card,
@@ -36,8 +84,10 @@ export function ReviewCard({
   const { t, locale } = useAppearance();
   const { report } = useNotifications();
   const { surfaceHidden } = useSurface();
+  const present = useIsPresent();
   const [revealed, setRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const pending = useRef(false);
   const media = data?.media.find((item) => item.id === card.mediaId);
   const choices: { id: Rating; title: string; detail: string }[] = [
     {
@@ -62,7 +112,8 @@ export function ReviewCard({
     },
   ];
   async function rate(rating: Rating) {
-    if (!revealed || busy) return;
+    if (!present || !revealed || busy || pending.current) return;
+    pending.current = true;
     setBusy(true);
     const result = await report(async () => {
       await mutate(() => cardsApi.rateCard(card.id, rating), {
@@ -70,10 +121,15 @@ export function ReviewCard({
       });
       return true;
     });
-    if (result) onRated();
+    if (result) {
+      onRated();
+      return;
+    }
     setBusy(false);
+    pending.current = false;
   }
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (!present) return;
     const handler = (event: KeyboardEvent) => {
       if (surfaceHidden || busy || event.repeat || shouldIgnoreShortcut(event)) return;
       if (event.code === 'Space') {
@@ -88,7 +144,7 @@ export function ReviewCard({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [revealed, busy, card.id, surfaceHidden]);
+  }, [present, revealed, busy, card.id, surfaceHidden]);
   return (
     <>
       <article className={`review-card ${revealed ? 'revealed' : ''}`}>
@@ -161,7 +217,7 @@ export function ReviewCard({
             <button
               key={choice.id}
               className={`rating-button ${choice.id}`}
-              disabled={!revealed || busy}
+              disabled={!present || !revealed || busy}
               onClick={() => void rate(choice.id)}
             >
               <span className="rating-key">{index + 1}</span>
@@ -232,13 +288,14 @@ export function ReviewPage() {
           style={{ width: `${total ? (reviewed.length / total) * 100 : 0}%` }}
         />
       </div>
-      {card ? (
-        <ReviewCard
-          key={revision(card)}
-          card={card}
-          onRated={() => setReviewed((items) => [...items, revision(card)])}
-        />
-      ) : (
+      <AnimatePresence mode="wait">
+        <ReviewTransition key={card ? revision(card) : 'complete'}>
+          {card ? (
+            <ReviewCard
+              card={card}
+              onRated={() => setReviewed((items) => [...items, revision(card)])}
+            />
+          ) : (
         <div className="review-complete">
           <div className="review-complete-icon">
             <Check size={28} strokeWidth={1.7} />
@@ -271,7 +328,9 @@ export function ReviewPage() {
             </Link>
           </div>
         </div>
-      )}
+          )}
+        </ReviewTransition>
+      </AnimatePresence>
     </div>
   );
 }

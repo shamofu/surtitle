@@ -1,0 +1,68 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+:root {
+  --motion-fast: 120ms;
+  --motion-enter: 180ms;
+  --motion-exit: 120ms;
+  --motion-ease: cubic-bezier(.2, 0, 0, 1);
+}
+
+/* Only explicitly interactive surfaces receive transitions. Focus remains immediate. */
+:where(.button, .icon-button, .locale-button, .activity-trigger, .main-nav a, .back-link,
+  .filter-tabs button, .segmented-control button, .transcript-tabs button,
+  .format-option, .ai-kind-list button, .rating-button, .continue-row, .media-row,
+  .phrase-card, .transcript-row, .import-drop, input, select, textarea, summary) {
+  transition: background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease);
+}
+:where(.button, .icon-button, .locale-button, .rating-button) {
+  transition: background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    scale var(--motion-fast) var(--motion-ease);
+}
+:where(.button, .icon-button, .locale-button, .rating-button):active:not(:disabled):not([aria-disabled='true']) {
+  scale: .98;
+}
+.page-enter, .library-page {
+  animation: page-arrive var(--motion-enter) var(--motion-ease);
+}
+/* Animate one group, not every result on each search or snapshot update. */
+.media-list, .phrase-list, .library-empty, .empty-state,
+.review-card, .review-complete, .review-answer:not(.concealed), .library-drop-overlay {
+  animation: content-arrive var(--motion-enter) var(--motion-ease);
+}
+.rating-area, .rating-area .rating-buttons {
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+.session-progress span { transition: width var(--motion-enter) var(--motion-ease); }
+.toast { animation: none; }
+.progress-status-copy, .activity-empty, .field-error, .phrase-saved {
+  animation: content-arrive var(--motion-enter) var(--motion-ease);
+}
+.progress-status progress::-webkit-progress-value {
+  transition: width var(--motion-enter) var(--motion-ease);
+}
+.notification-portal { display: contents; }
+details[data-motion-state='exiting'] > :not(summary) { pointer-events: none; }
+@keyframes page-arrive {
+  from { opacity: 0; translate: 0 6px; }
+  to { opacity: 1; translate: 0 0; }
+}
+@keyframes content-arrive {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+:root[data-motion='reduce'] *,
+:root[data-motion='reduce'] *::before,
+:root[data-motion='reduce'] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+:root[data-motion='reduce'] :where(.button, .icon-button, .locale-button, .rating-button):active {
+  scale: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(.button, .icon-button, .locale-button, .rating-button):active { scale: none; }
+}

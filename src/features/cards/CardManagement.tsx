@@ -7,7 +7,7 @@ import {
   useAppearance,
   useNotifications,
 } from '../../app/runtime';
-import { Button, Field, Modal } from '../../shared/ui/index';
+import { Button, Field, Modal, useModalExit } from '../../shared/ui/index';
 
 export function EditCardDialog({
   card,
@@ -27,17 +27,32 @@ export function EditCardDialog({
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const [confirmClose, setConfirmClose] = useState(false);
+  const exit = useModalExit();
+  const confirmationExit = useModalExit(confirmClose);
   const [saveError, setSaveError] = useState('');
   const dirty = term.trim() !== card.term || meaning !== card.meaning ||
     example !== card.example || translation !== (card.translation || '') ||
     explanation !== (card.explanation || '');
   function close() {
-    if (pending.current) return;
+    if (pending.current || exit.exiting || confirmationExit.exiting) return;
     if (dirty) setConfirmClose(true);
-    else onClose();
+    else void exit.close(onClose);
+  }
+  async function closeEditor() {
+    if (confirmClose) {
+      await confirmationExit.close(async () => {
+        setConfirmClose(false);
+        await exit.close(onClose);
+      });
+      return;
+    }
+    await exit.close(onClose);
+  }
+  function keepEditing() {
+    if (!pending.current) void confirmationExit.close(() => setConfirmClose(false));
   }
   async function save() {
-    if (pending.current || !dirty || !term.trim()) return;
+    if (pending.current || exit.exiting || confirmationExit.exiting || !dirty || !term.trim()) return;
     pending.current = true;
     setBusy(true);
     setSaveError('');
@@ -65,15 +80,16 @@ export function EditCardDialog({
     );
     setBusy(false);
     pending.current = false;
-    if (ok) onClose();
+    if (ok) await closeEditor();
   }
   return (
     <Modal
+      {...exit.modalProps}
       title={t('フレーズを編集', 'Edit phrase')}
       onClose={close}
-      closeDisabled={busy}
+      closeDisabled={busy || exit.exiting || confirmationExit.exiting}
     >
-      <fieldset disabled={busy}>
+      <fieldset disabled={busy || exit.exiting || confirmationExit.exiting}>
         <Field label={t('語彙・フレーズ', 'Word or phrase')}>
           <input
             autoFocus
@@ -132,15 +148,16 @@ export function EditCardDialog({
         </footer>
       </fieldset>
       {confirmClose && <Modal
+        {...confirmationExit.modalProps}
         title={t('変更を保存しますか？', 'Save your changes?')}
-        onClose={() => { if (!pending.current) setConfirmClose(false); }}
-        closeDisabled={busy}
+        onClose={keepEditing}
+        closeDisabled={busy || confirmationExit.exiting}
       >
         <p>{t('このフレーズには未保存の変更があります。', 'This phrase has unsaved changes.')}</p>
         {saveError && <p className="notice warning" role="alert">{saveError}</p>}
         <footer className="modal-footer">
-          <Button disabled={busy} onClick={() => setConfirmClose(false)}>{t('編集を続ける', 'Keep editing')}</Button>
-          <Button variant="danger" disabled={busy} onClick={onClose}>{t('保存せずに閉じる', 'Discard changes')}</Button>
+          <Button disabled={busy} onClick={keepEditing}>{t('編集を続ける', 'Keep editing')}</Button>
+          <Button variant="danger" disabled={busy} onClick={() => void closeEditor()}>{t('保存せずに閉じる', 'Discard changes')}</Button>
           <Button variant="primary" busy={busy} disabled={!term.trim()} onClick={() => void save()}>{t('保存して閉じる', 'Save and close')}</Button>
         </footer>
       </Modal>}
@@ -159,22 +176,24 @@ export function DeleteCardDialog({
   const { t } = useAppearance();
   const { report } = useNotifications();
   const [busy, setBusy] = useState(false);
+  const exit = useModalExit();
+  const close = () => { if (!busy) void exit.close(onClose); };
   async function remove() {
+    if (busy || exit.exiting) return;
     setBusy(true);
     const ok = await report(async () => {
       await mutate(() => cardsApi.deleteCard(card.id), { kind: 'snapshot' });
       return true;
     });
     setBusy(false);
-    if (ok) onClose();
+    if (ok) await exit.close(onClose);
   }
   return (
     <Modal
+      {...exit.modalProps}
       title={t('フレーズを削除', 'Delete phrase')}
-      closeDisabled={busy}
-      onClose={() => {
-        if (!busy) onClose();
-      }}
+      closeDisabled={busy || exit.exiting}
+      onClose={close}
     >
       <p>{card.term}</p>
       <p className="notice warning">
@@ -184,7 +203,7 @@ export function DeleteCardDialog({
         )}
       </p>
       <footer className="modal-footer">
-        <Button disabled={busy} onClick={onClose}>
+        <Button disabled={busy} onClick={close}>
           {t('キャンセル', 'Cancel')}
         </Button>
         <Button variant="danger" busy={busy} onClick={() => void remove()}>

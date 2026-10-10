@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useRef, useState } from 'react';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { ArrowDownToLine, Check, FileVideo2, FolderOpen, Link2, Plus, RefreshCw, Sparkles, Upload, X } from 'lucide-react';
 import { libraryApi } from './api';
 import { useDataActions, useAppearance, useSnapshot, useNotifications } from '../../app/runtime';
-import { Button, Field, IconButton, Modal } from '../../shared/ui/index';
+import { Button, Field, IconButton, Modal, useModalExit } from '../../shared/ui/index';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { useActivities } from '../../app/providers/Activities';
 import { LanguageInput } from '../../shared/ui/LanguageInput';
@@ -28,6 +28,8 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
   const { data } = useSnapshot();
   const { report } = useNotifications();
   const { runTracked } = useActivities();
+  const exit = useModalExit();
+  const navigate = useNavigate();
   const [fileProgress, setFileProgress] = useState<{ completed: number; total: number }>();
   const [mode, setMode] = useState<'local' | 'url'>('local');
   const [rows, setRows] = useState<ImportQueueItem[]>([]);
@@ -67,7 +69,7 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
     setRows(rowsRef.current);
   }
   function begin(next: NonNullable<typeof phase>) {
-    if (pending.current || checkingLanguages.current) return false;
+    if (pending.current || checkingLanguages.current || exit.exiting) return false;
     pending.current = true;
     setPhase(next);
     setProblem('');
@@ -217,7 +219,7 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
       return true;
     }, t('ダウンロードを開始しました。ライブラリで進捗を確認できます。', 'Download started. Follow its progress in the library.'));
     finish();
-    if (success && alive.current) onReturnToLibrary();
+    if (success && alive.current) await exit.close(onReturnToLibrary);
   }
   function statusText(row: ImportQueueItem) {
     const status = queueStatus(row, pair);
@@ -236,7 +238,7 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
     };
     return row.reason ? reasons[row.reason] : t('追加できないファイルです', 'This file cannot be added');
   }
-  return <Modal title={t('作品を追加', 'Add a video or audio file')} closeDisabled={busy} onClose={() => { if (!pending.current && !checkingLanguages.current) onClose(); }}>
+  return <Modal {...exit.modalProps} title={t('作品を追加', 'Add a video or audio file')} closeDisabled={busy || exit.exiting} onClose={() => { if (!pending.current && !checkingLanguages.current) void exit.close(onClose); }}>
     <div className="media-import">
       <div className="import-body">
       <div className="segmented-control" role="group" aria-label={t('追加する方法', 'Import source')}>
@@ -263,7 +265,11 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
               {status === 'imported' || status === 'existing' ? <Check size={18} aria-hidden="true" /> : <FileVideo2 size={18} aria-hidden="true" />}
               <div className="import-file-copy"><strong title={row.inputPath}>{fileName(row.inputPath)}</strong><small className="import-file-path">{row.inputPath}</small><p>{statusText(row)}</p></div>
               <div className="import-file-actions">
-                {row.mediaId && (status === 'imported' || status === 'existing') && !busy && <Link to="/study/$mediaId" params={{ mediaId: row.mediaId }} className="button secondary" aria-label={t(`${fileName(row.inputPath)} を開く`, `Open ${fileName(row.inputPath)}`)}>{t('開く', 'Open')}</Link>}
+                {row.mediaId && (status === 'imported' || status === 'existing') && !busy && <Link to="/study/$mediaId" params={{ mediaId: row.mediaId }} className="button secondary" aria-label={t(`${fileName(row.inputPath)} を開く`, `Open ${fileName(row.inputPath)}`)} onClick={event => {
+                  if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  void report(() => exit.close(async () => { onClose(); await navigate({ to: '/study/$mediaId', params: { mediaId: row.mediaId! } }); }));
+                }}>{t('開く', 'Open')}</Link>}
                 <IconButton label={t(`${fileName(row.inputPath)} を一覧から外す`, `Remove ${fileName(row.inputPath)} from this list`)} disabled={busy} onClick={() => updateRows(current => current.filter(item => item.id !== row.id))}><X size={17} /></IconButton>
               </div>
             </li>;
@@ -281,7 +287,7 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
       <p className="helper-text"><Sparkles size={13} />{t('追加だけでは AI を実行しません。使う範囲と金額を後から選べます。', 'Importing does not run AI. Choose its scope and cost when you need it.')}</p>
       </div>
       <footer className="modal-footer import-footer">
-        <Button onClick={attempted || addedCount || existingCount ? onReturnToLibrary : onClose} disabled={busy}>{attempted || addedCount || existingCount ? t('ライブラリに戻る', 'Return to library') : t('キャンセル', 'Cancel')}</Button>
+        <Button onClick={() => void exit.close(attempted || addedCount || existingCount ? onReturnToLibrary : onClose)} disabled={busy || exit.exiting}>{attempted || addedCount || existingCount ? t('ライブラリに戻る', 'Return to library') : t('キャンセル', 'Cancel')}</Button>
         {mode === 'local' && failedCount > 0 && <Button disabled={busy || !languagesValid} onClick={() => void submitLocal(true)}><RefreshCw size={16} />{t('失敗したファイルだけ再試行', 'Retry failed files')}</Button>}
         {(mode === 'url' || readyCount > 0 || !rows.length) && <Button variant="primary" busy={busy} disabled={!languagesValid || (mode === 'local' ? !readyCount : !validUrl)} onClick={() => void (mode === 'local' ? submitLocal() : submitUrl())}><Plus size={16} />{mode === 'local' && readyCount ? t(`${readyCount} 件をライブラリに追加`, `Add ${readyCount} ${readyCount === 1 ? 'file' : 'files'} to library`) : t('ライブラリに追加', 'Add to library')}</Button>}
       </footer>

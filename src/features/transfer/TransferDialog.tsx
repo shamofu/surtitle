@@ -18,7 +18,7 @@ import {
   useAppearance,
   useNotifications,
 } from '../../app/runtime';
-import { Button, Modal } from '../../shared/ui/index';
+import { Button, Modal, useModalExit } from '../../shared/ui/index';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { useActivities } from '../../app/providers/Activities';
 import { useClearPreparationSessions } from '../ai/PreparationSessions';
@@ -40,6 +40,8 @@ export function TransferDialog({
   const [format, setFormat] = useState<ExportFormat>(mediaId ? 'srt' : 'zip');
   const [exportedPaths, setExportedPaths] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const exit = useModalExit();
+  const close = () => { if (!busy) void exit.close(onClose); };
   const [phase, setPhase] = useState('exporting');
   const [preview, setPreview] = useState<RestorePreview | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
@@ -125,6 +127,7 @@ export function TransferDialog({
       : []),
   ];
   async function exportData() {
+    if (busy || exit.exiting) return;
     setBusy(true);
     setPhase('exporting');
     try {
@@ -138,6 +141,7 @@ export function TransferDialog({
     }
   }
   async function chooseBackup() {
+    if (busy || exit.exiting) return;
     const request = ++previewRequest.current;
     setBusy(true);
     setPhase('reading_backup');
@@ -155,7 +159,7 @@ export function TransferDialog({
     setBusy(false);
   }
   async function restoreData() {
-    if (!preview || !acknowledged) return;
+    if (!preview || !acknowledged || busy || exit.exiting) return;
     setBusy(true);
     setPhase('restoring');
     const result = await report(
@@ -173,16 +177,15 @@ export function TransferDialog({
       t('学習データを復元しました。', 'Learning data restored.'),
     );
     setBusy(false);
-    if (result) onClose();
+    if (result) await exit.close(onClose);
   }
   return (
     <Modal
-      closeDisabled={busy}
+      {...exit.modalProps}
+      closeDisabled={busy || exit.exiting}
       title={t('学びを持ち運ぶ', 'Take your learning with you')}
       eyebrow="YOUR WORDS, YOUR DATA"
-      onClose={() => {
-        if (!busy) onClose();
-      }}
+      onClose={close}
     >
       <div className="segmented-control">
         <button
@@ -206,7 +209,7 @@ export function TransferDialog({
       {tab === 'export' && exportedPaths.length > 0 ? <section aria-label={t('書き出し完了', 'Export complete')}>
         <p role="status">{t('書き出しました。', 'Your export is ready.')}</p>
         <ul>{exportedPaths.map(path => <li key={path}><p style={{ overflowWrap: 'anywhere' }}>{path}</p><Button onClick={() => void report(() => transferApi.revealExportFile(path))}><FolderOpen size={16} />{t('保存先を開く', 'Open containing folder')}</Button></li>)}</ul>
-        <footer className="modal-footer"><Button onClick={() => setExportedPaths([])}>{t('別の形式で書き出す', 'Export another format')}</Button><Button variant="primary" onClick={onClose}>{t('完了', 'Done')}</Button></footer>
+        <footer className="modal-footer"><Button onClick={() => setExportedPaths([])}>{t('別の形式で書き出す', 'Export another format')}</Button><Button variant="primary" onClick={close}>{t('完了', 'Done')}</Button></footer>
       </section> : tab === 'export' ? (
         <>
           <p className="notice" role="status">{format === 'srt' || format === 'vtt'
@@ -241,7 +244,7 @@ export function TransferDialog({
             )}
           </p>
           <footer className="modal-footer">
-            <Button onClick={onClose} disabled={busy}>
+            <Button onClick={close} disabled={busy}>
               {t('キャンセル', 'Cancel')}
             </Button>
             <Button

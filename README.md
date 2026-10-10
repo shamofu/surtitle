@@ -16,6 +16,8 @@ Open **Transcript** for the subtitle list and the **Transcription** and **Sugges
 
 Settings and existing phrase edits use explicit saves. Leaving with unsaved changes offers save, discard or continue editing; a failed save keeps the input. **Review errors** in settings opens and focuses the first invalid field, including fields inside advanced options. Saving disables competing edits and dismissal. Dialog notifications remain visible inside the frontmost dialog, and Escape closes only that dialog before returning focus to its opener.
 
+UI transitions use a shared 120–180 ms motion rhythm, including dialog and panel exits. **Settings → Animations** follows the operating system by default; choose **Reduce motion** and save to disable animations throughout the app. Native video and subtitle rows retain their geometry during transitions.
+
 Long operations show their current stage near the action. Open **Activity** in the top bar to follow downloads, tool setup, audio preparation, AI jobs and data transfers across pages. Percentages appear only when the total is known; YouTube downloads show stored size instead. Downloading a tool is followed by verification and installation before it is ready. The activity list retains the latest 20 finished operations from the current app session. Closing it does not stop work; use the existing cancel actions when needed.
 
 Data lives under `%LOCALAPPDATA%\app.surtitle.desktop`. Original local media is referenced. Saved cards retain their source text and audio when subtitles change. [Learning export/restore](docs/data-transfer.md) supports CSV/TSV, subtitles, JSON and ZIP with audio; backups exclude original media, credentials, paid jobs, approvals and charge ledgers.

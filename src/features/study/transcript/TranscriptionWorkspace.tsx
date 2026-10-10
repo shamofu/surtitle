@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { AnimatedDetails, openAnimatedDetails } from '../../../shared/ui/AnimatedDetails';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { Mic2, RefreshCw } from 'lucide-react';
@@ -147,13 +148,13 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
     {!quote && <><p>{t('Transcribeの本文を使い、届いた部分から字幕を表示します。気になる箇所はあとから修正できます。', 'Use Transcribe text as subtitles as each part arrives. You can correct any passage later.')}</p>
     <p className="transcription-scope"><strong>{whole ? t('全編', 'Full media') : t('選択した区間', 'Selected range')}</strong> · {timestamp(from ?? 0)}–{timestamp(to ?? 0)} · {media.learningLanguage}</p></>}
     {!configured && <div className="notice"><p>{t('最初に文字起こし用のモデルと認証を設定してください。戻るとこの範囲から続けられます。', 'Set up a transcription model and credentials. This scope will be kept when you return.')}</p><Button onClick={() => void setup()} busy={phase === 'setup'}>{t('設定して戻る', 'Set up and return')}</Button></div>}
-    <details open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)}>
+    <AnimatedDetails open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)}>
       <summary>{t('範囲・モデルを変更', 'Change range or model')}</summary>
       <label className="check-field"><input type="checkbox" checked={whole} disabled={busy} onChange={event => changeScope(() => setWhole(event.target.checked))} />{t('全編を文字起こし', 'Transcribe the whole media')}</label>
       {!whole && <div className="field-row"><Field label={t('開始', 'From')}><input value={start} disabled={busy} onChange={event => changeScope(() => setStart(event.target.value))} /></Field><Field label={t('終了', 'To')}><input value={end} disabled={busy} onChange={event => changeScope(() => setEnd(event.target.value))} /></Field></div>}
       <ModelEditor purpose="transcription" value={model} location={data?.settings.vertexLocation || 'global'} disabled={busy} onChange={value => { setModel(value); setQuote(undefined); }} />
       <Button disabled={busy || !configured || !valid} onClick={() => void estimate(true)}>{t('見積もりを更新', 'Update estimate')}</Button>
-    </details>
+    </AnimatedDetails>
     {!valid && <p role="status">{media.durationMs ? t('作品内の開始・終了時刻を指定してください。', 'Choose a valid range within the media.') : t('作品の長さを確認しています…', 'Checking media duration…')}</p>}
     {phase === 'preparing' ? <PreparationProgress operationId={preparationSession.session?.operationId} label={media.title} /> : busy && <ProgressStatus label={media.title} phase={phase} status="running" />}
     {problem && <p className="notice warning" role="alert">{problem}</p>}
@@ -183,7 +184,7 @@ function TranscriptHistory({ jobId }: { jobId: string }) {
     {!view && !problem && <p role="status">{t('保存した結果を読み込み中…', 'Loading saved results…')}</p>}
     {view && <><p>{t('文字起こし時の記録です。現在の字幕は一覧から編集できます。', 'This is the original transcription record. Edit current subtitles in the list.')}</p>
       {!view.applied && view.canApply && <Button busy={applying} onClick={() => void useSavedResults()}>{t('保存済みの結果を使う', 'Use saved results')}</Button>}
-      {view.draft.conflicts.length > 0 && <details><summary>{t('保存された境界の候補', 'Saved boundary alternatives')}</summary>
+      {view.draft.conflicts.length > 0 && <AnimatedDetails><summary>{t('保存された境界の候補', 'Saved boundary alternatives')}</summary>
         <p>{t('候補を使う場合は、字幕一覧の該当行を編集して選べます。', 'To use an alternative, open the corresponding subtitle row for editing.')}</p>
         {view.draft.conflicts.map(conflict => <div key={conflict.id}>
           <p>{timestamp(conflict.startMs)}–{timestamp(conflict.endMs)}</p>
@@ -191,11 +192,11 @@ function TranscriptHistory({ jobId }: { jobId: string }) {
             {cues.map((cue, cueIndex) => <p key={cueIndex}><small>{timestamp(cue.startMs)}–{timestamp(cue.endMs)}</small> {cue.text}</p>)}
           </blockquote>)}
         </div>)}
-      </details>}
-      {view.draft.chunks.map(chunk => <details key={chunk.ordinal}><summary>{timestamp(chunk.coreStartMs)}–{timestamp(chunk.coreEndMs)} · {chunk.status === 'pending' ? t('未取得', 'Not received') : t('受信済み', 'Received')}</summary>
+      </AnimatedDetails>}
+      {view.draft.chunks.map(chunk => <AnimatedDetails key={chunk.ordinal}><summary>{timestamp(chunk.coreStartMs)}–{timestamp(chunk.coreEndMs)} · {chunk.status === 'pending' ? t('未取得', 'Not received') : t('受信済み', 'Received')}</summary>
         {chunk.segments.map((cue, index) => <p key={index}>{cue.text}</p>)}
         <StoredResponse jobId={jobId} ordinal={chunk.ordinal} />
-      </details>)}</>}
+      </AnimatedDetails>)}</>}
   </div>;
 }
 function StoredResponse({ jobId, ordinal }: { jobId: string; ordinal: number }) {
@@ -228,17 +229,17 @@ function TranscriptionJob({ job, focused, active, history, onReview, onRequest }
   const details = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     if (!focused || !active) return;
-    if (details.current) details.current.open = true;
+    if (details.current) openAnimatedDetails(details.current);
     target.current?.focus({ preventScroll: true });
     target.current?.scrollIntoView?.({ block: 'nearest' });
   }, [focused, active]);
   return <div className="transcription-job" data-job-id={job.id} ref={target} tabIndex={-1}>
     <TranscriptionProgress job={job} />
     {!!job.transcriptionRanges?.length && <div className="transcription-ranges" aria-label={t('区間ごとの状態', 'Transcription ranges')}>{job.transcriptionRanges.map((range, index) => <span key={index} className={`range-${range.state}`} title={`${timestamp(range.startMs)}–${timestamp(range.endMs)} · ${range.state}`} />)}</div>}
-    {(job.issue || job.retry || (job.status === 'running' && job.pacing)) && <details ref={details}>
+    {(job.issue || job.retry || (job.status === 'running' && job.pacing)) && <AnimatedDetails ref={details}>
       <summary>{t('処理の詳細', 'Processing details')}</summary>
       <JobProcessingDetails job={job} />
-    </details>}
+    </AnimatedDetails>}
     <JobActions job={job} inlineTranscription onReviewTranscript={onReview} />
     {job.transcriptionRanges?.filter(range => range.state === 'failed').map((range, index) => <Button key={index} onClick={() => onRequest(range)}>{t('この区間を再文字起こし', 'Transcribe this range again')} · {timestamp(range.startMs)}–{timestamp(range.endMs)}</Button>)}
     {history && <TranscriptHistory jobId={job.id} />}
@@ -265,9 +266,9 @@ export function TranscriptionWorkspace({ media, request, onRequest, onDone, onSt
     {request && <TranscriptionSetup key={request.id} media={media} request={request} onDone={onDone} onStarted={onStarted} />}
     {!request && continuations.filter(item => item.kind === 'transcribe' && item.mediaId === media.id && (!item.quoteId || !jobs.some(job => job.id === item.quoteId))).map(item => <Button key={item.id} onClick={() => onResume?.(item)}>{t('途中の文字起こしを続ける', 'Continue transcription setup')}</Button>)}
     {current.filter(job => !request || job.id === focusJobId).map(showJob)}
-    {(completed.length > 0 || onOpenEarlierDrafts) && <details><summary>{t('文字起こしの履歴', 'Transcription history')}{completed.length > 0 ? ` (${completed.length})` : ''}</summary>{completed.map(showJob)}
+    {(completed.length > 0 || onOpenEarlierDrafts) && <AnimatedDetails><summary>{t('文字起こしの履歴', 'Transcription history')}{completed.length > 0 ? ` (${completed.length})` : ''}</summary>{completed.map(showJob)}
       {onOpenEarlierDrafts && <Button variant="ghost" onClick={onOpenEarlierDrafts}>{t('以前の下書きを開く', 'Open earlier drafts')}</Button>}
-    </details>}
+    </AnimatedDetails>}
   </section>;
 }
 

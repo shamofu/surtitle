@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { AnimatedDetails } from '../../../shared/ui/AnimatedDetails';
 import { useDraftStudy, PAGE_SIZE, BLOCK_PAGE_SIZE } from './useDraftStudy';
 import { cueOrigin } from './provenance';
 import { DraftSelectionEditor } from './DraftSelectionEditor';
@@ -284,7 +285,7 @@ function DraftStudyContent({
               )}
             </p>
           )}
-          <details className="draft-study-blocks">
+          <AnimatedDetails className="draft-study-blocks">
             <summary>
               {t(
                 '音声区間と保存された本文',
@@ -403,7 +404,7 @@ function DraftStudyContent({
                 </Button>
               </div>
             )}
-          </details>
+          </AnimatedDetails>
         </>
       )}
       {!!bookmarks.length && (

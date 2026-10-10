@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { AnimatedDetails } from '../../../shared/ui/AnimatedDetails';
 import { DraftCardDialog, DraftAiDialog } from './DraftDialogs';
 import { useMounted } from './lifecycle';
 import type { PlayRange } from './lifecycle';
@@ -380,7 +381,7 @@ export function DraftSelectionEditor({
           )}
         </section>
       )}
-      <details>
+      <AnimatedDetails>
         <summary>
           {t('この下書きの書き出し・削除', 'Export or remove this draft')}
         </summary>
@@ -446,7 +447,7 @@ export function DraftSelectionEditor({
             {t('あとで確認する一覧から外す', 'Remove from kept drafts')}
           </Button>
         </div>
-      </details>
+      </AnimatedDetails>
       <Button variant="ghost" disabled={busy} onClick={onClose}>
         {t('閉じて視聴を続ける', 'Close and keep watching')}
       </Button>

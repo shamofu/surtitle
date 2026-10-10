@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { AnimatedDetails } from '../../../shared/ui/AnimatedDetails';
 import { Alternatives } from './Preview';
 import { useState } from 'react';
 
@@ -183,12 +184,12 @@ export function ResultEvidence({
       )}
       {detail && (
         <>
-          <details>
+          <AnimatedDetails>
             <summary>{t('元の保存応答', 'Original saved response')}</summary>
             <pre>
               {JSON.stringify(detail.evidence?.response ?? null, null, 2)}
             </pre>
-          </details>
+          </AnimatedDetails>
           {detail.reparses.map((candidate) => (
             <section key={candidate.id}>
               <h4>
@@ -286,7 +287,7 @@ export function JoinedSubtitles({
     'The original subtitles could not be displayed. Refresh the saved results.',
   );
   return (
-    <details className="draft-chunks">
+    <AnimatedDetails className="draft-chunks">
       <summary>
         {t(
           `自動でつないだ字幕を確認（${joins.length} 件）`,
@@ -370,6 +371,6 @@ export function JoinedSubtitles({
           </section>
         );
       })}
-    </details>
+    </AnimatedDetails>
   );
 }

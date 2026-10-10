@@ -20,7 +20,7 @@ import type { DraftSelection } from './api';
 import { timestamp } from '../../../shared/format';
 import { QuoteApproval } from '../../ai/QuoteApproval';
 import { ModelEditor, emptyModel } from '../../ai/ModelEditor';
-import { Button, Field, Modal } from '../../../shared/ui/index';
+import { Button, Field, Modal, useModalExit } from '../../../shared/ui/index';
 import { useActivities } from '../../../app/providers/Activities';
 import { ProgressStatus } from '../../../shared/ui/ProgressStatus';
 import './draft-study.css';
@@ -34,6 +34,7 @@ export function DraftCardDialog({
   candidate?: VocabularyCandidate;
   onClose: () => void;
 }) {
+  const exit = useModalExit();
   const { mutate } = useDataActions();
   const { t } = useAppearance();
   const { report } = useNotifications();
@@ -46,7 +47,7 @@ export function DraftCardDialog({
   const [busy, setBusy] = useState(false);
   const locked = useRef(false);
   async function save() {
-    if (locked.current || !term.trim() || !meaning.trim()) return;
+    if (exit.exiting || locked.current || !term.trim() || !meaning.trim()) return;
     locked.current = true;
     setBusy(true);
     const operationId = `local:${crypto.randomUUID()}`;
@@ -71,14 +72,15 @@ export function DraftCardDialog({
     if (!mounted.current) return;
     locked.current = false;
     setBusy(false);
-    if (result) onClose();
+    if (result) await exit.close(onClose);
   }
   return (
     <Modal
+      {...exit.modalProps}
       title={t('この表現を覚える', 'Keep this phrase')}
-      closeDisabled={busy}
+      closeDisabled={busy || exit.exiting}
       onClose={() => {
-        if (!busy) onClose();
+        if (!busy && !exit.exiting) void exit.close(onClose);
       }}
     >
       <p className="draft-study-example">{selection.text}</p>
@@ -124,7 +126,7 @@ export function DraftCardDialog({
         />
       </Field>
       <footer className="modal-footer">
-        <Button disabled={busy} onClick={onClose}>
+        <Button disabled={busy || exit.exiting} onClick={() => void exit.close(onClose)}>
           {t('キャンセル', 'Cancel')}
         </Button>
         <Button
@@ -147,6 +149,7 @@ export function DraftAiDialog({
   selection: DraftSelection;
   onClose: () => void;
 }) {
+  const exit = useModalExit();
   const { mutate } = useDataActions();
   const { t } = useAppearance();
   const { data } = useSnapshot();
@@ -167,7 +170,7 @@ export function DraftAiDialog({
   const locked = useRef(false);
   async function estimate() {
     if (
-      locked.current ||
+      exit.exiting || locked.current ||
       !model.modelId.trim() ||
       !Number.isInteger(model.maxOutputTokens) ||
       model.maxOutputTokens <= 0
@@ -193,7 +196,7 @@ export function DraftAiDialog({
     if (result) setQuote(result);
   }
   async function approve() {
-    if (!quote || locked.current) return;
+    if (exit.exiting || !quote || locked.current) return;
     locked.current = true;
     setBusy(true);
     const result = await report(
@@ -206,14 +209,15 @@ export function DraftAiDialog({
     if (!mounted.current) return;
     locked.current = false;
     setBusy(false);
-    if (result) onClose();
+    if (result) await exit.close(onClose);
   }
   return (
     <Modal
+      {...exit.modalProps}
       title={t('この表現に、AIの助けを', 'AI for this phrase')}
-      closeDisabled={busy}
+      closeDisabled={busy || exit.exiting}
       onClose={() => {
-        if (!busy) onClose();
+        if (!busy && !exit.exiting) void exit.close(onClose);
       }}
     >
       <p className="draft-study-example">{selection.text}</p>

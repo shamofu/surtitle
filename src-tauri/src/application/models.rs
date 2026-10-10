@@ -88,6 +88,10 @@ fn validate_model(model: &AiModelPreference, location: &str, allow_empty: bool) 
 
 pub(crate) fn validate_settings(settings: &AppSettings) -> Result<()> {
     ensure!(
+        ["system", "reduce"].contains(&settings.motion_preference.as_str()),
+        "Invalid animation preference"
+    );
+    ensure!(
         !settings.vertex_location.is_empty()
             && settings.vertex_location.len() <= 63
             && settings
@@ -353,6 +357,29 @@ fn import_credential_file(state: &AppState, file: Option<&std::path::Path>) -> R
 #[cfg(test)]
 mod settings_tests {
     use super::*;
+
+    #[test]
+    fn motion_preference_is_saved_reopened_and_invalid_values_are_rejected() {
+        let root = tempfile::tempdir().unwrap();
+        let state = Services::open(root.path().to_path_buf()).unwrap();
+        assert_eq!(state.settings().unwrap().motion_preference, "system");
+        let mut settings = state.settings().unwrap();
+        settings.motion_preference = "reduce".into();
+        update_settings(state.clone(), settings).unwrap();
+        drop(state);
+        let reopened = Services::open(root.path().to_path_buf()).unwrap();
+        assert_eq!(reopened.settings().unwrap().motion_preference, "reduce");
+        for invalid in ["", "always", "full"] {
+            let mut settings = reopened.settings().unwrap();
+            settings.motion_preference = invalid.into();
+            assert!(update_settings(reopened.clone(), settings).is_err());
+            assert_eq!(reopened.settings().unwrap().motion_preference, "reduce");
+        }
+        let mut settings = reopened.settings().unwrap();
+        settings.motion_preference = "system".into();
+        update_settings(reopened.clone(), settings).unwrap();
+        assert_eq!(reopened.settings().unwrap().motion_preference, "system");
+    }
 
     #[test]
     fn cancelled_or_failed_credential_import_never_reports_a_saved_key() {

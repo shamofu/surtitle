@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from '@playwright/test';
 
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+test.describe(`dialog motion: ${reducedMotion}`, () => {
+test.use({ reducedMotion });
+
 test.beforeEach(async ({ page }) => {
   await page.route(/\/src\/main\.tsx(?:\?|$)/, route => route.fulfill({
     contentType: 'application/javascript', body: 'import "/e2e/browser/surface-fixture.tsx";',
@@ -88,4 +92,7 @@ for (const viewport of [{ width: 1024, height: 700 }, { width: 1440, height: 900
     await expect(notification).toHaveCount(0);
     await expect(dialog.getByRole('textbox', { name: 'Phrase 20', exact: true })).toHaveValue('An editable phrase');
   });
+}
+
+});
 }

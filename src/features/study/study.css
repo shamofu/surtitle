@@ -12,6 +12,7 @@
 .study-top-actions .button { font-size: 13px; }
 .study-auxiliary { flex: 0 0 auto; max-height: min(180px, 25dvh); overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 8px; }
 .study-auxiliary:empty { display: none; }
+.study-auxiliary:not(:has(> :not([hidden]))) { display: none; }
 .study-auxiliary > * { flex-shrink: 0; }
 .study-auxiliary > .notice { margin: 0; flex-wrap: wrap; }
 .study-auxiliary > details.notice { display: block; }
@@ -43,6 +44,13 @@
 .study-companion { min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--surface); border-radius: 8px; overflow: hidden; }
 .study-transcript, .transcript-view, .transcription-view, .transcript-draft-view { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
 .study-companion[hidden], .study-transcript[hidden], .transcription-view[hidden] { display: none; }
+.study-companion-body, .transcript-tab-content { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
+.study-motion-region { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
+.study-motion-region[hidden] { display: none; }
+.study-motion-region[data-exiting] { position: absolute; inset: 0; pointer-events: none; }
+.study-motion-inline { flex: 0 0 auto; }
+.study-motion-inline[data-exiting] { position: static; }
+.study-companion[inert] { pointer-events: none; }
 .transcript-draft-view > .button { flex-shrink: 0; align-self: flex-start; margin: 8px; white-space: normal; }
 .companion-heading { flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
 .companion-heading h2 { font-size: 15px; font-weight: 600; }

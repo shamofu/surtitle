@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import * as m from 'motion/react-m';
 import { Check, FileCheck2, Pause, RotateCw, Square } from 'lucide-react';
 import { aiApi } from './api';
 import type { AiQuote } from '../../shared/contracts/ai';
@@ -11,7 +12,8 @@ import {
   useNotifications,
   useSnapshot,
 } from '../../app/runtime';
-import { Button, Modal } from '../../shared/ui/index';
+import { Button, Modal, useModalExit } from '../../shared/ui/index';
+import { motionDurations, motionEase, useAppMotion } from '../../shared/motion';
 import { QuoteApproval } from './QuoteApproval';
 import { timestamp } from '../../shared/format';
 import { UnknownAttempt } from '../settings/PausedJobs';
@@ -32,12 +34,20 @@ export function JobActions({
   const [busy, setBusy] = useState(false);
   const [quote, setQuote] = useState<AiQuote>();
   const [saved, setSaved] = useState<SavedAiResult[]>();
+  const savedExit = useModalExit(!!saved);
+  const quoteExit = useModalExit(!!quote);
+  const exiting = savedExit.exiting || quoteExit.exiting;
+  function closeQuote() {
+    void quoteExit.close(() => setQuote(undefined));
+  }
   async function perform(action: () => Promise<void>) {
+    if (busy || exiting) return;
     setBusy(true);
     await report(action);
     setBusy(false);
   }
   async function estimateRetry() {
+    if (busy || exiting) return;
     setBusy(true);
     const result = await report(() =>
       mutate(() => aiApi.createRetryQuote(job.id), { kind: 'snapshot' }),
@@ -46,28 +56,31 @@ export function JobActions({
     setBusy(false);
   }
   async function openQuote() {
+    if (busy || exiting) return;
     setBusy(true);
     const result = await report(() => mutate(() => aiApi.reviewAiJob(job.id), { kind: 'snapshot' }));
     if (result) setQuote(result);
     setBusy(false);
   }
   async function approve() {
-    if (!quote) return;
+    if (!quote || busy || exiting) return;
     setBusy(true);
     const success = await report(async () => {
       await mutate(() => quote.isRetry ? aiApi.reapproveQuote(quote) : aiApi.approveQuote(quote), { kind: 'snapshot' });
       return true;
     });
     setBusy(false);
-    if (success) setQuote(undefined);
+    if (success) closeQuote();
   }
   async function openSaved() {
+    if (busy || exiting) return;
     setBusy(true);
     const results = await report(() => aiApi.savedAiResults(job.id));
     if (results) setSaved(results);
     setBusy(false);
   }
   async function applySaved(result: SavedAiResult) {
+    if (busy || exiting) return;
     setBusy(true);
     const results = await report(
       async () => {
@@ -84,7 +97,7 @@ export function JobActions({
   }
   return (
     <>
-      <div className="inline-actions job-actions">
+      <div className="inline-actions job-actions" inert={exiting}>
         {job.issue?.nextAction === 'retry_local' && <Button busy={busy} onClick={() => void perform(() => mutate(() => aiApi.retryAiApplication(job.id), { kind: 'snapshot' }))}>{t('保存結果の反映を再試行', 'Retry applying saved results')}</Button>}
         {job.status === 'queued' && <Button busy={busy} onClick={() => void openQuote()}>{t('見積もりを開く', 'Open estimate')}</Button>}
         {(job.hasTranscriptResult ?? job.transcriptReview) && onReviewTranscript && (
@@ -139,11 +152,12 @@ export function JobActions({
       </div>
       {saved && (
         <Modal
+          {...savedExit.modalProps}
           title={t('保存済み翻訳を確認', 'Review saved translations')}
-          closeDisabled={busy}
+          closeDisabled={busy || exiting}
           eyebrow="SAVED ON THIS DEVICE"
           onClose={() => {
-            if (!busy) setSaved(undefined);
+            if (!busy) void savedExit.close(() => setSaved(undefined));
           }}
         >
           <p className="notice">
@@ -191,11 +205,12 @@ export function JobActions({
       )}
       {quote && (
         <JobQuoteSurface
+          modalProps={quoteExit.modalProps}
           inline={inlineTranscription}
-          busy={busy}
+          busy={busy || quoteExit.exiting}
           title={quote.isRetry ? t('残りの処理を確認', 'Review remaining work') : t('実行の見積もり', 'Job estimate')}
           onClose={() => {
-            if (!busy) setQuote(undefined);
+            if (!busy) closeQuote();
           }}
         >
           {quote.isRetry && <p className="notice">
@@ -208,11 +223,11 @@ export function JobActions({
             {attempt.jobId !== job.id && <p>{t('別の処理の結果確認が必要です。', 'Another job has an unknown outcome to acknowledge.')}</p>}
             <UnknownAttempt attempt={attempt} onResolved={() => void openQuote()} />
           </div>)}
-          <Button variant="ghost" busy={busy} onClick={() => void openQuote()}>{t('見積もりを更新', 'Refresh estimate')}</Button>
+          <Button variant="ghost" busy={busy} disabled={quoteExit.exiting} onClick={() => void openQuote()}>{t('見積もりを更新', 'Refresh estimate')}</Button>
           <QuoteApproval
             key={quote.id}
             quote={quote}
-            busy={busy}
+            busy={busy || quoteExit.exiting}
             transcription={inlineTranscription}
             onApprove={() => void approve()}
           />
@@ -222,8 +237,27 @@ export function JobActions({
   );
 }
 
-function JobQuoteSurface({ inline, title, onClose, children, busy }: { inline: boolean; title: string; onClose: () => void; children: ReactNode; busy: boolean }) {
+function JobQuoteSurface({ inline, title, onClose, children, busy, modalProps }: { inline: boolean; title: string; onClose: () => void; children: ReactNode; busy: boolean; modalProps: ReturnType<typeof useModalExit>['modalProps'] }) {
   const { t } = useAppearance();
-  return inline ? <section aria-label={title}><h4>{title}</h4>{children}<Button variant="ghost" disabled={busy} onClick={onClose}>{t('閉じる', 'Close')}</Button></section>
-    : <Modal title={title} eyebrow="A NEW QUOTE, A NEW DECISION" closeDisabled={busy} onClose={onClose}>{children}</Modal>;
+  const { reducedMotion } = useAppMotion();
+  const { open, onExited } = modalProps;
+  const revision = useRef(0);
+  useLayoutEffect(() => {
+    const generation = ++revision.current;
+    if (!inline || open) return;
+    const finish = () => { if (generation === revision.current) onExited(); };
+    if (reducedMotion) { finish(); return; }
+    // Keep completion bounded even when WebView animation frames are suspended.
+    const timer = window.setTimeout(finish, motionDurations.exit * 1000);
+    return () => { ++revision.current; window.clearTimeout(timer); };
+  }, [inline, open, reducedMotion, onExited]);
+  return inline ? <m.section aria-label={title} data-state={open ? 'open' : 'closing'} inert={!open} aria-hidden={!open || undefined}
+    initial={reducedMotion ? false : 'hidden'} animate={open ? 'shown' : 'hidden'}
+    variants={{ shown: { opacity: 1, y: 0 }, hidden: { opacity: 0, y: reducedMotion ? 0 : 4 } }}
+    transition={{ duration: reducedMotion ? 0 : open ? motionDurations.enter : motionDurations.exit, ease: motionEase }}
+    onAnimationComplete={definition => { if (definition === 'hidden' && !open) onExited(); }}
+    onClickCapture={event => { if (!open) { event.preventDefault(); event.stopPropagation(); } }}
+    onKeyDownCapture={event => { if (!open) { event.preventDefault(); event.stopPropagation(); } }}
+  ><h4>{title}</h4>{children}<Button variant="ghost" disabled={busy || !open} onClick={onClose}>{t('閉じる', 'Close')}</Button></m.section>
+    : <Modal {...modalProps} title={title} eyebrow="A NEW QUOTE, A NEW DECISION" closeDisabled={busy} onClose={onClose}>{children}</Modal>;
 }

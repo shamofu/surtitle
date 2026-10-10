@@ -26,7 +26,8 @@ import {
   useNotifications,
 } from '../../app/runtime';
 import { parseTimestamp, timestamp } from '../../shared/format';
-import { Button, Field, Modal } from '../../shared/ui/index';
+import { Button, Field, Modal, useModalExit } from '../../shared/ui/index';
+import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
 import { ModelEditor, emptyModel } from './ModelEditor';
 import { useActivities } from '../../app/providers/Activities';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
@@ -62,6 +63,7 @@ export function AiDialog({
   const { report } = useNotifications();
   const { runTracked } = useActivities();
   const navigate = useNavigate();
+  const exit = useModalExit();
   const [continuationId] = useState(() => continuation?.id || crypto.randomUUID());
   const [kind, setKind] = useState<AiQuote['kind']>(continuation?.kind || initialKind);
   const [wholeMedia, setWholeMedia] = useState(continuation?.wholeMedia ?? true);
@@ -150,7 +152,7 @@ export function AiDialog({
     if (preparationSession.session?.result && kind === 'transcribe') setPreparation(preparationSession.session.result);
   }, [preparationSession.session?.result, kind]);
   async function prepare() {
-    if (!valid) return;
+    if (!valid || exit.exiting) return;
     setPreparing(true);
     setPreparation(undefined);
     const result = await report(() => preparationSession.prepare(operationId =>
@@ -170,7 +172,7 @@ export function AiDialog({
     return result;
   }
   async function estimate() {
-    if (!valid || !modelValid || invalidSource || pending.current || busy || preparing || !data?.settings.credentialConfigured)
+    if (!valid || !modelValid || invalidSource || pending.current || busy || preparing || exit.exiting || !data?.settings.credentialConfigured)
       return;
     pending.current = true; setBusy(true); setBusyPhase('estimating'); setRestored(false);
     try {
@@ -200,7 +202,7 @@ export function AiDialog({
     }
   }
   async function approve() {
-    if (!quote || invalidSource || revision !== boundRevision) return;
+    if (!quote || invalidSource || busy || exit.exiting || revision !== boundRevision) return;
     setBusy(true); setBusyPhase('starting');
     const result = await report(
       async () => {
@@ -209,7 +211,7 @@ export function AiDialog({
       },
       t('承認した処理を開始しました。', 'Your approved job has started.'),
     );
-    if (result) { preparationSession.forgetEstimate(); onApproved?.(kind, focusTerm.trim()); await report(() => continuationApi.discard(continuationId)); onClose(); }
+    if (result) { preparationSession.forgetEstimate(); onApproved?.(kind, focusTerm.trim()); await report(() => continuationApi.discard(continuationId)); await exit.close(onClose); }
     setBusy(false);
   }
   function saveContinuation(quoteId = quote?.id, preparationId = preparation?.id, sourceSignature = mediaSignature) {
@@ -219,11 +221,11 @@ export function AiDialog({
       sourceMediaSignature: kind === 'transcribe' ? sourceSignature : boundMediaSignature });
   }
   async function openSettings() {
-    if (busy || preparing) return;
+    if (busy || preparing || exit.exiting) return;
     setBusy(true); setBusyPhase('setup');
     const saved = await report(() => saveContinuation());
     setBusy(false);
-    if (saved) { onClose(); void navigate({ to: '/settings', search: { resume: saved.id } }); }
+    if (saved) await report(() => exit.close(async () => { onClose(); await navigate({ to: '/settings', search: { resume: saved.id } }); }));
   }
   useEffect(() => {
     if (!continuation?.quoteId || continuationMediaChanged || !nativeAvailable() || revision !== initialRevision.current) return;
@@ -232,18 +234,19 @@ export function AiDialog({
     return () => { active = false; };
   }, [continuation?.quoteId, continuationMediaChanged, report, runTracked, revision]);
   async function reselectSource() {
-    if (busy || preparing || !onReselectSource) return;
+    if (busy || preparing || exit.exiting || !onReselectSource) return;
     setBusy(true); setBusyPhase('setup');
     const saved = await report(() => saveContinuation());
     setBusy(false);
-    if (saved) onReselectSource(saved);
+    if (saved) await exit.close(() => onReselectSource(saved));
   }
   return (
     <Modal
-      closeDisabled={busy || preparing}
+      {...exit.modalProps}
+      closeDisabled={busy || preparing || exit.exiting}
       title={t('AIで学習を補助', 'AI assistance')}
       onClose={() => {
-        if (!busy && !preparing) onClose();
+        if (!busy && !preparing) void exit.close(onClose);
       }}
     >
       {restored && <p className="notice" role="status">{t('データを復元しました。対象を確認してから見積もりを準備してください。', 'Data was restored. Check the source and prepare a new estimate.')}</p>}
@@ -453,7 +456,7 @@ export function AiDialog({
               ) : null}
             </div>
           )}
-          <details className="ai-model-settings" open={!modelValid}>
+          <AnimatedDetails className="ai-model-settings" open={!modelValid}>
             <summary>{modelValid ? `${t('使用するモデル', 'Model')}: ${selectedModel.modelId}` : t('モデルを選ぶ', 'Choose a model')}</summary>
             <ModelEditor
               key={purpose}
@@ -465,7 +468,7 @@ export function AiDialog({
                 setModels((current) => ({ ...current, [purpose]: model }))
               }
             />
-          </details>
+          </AnimatedDetails>
           <div className="notice">
             <ShieldCheck size={18} />
             <span>
@@ -485,7 +488,7 @@ export function AiDialog({
             </p>
           )}
           <footer className="modal-footer">
-            <Button onClick={onClose} disabled={busy || preparing}>
+            <Button onClick={() => void exit.close(onClose)} disabled={busy || preparing || exit.exiting}>
               {t('キャンセル', 'Cancel')}
             </Button>
             <Button

@@ -107,6 +107,33 @@ function snapshot(value: AppSettings): AppSnapshot {
 }
 
 describe('settings refresh preserves unrelated unsaved edits', () => {
+  it('normalizes legacy motion settings and only saves a changed preference on request', async () => {
+    context.data = snapshot(settings());
+    render(<SettingsPage />);
+    const animations = screen.getByRole('combobox', { name: 'Animations' });
+    expect(animations).toHaveValue('system');
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    fireEvent.change(animations, { target: { value: 'reduce' } });
+    expect(settingsApi.updateSettings).not.toHaveBeenCalled();
+    expect(screen.getByText('You have unsaved changes')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(settingsApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ motionPreference: 'reduce' })));
+  });
+
+  it('preserves the motion draft after save failure and unrelated snapshot refresh', async () => {
+    const initial = { ...settings(), motionPreference: 'system' as const };
+    context.data = snapshot(initial);
+    const view = render(<SettingsPage />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Animations' }), { target: { value: 'reduce' } });
+    vi.mocked(settingsApi.updateSettings).mockRejectedValueOnce(new Error('save failed'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled());
+    context.data = snapshot({ ...initial, theme: 'light' });
+    view.rerender(<SettingsPage />);
+    expect(screen.getByRole('combobox', { name: 'Animations' })).toHaveValue('reduce');
+    expect(screen.getByRole('combobox', { name: 'Theme' })).toHaveValue('light');
+  });
+
   it('keeps settings saved across refreshes when no model preferences exist', () => {
     const initial = { ...settings(), aiModels: undefined };
     context.data = snapshot(initial);
@@ -458,6 +485,7 @@ describe('guided settings and shared model catalogue', () => {
     let reject!: (error: Error) => void;
     vi.mocked(settingsApi.updateSettings).mockReturnValueOnce(new Promise((_resolve, rejectSave) => { reject = rejectSave; }));
     render(<SettingsPage />);
+    fireEvent.click(screen.getByText('Detailed settings by purpose'));
     const language = screen.getByRole('combobox', { name: 'Learning language' });
     fireEvent.change(language, { target: { value: 'French' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -475,6 +503,7 @@ describe('guided settings and shared model catalogue', () => {
     context.data = snapshot({ ...settings(), credentialConfigured: true });
     vi.mocked(aiApi.vertexModels).mockResolvedValue([{ id: 'gemini-shared', displayName: 'Shared model' }]);
     const { container } = render(<SettingsPage />);
+    fireEvent.click(screen.getByText('Detailed settings by purpose'));
     const buttons = screen.getAllByRole('button', { name: /Fetch Vertex/ });
     expect(buttons).toHaveLength(1);
     fireEvent.click(buttons[0]);
@@ -530,6 +559,7 @@ describe('guided settings and shared model catalogue', () => {
     context.data = snapshot({ ...settings(), credentialConfigured: true });
     vi.mocked(aiApi.vertexModels).mockRejectedValueOnce(new Error('denied'));
     render(<SettingsPage />);
+    fireEvent.click(screen.getByText('Detailed settings by purpose'));
     fireEvent.click(screen.getByRole('button', { name: /Fetch Vertex model/ }));
     await screen.findByText(/Could not fetch candidates/);
     const modelId = screen.getAllByRole('combobox', { name: /Gemini model ID/ })[1];

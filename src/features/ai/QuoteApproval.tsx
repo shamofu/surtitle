@@ -8,6 +8,7 @@ import type { AiQuote } from '../../shared/contracts/ai';
 import { useAppearance } from '../../app/runtime';
 import { money, quoteCanBeApproved, timestamp } from '../../shared/format';
 import { Button } from '../../shared/ui/index';
+import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
 
 export function QuoteApproval({
   quote,
@@ -80,7 +81,7 @@ export function QuoteApproval({
           </dd>
         </div>}
       </dl>
-      <details open={!transcription}>
+      <AnimatedDetails open={!transcription}>
         <summary>{t('料金・送信の詳細', 'Cost and request details')}</summary>
         <dl className="details-list">
         {transcription && <div><dt>{t('モデル', 'Model')}</dt><dd>{quote.model} · {quote.location || 'global'}</dd></div>}
@@ -128,7 +129,7 @@ export function QuoteApproval({
           </div>
         )}
       </dl>
-      </details>
+      </AnimatedDetails>
       {quote.warnings.map((warning, index) => (
         <p className="notice warning" key={index}>
           {warning}

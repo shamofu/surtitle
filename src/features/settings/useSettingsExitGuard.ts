@@ -4,6 +4,7 @@ import { useBlocker } from '@tanstack/react-router';
 import { useAppearance, useNotifications } from '../../app/runtime';
 import { nativeAvailable } from '../../shared/native/transport';
 import { closeWindow, subscribeWindowClose } from '../../shared/native/window';
+import { useModalExit } from '../../shared/ui';
 
 export function useSettingsExitGuard(dirty: boolean, saving: boolean, save: () => Promise<boolean | undefined>, preparing = false) {
   const { t } = useAppearance();
@@ -27,6 +28,8 @@ export function useSettingsExitGuard(dirty: boolean, saving: boolean, save: () =
     withResolver: true,
     enableBeforeUnload: dirty || saving || busy || preparing,
   });
+  const open = nativeClose || blocker.status === 'blocked';
+  const exit = useModalExit(open);
 
   useEffect(() => {
     if (!nativeAvailable()) return;
@@ -39,10 +42,12 @@ export function useSettingsExitGuard(dirty: boolean, saving: boolean, save: () =
   }, [notify]);
 
   function keepEditing() {
-    if (leaving.current || latest.current.saving) return;
-    setNativeClose(false);
-    setError('');
-    if (blocker.status === 'blocked') blocker.reset();
+    if (leaving.current || latest.current.saving || exit.exiting) return;
+    void exit.close(() => {
+      setNativeClose(false);
+      setError('');
+      if (blocker.status === 'blocked') blocker.reset();
+    });
   }
 
   async function leave(saveFirst: boolean) {
@@ -55,8 +60,10 @@ export function useSettingsExitGuard(dirty: boolean, saving: boolean, save: () =
         setError(t('設定を保存できませんでした。入力内容を確認して、もう一度保存してください。', 'Settings could not be saved. Check the values and try again.'));
         return;
       }
-      if (nativeClose) await closeWindow();
-      else if (blocker.status === 'blocked') blocker.proceed();
+      await exit.close(async () => {
+        if (nativeClose) await closeWindow();
+        else if (blocker.status === 'blocked') blocker.proceed();
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -66,8 +73,9 @@ export function useSettingsExitGuard(dirty: boolean, saving: boolean, save: () =
   }
 
   return {
-    open: nativeClose || blocker.status === 'blocked',
-    busy: busy || saving,
+    open,
+    modalProps: exit.modalProps,
+    busy: busy || saving || exit.exiting,
     error,
     keepEditing,
     saveAndLeave: () => leave(true),

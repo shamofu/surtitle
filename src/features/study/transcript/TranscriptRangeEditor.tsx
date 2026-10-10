@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { AnimatedDetails } from '../../../shared/ui/AnimatedDetails';
 import { useState } from 'react';
 import { Play } from 'lucide-react';
 import { studyApi } from '../api';
@@ -165,7 +166,7 @@ export function TranscriptRangeEditor({
           )}
         </p>
       )}
-      <details>
+      <AnimatedDetails>
         <summary>
           {t('修正前の字幕を表示', 'Show subtitles before manual correction')}
         </summary>
@@ -183,7 +184,7 @@ export function TranscriptRangeEditor({
             )}
           </p>
         )}
-      </details>
+      </AnimatedDetails>
       <SubtitleRows
         rows={rows}
         onChange={(value) => {

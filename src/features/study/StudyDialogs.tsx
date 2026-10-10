@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
 import { useEffect, useRef, useState } from 'react';
 
 import { AudioLines, BookmarkPlus, Check } from 'lucide-react';
@@ -17,7 +18,7 @@ import {
   useNotifications,
 } from '../../app/runtime';
 import { parseTimestamp, timestamp } from '../../shared/format';
-import { Button, Field, Modal } from '../../shared/ui/index';
+import { Button, Field, Modal, useModalExit } from '../../shared/ui/index';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { useActivities } from '../../app/providers/Activities';
 
@@ -58,6 +59,7 @@ export function EditDialog({
   onClose: () => void;
   onRetranscribe?: (range: { startMs: number; endMs: number }) => void;
 }) {
+  const exit = useModalExit();
   const { mutate } = useDataActions();
   const { t } = useAppearance();
   const { report, notify } = useNotifications();
@@ -73,7 +75,7 @@ export function EditDialog({
   const startMs = parseTimestamp(start),
     endMs = parseTimestamp(end);
   async function save() {
-    if (draft.stale || startMs === null || endMs === null || endMs <= startMs) return;
+    if (exit.exiting || draft.stale || startMs === null || endMs === null || endMs <= startMs) return;
     setBusy(true);
     const success = await report(
       async () => {
@@ -96,27 +98,28 @@ export function EditDialog({
       t('字幕を保存しました。', 'Subtitle saved.'),
     );
     setBusy(false);
-    if (success) onClose();
+    if (success) await exit.close(onClose);
   }
   async function close(discard = false) {
-    if (busy) return;
+    if (busy || exit.exiting) return;
     const success = await report(async () => { if (discard) await draft.discard(); else await draft.flush(); return true; });
-    if (success) onClose();
+    if (success) await exit.close(onClose);
   }
   async function retranscribe() {
-    if (busy || !onRetranscribe) return;
+    if (busy || exit.exiting || !onRetranscribe) return;
     setBusy(true);
     const saved = await report(async () => { await draft.flush(); return true; });
     setBusy(false);
-    if (saved) onRetranscribe({ startMs: segment.startMs, endMs: segment.endMs });
+    if (saved) await exit.close(() => onRetranscribe({ startMs: segment.startMs, endMs: segment.endMs }));
   }
   return (
     <Modal
+      {...exit.modalProps}
       title={t('字幕を編集', 'Edit subtitle')}
-      closeDisabled={busy}
+      closeDisabled={busy || exit.exiting}
       onClose={() => void close()}
     >
-      {!!segment.reviewIssues?.length && <details className="notice warning">
+      {!!segment.reviewIssues?.length && <AnimatedDetails className="notice warning">
         <summary>{t('自動字幕の注意点と候補', 'Automatic subtitle notes and alternatives')}</summary>
         <p>{t('以下は元の生成結果です。必要な箇所を編集して保存できます。', 'These are the original generated results. Edit the subtitle below to make corrections.')}</p>
         {segment.reviewIssues.map(issue => <div key={issue.id}>
@@ -129,7 +132,7 @@ export function EditDialog({
             <Button variant="ghost" disabled={busy || draft.stale} onClick={() => change({ text: alternative.text, start: timestamp(alternative.startMs, true), end: timestamp(alternative.endMs, true) })}>{t('この候補を使う', 'Use this alternative')}</Button>
           </blockquote>)}
         </div>)}
-      </details>}
+      </AnimatedDetails>}
       {segment.timingPrecision === 'source_block' && <p className="helper-text">{t('この時刻は取得元の音声範囲です。本文の修正だけでは正確な字幕時刻には変わりません。', 'These times identify the source audio range. Editing the text does not establish precise subtitle timing.')}</p>}
       {onRetranscribe && <Button variant="ghost" disabled={busy} onClick={() => void retranscribe()}>{t('この区間を再文字起こし', 'Transcribe this range again')}</Button>}
       <div className="field-row">
@@ -197,12 +200,13 @@ export function SaveCardDialog({
   initialTerm?: string;
   onClose: () => void;
 }) {
+  const exit = useModalExit();
   const { t } = useAppearance();
   const { report } = useNotifications();
   const [busy, setBusy] = useState(false);
   return (
-    <Modal title={t('フレーズを保存', 'Save phrase')} closeDisabled={busy} onClose={() => { if (!busy) void report(async () => { await flushEditorDrafts(); onClose(); }); }}>
-      <SaveCardForm segment={segment} candidate={candidate} initialTerm={initialTerm} onClose={onClose} onBusyChange={setBusy} />
+    <Modal {...exit.modalProps} title={t('フレーズを保存', 'Save phrase')} closeDisabled={busy || exit.exiting} onClose={() => { if (!busy && !exit.exiting) void report(async () => { await flushEditorDrafts(); await exit.close(onClose); }); }}>
+      <SaveCardForm segment={segment} candidate={candidate} initialTerm={initialTerm} onClose={() => void exit.close(onClose)} onBusyChange={setBusy} />
     </Modal>
   );
 }

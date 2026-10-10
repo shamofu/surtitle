@@ -41,6 +41,7 @@ import {
 import { money } from '../../shared/format';
 import { Button, Field, Modal, PageTitle } from '../../shared/ui/index';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
+import { AnimatedDetails, openAnimatedDetails } from '../../shared/ui/AnimatedDetails';
 import { useActivities } from '../../app/providers/Activities';
 import { LanguageInput } from '../../shared/ui/LanguageInput';
 import { TransferDialog } from '../transfer/TransferDialog';
@@ -50,6 +51,7 @@ import { ModelEditor, emptyModel, validOutputTokens } from '../ai/ModelEditor';
 function completeBudgets(settings: AppSettings): AppSettings {
   return {
     ...settings,
+    motionPreference: settings.motionPreference ?? 'system',
     monthlyBudgetUsd: settings.monthlyBudgetUsd ?? settings.dailyBudgetUsd,
     perJobBudgetUsd: settings.perJobBudgetUsd ?? settings.dailyBudgetUsd,
     aiModels: settings.aiModels ?? {},
@@ -242,7 +244,7 @@ export function SettingsPage() {
     const invalid = page.current?.querySelector<HTMLElement>('input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"]');
     if (!invalid) return;
     for (let ancestor = invalid.parentElement; ancestor; ancestor = ancestor.parentElement) {
-      if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+      if (ancestor instanceof HTMLDetailsElement) openAnimatedDetails(ancestor);
     }
     invalid.scrollIntoView({ block: 'center', behavior: 'smooth' });
     invalid.focus({ preventScroll: true });
@@ -353,7 +355,7 @@ export function SettingsPage() {
                     <option value="custom">{t('カスタム — 詳細を調整', 'Custom — adjust the details')}</option>
                   </select>
                 </Field>
-                <details className="settings-details" open={retentionCustom || retentionPreset == null}>
+                <AnimatedDetails className="settings-details" open={retentionCustom || retentionPreset == null}>
                   <summary>{t('復習の詳細設定', 'Advanced review settings')}</summary>
                   <Field label={t('目標の記憶保持率（%）', 'Target retention (%)')} error={errors.retention} hint={t('次の復習まで覚えていることを目指す割合です。高いほど復習が増えます。標準は90%です。', 'The proportion you aim to remember until the next review. Higher values mean more reviews. The standard is 90%.')}>
                   <input
@@ -368,7 +370,7 @@ export function SettingsPage() {
                     }}
                   />
                 </Field>
-                </details>
+                </AnimatedDetails>
                 </div>
               </div>
               <Field
@@ -432,6 +434,17 @@ export function SettingsPage() {
                     <option value="system">
                       {t('システムに合わせる', 'System')}
                     </option>
+                  </select>
+                </Field>
+              </div>
+              <div className="field-row">
+                <Field label={t('アニメーション', 'Animations')} hint={t('保存後に適用されます。動きを減らすと、画面の切り替えや開閉をすぐに完了します。', 'Applied after saving. Reduced motion makes transitions and dialogs complete immediately.')}>
+                  <select
+                    value={draft?.motionPreference ?? 'system'}
+                    onChange={(event) => change('motionPreference', event.target.value as AppSettings['motionPreference'])}
+                  >
+                    <option value="system">{t('OS設定に従う', 'Follow system settings')}</option>
+                    <option value="reduce">{t('アニメーションを減らす', 'Reduce motion')}</option>
                   </select>
                 </Field>
               </div>
@@ -531,7 +544,7 @@ export function SettingsPage() {
               {modelsBusy && <ProgressStatus label={t('AIモデルの候補', 'AI model candidates')} phase="discovering_models" />}
             </div>
             <ModelSetup models={draft?.aiModels || {}} location={draft?.vertexLocation || 'global'} candidates={modelCatalogue.key === catalogueKey ? modelCatalogue.models : []} disabled={!draft || busy || credentialBusy} onChange={aiModels => change('aiModels', aiModels)} />
-            <details><summary>{t('用途ごとの詳細設定', 'Detailed settings by purpose')}</summary>
+            <AnimatedDetails><summary>{t('用途ごとの詳細設定', 'Detailed settings by purpose')}</summary>
             {(
               [
                 'transcription',
@@ -575,7 +588,7 @@ export function SettingsPage() {
                 />
               </section>
             ))}
-            </details>
+            </AnimatedDetails>
           </section>
           <section id="budget" className="settings-card">
             <div className="settings-section-title">
@@ -642,7 +655,7 @@ export function SettingsPage() {
               `詳細の上限を設定済み：1日 ${money(draft!.dailyBudgetUsd)}、1処理 ${money(perJobBudget)}。月額と異なる上限だけを維持し、同じ上限は月額の変更に合わせます。`,
               `Advanced limits: ${money(draft!.dailyBudgetUsd)} per day and ${money(perJobBudget)} per job. Independent limits are kept when the monthly budget changes.`,
             )}</p>}
-            <details className="settings-details budget-details">
+            <AnimatedDetails className="settings-details budget-details">
               <summary>{t('1日・1処理の上限を調整', 'Adjust daily and per-job limits')}</summary>
               <p className="helper-text">{t('月額と同じ上限は月額の変更に合わせて調整します。個別の上限はそのまま維持します。各上限の0は、その期間・処理の上限なしを意味します。', 'Limits matching the monthly budget follow its changes. Independent limits are kept. Zero removes the limit for that period or job.')}</p>
               <div className="field-row">
@@ -659,7 +672,7 @@ export function SettingsPage() {
                   <Button disabled={!draft || busy || !Number.isFinite(monthlyBudget) || perJobBudget === monthlyBudget} onClick={() => change('perJobBudgetUsd', monthlyBudget)}>{t('月額と同じに戻す', 'Match the monthly budget')}</Button>
                 </div>
               </div>
-            </details>
+            </AnimatedDetails>
             <p className="notice">
               <ShieldCheck size={17} />
               {t(
@@ -798,7 +811,7 @@ export function SettingsPage() {
           </Button>
         </div>
       </div>
-      {exitGuard.open && <Modal title={t('変更を保存しますか？', 'Save your changes?')} onClose={exitGuard.keepEditing} closeDisabled={exitGuard.busy}>
+      {exitGuard.open && <Modal {...exitGuard.modalProps} title={t('変更を保存しますか？', 'Save your changes?')} onClose={exitGuard.keepEditing} closeDisabled={exitGuard.busy}>
         <p>{t('設定に未保存の変更があります。保存してから移動するか、変更を破棄できます。', 'Your settings have unsaved changes. Save them before leaving, or discard them.')}</p>
         {exitGuard.error && <p className="notice warning" role="alert">{exitGuard.error}</p>}
         {pricing && <p role="status">{t('モデルの料金を取得中です。取得が終わると保存できます。', 'Retrieving model prices. You can save when the requests finish.')}</p>}

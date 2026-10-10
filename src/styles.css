@@ -14,3 +14,4 @@
 @import './features/study/transcript/transcript.css';
 @import './features/library/management.css';
 @import './app/responsive.css';
+@import './shared/motion/motion.css';
