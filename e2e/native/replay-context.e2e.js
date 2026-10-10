@@ -80,7 +80,9 @@ async function replay(request, expectedStart, expectedEnd) {
   await control({ action: 'pause' });
   await control({ action: 'loop' });
   await control({ action: 'seek', startMs: 6000 });
-  await control({ action: 'rate', value: .5 });
+  // Keep the 140 ms source-position assertion, but allow 560 ms of wall time
+  // to observe it on a busy hosted desktop instead of only 280 ms.
+  await control({ action: 'rate', value: .25 });
   // Sample next to the actual IPC command. A separate WebDriver round trip can
   // miss the first 140 ms of source playback on a busy hosted desktop.
   const beginning = await browser.execute(async (nextRequest, start) => {

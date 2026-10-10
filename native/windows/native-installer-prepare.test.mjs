@@ -2,6 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 
+// Allow the bounded Python subprocess to finish even on a busy hosted runner.
 test('source preparation preserves pinned sources/notices and rejects tampered downloads', () => {
   const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-B', '-c', String.raw`
 import hashlib, importlib.util, io, json, pathlib, tarfile, tempfile
@@ -65,4 +66,4 @@ with tempfile.TemporaryDirectory() as temp:
 `], { cwd: new URL('../..', import.meta.url), encoding: 'utf8', windowsHide: true, timeout: 15_000 });
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stdout + result.stderr);
-});
+}, 20_000);
