@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render as renderView, screen, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { TranscriptionWorkspace } from '../features/study/transcript/TranscriptionWorkspace';
+import { TranscriptionStatus, TranscriptionWorkspace } from '../features/study/transcript/TranscriptionWorkspace';
 import { aiApi } from '../features/ai/api';
 import { continuationApi } from '../features/ai/continuations';
 import { studyApi } from '../features/study/api';
@@ -15,7 +15,7 @@ import { PreparationSessionsProvider, useClearPreparationSessions } from '../fea
 
 const render = (ui: ReactElement) => renderView(ui, { wrapper: PreparationSessionsProvider });
 function RestoreData() { const clear = useClearPreparationSessions(); return <button onClick={clear}>Restore data</button>; }
-const fixture = vi.hoisted(() => ({ configured: true, jobs: [] as JobSummary[], activities: [] as Activity[], navigate: vi.fn() }));
+const fixture = vi.hoisted(() => ({ configured: true, jobs: [] as JobSummary[], activities: [] as Activity[], navigate: vi.fn(), locale: 'en' as 'ja' | 'en' }));
 vi.mock('../app/providers/Activities', () => {
   const runTracked = async (_descriptor: unknown, action: () => Promise<unknown>) => action();
   return { useActivities: () => ({ activities: fixture.activities, runTracked }) };
@@ -30,7 +30,7 @@ vi.mock('../features/ai/continuations', () => ({ continuationApi: { save: vi.fn(
 vi.mock('../features/library/api', () => ({ libraryApi: { mediaStreams: vi.fn() } }));
 vi.mock('../features/study/api', () => ({ studyApi: { transcriptReview: vi.fn(), transcriptResultDetail: vi.fn(), applyTranscriptReview: vi.fn() } }));
 vi.mock('../app/runtime', () => {
-  const t = (_ja: string, en: string) => en;
+  const t = (ja: string, en: string) => fixture.locale === 'ja' ? ja : en;
   const report = async (action: () => Promise<unknown>) => { try { return await action(); } catch { return undefined; } };
   const runtime = () => ({ t, report, mutate: (action: () => Promise<unknown>) => action(),
     data: { settings: { credentialConfigured: fixture.configured, vertexProject: 'project', vertexLocation: 'global', aiModels: {
@@ -42,7 +42,7 @@ const media: Media = { id: 'media', title: 'Recording', path: 'C:/audio.wav', ki
 const preparation = { id: 'prepared', mediaId: 'media', startMs: 0, endMs: 300000, wholeMedia: true, coreDurationMs: 300000, sendDurationMs: 306000, chunkCount: 3 };
 const quote: AiQuote = { id: 'quote', mediaId: 'media', kind: 'transcribe', startMs: 0, endMs: 300000, model: 'gemini-transcribe', estimatedUsd: .1, maximumUsd: .2, inputTokens: 100, maxOutputTokens: 12288, expiresAt: '2099-01-01T00:00:00Z', warnings: [], canApprove: true, applyPolicy: 'auto' };
 beforeEach(() => {
-  fixture.configured = true; fixture.jobs = []; fixture.activities = [];
+  fixture.configured = true; fixture.jobs = []; fixture.activities = []; fixture.locale = 'en';
   vi.mocked(libraryApi.mediaStreams).mockResolvedValue([]);
   vi.mocked(aiApi.prepareTranscription).mockResolvedValue(preparation);
   vi.mocked(aiApi.createTranscriptionQuote).mockResolvedValue(quote);
@@ -51,7 +51,7 @@ beforeEach(() => {
   vi.mocked(continuationApi.save).mockImplementation(async request => request);
   vi.mocked(continuationApi.discard).mockResolvedValue(undefined);
 });
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.resetAllMocks(); });
 
 it('prepares and estimates on entry, then starts only after one explicit priced action', async () => {
   const done = vi.fn();
@@ -141,6 +141,7 @@ it('shows ongoing received and failed ranges without requiring a draft review', 
   const request = vi.fn();
   render(<TranscriptionWorkspace media={media} onRequest={request} onDone={vi.fn()} />);
   expect(screen.getByRole('progressbar', { name: 'Transcription progress' })).toHaveAttribute('value', '0.5');
+  expect(screen.getByText('50%')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: /Transcribe this range again/ }));
   expect(request).toHaveBeenCalledWith(expect.objectContaining({ startMs: 100000, endMs: 200000 }));
   expect(aiApi.prepareTranscription).not.toHaveBeenCalled();
@@ -287,4 +288,154 @@ it('uses compatible saved results with one local action and no new paid request'
   expect(aiApi.prepareTranscription).not.toHaveBeenCalled();
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+});
+
+const waitingJob: JobSummary = {
+  id: 'waiting', mediaId: 'media', kind: 'transcribe', status: 'running', createdAt: '', progress: 1 / 3,
+  message: 'Old generic provider message', automaticTranscript: true,
+  retry: { state: 'waiting', ordinal: 1, retryNumber: 1, maxRetries: 2, nextRetryAt: '2026-10-10T00:00:30Z' },
+  issue: { code: 'provider', phase: 'execute', httpStatus: 429, ordinal: 1, occurredAt: '2026-10-10T00:00:00Z', nextAction: 'resume' },
+  transcriptionRanges: [{ startMs: 0, endMs: 100000, state: 'received' }, { startMs: 100000, endMs: 200000, state: 'pending' }, { startMs: 200000, endMs: 300000, state: 'pending' }],
+};
+
+it('counts down a native retry deadline without sending, then waits for the native retry state', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-10T00:00:00Z'));
+  fixture.jobs = [waitingJob];
+  const view = render(<TranscriptionWorkspace media={media} onRequest={vi.fn()} onDone={vi.fn()} />);
+  expect(screen.getByText('Retrying in 30s')).toBeVisible();
+  expect(screen.getByRole('status')).toHaveTextContent('Waiting to retry (1/2)');
+  expect(screen.getByRole('button', { name: 'Pause automatic retry' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Resume remaining work' })).not.toBeInTheDocument();
+  act(() => vi.advanceTimersByTime(30000));
+  expect(screen.getByText('Preparing to retry')).toBeVisible();
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+  expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
+  fixture.jobs = [{ ...waitingJob, retry: { ...waitingJob.retry!, state: 'retrying', nextRetryAt: undefined } }];
+  view.rerender(<TranscriptionWorkspace media={media} onRequest={vi.fn()} onDone={vi.fn()} />);
+  expect(screen.getByRole('status')).toHaveTextContent('Retrying the busy audio range (1/2)');
+  expect(screen.queryByText('Preparing to retry')).not.toBeInTheDocument();
+});
+
+it('opens the running job details from compact status even when a newer job failed', () => {
+  fixture.jobs = [{ ...waitingJob, id: 'newer-failure', status: 'failed', retry: undefined }, waitingJob];
+  const open = vi.fn();
+  const view = render(<TranscriptionStatus mediaId="media" hasRequest={false} onOpen={open} />);
+  fireEvent.click(screen.getByRole('button', { name: /View details/ }));
+  expect(open).toHaveBeenCalledWith('waiting');
+  view.unmount();
+  render(<TranscriptionWorkspace media={media} onRequest={vi.fn()} onDone={vi.fn()} focusJobId="waiting" />);
+  const target = document.querySelector('.transcription-job[data-job-id="waiting"]')!;
+  expect(target).toHaveFocus();
+  expect(target.querySelector('details')).toHaveAttribute('open');
+  expect(target).toHaveTextContent('Range 2 · 1:40–3:20');
+  expect(target).toHaveTextContent('HTTP 429');
+  expect(target).toHaveTextContent('2026-10-10T00:00:00Z');
+});
+
+it.each([
+  ['exhausted', 'Stopped after 2 automatic retries'],
+  ['deferred', 'Stopped because the service requires waiting more than 5 minutes'],
+] as const)('explains %s retries as stopped and retains received ranges', (state, message) => {
+  fixture.jobs = [{ ...waitingJob, status: 'failed', retry: { ...waitingJob.retry!, state, retryNumber: 2 } }];
+  render(<TranscriptionWorkspace media={media} onRequest={vi.fn()} onDone={vi.fn()} />);
+  expect(screen.getByRole('status')).toHaveTextContent(message);
+  expect(screen.getByRole('status')).toHaveTextContent('Received subtitles are saved');
+  expect(screen.getByRole('button', { name: 'Resume remaining work' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Pause automatic retry' })).not.toBeInTheDocument();
+  expect(document.querySelectorAll('.range-received')).toHaveLength(1);
+  expect(aiApi.createRetryQuote).not.toHaveBeenCalled();
+  expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
+});
+
+it('explains saved HTTP 429 failures without replaying them or blaming settings', () => {
+  fixture.jobs = [{ ...waitingJob, status: 'failed', retry: undefined }];
+  render(<TranscriptionWorkspace media={media} onRequest={vi.fn()} onDone={vi.fn()} />);
+  expect(screen.getByRole('status')).toHaveTextContent('busy or rate limited (HTTP 429)');
+  expect(screen.queryByText('Old generic provider message')).not.toBeInTheDocument();
+  expect(aiApi.createRetryQuote).not.toHaveBeenCalled();
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+  expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
+});
+
+it('keeps unknown-outcome recovery explicit when a saved job also records HTTP 429', () => {
+  fixture.jobs = [{ ...waitingJob, status: 'unknown', retry: undefined }];
+  render(<TranscriptionWorkspace media={media} onRequest={vi.fn()} onDone={vi.fn()} />);
+  expect(screen.getByRole('status')).toHaveTextContent('rate limit (HTTP 429)');
+  expect(screen.getByRole('status')).toHaveTextContent('Review requests with an unknown outcome');
+  expect(screen.queryByText(/Review an estimate to resume/)).not.toBeInTheDocument();
+  expect(aiApi.createRetryQuote).not.toHaveBeenCalled();
+  expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['en', false], ['en', true], ['ja', false], ['ja', true],
+] as const)('shows %s pacing slowed=%s, details and a native-only countdown while retaining received ranges', (locale, slowed) => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-10T00:00:00Z'));
+  fixture.locale = locale;
+  const seconds = slowed ? 40 : 10;
+  const pacedJob: JobSummary = { ...waitingJob, retry: undefined,
+    pacing: { ordinal: 1, nextSendAt: new Date(Date.now() + seconds * 1000).toISOString(), intervalMs: seconds * 1000, slowed },
+  };
+  fixture.jobs = [pacedJob];
+  const open = vi.fn();
+  const compact = render(<TranscriptionStatus mediaId="media" hasRequest={false} onOpen={open} />);
+  expect(screen.getByRole('status')).toHaveTextContent(locale === 'ja'
+    ? slowed ? '混雑を避けるため送信間隔を調整中' : '送信間隔を調整中'
+    : slowed ? 'Spacing out requests to reduce congestion.' : 'Spacing out requests.');
+  expect(screen.queryByText(/HTTP 429/)).not.toBeInTheDocument();
+  expect(screen.getByText('33%')).toBeVisible();
+  fireEvent.click(screen.getByRole('button'));
+  expect(open).toHaveBeenCalledExactlyOnceWith(pacedJob.id);
+  compact.unmount();
+  const view = render(<TranscriptionWorkspace media={media} onRequest={vi.fn()} onDone={vi.fn()} focusJobId={pacedJob.id} />);
+  expect(screen.getByText(locale === 'ja' ? `${seconds}秒後に次の区間を送信` : `Next request in ${seconds}s`)).toBeVisible();
+  expect(screen.getByText(locale === 'ja' ? '区間 2' : 'Range 2', { exact: false })).toHaveTextContent('1:40–3:20');
+  expect(screen.getByText(locale === 'ja' ? `${seconds}秒以上` : `At least ${seconds}s`)).toBeVisible();
+  expect(screen.getByRole('button', { name: locale === 'ja' ? '次の送信前に一時停止' : 'Pause before next request' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: locale === 'ja' ? '中止' : 'Cancel' })).toBeEnabled();
+  expect(document.querySelectorAll('.range-received')).toHaveLength(1);
+  expect(screen.queryByText(/HTTP 429/)).not.toBeInTheDocument();
+  act(() => vi.advanceTimersByTime(seconds * 1000));
+  expect(screen.getByText(locale === 'ja' ? '次の送信を準備中' : 'Preparing the next request')).toBeVisible();
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+  expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
+  expect(aiApi.createRetryQuote).not.toHaveBeenCalled();
+  fixture.jobs = [{ ...pacedJob, status: 'paused', message: 'Paused' }];
+  view.rerender(<TranscriptionWorkspace media={media} onRequest={vi.fn()} onDone={vi.fn()} />);
+  expect(screen.getByRole('status')).toHaveTextContent('Paused');
+  expect(screen.queryByText(locale === 'ja' ? '次の送信を準備中' : 'Preparing the next request')).not.toBeInTheDocument();
+});
+
+it('gives native retry timing precedence when a snapshot also includes pacing', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-10T00:00:00Z'));
+  fixture.jobs = [{ ...waitingJob, pacing: { ordinal: 2, nextSendAt: '2026-10-10T00:00:10Z', intervalMs: 10000, slowed: false } }];
+  render(<TranscriptionWorkspace media={media} onRequest={vi.fn()} onDone={vi.fn()} focusJobId={waitingJob.id} />);
+  expect(screen.getByRole('status')).toHaveTextContent('Waiting to retry (1/2)');
+  expect(screen.getByText('Retrying in 30s')).toBeVisible();
+  expect(screen.getByText('Range 2', { exact: false })).toHaveTextContent('1:40–3:20');
+  expect(screen.queryByText('Next request scheduled')).not.toBeInTheDocument();
+  expect(screen.queryByText(/Spacing out/)).not.toBeInTheDocument();
+});
+
+it('keeps an unrepresentable pacing deadline waiting without an invented date and permits pause or cancel', async () => {
+  fixture.jobs = [{ ...waitingJob, retry: undefined,
+    pacing: { ordinal: 1, intervalMs: 60000, slowed: true },
+  }];
+  render(<TranscriptionWorkspace media={media} onRequest={vi.fn()} onDone={vi.fn()} focusJobId={waitingJob.id} />);
+  expect(screen.getByRole('status')).toHaveTextContent('Spacing out requests to reduce congestion.');
+  expect(screen.getByText('The next allowed send time is unavailable')).toBeVisible();
+  expect(document.querySelector('time')).not.toBeInTheDocument();
+  expect(document.querySelector('.retry-countdown')).not.toBeInTheDocument();
+  expect(document.body).not.toHaveTextContent(/NaN|Invalid Date|Preparing the next request/);
+  fireEvent.click(screen.getByRole('button', { name: 'Pause before next request' }));
+  await waitFor(() => expect(aiApi.pauseAiJob).toHaveBeenCalledExactlyOnceWith(waitingJob.id));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(aiApi.cancelAiJob).toHaveBeenCalledExactlyOnceWith(waitingJob.id));
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+  expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
+  expect(aiApi.createRetryQuote).not.toHaveBeenCalled();
 });

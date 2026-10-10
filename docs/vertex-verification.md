@@ -23,6 +23,8 @@ Local audio preparation uses the selected source audio track and saves the split
 
 Queued jobs offer **Open estimate** to resume approval. Paused or failed transcription offers **Resume remaining work** and requires a new approval for remaining work. Already received text is retained. When received results could not be applied locally, **Retry applying saved results** retries that step without another provider request.
 
+New transcription approvals include at most two automatic retries per chunk when the service returns HTTP 429. Review the maximum sends, audio duration, output tokens and reservation shown with the estimate. During the wait, progress shows the affected chunk, remaining wait and retry count, and permits pause or cancel. The normal waits are 10 and 20 seconds plus up to 20% jitter; a longer `Retry-After` is respected. A wait beyond five minutes or continued rejection after the third send stops the job for a new review. Existing completed chunks and edited subtitles are retained. Older unknown outcomes still require acknowledgement before fresh approval, and connection failures are not automatically retried. The validation CLI below does not opt into this policy.
+
 Transcription history retains original responses and range status. VAD observations and boundary alternatives are optional detail; they never require whole-transcript review before learning. Unusable word anchors preserve the original text as an **Audio range** with the submitted bounds, while valid anchors produce synchronized cues. Missing, empty, corrupt and unknown-cost results remain distinguishable. No timing failure or quality concern automatically switches models or sends a paid fallback.
 
 ## Correct a transcript
@@ -144,7 +146,8 @@ See the [test guide](testing.md) for offline regressions and native integration 
 | 403 | Relevant API, billing/project permissions, organization restrictions; metadata permissions can differ from generation |
 | 404 / unsupported model | Exact model ID, location, project availability, and Preview terms |
 | Unsupported thinking or adapter | Explicit settings against the selected model's contract; prepare a new reviewed configuration |
-| 429 / server error / disconnect | Stop and inspect the recorded attempt/hold before separately approving any retry |
+| 429 during transcription | Inspect the displayed wait/retry count; after exhaustion or a server wait over five minutes, review the remaining work. Reservations remain counted. Older unknown outcomes require acknowledgement before new approval. |
+| Other server error / disconnect | Stop and inspect the recorded attempt/hold before separately approving any retry |
 | Missing or ambiguous price | Verify a manual rate or explicitly approve unpriced scope; do not treat it as zero |
 | Invalid word timestamps | Use retained Audio range text; synchronized captions require valid anchors, and a separate paid retry remains explicit |
 | Corrupt or incomplete content | Inspect retained evidence and source audio; settled usage does not make a malformed response usable |

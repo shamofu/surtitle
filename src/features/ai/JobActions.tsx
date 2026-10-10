@@ -114,7 +114,7 @@ export function JobActions({
             }
           >
             <Pause size={13} />
-            {t('次の送信前に一時停止', 'Pause before next request')}
+            {job.retry?.state === 'waiting' ? t('自動再試行を一時停止', 'Pause automatic retry') : t('次の送信前に一時停止', 'Pause before next request')}
           </Button>
         )}
         {['running', 'queued', 'paused'].includes(job.status) && (

@@ -13,6 +13,10 @@ pub enum Scenario {
     Translation,
     Transcription,
     TranscriptionCoarseFirst,
+    Transcription429ThenSuccess,
+    TranscriptionSecond429ThenSuccess,
+    Transcription429Exhausted,
+    Transcription429Deferred,
     SendFailure,
 }
 
@@ -87,6 +91,8 @@ struct Reply {
     ordinal: u32,
     expected_body: Value,
     bytes: Vec<u8>,
+    status: u16,
+    retry_after: Option<&'static str>,
 }
 
 struct OfflineTransport {
@@ -120,21 +126,37 @@ impl Transport for OfflineTransport {
         match self.scenario {
             Scenario::Translation
             | Scenario::Transcription
-            | Scenario::TranscriptionCoarseFirst => Ok(OfflineResponse(Some(reply.bytes))),
+            | Scenario::TranscriptionCoarseFirst
+            | Scenario::Transcription429ThenSuccess
+            | Scenario::TranscriptionSecond429ThenSuccess
+            | Scenario::Transcription429Exhausted
+            | Scenario::Transcription429Deferred => Ok(OfflineResponse {
+                bytes: Some(reply.bytes),
+                status: reply.status,
+                retry_after: reply.retry_after,
+            }),
             Scenario::SendFailure => Err(()),
         }
     }
 }
 
-struct OfflineResponse(Option<Vec<u8>>);
+struct OfflineResponse {
+    bytes: Option<Vec<u8>>,
+    status: u16,
+    retry_after: Option<&'static str>,
+}
 
 impl ResponseBody for OfflineResponse {
     fn status(&self) -> u16 {
-        200
+        self.status
+    }
+
+    fn retry_after(&self) -> Option<&str> {
+        self.retry_after
     }
 
     async fn chunk(&mut self) -> std::result::Result<Option<Vec<u8>>, ()> {
-        Ok(self.0.take())
+        Ok(self.bytes.take())
     }
 }
 
@@ -160,7 +182,12 @@ impl OfflineVertexService {
         for (ordinal, task) in plan.requests.iter().enumerate() {
             let response = if matches!(
                 scenario,
-                Scenario::Transcription | Scenario::TranscriptionCoarseFirst
+                Scenario::Transcription
+                    | Scenario::TranscriptionCoarseFirst
+                    | Scenario::Transcription429ThenSuccess
+                    | Scenario::Transcription429Exhausted
+                    | Scenario::TranscriptionSecond429ThenSuccess
+                    | Scenario::Transcription429Deferred
             ) {
                 transcription_response(task, ordinal, scenario)?
             } else {
@@ -210,10 +237,41 @@ impl OfflineVertexService {
                         .encode(audio.verified_bytes()?)
                         .into();
                 }
+                if (ordinal == 0
+                    && matches!(
+                        scenario,
+                        Scenario::Transcription429ThenSuccess
+                            | Scenario::Transcription429Exhausted
+                            | Scenario::Transcription429Deferred
+                    ))
+                    || (ordinal == 1
+                        && matches!(scenario, Scenario::TranscriptionSecond429ThenSuccess))
+                {
+                    let rejects = if matches!(scenario, Scenario::Transcription429Exhausted) {
+                        3
+                    } else {
+                        1
+                    };
+                    for _ in 0..rejects {
+                        replies.push_back(Reply {
+                            ordinal: ordinal as u32,
+                            expected_body: expected_body.clone(),
+                            bytes: vec![],
+                            status: 429,
+                            retry_after: if matches!(scenario, Scenario::Transcription429Deferred) {
+                                Some("301")
+                            } else {
+                                None
+                            },
+                        });
+                    }
+                }
                 replies.push_back(Reply {
                     ordinal: ordinal as u32,
                     expected_body,
                     bytes: serde_json::to_vec(&response)?,
+                    status: 200,
+                    retry_after: None,
                 });
             }
         }
@@ -261,7 +319,7 @@ impl OfflineVertexService {
     pub async fn execute_next_with_guard(
         &self,
         job_id: &str,
-        before_send: impl FnOnce() -> Result<()>,
+        before_send: impl FnMut() -> Result<()>,
     ) -> Result<Option<ExecutionResult>> {
         if job_id != self.job_id {
             return Err(AiError::Invalid(
@@ -273,6 +331,28 @@ impl OfflineVertexService {
             &self.auth,
             &self.transport,
             job_id,
+            before_send,
+        )
+        .await
+    }
+
+    pub async fn execute_next_scoped_with_guard(
+        &self,
+        job_id: &str,
+        approval_id: &str,
+        before_send: impl FnMut() -> Result<()>,
+    ) -> Result<Option<ExecutionResult>> {
+        if job_id != self.job_id {
+            return Err(AiError::Invalid(
+                "Offline fixture belongs to another job".into(),
+            ));
+        }
+        execute_scoped_with_io(
+            &self.store,
+            &self.auth,
+            &self.transport,
+            job_id,
+            Some(approval_id),
             before_send,
         )
         .await

@@ -13,14 +13,44 @@ impl AiStore {
     }
 
     pub(super) fn reserve_next_at(&self, job_id: &str, at: i64) -> Result<Option<ReservedRequest>> {
+        self.reserve_next_inner(job_id, at, None)
+    }
+
+    pub fn reserve_next_scoped(
+        &self,
+        job_id: &str,
+        approval_id: &str,
+    ) -> Result<Option<ReservedRequest>> {
+        self.reserve_next_inner(job_id, self.now_ms(), Some(approval_id))
+    }
+
+    fn reserve_next_inner(
+        &self,
+        job_id: &str,
+        at: i64,
+        expected_approval: Option<&str>,
+    ) -> Result<Option<ReservedRequest>> {
         let mut conn = self.connect()?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         self.require_validation_scope(&tx)?;
         let (plan, digest, state, _) = read_job(&tx, job_id)?;
+        let approval_id = super::retries::current_approval(&tx, job_id)?;
+        if let Some(expected) = expected_approval {
+            super::retries::check_generation(&tx, job_id, Some(expected))?;
+        }
         if state != "approved" || plan.digest()? != digest {
             return Err(AiError::ApprovalRequired);
         }
         if has_blocking_attempt(&tx)? {
+            if expected_approval.is_some()
+                && tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM ai_attempts WHERE job_id=? AND state='reserved')",
+                    [job_id],
+                    |row| row.get::<_, bool>(0),
+                )?
+            {
+                return Err(AiError::WorkerBusy);
+            }
             return Err(AiError::InFlight);
         }
         let ordinal: Option<u32> = tx.query_row("SELECT ordinal FROM ai_requests WHERE job_id=? AND state='pending' ORDER BY ordinal LIMIT 1",[job_id],|r|r.get(0)).optional()?;
@@ -28,6 +58,32 @@ impl AiStore {
             tx.commit()?;
             return Ok(None);
         };
+        let retry_scope: Option<(u32,u32,Option<i64>)> = tx.query_row(
+            "SELECT max_retries,attempts_started,retry_at_ms FROM ai_approval_requests WHERE approval_id=? AND job_id=? AND ordinal=?",
+            params![approval_id,job_id,ordinal], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).optional()?;
+        if let Some((max, started, next)) = retry_scope {
+            // A legacy executor cannot opt into automatic retry by discovering
+            // a newer approval. Native scoped workers carry the reviewed ID.
+            if max > 0 && expected_approval.is_none() {
+                return Err(AiError::ApprovalRequired);
+            }
+            if started > max {
+                return Err(AiError::ApprovalRequired);
+            }
+            if let Some(next) = next.filter(|next| *next > at) {
+                return Err(AiError::RetryWaiting(next));
+            }
+            if started > 0 {
+                let retryable: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM ai_approval_requests s JOIN ai_attempts a ON a.id=s.last_attempt_id WHERE s.approval_id=? AND s.ordinal=? AND a.state='rejected_429' AND s.retry_state='waiting')",
+                    params![approval_id,ordinal], |row| row.get(0))?;
+                if !retryable {
+                    return Err(AiError::ApprovalRequired);
+                }
+            }
+        } else if approval_id.is_some() {
+            return Err(AiError::ApprovalRequired);
+        }
         let task = plan
             .requests
             .get(ordinal as usize)
@@ -35,6 +91,7 @@ impl AiStore {
             .clone();
         self.check_model_permission(&plan, job_id, at)?;
         validate_scope(&tx, &plan, job_id, &digest, false)?;
+        self.check_pacing(&tx, &plan, ordinal, at)?;
         let reserve = plan.estimates()?[ordinal as usize].estimated_max_microusd;
         if let Some(amount) = reserve {
             check_budget(&tx, job_id, amount, at)?;
@@ -43,6 +100,14 @@ impl AiStore {
         self.check_development_budget(&tx, reserve.unwrap_or(0), true)?;
         let attempt_id = uuid::Uuid::new_v4().to_string();
         tx.execute("INSERT INTO ai_attempts(id,job_id,ordinal,state,reserve_microusd,created_at_ms) VALUES (?,?,?,'reserved',?,?)",params![attempt_id,job_id,ordinal,reserve.map(i64::try_from).transpose().map_err(|_|AiError::Invalid("Reservation overflow".into()))?,at])?;
+        if approval_id.is_some() {
+            tx.execute(
+                "UPDATE ai_approval_requests SET attempts_started=attempts_started+1,
+                retry_state=CASE WHEN attempts_started>0 THEN 'retrying' ELSE NULL END,
+                retry_at_ms=NULL,last_attempt_id=? WHERE approval_id=? AND ordinal=?",
+                params![attempt_id, approval_id, ordinal],
+            )?;
+        }
         tx.execute(
             "UPDATE ai_requests SET state='reserved' WHERE job_id=? AND ordinal=?",
             params![job_id, ordinal],
@@ -50,6 +115,7 @@ impl AiStore {
         audit(&tx, at, "reserved", Some(job_id), &attempt_id)?;
         tx.commit()?;
         Ok(Some(ReservedRequest {
+            approval_id,
             attempt_id,
             job_id: job_id.into(),
             ordinal,
@@ -71,6 +137,11 @@ impl AiStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         self.require_validation_scope(&tx)?;
         let (plan, digest, state, _) = read_job(&tx, &reservation.job_id)?;
+        super::retries::check_generation(
+            &tx,
+            &reservation.job_id,
+            reservation.approval_id.as_deref(),
+        )?;
         if state != "approved" {
             return Err(AiError::ApprovalRequired);
         }
@@ -107,6 +178,14 @@ impl AiStore {
         }
         #[cfg(feature = "development-validation")]
         self.check_development_budget(&tx, 0, false)?;
+        let dispatched: Option<i64> = tx.query_row(
+            "SELECT dispatched_at_ms FROM ai_attempts WHERE id=?",
+            [&reservation.attempt_id],
+            |row| row.get(0),
+        )?;
+        if dispatched.is_none() {
+            self.pace_dispatch(&tx, &plan, reservation.ordinal, at)?;
+        }
         // Reservation can precede UTC midnight while credential preflight finishes
         // after it. Charge accounting belongs to the initial authorized dispatch,
         // while created_at_ms continues to identify the reservation audit time.

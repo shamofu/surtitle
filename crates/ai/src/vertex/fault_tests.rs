@@ -918,6 +918,7 @@ async fn modified_audio_is_rejected_before_oauth_or_paid_transport() {
     let audio = AudioAttachment::from_file(path.clone(), 0, 1000).unwrap();
     let h = Harness::new(vec![]);
     let reservation = ReservedRequest {
+        approval_id: None,
         attempt_id: "private-preflight-only".into(),
         job_id: h.quote.id.clone(),
         ordinal: 0,
@@ -952,6 +953,60 @@ async fn source_guard_failure_releases_unsent() {
     .await;
     assert!(matches!(result, Err(AiError::PreparationChanged)));
     h.assert_unsent();
+}
+
+#[tokio::test]
+async fn pacing_after_auth_rechecks_source_without_consuming_another_attempt() {
+    for source_changed in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let h = Harness::with_tasks(
+            vec![transcript_task(directory.path())],
+            vec![Ok(FakeResponse::json(transcript_response()))],
+        );
+        let store = h.store.clone();
+        let plan = store.prepared_job(&h.quote.id).unwrap();
+        let db_path = h.transport.db_path.clone();
+        let until = crate::ledger::TEST_NOW_MS + 5_000;
+        *h.auth.hook.lock().unwrap() = Some(Box::new(move || {
+            Connection::open(db_path).unwrap().execute(
+                "INSERT INTO ai_transcription_pacing(project_id,model_id,location,interval_ms,cooldown_until_ms) VALUES (?,?,?,10000,?)",
+                rusqlite::params![plan.project_id,plan.execution.model_id,plan.execution.location,until],
+            ).unwrap();
+        }));
+        let mut guards = 0;
+        let result = execute_with_io(&h.store, &h.auth, &h.transport, &h.quote.id, || {
+            guards += 1;
+            if guards > 1 {
+                store.set_test_time(until);
+                if source_changed {
+                    return Err(AiError::PreparationChanged);
+                }
+            }
+            Ok(())
+        })
+        .await;
+        assert_eq!(guards, 2);
+        let conn = Connection::open(&h.transport.db_path).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM ai_attempts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        if source_changed {
+            assert!(matches!(result, Err(AiError::PreparationChanged)));
+            h.assert_unsent();
+        } else {
+            assert!(result.unwrap().is_some());
+            assert_eq!(h.sends(), 1);
+            let releases: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM ai_attempts WHERE state='released'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(releases, 0);
+        }
+    }
 }
 
 #[tokio::test]

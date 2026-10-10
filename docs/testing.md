@@ -24,6 +24,8 @@ The required `browser` CI job runs the browser suite and six visual comparisons 
 The maintained regressions cover:
 
 - Immutable request approval, zero/unknown pricing, concurrent reservations, cancellation before dispatch, communication failure, crash recovery and settlement exactly once.
+- Approval-bound transcription HTTP 429 retries: success and exhaustion, Retry-After timing, retained monetary holds and unpriced counts, legacy approvals, pause/cancel/restart, superseded workers, and retry-aware quotes and Japanese/English progress displays.
+- Transcription pacing: normal and congestion-adjusted intervals, retry timing precedence, Japanese/English countdowns and processing details, pause/cancel while waiting, and preserved received subtitles without a UI-triggered send.
 - Parser/citation validation, literal source preservation, pending/conflicting transcript ranges, local corrections, stale adoption and saved-card independence.
 - Priced transcription start without duplicate consent, unpriced acknowledgement, automatic preparation, range re-transcription and setup restoration in the shared transcript panel.
 - Transcribe text retained when word timing is missing, reversed, out of range or unaligned; source-block bounds preserve submitted context and never become synchronized captions or subtitle exports.

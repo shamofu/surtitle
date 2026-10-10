@@ -189,6 +189,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const [edit, setEdit] = useState<SubtitleSegment>();
   const [aiKind, setAiKind] = useState<AiQuote['kind']>();
   const [transcriptionRequest, setTranscriptionRequest] = useState<TranscriptionRequest>();
+  const [focusedTranscriptionJob, setFocusedTranscriptionJob] = useState<string>();
   const [aiContinuation, setAiContinuation] = useState<AiContinuation>();
   const [aiRebind, setAiRebind] = useState<AiContinuation>();
   const [transfer, setTransfer] = useState(false);
@@ -796,8 +797,8 @@ function StudySession({ mediaId }: { mediaId: string }) {
             <div className="study-transcript" hidden={panel !== 'transcript'}>
               <StudyTranscript
                 active={panel === 'transcript'}
-                transcriptionWorkspace={<TranscriptionWorkspace media={media} request={transcriptionRequest} onRequest={openTranscription} continuations={continuationsQuery.data} onResume={resumeAi} onOpenEarlierDrafts={() => setTab('draft')} onDone={() => { setTranscriptionRequest(undefined); void continuationsQuery.refetch(); }} onStarted={() => { setTranscriptionRequest(undefined); setTab('transcript'); void continuationsQuery.refetch(); }} />}
-                transcriptionStatus={<TranscriptionStatus mediaId={mediaId} hasRequest={!!transcriptionRequest} onOpen={() => setTab('transcription')} />}
+                transcriptionWorkspace={<TranscriptionWorkspace media={media} request={transcriptionRequest} onRequest={openTranscription} continuations={continuationsQuery.data} onResume={resumeAi} focusJobId={focusedTranscriptionJob} active={tab === 'transcription'} onOpenEarlierDrafts={() => setTab('draft')} onDone={() => { setTranscriptionRequest(undefined); void continuationsQuery.refetch(); }} onStarted={() => { setTranscriptionRequest(undefined); setTab('transcript'); void continuationsQuery.refetch(); }} />}
+                transcriptionStatus={<TranscriptionStatus mediaId={mediaId} hasRequest={!!transcriptionRequest} onOpen={jobId => { setFocusedTranscriptionJob(jobId); setTab('transcription'); }} />}
                 onTranscribeRange={openTranscription}
                 media={media}
                 segments={segments}

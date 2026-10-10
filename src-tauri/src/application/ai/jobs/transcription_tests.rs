@@ -115,7 +115,7 @@ impl Fixture {
         }
     }
 
-    fn approve(&self) -> PreparedJob {
+    fn approve(&self) -> ApprovedExecution {
         approve_for_execution(
             &self.state,
             &self.quote.id,
@@ -123,6 +123,19 @@ impl Fixture {
             false,
             false,
             true,
+        )
+        .unwrap()
+    }
+
+    fn approve_retries(&self, retry: bool) -> ApprovedExecution {
+        approve_for_execution_with_retry(
+            &self.state,
+            &self.quote.id,
+            &self.quote.digest,
+            retry,
+            false,
+            true,
+            Some(1),
         )
         .unwrap()
     }
@@ -135,7 +148,7 @@ impl Fixture {
 
     fn start(
         &self,
-        plan: PreparedJob,
+        plan: ApprovedExecution,
         service: Arc<OfflineVertexService>,
     ) -> tokio::task::JoinHandle<Result<()>> {
         tokio::spawn(run_approved_with(
@@ -221,13 +234,13 @@ async fn immutable_audio_preparation_uses_current_subtitles_at_quote_time_and_pr
 }
 
 async fn reached(checkpoint: &mut Checkpoint) {
-    tokio::time::timeout(Duration::from_secs(10), checkpoint.reached())
+    tokio::time::timeout(Duration::from_secs(30), checkpoint.reached())
         .await
         .expect("transcription checkpoint timed out");
 }
 
 async fn finished(worker: tokio::task::JoinHandle<Result<()>>) -> Result<()> {
-    tokio::time::timeout(Duration::from_secs(10), worker)
+    tokio::time::timeout(Duration::from_secs(60), worker)
         .await
         .expect("transcription worker timed out")
         .expect("transcription worker panicked")
@@ -238,6 +251,556 @@ fn attempts(root: &Path, job: &str) -> Vec<(String, u32, String, Option<i64>)> {
     connection.prepare("SELECT id,ordinal,state,charged_microusd FROM ai_attempts WHERE job_id=? ORDER BY ordinal,created_at_ms").unwrap()
         .query_map([job], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).unwrap()
         .collect::<rusqlite::Result<Vec<_>>>().unwrap()
+}
+
+async fn waiting(fixture: &Fixture) -> RetryStatus {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            if let Some(retry) = fixture.state.ai.retry_status(&fixture.quote.id).unwrap()
+                && retry.state == "waiting"
+            {
+                return retry;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("worker should enter HTTP429 wait")
+}
+
+async fn pacing(fixture: &Fixture) -> PacingStatus {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(pacing) = fixture.state.ai.pacing_status(&fixture.quote.id).unwrap() {
+                return pacing;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("worker should wait before reserving the next section")
+}
+
+#[tokio::test]
+async fn pacing_spaces_dispatches_without_reserving_and_preserves_live_edits() {
+    let fixture = Fixture::new().await;
+    let service = fixture.service(Scenario::Transcription);
+    let worker = fixture.start(fixture.approve_retries(false), service.clone());
+    let delay = pacing(&fixture).await;
+    assert_eq!(delay.ordinal, 1);
+    assert_eq!(delay.interval_ms, 10_000);
+    assert!(!delay.slowed);
+    assert_eq!(service.sent_ordinals(), [0]);
+    assert_eq!(
+        attempts(fixture.directory.path(), &fixture.quote.id).len(),
+        1
+    );
+    assert_eq!(fixture.state.ai.summary().unwrap().daily_held_microusd, 0);
+    for locale in ["ja", "en"] {
+        fixture
+            .state
+            .preferences
+            .update(|p| {
+                p.settings.locale = locale.into();
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = super::super::snapshot::get_app_snapshot(fixture.state.clone()).unwrap();
+        let job = snapshot
+            .jobs
+            .iter()
+            .find(|job| job.id == fixture.quote.id)
+            .unwrap();
+        assert_eq!(job.status, "running");
+        assert!(job.retry.is_none());
+        assert_eq!(
+            job.pacing.as_ref().unwrap().next_send_at,
+            delay.next_send_at
+        );
+        assert!(!job.message.as_ref().unwrap().contains("429"));
+    }
+    let mut correction = fixture
+        .rows()
+        .into_iter()
+        .find(|row| row.text == "Hello.")
+        .unwrap();
+    correction.text = "Human correction during normal send spacing.".into();
+    correction.status = "confirmed".into();
+    crate::application::subtitles::edit_segment(fixture.state.clone(), correction.clone()).unwrap();
+    finished(worker).await.unwrap();
+    assert_eq!(service.sent_ordinals(), [0, 1]);
+    let conn = rusqlite::Connection::open(fixture.directory.path().join("charges.sqlite")).unwrap();
+    let elapsed: i64 = conn
+        .query_row(
+            "SELECT MAX(dispatched_at_ms)-MIN(dispatched_at_ms) FROM ai_attempts WHERE job_id=?",
+            [&fixture.quote.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(elapsed >= 10_000, "dispatches were only {elapsed}ms apart");
+    assert_eq!(
+        serde_json::to_value(
+            fixture
+                .rows()
+                .iter()
+                .find(|row| row.id == correction.id)
+                .unwrap()
+        )
+        .unwrap(),
+        serde_json::to_value(&correction).unwrap()
+    );
+    assert!(
+        fixture
+            .state
+            .ai
+            .pacing_status(&fixture.quote.id)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn pause_cancel_or_reapproval_during_pacing_stops_the_old_worker() {
+    for action in ["pause", "cancel", "reapprove"] {
+        let fixture = Fixture::new().await;
+        let service = fixture.service(Scenario::Transcription);
+        let worker = fixture.start(fixture.approve_retries(false), service.clone());
+        let delay = pacing(&fixture).await;
+        let before = attempts(fixture.directory.path(), &fixture.quote.id);
+        if action == "cancel" {
+            cancel_ai_job(fixture.state.clone(), fixture.quote.id.clone()).unwrap();
+        } else {
+            pause_ai_job(fixture.state.clone(), fixture.quote.id.clone()).unwrap();
+            if action == "reapprove" {
+                fixture.approve_retries(true);
+                assert_eq!(
+                    fixture
+                        .state
+                        .ai
+                        .pacing_status(&fixture.quote.id)
+                        .unwrap()
+                        .unwrap()
+                        .next_send_at,
+                    delay.next_send_at
+                );
+            }
+        }
+        tokio::time::timeout(Duration::from_secs(2), worker)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(service.sent_ordinals(), [0]);
+        assert_eq!(
+            attempts(fixture.directory.path(), &fixture.quote.id),
+            before
+        );
+        assert!(
+            fixture
+                .state
+                .ai
+                .job_issue(&fixture.quote.id)
+                .unwrap()
+                .is_none()
+        );
+    }
+}
+
+#[tokio::test]
+async fn pacing_rechecks_budget_and_source_before_the_next_reservation() {
+    for change_source in [false, true] {
+        let fixture = Fixture::new().await;
+        let service = fixture.service(Scenario::Transcription);
+        let worker = fixture.start(fixture.approve_retries(false), service.clone());
+        pacing(&fixture).await;
+        let before = attempts(fixture.directory.path(), &fixture.quote.id);
+        if change_source {
+            let db = lock(&fixture.state.db).unwrap();
+            let mut media = db.media(&fixture.quote.media_id).unwrap();
+            media.duration_ms = 7500;
+            db.put_media(&media).unwrap();
+        } else {
+            fixture
+                .state
+                .ai
+                .set_budget(BudgetLimits {
+                    per_job_microusd: 440,
+                    daily_microusd: 440,
+                    monthly_microusd: 440,
+                })
+                .unwrap();
+        }
+        let error = finished(worker).await.unwrap_err();
+        if !change_source {
+            assert!(matches!(
+                error.downcast_ref::<AiError>(),
+                Some(AiError::BudgetExceeded(_))
+            ));
+        }
+        assert_eq!(service.sent_ordinals(), [0]);
+        assert_eq!(
+            attempts(fixture.directory.path(), &fixture.quote.id),
+            before
+        );
+        assert!(fixture.rows().iter().any(|row| row.text == "Hello."));
+        assert_eq!(
+            fixture.state.ai.quote(&fixture.quote.id).unwrap().state,
+            "needs_review"
+        );
+    }
+}
+
+#[tokio::test]
+async fn http429_retries_only_failed_section_and_preserves_progressive_manual_edits() {
+    let fixture = Fixture::new().await;
+    assert_eq!(fixture.quote.retry_policy.as_ref().unwrap().version, 1);
+    assert_eq!(
+        fixture.quote.maximum_request_count,
+        fixture.quote.request_count * 3
+    );
+    assert_eq!(
+        fixture.quote.maximum_send_duration_ms,
+        fixture.quote.send_duration_ms * 3
+    );
+    assert_eq!(
+        fixture.quote.maximum_total_output_tokens,
+        fixture.quote.total_output_tokens * 3
+    );
+    assert!(
+        (fixture.quote.maximum_usd.unwrap() - fixture.quote.estimated_usd.unwrap() * 3.).abs()
+            < 1e-10
+    );
+    let service = fixture.service(Scenario::TranscriptionSecond429ThenSuccess);
+    let worker = fixture.start(fixture.approve_retries(false), service.clone());
+    let retry = waiting(&fixture).await;
+    assert_eq!(
+        (retry.ordinal, retry.retry_number, retry.max_retries),
+        (1, 1, 2)
+    );
+    assert_eq!(service.sent_ordinals(), [0, 1]);
+    for locale in ["ja", "en"] {
+        fixture
+            .state
+            .preferences
+            .update(|p| {
+                p.settings.locale = locale.into();
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = super::super::snapshot::get_app_snapshot(fixture.state.clone()).unwrap();
+        let job = snapshot
+            .jobs
+            .iter()
+            .find(|job| job.id == fixture.quote.id)
+            .unwrap();
+        assert_eq!(job.status, "running");
+        assert_eq!(job.retry.as_ref().unwrap().state, "waiting");
+        assert!(job.message.as_ref().unwrap().contains("429"));
+    }
+    let mut corrected = fixture
+        .rows()
+        .into_iter()
+        .find(|row| row.text == "Hello.")
+        .unwrap();
+    corrected.text = "Kept while waiting for HTTP 429.".into();
+    corrected.status = "confirmed".into();
+    crate::application::subtitles::edit_segment(fixture.state.clone(), corrected.clone()).unwrap();
+    tokio::time::timeout(Duration::from_secs(40), worker)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(service.sent_ordinals(), [0, 1, 1]);
+    assert_eq!(
+        fixture.state.ai.quote(&fixture.quote.id).unwrap().state,
+        "completed"
+    );
+    assert_eq!(
+        serde_json::to_value(
+            fixture
+                .rows()
+                .iter()
+                .find(|row| row.id == corrected.id)
+                .unwrap()
+        )
+        .unwrap(),
+        serde_json::to_value(&corrected).unwrap()
+    );
+    assert!(fixture.state.ai.summary().unwrap().daily_held_microusd > 0);
+    assert!(
+        fixture
+            .state
+            .ai
+            .summary()
+            .unwrap()
+            .unknown_attempts
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn http429_exhaustion_stops_after_three_sends_and_retains_accounting() {
+    let fixture = Fixture::new().await;
+    let service = fixture.service(Scenario::Transcription429Exhausted);
+    let worker = fixture.start(fixture.approve_retries(false), service.clone());
+    let error = tokio::time::timeout(Duration::from_secs(90), worker)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(matches!(
+        error.downcast_ref::<AiError>(),
+        Some(AiError::Provider(429))
+    ));
+    assert_eq!(service.sent_ordinals(), [0, 0, 0]);
+    let snapshot = super::super::snapshot::get_app_snapshot(fixture.state.clone()).unwrap();
+    let job = snapshot
+        .jobs
+        .iter()
+        .find(|job| job.id == fixture.quote.id)
+        .unwrap();
+    assert_eq!(job.status, "failed");
+    assert_eq!(job.retry.as_ref().unwrap().state, "exhausted");
+    assert_eq!(job.issue.as_ref().unwrap().http_status, Some(429));
+    assert_eq!(job.issue.as_ref().unwrap().next_action, "resume");
+    assert_eq!(
+        attempts(fixture.directory.path(), &fixture.quote.id).len(),
+        3
+    );
+    assert!(fixture.state.ai.summary().unwrap().daily_held_microusd > 0);
+}
+
+#[tokio::test]
+async fn http429_retry_after_over_five_minutes_stops_and_reports_resume_time() {
+    let fixture = Fixture::new().await;
+    let service = fixture.service(Scenario::Transcription429Deferred);
+    let before = chrono::Utc::now().timestamp_millis();
+    let error = finished(fixture.start(fixture.approve_retries(false), service.clone()))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error.downcast_ref::<AiError>(),
+        Some(AiError::Provider(429))
+    ));
+    assert_eq!(service.sent_ordinals(), [0]);
+    let retry = fixture
+        .state
+        .ai
+        .retry_status(&fixture.quote.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(retry.state, "deferred");
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(retry.next_retry_at.as_ref().unwrap())
+            .unwrap()
+            .timestamp_millis()
+            >= before + 301_000
+    );
+}
+
+#[tokio::test]
+async fn http429_pause_cancel_and_reapproval_stop_the_waiting_worker_without_resend() {
+    for cancel in [false, true] {
+        let fixture = Fixture::new().await;
+        // Reapproval includes a fresh worst-case scope plus the retained 429
+        // hold. Give this lifecycle test room for both independent approvals.
+        fixture
+            .state
+            .ai
+            .set_budget(BudgetLimits {
+                per_job_microusd: 10_000_000,
+                daily_microusd: 10_000_000,
+                monthly_microusd: 10_000_000,
+            })
+            .unwrap();
+        let service = fixture.service(Scenario::Transcription429ThenSuccess);
+        let worker = fixture.start(fixture.approve_retries(false), service.clone());
+        waiting(&fixture).await;
+        if cancel {
+            cancel_ai_job(fixture.state.clone(), fixture.quote.id.clone()).unwrap();
+        } else {
+            pause_ai_job(fixture.state.clone(), fixture.quote.id.clone()).unwrap();
+            let approved = fixture.approve_retries(true);
+            let resumed = fixture.service(Scenario::Transcription);
+            finished(fixture.start(approved, resumed.clone()))
+                .await
+                .unwrap();
+            assert_eq!(resumed.sent_ordinals(), [0, 1]);
+        }
+        finished(worker).await.unwrap();
+        assert_eq!(service.sent_ordinals(), [0]);
+        assert!(
+            fixture
+                .state
+                .ai
+                .job_issue(&fixture.quote.id)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            fixture.state.ai.quote(&fixture.quote.id).unwrap().state,
+            if cancel { "cancelled" } else { "completed" }
+        );
+    }
+}
+
+#[tokio::test]
+async fn simultaneous_workers_for_one_approval_do_not_overwrite_or_double_send() {
+    let fixture = Fixture::new().await;
+    let approved = fixture.approve_retries(false);
+    let service = fixture.service(Scenario::Transcription);
+    let mut checkpoint = service.checkpoint(Stage::BeforeDispatch, 0);
+    let first = fixture.start(approved.clone(), service.clone());
+    reached(&mut checkpoint).await;
+    let second = fixture.start(approved, service.clone());
+    finished(second).await.unwrap();
+    assert!(service.sent_ordinals().is_empty());
+    assert!(
+        fixture
+            .state
+            .ai
+            .job_issue(&fixture.quote.id)
+            .unwrap()
+            .is_none()
+    );
+    checkpoint.resume();
+    finished(first).await.unwrap();
+    assert_eq!(service.sent_ordinals(), [0, 1]);
+}
+
+#[tokio::test]
+async fn in_flight_http429_does_not_hide_pause_or_cancellation_in_snapshot() {
+    for cancel in [false, true] {
+        let fixture = Fixture::new().await;
+        let service = fixture.service(Scenario::Transcription429ThenSuccess);
+        let mut checkpoint = service.checkpoint(Stage::AfterSend, 0);
+        let worker = fixture.start(fixture.approve_retries(false), service.clone());
+        reached(&mut checkpoint).await;
+        if cancel {
+            cancel_ai_job(fixture.state.clone(), fixture.quote.id.clone()).unwrap();
+        } else {
+            pause_ai_job(fixture.state.clone(), fixture.quote.id.clone()).unwrap();
+        }
+        checkpoint.resume();
+        finished(worker).await.unwrap_err();
+        assert_eq!(service.sent_ordinals(), [0]);
+        for (locale, paused, cancelled) in [
+            ("ja", "一時停止", "キャンセル"),
+            ("en", "Paused", "Cancelled"),
+        ] {
+            fixture
+                .state
+                .preferences
+                .update(|p| {
+                    p.settings.locale = locale.into();
+                    Ok(())
+                })
+                .unwrap();
+            let snapshot = super::super::snapshot::get_app_snapshot(fixture.state.clone()).unwrap();
+            let job = snapshot
+                .jobs
+                .iter()
+                .find(|job| job.id == fixture.quote.id)
+                .unwrap();
+            assert_eq!(job.status, if cancel { "cancelled" } else { "paused" });
+            assert!(job.message.as_ref().unwrap().starts_with(if cancel {
+                cancelled
+            } else {
+                paused
+            }));
+        }
+    }
+}
+
+#[tokio::test]
+async fn legacy_approval_keeps_http429_unknown_without_automatic_retry() {
+    let fixture = Fixture::new().await;
+    let service = fixture.service(Scenario::Transcription429ThenSuccess);
+    finished(fixture.start(fixture.approve(), service.clone()))
+        .await
+        .unwrap_err();
+    assert_eq!(service.sent_ordinals(), [0]);
+    assert_eq!(
+        fixture.state.ai.summary().unwrap().unknown_attempts.len(),
+        1
+    );
+    assert!(
+        fixture
+            .state
+            .ai
+            .retry_status(&fixture.quote.id)
+            .unwrap()
+            .is_none()
+    );
+    for (locale, acknowledgement) in [
+        ("ja", "結果不明の要求を確認"),
+        ("en", "Acknowledge the unknown request"),
+    ] {
+        fixture
+            .state
+            .preferences
+            .update(|p| {
+                p.settings.locale = locale.into();
+                Ok(())
+            })
+            .unwrap();
+        let snapshot = super::super::snapshot::get_app_snapshot(fixture.state.clone()).unwrap();
+        let job = snapshot
+            .jobs
+            .iter()
+            .find(|job| job.id == fixture.quote.id)
+            .unwrap();
+        assert_eq!(job.status, "unknown");
+        assert!(job.message.as_ref().unwrap().contains(acknowledgement));
+    }
+}
+
+#[tokio::test]
+async fn restart_during_http429_wait_requires_reapproval_and_resumes_only_remaining_section() {
+    let fixture = Fixture::new().await;
+    let service = fixture.service(Scenario::TranscriptionSecond429ThenSuccess);
+    let worker = fixture.start(fixture.approve_retries(false), service.clone());
+    waiting(&fixture).await;
+    let before = attempts(fixture.directory.path(), &fixture.quote.id);
+    assert_eq!(service.sent_ordinals(), [0, 1]);
+    // Simulate process shutdown, including releasing the data-directory lock.
+    worker.abort();
+    assert!(worker.await.unwrap_err().is_cancelled());
+    drop(service);
+    let Fixture {
+        directory,
+        state,
+        quote,
+        ..
+    } = fixture;
+    drop(state);
+    let reopened = Services::open(directory.path().to_path_buf()).unwrap();
+    assert_eq!(reopened.ai.quote(&quote.id).unwrap().state, "needs_review");
+    assert_eq!(attempts(directory.path(), &quote.id), before);
+    let quote = super::super::quotes::review_ai_job(reopened.clone(), quote.id).unwrap();
+    assert!(quote.can_approve, "{:?}", quote.blocked_reason);
+    assert_eq!(quote.request_count, 1);
+    let approved = approve_for_execution_with_retry(
+        &reopened,
+        &quote.id,
+        &quote.digest,
+        true,
+        false,
+        true,
+        Some(1),
+    )
+    .unwrap();
+    let service = Arc::new(
+        OfflineVertexService::new(reopened.ai.clone(), &quote.id, Scenario::Transcription).unwrap(),
+    );
+    let executor = service.clone();
+    run_approved_with(reopened.clone(), quote.id.clone(), approved, move |_| {
+        Ok(executor)
+    })
+    .await
+    .unwrap();
+    assert_eq!(service.sent_ordinals(), [1]);
+    assert_eq!(reopened.ai.quote(&quote.id).unwrap().state, "completed");
 }
 
 #[tokio::test]

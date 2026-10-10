@@ -65,6 +65,7 @@ export const aiApi = {
       digest: quote.digest || '',
       acknowledgeUnpriced: quote.unpriced === true,
       acknowledgeUnqualified: true,
+      retryPolicyVersion: quote.retryPolicy?.version,
     }),
   reapproveQuote: (quote: AiQuote) =>
     call<void>('reapprove_quote', {
@@ -72,6 +73,7 @@ export const aiApi = {
       digest: quote.digest || '',
       acknowledgeUnpriced: quote.unpriced === true,
       acknowledgeUnqualified: true,
+      retryPolicyVersion: quote.retryPolicy?.version,
     }),
   createRetryQuote: (jobId: string) =>
     call<AiQuote>('create_retry_quote', { jobId }),

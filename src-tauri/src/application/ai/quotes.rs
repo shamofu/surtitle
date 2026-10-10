@@ -7,6 +7,15 @@ pub(super) fn utc_time(ms: i64) -> String {
 }
 
 pub(crate) fn quote_for_ui(state: &AppState, quote: JobQuote, is_retry: bool) -> Result<AiQuote> {
+    quote_for_ui_with_policy(state, quote, is_retry, true)
+}
+
+pub(super) fn quote_for_ui_with_policy(
+    state: &AppState,
+    quote: JobQuote,
+    is_retry: bool,
+    include_retry: bool,
+) -> Result<AiQuote> {
     let p = state.preferences.read()?;
     let context = p
         .quotes
@@ -26,7 +35,23 @@ pub(crate) fn quote_for_ui(state: &AppState, quote: JobQuote, is_retry: bool) ->
     let summary = state.ai.summary()?;
     let limits = summary.limits;
     let now = chrono::Utc::now().timestamp_millis();
-    let additional = quote.additional_reservation_microusd;
+    let retry_not_before = state.ai.retry_not_before(&quote.id)?;
+    let retry_policy = if include_retry {
+        state.ai.transcription_retry_policy(&quote.id)?
+    } else {
+        None
+    };
+    let multiplier = retry_policy
+        .as_ref()
+        .map_or(1, |policy| u64::from(policy.max_retries) + 1);
+    let base_additional = quote.additional_reservation_microusd;
+    let additional = base_additional
+        .map(|amount| {
+            amount
+                .checked_mul(multiplier)
+                .context("Retry reservation exceeds the supported amount")
+        })
+        .transpose()?;
     let remaining: Vec<_> = quote
         .requests
         .iter()
@@ -68,6 +93,17 @@ pub(crate) fn quote_for_ui(state: &AppState, quote: JobQuote, is_retry: bool) ->
         Some(tr(
             "結果不明の要求を先に確認してください。",
             "Acknowledge requests with unknown outcomes first.",
+        ))
+    } else if let Some(at) = retry_not_before.filter(|at| *at > now) {
+        Some(tr(
+            &format!(
+                "混雑・利用制限（HTTP 429）のため、{} 以降に残りの処理を承認してください。",
+                utc_time(at)
+            ),
+            &format!(
+                "HTTP 429 requires waiting. Approve the remaining work after {}.",
+                utc_time(at)
+            ),
         ))
     } else if additional.is_some_and(|cost| {
         (limits.per_job_microusd > 0
@@ -129,7 +165,7 @@ pub(crate) fn quote_for_ui(state: &AppState, quote: JobQuote, is_retry: bool) ->
         end_ms: context.end_ms,
         model: quote.execution.model_id,
         location: quote.execution.location,
-        estimated_usd: additional.map(|cost| cost as f64 / 1_000_000.),
+        estimated_usd: base_additional.map(|cost| cost as f64 / 1_000_000.),
         maximum_usd: additional.map(|cost| cost as f64 / 1_000_000.),
         input_tokens: remaining.iter().map(|r| r.input_tokens_reserved).sum(),
         max_output_tokens: quote.execution.max_output_tokens,
@@ -139,6 +175,15 @@ pub(crate) fn quote_for_ui(state: &AppState, quote: JobQuote, is_retry: bool) ->
             .sum(),
         request_count: remaining.len(),
         send_duration_ms: remaining.iter().map(|r| r.audio_duration_ms).sum(),
+        maximum_request_count: remaining.len() * multiplier as usize,
+        maximum_send_duration_ms: remaining.iter().map(|r| r.audio_duration_ms).sum::<u64>()
+            * multiplier,
+        maximum_total_output_tokens: remaining
+            .iter()
+            .map(|r| u64::from(r.max_output_tokens))
+            .sum::<u64>()
+            * multiplier,
+        retry_policy,
         pricing_source: quote.execution.price.map(|price| price.source),
         unpriced: additional.is_none(),
         expires_at: utc_time(quote.quote_expires_at_ms),

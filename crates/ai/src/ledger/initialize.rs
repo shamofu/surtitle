@@ -58,6 +58,8 @@ impl AiStore {
             PRAGMA user_version=2;
         ")?;
         transcript_evidence::initialize(&conn)?;
+        super::retries::initialize(&conn)?;
+        super::pacing::initialize(&conn)?;
         Ok(store)
     }
 

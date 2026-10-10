@@ -35,6 +35,8 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                     if has_warnings { "applied_with_warnings" } else { "applied" }
                 } else if has_transcript_result { "ready" } else { "none" };
                 let issue = state.ai.job_issue(&q.id)?;
+                let retry = state.ai.retry_status(&q.id)?;
+                let pacing = state.ai.pacing_status(&q.id)?;
                 let pending_results = saved_results(&state, &q.id)?
                     .iter()
                     .filter(|result| !result.applied)
@@ -57,6 +59,10 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                 let (ja, en) = match issue.as_ref().map(|issue| issue.code.as_str()) {
                     Some("credentials") => ("認証設定を確認してください。受信済み結果は保存されています。", "Check your credentials. Received results are saved."),
                     Some("budget") => ("予算の上限に達しました。設定を見直して残りを再開できます。", "The budget limit was reached. Update it to resume the remaining work."),
+                    Some("provider") if status == "paused" && issue.as_ref().is_some_and(|issue| issue.http_status == Some(429)) => ("一時停止しています。混雑・利用制限（HTTP 429）の費用記録と受信済み結果は保持しています。続行には残りの処理の承認が必要です。", "Paused. Accounting for HTTP 429 and received results are retained. Approve the remaining work to continue."),
+                    Some("provider") if status == "cancelled" && issue.as_ref().is_some_and(|issue| issue.http_status == Some(429)) => ("キャンセルしました。混雑・利用制限（HTTP 429）の費用記録と受信済み結果は保持しています。", "Cancelled. Accounting for HTTP 429 and received results are retained."),
+                    Some("provider") if status == "unknown" && issue.as_ref().is_some_and(|issue| issue.http_status == Some(429)) => ("混雑・利用制限（HTTP 429）で停止しました。旧承認の要求は結果不明として費用記録を保持しています。結果不明の要求を確認してから、残りの処理を承認してください。", "Stopped by congestion or a usage limit (HTTP 429). Accounting for this earlier approval is retained as unknown. Acknowledge the unknown request before approving the remaining work."),
+                    Some("provider") if issue.as_ref().is_some_and(|issue| issue.http_status == Some(429)) => ("混雑・利用制限（HTTP 429）で停止しました。完了済みの区間は保存されています。残りの処理を確認して再開できます。", "Stopped by congestion or a usage limit (HTTP 429). Completed sections are saved. Review the remaining work to resume."),
                     Some("provider") => ("サービスがリクエストを受け付けませんでした。モデルとプロジェクトの設定を確認してください。", "The service rejected the request. Check the model and project settings."),
                     Some("source_changed") => ("元の動画または字幕が変更されています。受信済み結果は保存されています。", "The source media or subtitles changed. Received results are saved."),
                     Some("local_apply") => ("結果は受信済みですが、字幕への反映に失敗しました。追加送信せずに反映を再試行できます。", "Results were received but could not be applied. Retry applying without another request."),
@@ -77,6 +83,15 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                 };
                 let needs_attention = issue.is_some() || pending_results > 0 || transcript_review
                     || ["unknown", "paused", "failed", "queued"].contains(&status);
+                let (ja, en) = match retry.as_ref().map(|retry| retry.state.as_str()) {
+                    Some("waiting") if status == "running" => ("混雑・利用制限（HTTP 429）のため待機しています。同じ区間を再試行します。", "Waiting after congestion or a usage limit (HTTP 429). The same section will be retried."),
+                    Some("retrying") if status == "running" => ("混雑・利用制限（HTTP 429）が発生した区間を再試行しています。", "Retrying the section that received HTTP 429."),
+                    Some("exhausted") if status == "failed" => ("混雑・利用制限（HTTP 429）の再試行上限に達しました。完了済みの区間は保存されています。残りの処理には再承認が必要です。", "The HTTP 429 retry limit was reached. Completed sections are saved. Approve the remaining work to continue."),
+                    Some("deferred") if status == "failed" => ("混雑・利用制限（HTTP 429）により5分を超える待機が必要です。表示された再開可能時刻以降に残りの処理を承認してください。", "HTTP 429 requires waiting longer than five minutes. Approve the remaining work after the displayed resume time."),
+                    _ if status == "running" && pacing.as_ref().is_some_and(|pacing| pacing.slowed) => ("混雑を避けるため送信間隔を調整しています。受信済み字幕は使えます。", "Spacing requests to reduce congestion. Received subtitles remain available."),
+                    _ if status == "running" && pacing.is_some() => ("次の区間の送信まで待機しています。受信済み字幕は使えます。", "Waiting before sending the next section. Received subtitles remain available."),
+                    _ => (ja, en),
+                };
                 let message = if p.settings.locale == "ja" { ja } else { en }.to_owned();
                 Ok(JobSummary {
                     id: q.id,
@@ -94,6 +109,8 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                     issue,
                     automatic_transcript: automatic,
                     transcription_ranges,
+                    retry,
+                    pacing,
                 })
             })
             .collect::<Result<Vec<_>>>()?;

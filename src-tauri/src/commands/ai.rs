@@ -33,6 +33,7 @@ pub async fn approve_quote(
     digest: String,
     acknowledge_unpriced: bool,
     acknowledge_unqualified: bool,
+    retry_policy_version: Option<u32>,
 ) -> std::result::Result<(), String> {
     crate::application::ai::jobs::approve_quote(
         state.inner().clone(),
@@ -40,6 +41,7 @@ pub async fn approve_quote(
         digest,
         acknowledge_unpriced,
         acknowledge_unqualified,
+        retry_policy_version,
     )
     .await
 }
@@ -76,6 +78,7 @@ pub async fn reapprove_quote(
     digest: String,
     acknowledge_unpriced: bool,
     acknowledge_unqualified: bool,
+    retry_policy_version: Option<u32>,
 ) -> std::result::Result<(), String> {
     crate::application::ai::jobs::reapprove_quote(
         state.inner().clone(),
@@ -83,6 +86,7 @@ pub async fn reapprove_quote(
         digest,
         acknowledge_unpriced,
         acknowledge_unqualified,
+        retry_policy_version,
     )
     .await
 }

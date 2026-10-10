@@ -33,6 +33,10 @@ pub struct JobSummary {
     automatic_transcript: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     transcription_ranges: Vec<TranscriptionRangeSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retry: Option<RetryStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pacing: Option<PacingStatus>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -96,6 +100,11 @@ pub struct AiQuote {
     request_count: usize,
     send_duration_ms: u64,
     total_output_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retry_policy: Option<RetryPolicy>,
+    maximum_request_count: usize,
+    maximum_send_duration_ms: u64,
+    maximum_total_output_tokens: u64,
     pricing_source: Option<String>,
     unpriced: bool,
     location: String,

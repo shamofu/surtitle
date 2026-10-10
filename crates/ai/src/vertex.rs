@@ -35,6 +35,9 @@ trait Transport: Send + Sync {
 
 trait ResponseBody {
     fn status(&self) -> u16;
+    fn retry_after(&self) -> Option<&str> {
+        None
+    }
     fn chunk(&mut self) -> impl Future<Output = std::result::Result<Option<Vec<u8>>, ()>> + Send;
 }
 
@@ -76,6 +79,13 @@ impl Transport for reqwest::Client {
 impl ResponseBody for reqwest::Response {
     fn status(&self) -> u16 {
         reqwest::Response::status(self).as_u16()
+    }
+
+    fn retry_after(&self) -> Option<&str> {
+        self.headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .filter(|value| value.as_bytes().len() <= 128)
+            .and_then(|value| value.to_str().ok())
     }
 
     async fn chunk(&mut self) -> std::result::Result<Option<Vec<u8>>, ()> {
@@ -130,9 +140,27 @@ impl VertexService {
     pub async fn execute_next_with_guard(
         &self,
         job_id: &str,
-        before_send: impl FnOnce() -> Result<()>,
+        before_send: impl FnMut() -> Result<()>,
     ) -> Result<Option<ExecutionResult>> {
         execute_with_io(&self.store, &self.vault, &self.client, job_id, before_send).await
+    }
+
+    /// Native workers bind every reservation to the approval that started them.
+    pub async fn execute_next_scoped_with_guard(
+        &self,
+        job_id: &str,
+        approval_id: &str,
+        before_send: impl FnMut() -> Result<()>,
+    ) -> Result<Option<ExecutionResult>> {
+        execute_scoped_with_io(
+            &self.store,
+            &self.vault,
+            &self.client,
+            job_id,
+            Some(approval_id),
+            before_send,
+        )
+        .await
     }
 }
 
@@ -143,13 +171,29 @@ async fn execute_with_io(
     auth: &impl Authorization,
     transport: &impl Transport,
     job_id: &str,
-    before_send: impl FnOnce() -> Result<()>,
+    before_send: impl FnMut() -> Result<()>,
 ) -> Result<Option<ExecutionResult>> {
-    let Some(reservation) = store.reserve_next(job_id)? else {
+    execute_scoped_with_io(store, auth, transport, job_id, None, before_send).await
+}
+
+async fn execute_scoped_with_io(
+    store: &AiStore,
+    auth: &impl Authorization,
+    transport: &impl Transport,
+    job_id: &str,
+    approval_id: Option<&str>,
+    mut before_send: impl FnMut() -> Result<()>,
+) -> Result<Option<ExecutionResult>> {
+    let reserved = match approval_id {
+        Some(id) => store.reserve_next_scoped(job_id, id)?,
+        None => store.reserve_next(job_id)?,
+    };
+    let Some(reservation) = reserved else {
         return Ok(None);
     };
     // Validate and load immutable local input before requesting an OAuth token.
     let prepared = prepare_authenticated(auth, &reservation).await;
+    check_current_reservation(store, &reservation)?;
     let (body, token) = match prepared {
         Ok(v) => v,
         Err(error) => {
@@ -157,20 +201,33 @@ async fn execute_with_io(
             return Err(error);
         }
     };
-    if let Err(error) = before_send() {
-        store.release_unsent(&reservation.attempt_id, "source_changed_before_send")?;
-        return Err(error);
-    }
     // Authentication may take time, and the guard may observe a cancellation.
     // Recheck the exact reservation, current limits, and approval immediately
     // before handing the request to the transport.
-    if let Err(error) = store.validate_dispatch(&reservation) {
-        store.release_unsent(&reservation.attempt_id, "dispatch_validation_failed")?;
-        return Err(error);
+    loop {
+        check_current_reservation(store, &reservation)?;
+        if let Err(error) = before_send() {
+            store.release_unsent(&reservation.attempt_id, "source_changed_before_send")?;
+            return Err(error);
+        }
+        match store.validate_dispatch(&reservation) {
+            Ok(()) => break,
+            Err(AiError::PacingWaiting(_)) => {
+                // Keep this unsent reservation; waiting is neither a failed
+                // attempt nor a reason to consume another retry. The guard and
+                // approval are checked again after every cancellable wait.
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            Err(error) => {
+                store.release_unsent(&reservation.attempt_id, "dispatch_validation_failed")?;
+                return Err(error);
+            }
+        }
     }
     let url = reservation.execution.endpoint(&reservation.project_id)?;
     let response = transport.send(&url, &token, &body).await;
     drop(token);
+    check_current_reservation(store, &reservation)?;
     let mut response = match response {
         Ok(r) => r,
         Err(_) => {
@@ -180,6 +237,19 @@ async fn execute_with_io(
     };
     if !(200..300).contains(&response.status()) {
         let status = response.status();
+        if status == 429 {
+            let retry_after = response.retry_after().filter(|value| value.len() <= 128);
+            let retry = store.handle_429(&reservation, retry_after)?;
+            if retry.state == "waiting" {
+                let next = retry
+                    .next_retry_at
+                    .as_deref()
+                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                    .ok_or(AiError::UnknownOutcome)?;
+                return Err(AiError::RetryWaiting(next.timestamp_millis()));
+            }
+            return Err(AiError::Provider(status));
+        }
         // Conservatively retain the reservation even for rejected HTTP requests;
         // no response usage means the client cannot prove the billing outcome.
         store.mark_unknown(&reservation.attempt_id)?;
@@ -188,7 +258,9 @@ async fn execute_with_io(
     // Bound memory even if a provider response violates the requested token cap.
     let mut bytes = Vec::new();
     loop {
-        match response.chunk().await {
+        let chunk = response.chunk().await;
+        check_current_reservation(store, &reservation)?;
+        match chunk {
             Ok(Some(chunk)) if chunk.len() <= MAX_RESPONSE_BYTES - bytes.len() => {
                 bytes.extend_from_slice(&chunk)
             }
@@ -273,10 +345,13 @@ async fn execute_with_io(
                 }
             }
             if output_tokens > reservation.execution.max_output_tokens as u64 {
-                store.require_review(
-                    job_id,
-                    "Provider exceeded approved output setting; response retained, no further send",
-                )?;
+                let reason =
+                    "Provider exceeded approved output setting; response retained, no further send";
+                if let Some(approval) = &reservation.approval_id {
+                    store.require_review_scoped(job_id, approval, reason)?;
+                } else {
+                    store.require_review(job_id, reason)?;
+                }
                 return Err(AiError::Invalid(
                     "Provider exceeded the approved output setting; inspect the saved result"
                         .into(),
@@ -315,6 +390,15 @@ async fn execute_with_io(
                 ))
         }
     }
+}
+
+fn check_current_reservation(store: &AiStore, reservation: &ReservedRequest) -> Result<()> {
+    if let Some(approval) = &reservation.approval_id {
+        if !store.approval_is_current(&reservation.job_id, approval)? {
+            return Err(AiError::Superseded);
+        }
+    }
+    Ok(())
 }
 
 async fn prepare_authenticated(

@@ -5,7 +5,8 @@ local transcript review. New whole-recording, range and re-transcription jobs
 publish received text in the ordinary subtitle list. No complete-transcript
 adoption, VAD acknowledgement or boundary review is required before learning.
 The default path uses one Transcribe VERBATIM request with word timestamps per
-prepared chunk; no failure automatically invokes another model or paid retry.
+prepared chunk. New approvals permit at most two retries of that same chunk for
+HTTP 429; other failures do not trigger an automatic paid retry or model switch.
 See [AI behavior](ai.md#application-workflow) for the two-action start flow.
 
 Production audio requests retain allowlisted provider evidence in the paid-work

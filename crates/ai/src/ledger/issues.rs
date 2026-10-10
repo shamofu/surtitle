@@ -24,6 +24,38 @@ impl AiStore {
         http_status: Option<u16>,
         next_action: &str,
     ) -> Result<()> {
+        self.record_job_issue_inner(job_id, None, code, phase, http_status, next_action)
+            .map(|_| ())
+    }
+
+    pub fn record_job_issue_scoped(
+        &self,
+        job_id: &str,
+        approval_id: &str,
+        code: &str,
+        phase: &str,
+        http_status: Option<u16>,
+        next_action: &str,
+    ) -> Result<bool> {
+        self.record_job_issue_inner(
+            job_id,
+            Some(approval_id),
+            code,
+            phase,
+            http_status,
+            next_action,
+        )
+    }
+
+    fn record_job_issue_inner(
+        &self,
+        job_id: &str,
+        approval_id: Option<&str>,
+        code: &str,
+        phase: &str,
+        http_status: Option<u16>,
+        next_action: &str,
+    ) -> Result<bool> {
         if ![
             "credentials",
             "budget",
@@ -35,6 +67,7 @@ impl AiStore {
             "local_io",
             "interrupted",
             "execution",
+            "rate_limited",
         ]
         .contains(&code)
             || !["prepare", "source", "execute", "apply", "recovery"].contains(&phase)
@@ -52,7 +85,12 @@ impl AiStore {
             return Err(AiError::Invalid("Invalid job diagnostic".into()));
         }
         let mut conn = self.connect()?;
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(expected) = approval_id {
+            if super::retries::current_approval(&tx, job_id)?.as_deref() != Some(expected) {
+                return Ok(false);
+            }
+        }
         // Only a matching durable request/attempt state identifies the stopped
         // request. Pending order is not evidence: failure can precede dispatch
         // or occur after a response was already marked complete.
@@ -63,7 +101,7 @@ impl AiStore {
                  WHERE r.job_id=? AND (
                    (r.state='unknown' AND a.state='unknown') OR
                    (r.state='reserved' AND a.state='reserved' AND ?='unknown_outcome') OR
-                   (r.state='failed' AND a.state IN ('released','settled')))
+                   (r.state='failed' AND a.state IN ('released','settled','rejected_429')))
                  ORDER BY r.ordinal LIMIT 2",
             )?;
             let candidates = query
@@ -92,7 +130,7 @@ impl AiStore {
             params![job_id, serde_json::to_string(&issue)?],
         )?;
         tx.commit()?;
-        Ok(())
+        Ok(true)
     }
     pub fn job_issue(&self, job_id: &str) -> Result<Option<JobIssue>> {
         let conn = self.connect()?;
@@ -106,6 +144,17 @@ impl AiStore {
         self.connect()?
             .execute("UPDATE ai_job_issues SET active=0 WHERE job_id=?", [job_id])?;
         Ok(())
+    }
+
+    pub fn clear_job_issue_scoped(&self, job_id: &str, approval_id: &str) -> Result<bool> {
+        let mut conn = self.connect()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if super::retries::current_approval(&tx, job_id)?.as_deref() != Some(approval_id) {
+            return Ok(false);
+        }
+        tx.execute("UPDATE ai_job_issues SET active=0 WHERE job_id=?", [job_id])?;
+        tx.commit()?;
+        Ok(true)
     }
 }
 

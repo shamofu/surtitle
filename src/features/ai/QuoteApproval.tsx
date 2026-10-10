@@ -24,7 +24,8 @@ export function QuoteApproval({
   const [acknowledgedQuote, setAcknowledgedQuote] = useState<string | null>(
     null,
   );
-  const approvalIdentity = `${quote.id}:${quote.digest || ''}:${quote.expiresAt}`;
+  const approvalIdentity = JSON.stringify([quote.id, quote.digest, quote.expiresAt, quote.retryPolicy,
+    quote.maximumRequestCount, quote.maximumSendDurationMs, quote.maximumTotalOutputTokens]);
   const acknowledged = acknowledgedQuote === approvalIdentity;
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -34,6 +35,7 @@ export function QuoteApproval({
   const expired = new Date(quote.expiresAt).getTime() <= now;
   const unpriced = quote.unpriced === true || quote.maximumUsd == null;
   const requiresAcknowledgement = !transcription || unpriced;
+  const automaticRetries = (quote.retryPolicy?.maxRetries ?? 0) > 0;
   return (
     <div className="quote-review">
       <div className="quote-cost">
@@ -84,19 +86,25 @@ export function QuoteApproval({
         {transcription && <div><dt>{t('モデル', 'Model')}</dt><dd>{quote.model} · {quote.location || 'global'}</dd></div>}
         {transcription && quote.applyPolicy === 'auto' && <div><dt>{t('受信後', 'As results arrive')}</dt><dd>{t('字幕を自動表示', 'Apply subtitles automatically')}</dd></div>}
         <div>
-          <dt>{t('要求数 / 同時送信', 'Requests / concurrency')}</dt>
+          <dt>{automaticRetries ? t('処理区間数 / 同時送信', 'Audio ranges / concurrency') : t('要求数 / 同時送信', 'Requests / concurrency')}</dt>
           <dd>{quote.requestCount ?? 1} / 1</dd>
         </div>
+        {automaticRetries && <div>
+          <dt>{t('再試行込みの最大送信回数', 'Maximum requests including retries')}</dt>
+          <dd>{quote.maximumRequestCount}</dd>
+        </div>}
         {(quote.sendDurationMs || 0) > 0 && (
           <div>
             <dt>{t('重複込みの送信音声', 'Audio including overlap')}</dt>
             <dd>{timestamp(quote.sendDurationMs || 0, true)}</dd>
           </div>
         )}
+        {automaticRetries && quote.maximumSendDurationMs != null && <div>
+          <dt>{t('再試行込みの最大送信音声', 'Maximum audio including retries')}</dt>
+          <dd>{timestamp(quote.maximumSendDurationMs, true)}</dd>
+        </div>}
         <div>
-          <dt>
-            {t('1要求 / 全要求の出力上限', 'Output limit per request / total')}
-          </dt>
+          <dt>{automaticRetries ? t('1要求 / 再試行前の出力上限', 'Output limit per request / before retries') : t('1要求 / 全要求の出力上限', 'Output limit per request / total')}</dt>
           <dd>
             {quote.maxOutputTokens.toLocaleString()} /{' '}
             {(
@@ -105,6 +113,10 @@ export function QuoteApproval({
             tokens
           </dd>
         </div>
+        {automaticRetries && quote.maximumTotalOutputTokens != null && <div>
+          <dt>{t('再試行込みの最大出力', 'Maximum output including retries')}</dt>
+          <dd>{quote.maximumTotalOutputTokens.toLocaleString()} tokens</dd>
+        </div>}
         {quote.pricingSource && (
           <div>
             <dt>{t('単価の出所', 'Price source')}</dt>
@@ -146,7 +158,9 @@ export function QuoteApproval({
           disabled={!quote.canApprove || expired || busy}
         />
         <span>
-          {unpriced && transcription ? t('料金を事前に確定できないことを了承し、この範囲の文字起こしを開始します。', 'I understand the price cannot be determined in advance and authorize transcription of this range.') : unpriced
+          {unpriced && transcription ? automaticRetries
+            ? t('料金を事前に確定できないことを了承し、表示された自動再試行と送信上限を含め、この範囲の文字起こしを開始します。', 'I understand the price cannot be determined in advance and authorize transcription of this range, including the displayed automatic retries and sending limits.')
+            : t('料金を事前に確定できないことを了承し、この範囲の文字起こしを開始します。', 'I understand the price cannot be determined in advance and authorize transcription of this range.') : unpriced
             ? t(
                 '料金と品質が未確認であることを理解し、この範囲・要求数・音声時間・出力設定で今回の実行を承認します。',
                 'I understand that pricing and quality are unverified and approve this job for the displayed scope, request count, audio duration, and output settings.',
@@ -157,6 +171,15 @@ export function QuoteApproval({
               )}
         </span>
       </label>}
+      {automaticRetries && <p className="notice" data-testid="automatic-retry-policy">
+        {t(
+          `サービスが混雑した場合（HTTP 429）だけ、各区間を最大${quote.retryPolicy!.maxRetries}回、自動で再試行します（最大${quote.maximumRequestCount}回の送信）。${unpriced ? '表示した送信上限には再試行を含みます。' : '予約額と送信上限は再試行を含みます。'}通信結果が不明な場合は停止します。`,
+          `Only when the service is busy (HTTP 429), each audio range may be retried automatically up to ${quote.retryPolicy!.maxRetries} times (${quote.maximumRequestCount} requests maximum). ${unpriced ? 'The displayed sending limits include retries.' : 'The reservation and maximum sending limits include retries.'} An unknown outcome stops the job.`,
+        )}
+      </p>}
+      {transcription && <p className="helper-text" data-testid="transcription-pacing-policy">
+        {t('音声は順に送信し、送信開始の間隔を10秒以上空けます。混雑時は間隔を延ばします。', 'Audio is sent one range at a time, with at least 10 seconds between request starts. Congestion increases the interval.')}
+      </p>}
       <Button
         variant="primary"
         className="full-width"

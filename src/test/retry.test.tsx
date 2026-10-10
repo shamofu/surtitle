@@ -112,4 +112,41 @@ describe('fresh approval for remaining AI work', () => {
     expect(aiApi.createRetryQuote).not.toHaveBeenCalled();
     expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
   });
+  it.each([
+    ['Pause automatic retry', 'pauseAiJob'],
+    ['Cancel', 'cancelAiJob'],
+  ] as const)('allows %s during a retry wait without sending another request', async (label, method) => {
+    render(<JobActions job={{ ...job, kind: 'transcribe', status: 'running',
+      retry: { state: 'waiting', ordinal: 1, retryNumber: 1, maxRetries: 2, nextRetryAt: '2099-01-01T00:00:00Z' },
+    }} inlineTranscription />);
+    fireEvent.click(screen.getByRole('button', { name: label }));
+    await waitFor(() => expect(aiApi[method]).toHaveBeenCalledExactlyOnceWith(job.id));
+    expect(aiApi.createRetryQuote).not.toHaveBeenCalled();
+    expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Resume remaining work' })).not.toBeInTheDocument();
+  });
+  it('only prepares an estimate after automatic retries are exhausted', async () => {
+    vi.mocked(aiApi.createRetryQuote).mockResolvedValue({ ...quote, kind: 'transcribe' });
+    render(<JobActions job={{ ...job, kind: 'transcribe', status: 'failed',
+      retry: { state: 'exhausted', ordinal: 1, retryNumber: 2, maxRetries: 2 },
+    }} inlineTranscription />);
+    fireEvent.click(screen.getByRole('button', { name: 'Resume remaining work' }));
+    await screen.findByRole('button', { name: 'Start transcription' });
+    expect(aiApi.createRetryQuote).toHaveBeenCalledExactlyOnceWith(job.id);
+    expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
+    expect(aiApi.resolveUnknownAttempt).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['Pause before next request', 'pauseAiJob'],
+    ['Cancel', 'cancelAiJob'],
+  ] as const)('allows %s during normal pacing without approving another request', async (label, method) => {
+    render(<JobActions job={{ ...job, kind: 'transcribe', status: 'running',
+      pacing: { ordinal: 1, nextSendAt: '2099-01-01T00:00:00Z', intervalMs: 10000, slowed: false },
+    }} inlineTranscription />);
+    fireEvent.click(screen.getByRole('button', { name: label }));
+    await waitFor(() => expect(aiApi[method]).toHaveBeenCalledExactlyOnceWith(job.id));
+    expect(aiApi.createRetryQuote).not.toHaveBeenCalled();
+    expect(aiApi.approveQuote).not.toHaveBeenCalled();
+    expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
+  });
 });

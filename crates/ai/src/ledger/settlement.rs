@@ -132,7 +132,17 @@ impl AiStore {
             return Err(AiError::UnknownOutcome);
         }
         tx.execute("UPDATE ai_attempts SET state=?,charged_microusd=?,settled_at_ms=?,usage_json=? WHERE id=?",params![state,charged.map(|n|n as i64),self.now_ms(),usage.map(serde_json::to_string).transpose()?,id])?;
+        tx.execute("UPDATE ai_approval_requests SET retry_state=NULL,retry_at_ms=NULL WHERE last_attempt_id=?", [id])?;
         let success = response.is_some() && error.is_none() && state == "settled";
+        let dispatched: bool = tx.query_row(
+            "SELECT dispatched_at_ms IS NOT NULL FROM ai_attempts WHERE id=?",
+            [id],
+            |row| row.get(0),
+        )?;
+        if previous == "reserved" && dispatched && state != "released" {
+            let (plan, _, _, _) = super::accounting::read_job(&tx, &job_id)?;
+            self.pace_outcome(&tx, &plan, ordinal, success)?;
+        }
         tx.execute("UPDATE ai_requests SET state=?,response_json=?,error_code=? WHERE job_id=? AND ordinal=?",params![if success {"completed"} else if state == "unknown" {"unknown"} else {"failed"},response.map(serde_json::to_string).transpose()?,error,job_id,ordinal])?;
         if !success || charged.zip(reserve).is_some_and(|(n, r)| n > r) {
             tx.execute(
@@ -158,8 +168,26 @@ impl AiStore {
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             jobs
         };
+        let dispatched = {
+            let mut statement = tx.prepare("SELECT job_id,ordinal FROM ai_attempts WHERE state='reserved' AND dispatched_at_ms IS NOT NULL")?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            rows
+        };
+        for (job, ordinal) in dispatched {
+            let (plan, _, _, _) = super::accounting::read_job(&tx, &job)?;
+            self.pace_outcome(&tx, &plan, ordinal, false)?;
+        }
         let changed = tx.execute(
             "UPDATE ai_attempts SET state='unknown' WHERE state='reserved'",
+            [],
+        )?;
+        tx.execute(
+            "UPDATE ai_approval_requests SET retry_state=NULL,retry_at_ms=NULL
+            WHERE last_attempt_id IN (SELECT id FROM ai_attempts WHERE state='unknown')",
             [],
         )?;
         tx.execute("UPDATE ai_requests SET state='unknown',error_code='interrupted' WHERE state='reserved'",[])?;

@@ -31,6 +31,14 @@ use sha2::{Digest, Sha256};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AiError {
+    #[error("This execution belongs to an earlier approval")]
+    Superseded,
+    #[error("Another worker already owns this approved request")]
+    WorkerBusy,
+    #[error("Waiting to retry a rate-limited request at {0}")]
+    RetryWaiting(i64),
+    #[error("Waiting for the transcription dispatch interval until {0}")]
+    PacingWaiting(i64),
     #[error("{0}")]
     Invalid(String),
     #[error("Paid work is disabled until nonzero daily, monthly, and job limits are configured")]

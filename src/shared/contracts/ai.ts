@@ -65,6 +65,19 @@ export interface JobSummary {
   needsAttention?: boolean;
   resultState?: 'none' | 'ready' | 'applied' | 'applied_with_warnings';
   issue?: { code: string; phase: string; occurredAt: string; ordinal?: number; httpStatus?: number; nextAction: string };
+  retry?: {
+    state: 'waiting' | 'retrying' | 'exhausted' | 'deferred';
+    ordinal: number;
+    retryNumber: number;
+    maxRetries: number;
+    nextRetryAt?: string;
+  };
+  pacing?: {
+    ordinal: number;
+    nextSendAt?: string;
+    intervalMs: number;
+    slowed: boolean;
+  };
   automaticTranscript?: boolean;
   transcriptionRanges?: { startMs: number; endMs: number; state: 'pending' | 'received' | 'failed' | 'source_block' }[];
 }
@@ -123,4 +136,8 @@ export interface AiQuote {
   unpriced?: boolean;
   location?: string;
   applyPolicy?: 'manual' | 'auto';
+  retryPolicy?: { version: number; maxRetries: number };
+  maximumRequestCount?: number;
+  maximumSendDurationMs?: number;
+  maximumTotalOutputTokens?: number;
 }

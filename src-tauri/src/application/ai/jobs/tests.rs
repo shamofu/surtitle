@@ -7,10 +7,11 @@ impl JobExecutor for Arc<OfflineVertexService> {
     async fn execute_next_with_guard(
         &self,
         job_id: &str,
-        before_send: impl FnOnce() -> surtitle_ai::Result<()> + Send,
+        approval_id: &str,
+        before_send: impl FnMut() -> surtitle_ai::Result<()> + Send,
     ) -> surtitle_ai::Result<Option<ExecutionResult>> {
         self.as_ref()
-            .execute_next_with_guard(job_id, before_send)
+            .execute_next_scoped_with_guard(job_id, approval_id, before_send)
             .await
     }
 }
@@ -111,7 +112,7 @@ impl Fixture {
         }
     }
 
-    fn approve(&self) -> PreparedJob {
+    fn approve(&self) -> ApprovedExecution {
         approve_for_execution(
             &self.state,
             &self.quote.id,
@@ -131,7 +132,7 @@ impl Fixture {
 
     fn start(
         &self,
-        plan: PreparedJob,
+        plan: ApprovedExecution,
         service: Arc<OfflineVertexService>,
     ) -> tokio::task::JoinHandle<Result<()>> {
         let state = self.state.clone();
@@ -321,6 +322,61 @@ async fn simultaneous_approvals_start_only_one_worker() {
         .unwrap();
     assert_eq!(service.sent_ordinals(), [0, 1]);
     fixture.assert_attempts(&["settled", "settled"]);
+}
+
+#[tokio::test]
+async fn recovered_and_superseded_worker_cannot_publish_response_or_failure() {
+    for scenario in [Scenario::Translation, Scenario::SendFailure] {
+        let fixture = Fixture::new().await;
+        let service = fixture.offline(scenario);
+        let mut checkpoint = service.checkpoint(Stage::AfterSend, 0);
+        let old = fixture.start(fixture.approve(), service.clone());
+        reached(&mut checkpoint).await;
+        assert_eq!(fixture.state.ai.recover_interrupted().unwrap(), 1);
+        let attempt = fixture.state.ai.summary().unwrap().unknown_attempts[0]
+            .id
+            .clone();
+        fixture.state.ai.acknowledge_unknown(&attempt).unwrap();
+        let approved = approve_for_execution(
+            &fixture.state,
+            &fixture.quote.id,
+            &fixture.quote.digest,
+            true,
+            false,
+            true,
+        )
+        .unwrap();
+        let before = attempt_snapshot(fixture.directory.path());
+        checkpoint.resume();
+        finished(old).await.unwrap();
+        assert_eq!(attempt_snapshot(fixture.directory.path()), before);
+        assert!(
+            fixture
+                .state
+                .ai
+                .job_issue(&fixture.quote.id)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            fixture
+                .state
+                .ai
+                .response(&fixture.quote.id, 0)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            fixture.state.ai.quote(&fixture.quote.id).unwrap().state,
+            "approved"
+        );
+        let resumed = fixture.offline(Scenario::Translation);
+        finished(fixture.start(approved, resumed.clone()))
+            .await
+            .unwrap();
+        assert_eq!(resumed.sent_ordinals(), [0, 1]);
+        assert_eq!(service.sent_ordinals(), [0]);
+    }
 }
 
 #[tokio::test]

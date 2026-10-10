@@ -4,6 +4,13 @@ use super::{audit, AiStore, BudgetLimits, JobQuote};
 use crate::{AiError, PreparedJob, Result};
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
+struct ApprovalOptions {
+    retry: bool,
+    acknowledge_unpriced: bool,
+    acknowledge_unqualified: bool,
+    retry_policy_version: Option<u32>,
+}
+
 impl AiStore {
     pub fn set_budget(&self, value: BudgetLimits) -> Result<()> {
         for n in [
@@ -149,14 +156,94 @@ impl AiStore {
         acknowledge_unpriced: bool,
         acknowledge_unqualified: bool,
     ) -> Result<()> {
+        self.approve_retry_scoped_at(
+            job_id,
+            expected_digest,
+            at,
+            ApprovalOptions {
+                retry,
+                acknowledge_unpriced,
+                acknowledge_unqualified,
+                retry_policy_version: None,
+            },
+        )
+        .map(|_| ())
+    }
+
+    /// Approval explicitly includes the displayed, fixed retry policy. Omitting
+    /// its version preserves the previous one-send-per-request scope.
+    pub fn approve_scope_with_retry(
+        &self,
+        job_id: &str,
+        digest: &str,
+        acknowledge_unpriced: bool,
+        acknowledge_unqualified: bool,
+        retry_policy_version: Option<u32>,
+    ) -> Result<String> {
+        self.approve_retry_scoped_at(
+            job_id,
+            digest,
+            self.now_ms(),
+            ApprovalOptions {
+                retry: false,
+                acknowledge_unpriced,
+                acknowledge_unqualified,
+                retry_policy_version,
+            },
+        )
+    }
+
+    pub fn reapprove_scope_with_retry(
+        &self,
+        job_id: &str,
+        digest: &str,
+        acknowledge_unpriced: bool,
+        acknowledge_unqualified: bool,
+        retry_policy_version: Option<u32>,
+    ) -> Result<String> {
+        self.approve_retry_scoped_at(
+            job_id,
+            digest,
+            self.now_ms(),
+            ApprovalOptions {
+                retry: true,
+                acknowledge_unpriced,
+                acknowledge_unqualified,
+                retry_policy_version,
+            },
+        )
+    }
+
+    fn approve_retry_scoped_at(
+        &self,
+        job_id: &str,
+        expected_digest: &str,
+        at: i64,
+        options: ApprovalOptions,
+    ) -> Result<String> {
+        let ApprovalOptions {
+            retry,
+            acknowledge_unpriced,
+            acknowledge_unqualified,
+            retry_policy_version,
+        } = options;
         let mut conn = self.connect()?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         self.require_validation_scope(&tx)?;
         let (plan, digest, state, expiry) = read_job(&tx, job_id)?;
         plan.validate()?;
+        let max_retries = match retry_policy_version {
+            None => 0,
+            Some(version) => {
+                self.retry_policy_for_plan(&plan)
+                    .filter(|policy| policy.version == version)
+                    .ok_or(AiError::ApprovalRequired)?
+                    .max_retries
+            }
+        };
         if digest != expected_digest
             || digest != plan.digest()?
-            || ["completed", "cancelled"].contains(&state.as_str())
+            || ["approved", "completed", "cancelled"].contains(&state.as_str())
             || at > expiry
             || !acknowledge_unqualified
             || (plan.execution.price.is_none() && !acknowledge_unpriced)
@@ -166,6 +253,9 @@ impl AiStore {
         self.check_model_permission(&plan, job_id, at)?;
         if has_blocking_attempt(&tx)? {
             return Err(AiError::InFlight);
+        }
+        if let Some(until) = super::retries::retry_floor(&tx, job_id, at)? {
+            return Err(AiError::RetryWaiting(until));
         }
         if !retry && state == "needs_review" {
             return Err(AiError::ApprovalRequired);
@@ -194,7 +284,14 @@ impl AiStore {
             }
         }
         if plan.execution.price.is_some() {
-            check_budget(&tx, job_id, pending_cost, at)?;
+            check_budget(
+                &tx,
+                job_id,
+                pending_cost
+                    .checked_mul(u64::from(max_retries + 1))
+                    .ok_or_else(|| AiError::Invalid("Cost overflow".into()))?,
+                at,
+            )?;
         }
         #[cfg(feature = "development-validation")]
         self.check_development_budget(&tx, pending_cost, true)?;
@@ -203,11 +300,20 @@ impl AiStore {
             [job_id],
             |r| r.get::<_, i64>(0),
         )? as u64;
-        let approval = serde_json::json!({"digest":digest,"max_attempts":previous + pending,
+        let approval_id = uuid::Uuid::new_v4().to_string();
+        let approval = serde_json::json!({"digest":digest,"max_attempts":previous + pending * u64::from(max_retries + 1),
+            "approval_id":approval_id,"retry_policy_version":retry_policy_version,
             "acknowledge_unpriced":acknowledge_unpriced,"acknowledge_unqualified":acknowledge_unqualified});
         if retry {
             tx.execute("UPDATE ai_requests SET state='pending',error_code=NULL WHERE job_id=? AND state IN ('failed','needs_review')",[job_id])?;
         }
+        tx.execute("INSERT INTO ai_approval_requests(approval_id,job_id,ordinal,max_retries,retry_at_ms,retry_floor_ms,retry_state)
+            SELECT ?,r.job_id,r.ordinal,?,
+                (SELECT MAX(s.retry_floor_ms) FROM ai_approval_requests s WHERE s.job_id=r.job_id AND s.ordinal=r.ordinal),
+                (SELECT MAX(s.retry_floor_ms) FROM ai_approval_requests s WHERE s.job_id=r.job_id AND s.ordinal=r.ordinal),
+                CASE WHEN EXISTS(SELECT 1 FROM ai_approval_requests s WHERE s.job_id=r.job_id AND s.ordinal=r.ordinal AND s.retry_floor_ms>?) THEN 'waiting' ELSE NULL END
+            FROM ai_requests r WHERE r.job_id=? AND r.state!='completed'",
+            params![approval_id,max_retries,at,job_id])?;
         tx.execute(
             "UPDATE ai_jobs SET state='approved',approved_at_ms=?,approval_json=? WHERE id=?",
             params![at, serde_json::to_string(&approval)?, job_id],
@@ -220,7 +326,7 @@ impl AiStore {
             &serde_json::to_string(&approval)?,
         )?;
         tx.commit()?;
-        Ok(())
+        Ok(approval_id)
     }
 
     pub fn pause(&self, job_id: &str) -> Result<()> {

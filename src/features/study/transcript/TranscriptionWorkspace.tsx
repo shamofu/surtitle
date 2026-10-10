@@ -13,6 +13,7 @@ import { continuationApi, type AiContinuation } from '../../ai/continuations';
 import { ModelEditor, emptyModel } from '../../ai/ModelEditor';
 import { QuoteApproval } from '../../ai/QuoteApproval';
 import { JobActions } from '../../ai/JobActions';
+import { currentTranscriptionJob, JobProcessingDetails, JobStatusMessage } from '../../ai/JobStatus';
 import { studyApi } from '../api';
 import { libraryApi } from '../../library/api';
 import { useActivities } from '../../../app/providers/Activities';
@@ -204,10 +205,51 @@ function StoredResponse({ jobId, ordinal }: { jobId: string; ordinal: number }) 
   return <>{evidence === undefined ? <Button variant="ghost" onClick={() => void report(() => studyApi.transcriptResultDetail(jobId, ordinal)).then(result => { if (result) setEvidence(JSON.stringify(result.evidence?.response ?? result, null, 2)); })}>{t('元の応答を表示', 'Show original response')}</Button> : <pre>{evidence}</pre>}</>;
 }
 
-export function TranscriptionWorkspace({ media, request, onRequest, onDone, onStarted, onOpenEarlierDrafts, continuations = [], onResume }: {
+function TranscriptionProgress({ job, compact = false }: { job: JobSummary; compact?: boolean }) {
+  const { t } = useAppearance();
+  const progress = Number.isFinite(job.progress) ? Math.min(1, Math.max(0, job.progress)) : 0;
+  return <span className={`progress-status${compact ? ' compact' : ''}`} data-status={job.status === 'queued' ? 'waiting' : job.status} aria-busy={job.status === 'running'}>
+    <span className="progress-status-copy">
+      {!compact && <strong>{t('文字起こしの進捗', 'Transcription progress')}</strong>}
+      <span><JobStatusMessage job={job} /></span>
+      {compact && <span className="progress-status-count">{Math.floor(progress * 100)}%</span>}
+    </span>
+    {job.status === 'running' && <progress aria-label={t('文字起こしの進捗', 'Transcription progress')} value={progress} max={1} />}
+    {!compact && <span className="progress-status-count">{Math.floor(progress * 100)}%</span>}
+  </span>;
+}
+
+function TranscriptionJob({ job, focused, active, history, onReview, onRequest }: {
+  job: JobSummary; focused: boolean; active: boolean; history: boolean;
+  onReview: (jobId: string) => void; onRequest: (range: { startMs: number; endMs: number }) => void;
+}) {
+  const { t } = useAppearance();
+  const target = useRef<HTMLDivElement>(null);
+  const details = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (!focused || !active) return;
+    if (details.current) details.current.open = true;
+    target.current?.focus({ preventScroll: true });
+    target.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [focused, active]);
+  return <div className="transcription-job" data-job-id={job.id} ref={target} tabIndex={-1}>
+    <TranscriptionProgress job={job} />
+    {!!job.transcriptionRanges?.length && <div className="transcription-ranges" aria-label={t('区間ごとの状態', 'Transcription ranges')}>{job.transcriptionRanges.map((range, index) => <span key={index} className={`range-${range.state}`} title={`${timestamp(range.startMs)}–${timestamp(range.endMs)} · ${range.state}`} />)}</div>}
+    {(job.issue || job.retry || (job.status === 'running' && job.pacing)) && <details ref={details}>
+      <summary>{t('処理の詳細', 'Processing details')}</summary>
+      <JobProcessingDetails job={job} />
+    </details>}
+    <JobActions job={job} inlineTranscription onReviewTranscript={onReview} />
+    {job.transcriptionRanges?.filter(range => range.state === 'failed').map((range, index) => <Button key={index} onClick={() => onRequest(range)}>{t('この区間を再文字起こし', 'Transcribe this range again')} · {timestamp(range.startMs)}–{timestamp(range.endMs)}</Button>)}
+    {history && <TranscriptHistory jobId={job.id} />}
+  </div>;
+}
+
+export function TranscriptionWorkspace({ media, request, onRequest, onDone, onStarted, onOpenEarlierDrafts, continuations = [], onResume, focusJobId, active = true }: {
   media: Media; request?: TranscriptionRequest; onRequest: (range?: { startMs: number; endMs: number }) => void; onDone: () => void;
   onStarted?: () => void;
   onOpenEarlierDrafts?: () => void; continuations?: AiContinuation[]; onResume?: (continuation: AiContinuation) => void;
+  focusJobId?: string; active?: boolean;
 }) {
   const { t } = useAppearance();
   const { data } = useSnapshot();
@@ -215,34 +257,28 @@ export function TranscriptionWorkspace({ media, request, onRequest, onDone, onSt
   const jobs = (data?.jobs ?? []).filter(job => job.mediaId === media.id && (job.kind === 'transcribe' || job.automaticTranscript));
   const current = jobs.filter(job => !['completed', 'cancelled'].includes(job.status));
   const completed = jobs.filter(job => ['completed', 'cancelled'].includes(job.status));
-  const showJob = (job: JobSummary) => <div className="transcription-job" key={job.id}>
-    <ProgressStatus label={t('文字起こしの進捗', 'Transcription progress')} phase={job.message || (job.status === 'completed' ? t('字幕を表示しました', 'Subtitles are ready') : t('文字起こし中', 'Transcribing'))} status={job.status === 'queued' ? 'waiting' : job.status} completed={job.progress} total={1} />
-    {!!job.transcriptionRanges?.length && <div className="transcription-ranges" aria-label={t('区間ごとの状態', 'Transcription ranges')}>{job.transcriptionRanges.map((range, index) => <span key={index} className={`range-${range.state}`} title={`${timestamp(range.startMs)}–${timestamp(range.endMs)} · ${range.state}`} />)}</div>}
-    <JobActions job={job} inlineTranscription onReviewTranscript={id => setHistory(value => value === id ? undefined : id)} />
-    {job.transcriptionRanges?.filter(range => range.state === 'failed').map((range, index) => <Button key={index} onClick={() => onRequest(range)}>{t('この区間を再文字起こし', 'Transcribe this range again')} · {timestamp(range.startMs)}–{timestamp(range.endMs)}</Button>)}
-    {history === job.id && <TranscriptHistory jobId={job.id} />}
-  </div>;
+  const showJob = (job: JobSummary) => <TranscriptionJob key={job.id} job={job} focused={focusJobId === job.id} active={active}
+    history={history === job.id} onReview={id => setHistory(value => value === id ? undefined : id)} onRequest={onRequest} />;
   return <section className="transcription-workspace" aria-label={t('文字起こし', 'Transcription')}>
     <div className="transcription-heading"><h3><Mic2 size={17} />{t('文字起こし', 'Transcription')}</h3>{!request && !current.length && <Button variant="ghost" onClick={() => onRequest()}>{media.segmentCount ? t('文字起こしを作り直す', 'Transcribe again') : t('字幕を作成', 'Create subtitles')}</Button>}</div>
     {!request && !jobs.length && <p className="transcription-intro">{t('音声から字幕を作成できます。範囲と見積もりを確認してから開始します。', 'Create subtitles from the audio. Review the range and estimate before starting.')}</p>}
     {request && <TranscriptionSetup key={request.id} media={media} request={request} onDone={onDone} onStarted={onStarted} />}
     {!request && continuations.filter(item => item.kind === 'transcribe' && item.mediaId === media.id && (!item.quoteId || !jobs.some(job => job.id === item.quoteId))).map(item => <Button key={item.id} onClick={() => onResume?.(item)}>{t('途中の文字起こしを続ける', 'Continue transcription setup')}</Button>)}
-    {!request && current.map(showJob)}
+    {current.filter(job => !request || job.id === focusJobId).map(showJob)}
     {(completed.length > 0 || onOpenEarlierDrafts) && <details><summary>{t('文字起こしの履歴', 'Transcription history')}{completed.length > 0 ? ` (${completed.length})` : ''}</summary>{completed.map(showJob)}
       {onOpenEarlierDrafts && <Button variant="ghost" onClick={onOpenEarlierDrafts}>{t('以前の下書きを開く', 'Open earlier drafts')}</Button>}
     </details>}
   </section>;
 }
 
-export function TranscriptionStatus({ mediaId, hasRequest, onOpen }: { mediaId: string; hasRequest: boolean; onOpen: () => void }) {
+export function TranscriptionStatus({ mediaId, hasRequest, onOpen }: { mediaId: string; hasRequest: boolean; onOpen: (jobId?: string) => void }) {
   const { data } = useSnapshot();
   const { t } = useAppearance();
   const jobs = (data?.jobs ?? []).filter(job => job.mediaId === mediaId && (job.kind === 'transcribe' || job.automaticTranscript));
-  const current = jobs.find(job => !['completed', 'cancelled'].includes(job.status));
+  const current = currentTranscriptionJob(jobs);
   if (!current && !hasRequest) return null;
-  return <button type="button" className="transcription-status" onClick={onOpen}>
-    <span>{current?.message || (hasRequest ? t('文字起こしの設定を続ける', 'Continue transcription setup') : t('文字起こし中', 'Transcribing'))}</span>
-    {current?.status === 'running' && <ProgressStatus label={t('文字起こしの進捗', 'Transcription progress')} completed={current.progress} total={1} status="running" compact />}
+  return <button type="button" className="transcription-status" onClick={() => onOpen(current?.id)}>
+    {current ? <TranscriptionProgress job={current} compact /> : <span>{t('文字起こしの設定を続ける', 'Continue transcription setup')}</span>}
     <span className="transcription-status-action">{t('詳細を開く', 'View details')}</span>
   </button>;
 }

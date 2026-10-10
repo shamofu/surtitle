@@ -9,9 +9,13 @@ mod dispatch;
 mod initialize;
 mod issues;
 mod local_applications;
+mod pacing;
 mod read;
+mod retries;
 mod settlement;
 pub use issues::JobIssue;
+pub use pacing::PacingStatus;
+pub use retries::{RetryPolicy, RetryStatus};
 
 mod transcript_evidence;
 pub use transcript_evidence::*;
@@ -83,6 +87,8 @@ pub struct AttemptSummary {
 /// A native-only reservation token. Do not expose this token as a renderer command.
 #[derive(Debug, Clone)]
 pub struct ReservedRequest {
+    /// Generation of the approval that reserved this exact attempt.
+    pub approval_id: Option<String>,
     pub attempt_id: String,
     pub job_id: String,
     pub ordinal: u32,
