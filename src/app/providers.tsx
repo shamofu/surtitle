@@ -6,12 +6,12 @@ import { SnapshotProvider } from './providers/Snapshot';
 import { SurfaceProvider } from './providers/Surface';
 export function AppProviders({ children }: { children: ReactNode }) {
   return (
-    <NotificationsProvider>
-      <SnapshotProvider>
-        <AppearanceProvider>
-          <SurfaceProvider>{children}</SurfaceProvider>
-        </AppearanceProvider>
-      </SnapshotProvider>
-    </NotificationsProvider>
+    <SurfaceProvider>
+      <NotificationsProvider>
+        <SnapshotProvider>
+          <AppearanceProvider>{children}</AppearanceProvider>
+        </SnapshotProvider>
+      </NotificationsProvider>
+    </SurfaceProvider>
   );
 }

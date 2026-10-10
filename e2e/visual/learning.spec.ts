@@ -55,4 +55,30 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
     await expect(dialog.getByRole('button', { name: locale === 'ja' ? '失敗したファイルだけ再試行' : 'Retry failed files', exact: true })).toBeInViewport();
     await capture(page, `import-results-${label}`);
   });
+
+  test(`transcription tab ${label}`, async ({ page }) => {
+    await installLearningFixture(page, locale, theme);
+    await page.goto('/study/visual-fixture');
+    await page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true }).click();
+    const tab = page.getByRole('tab', { name: locale === 'ja' ? '文字起こし' : 'Transcription', exact: true });
+    await tab.click();
+    await expect(tab).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByText(locale === 'ja' ? '文字起こしの履歴' : 'Transcription history', { exact: true })).toBeInViewport({ ratio: 1 });
+    await expect(page.getByRole('button', { name: locale === 'ja' ? '文字起こしを作り直す' : 'Transcribe again', exact: true })).toBeInViewport();
+    await capture(page, `transcription-tab-${label}`);
+  });
+
+  test(`phrase edit confirmation ${label}`, async ({ page }) => {
+    await installLearningFixture(page, locale, theme);
+    await page.goto('/cards');
+    await page.getByLabel(locale === 'ja' ? 'take a little detourの操作' : 'Actions for take a little detour', { exact: true }).click();
+    await page.getByRole('button', { name: locale === 'ja' ? '編集' : 'Edit', exact: true }).click();
+    const editor = page.getByRole('dialog', { name: locale === 'ja' ? 'フレーズを編集' : 'Edit phrase', exact: true });
+    await editor.getByLabel(locale === 'ja' ? '意味' : 'Meaning', { exact: true }).fill('少し寄り道をする — take a short detour');
+    await page.keyboard.press('Escape');
+    const confirmation = page.getByRole('dialog', { name: locale === 'ja' ? '変更を保存しますか？' : 'Save your changes?', exact: true });
+    await expect(page.locator('dialog[open]')).toHaveCount(2);
+    await expect(confirmation.getByRole('button', { name: locale === 'ja' ? '保存して閉じる' : 'Save and close', exact: true })).toBeInViewport({ ratio: 1 });
+    await capture(page, `phrase-edit-confirmation-${label}`);
+  });
 }

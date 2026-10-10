@@ -35,6 +35,7 @@ import {
   useDataActions,
 } from '../../../app/runtime';
 import { timestamp } from '../../../shared/format';
+import { shouldIgnoreShortcut } from '../../../shared/keyboard';
 import { Button, IconButton, Modal } from '../../../shared/ui/index';
 
 export function NativePlayer({
@@ -280,19 +281,15 @@ export function NativePlayer({
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (
-        event.defaultPrevented ||
+        shouldIgnoreShortcut(event) ||
         surfaceHidden ||
         interactionsDisabled ||
-        !loaded ||
-        (event.target instanceof HTMLElement &&
-          (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'SUMMARY'].includes(
-            event.target.tagName,
-          ) ||
-            event.target.isContentEditable))
+        !loaded
       )
         return;
       if (event.code === 'Space') {
         event.preventDefault();
+        if (event.repeat) return;
         void control({ action: state?.paused ? 'play' : 'pause' });
       }
       if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {

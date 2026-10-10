@@ -14,7 +14,8 @@ import { AppProviders } from '../app/providers';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import type { AppSnapshot } from '../shared/contracts/snapshot';
 
-vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn() }));
+vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn(), useBlocker: () => ({ status: 'idle' }) }));
+vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, closeWindow: vi.fn() }));
 
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,

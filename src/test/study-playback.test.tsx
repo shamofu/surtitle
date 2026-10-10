@@ -407,7 +407,7 @@ describe('watching and inspecting phrases', () => {
     mount();
     await ready();
     expect(document.querySelector('.current-caption-text')).toHaveTextContent(cues[0].text);
-    expect(screen.queryByLabelText('Search transcript')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Search transcript')).not.toBeVisible();
     expect(screen.queryByText('お願いします。')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Show translation' }));
     expect(screen.getByText('お願いします。')).toBeVisible();
@@ -928,7 +928,7 @@ describe('study sentence and source playback', () => {
     await waitFor(() => expect(playerApi.playerState).toHaveBeenCalled());
     expect(inspectButton()).toBeDisabled();
     openTranscript();
-    fireEvent.click(screen.getByRole('button', { name: 'Suggestions' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Suggestions' }));
     expect(await screen.findByRole('button', { name: 'Listen to source' })).toBeDisabled();
     openPlaybackSettings();
     const checkbox = screen.getByRole('checkbox', { name: 'Pause at the end of a caption group' });
@@ -947,7 +947,7 @@ describe('study sentence and source playback', () => {
     mount();
     await ready();
     openTranscript();
-    fireEvent.click(screen.getByRole('button', { name: 'Suggestions' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Suggestions' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Listen to source' }));
     await waitFor(() => expect(playerApi.playSourceRange).toHaveBeenCalledExactlyOnceWith('media', ['a', 'b']));
     const repeat = await screen.findByRole('button', { name: 'Repeat selected segment' });
@@ -962,10 +962,15 @@ describe('study sentence and source playback', () => {
   });
 
   it('keeps a repeat requested as soon as the selected source becomes available', async () => {
+    let finishLoop!: () => void;
+    const loopResponse = new Promise<void>(resolve => { finishLoop = resolve; });
+    const control = vi.mocked(playerApi.player).getMockImplementation()!;
+    vi.mocked(playerApi.player).mockImplementation(request =>
+      request.action === 'source-loop' ? loopResponse : control(request));
     mount();
     await ready();
     openTranscript();
-    fireEvent.click(screen.getByRole('button', { name: 'Suggestions' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Suggestions' }));
     const source = await screen.findByRole('button', { name: 'Listen to source' });
     let clicked = false;
     const observer = new MutationObserver(() => {
@@ -978,7 +983,11 @@ describe('study sentence and source playback', () => {
       await waitFor(() => expect(clicked).toBe(true));
       expect(playerApi.player).toHaveBeenCalledWith({ action: 'source-loop', startMs: 0, endMs: 2000 });
       const repeat = screen.getByRole('button', { name: 'Repeat selected segment' });
-      expect(repeat).toHaveAttribute('aria-pressed', 'true');
+      // Observing the click does not mean the native command or React update has settled.
+      expect(repeat).toBeDisabled();
+      expect(repeat).toHaveAttribute('aria-pressed', 'false');
+      await act(async () => { finishLoop(); });
+      await waitFor(() => expect(repeat).toHaveAttribute('aria-pressed', 'true'));
       expect(playerApi.player).not.toHaveBeenCalledWith({ action: 'loop' });
       fireEvent.click(repeat);
       await waitFor(() => expect(repeat).toHaveAttribute('aria-pressed', 'false'));
@@ -1020,7 +1029,7 @@ describe('study sentence and source playback', () => {
     mount();
     await ready();
     openTranscript();
-    fireEvent.click(screen.getByRole('button', { name: 'Suggestions' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Suggestions' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Listen to source' }));
     await waitFor(() => expect(fixture.notify).toHaveBeenCalledWith(expect.stringContaining('no longer adjacent'), 'error'));
     expect(document.querySelector('.phrase-panel')).toBeNull();
@@ -1037,7 +1046,7 @@ describe('study sentence and source playback', () => {
     const client = mount();
     await ready();
     openTranscript();
-    fireEvent.click(screen.getByRole('button', { name: 'Suggestions' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Suggestions' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Listen to source' }));
     const repeat = await screen.findByRole('button', { name: 'Repeat selected segment' });
     await waitFor(() => expect(repeat).toBeEnabled());

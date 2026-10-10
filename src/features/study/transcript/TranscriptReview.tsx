@@ -119,6 +119,7 @@ export function TranscriptReviewDialog({
   return (
     <Modal
       title={t('文字起こしを確認', 'Review transcription')}
+      closeDisabled={busy}
       eyebrow="LISTEN, REVIEW, THEN KEEP"
       wide
       onClose={() => {
@@ -493,6 +494,7 @@ export function TranscriptReviewDialog({
       {repairQuote && (
         <Modal
           title={t('境界修復の見積もり', 'Boundary repair estimate')}
+          closeDisabled={busy}
           onClose={() => {
             if (!busy) setRepairQuote(undefined);
           }}

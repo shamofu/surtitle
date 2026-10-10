@@ -33,6 +33,17 @@
 .running-label { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); white-space: nowrap; margin-right: 12px; }
 .page-content { flex: 1; overflow: auto; padding: 32px 40px 48px; scroll-behavior: smooth; min-height: 0; }
 .page-content > div { max-width: 1440px; margin: 0 auto; }
+.app-notifications { flex-shrink: 0; min-width: 0; }
+.app-notifications .toast-stack {
+  position: static;
+  max-width: none;
+  max-height: min(132px, 18dvh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+}
+.app-notifications .toast-stack:not(:empty) { padding: 8px 24px; }
+.app-notifications .toast { padding: 8px 12px; box-shadow: none; }
 .preview-banner, .error-banner { padding: 8px 32px; background: var(--surface-raised); display: flex; gap: 10px; align-items: center; font-size: 12px; line-height: 1.7; color: var(--muted); flex-shrink: 0; }
 .error-banner { background: var(--danger-soft); color: var(--danger); }
 .error-banner > span { min-width: 0; overflow-wrap: anywhere; }

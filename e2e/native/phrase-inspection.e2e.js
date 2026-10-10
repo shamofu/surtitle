@@ -16,6 +16,10 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
   const savedCardIds = [];
   before(async () => {
     await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__));
+    if (process.env.SURTITLE_E2E_FRONTEND_SCRIPT) {
+      const loadedScripts = await browser.execute(() => Array.from(document.querySelectorAll('script[src]'), script => new URL(script.src).pathname));
+      assert(loadedScripts.includes(process.env.SURTITLE_E2E_FRONTEND_SCRIPT), 'The native executable does not embed the expected current frontend');
+    }
     const snapshot = await invoke('get_app_snapshot');
     assert.equal(snapshot.settings.credentialConfigured, false);
     assert.equal(snapshot.budget.spentUsd, 0);
@@ -36,6 +40,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
   });
   afterEach(async function () {
     if (this.currentTest.state !== 'failed') return;
+    await navigate(`/study/${mediaId}`);
     await browser.refresh();
     await $('.play-button').waitForEnabled();
     await control({ action: 'pause' });
@@ -43,7 +48,10 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
   it('keeps the full native surface visible when opening panels and resizing at the minimum window size', async () => {
     for (const [width, height] of [[1440, 900], [1024, 700]]) {
       await browser.setWindowSize(width, height);
-      await browser.waitUntil(async () => (await player()).surfaceVisible, { timeoutMsg: 'Native video is clipped at this window size' });
+      await browser.waitUntil(async () => {
+        const state = await player();
+        return state.surfaceVisible && state.videoWidth === 640 && state.videoHeight === 360;
+      }, { timeoutMsg: 'Native video is clipped or has not decoded the fixture dimensions' });
       await $('button=Transcript').click();
       await $('[aria-label="Subtitle list"]').waitForDisplayed();
       await browser.waitUntil(async () => (await player()).surfaceVisible);
@@ -139,14 +147,90 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
     await browser.waitUntil(async () => !(await player()).paused);
     await control({ action: 'pause' });
   });
-  it('hides native video for playback settings and restores it after closing the modal', async () => {
-    await $('button=More').click();
+  it('hides native video for playback settings and restores focus without closing the background panel on Escape', async () => {
+    await control({ action: 'pause' });
+    const transcript = $('.study-top-actions button');
+    if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
+    await $('.transcript-panel').waitForDisplayed();
+    if (!(await $('button=Playback settings').isDisplayed())) await $('button=More').click();
     await $('button=Playback settings').click();
     await $('dialog').waitForDisplayed();
     await browser.waitUntil(async () => !(await player()).surfaceVisible);
-    await $('button[aria-label="Close"]').click();
+    await browser.execute(() => document.querySelector('dialog').focus());
+    await browser.keys(Key.Space);
+    assert.equal((await player()).paused, true, 'The background player responded to Space inside a modal');
+    await browser.keys(Key.Escape);
+    await expect($('dialog')).not.toExist();
+    await expect($('.transcript-panel')).toBeDisplayed();
     await browser.waitUntil(async () => (await player()).surfaceVisible);
     await expect($('button=Playback settings')).toBeFocused();
+    await browser.saveScreenshot(resolve('test-results/native/surface-modal-escape.png'));
+    await transcript.click();
+    await expect($('.transcript-panel')).not.toBeDisplayed();
+  });
+  it('keeps phrase actions clickable while a save notification moves between the page and modal', async () => {
+    const original = (await invoke('get_app_snapshot')).cards.find(card => card.id === fixture.cardId);
+    assert(original);
+    try {
+      await navigate('/cards');
+      const menu = () => $(`summary[aria-label="Actions for ${original.term}"]`);
+      await menu().click();
+      await $('.phrase-options[open]').$('button=Edit').click();
+      await $('dialog textarea').addValue(' Native notice regression.');
+      await $('dialog').$('button=Save').click();
+      await expect($('dialog')).not.toExist();
+      await $('button.toast.success').waitForDisplayed();
+      assert(await browser.execute(() => {
+        const notice = document.querySelector('button.toast.success').getBoundingClientRect();
+        const content = document.querySelector('.page-content').getBoundingClientRect();
+        return notice.bottom <= content.top + 1;
+      }), 'The global save notification overlays page actions');
+      await menu().click();
+      await browser.saveScreenshot(resolve('test-results/native/global-toast-phrase-menu.png'));
+      await $('.phrase-options[open]').$('button=Edit').click();
+      await $('dialog .modal-notifications button.toast.success').waitForDisplayed();
+      await $('dialog').$('button=Cancel').click();
+      await expect($('dialog')).not.toExist();
+      await expect($('button.toast.success')).toBeDisplayed();
+    } finally {
+      await invoke('edit_card', { request: {
+        id: original.id, term: original.term, meaning: original.meaning, example: original.example,
+        translation: original.translation, explanation: original.explanation,
+      } });
+      await navigate(`/study/${mediaId}`);
+      await browser.refresh();
+      await $('.play-button').waitForEnabled();
+    }
+  });
+  it('preserves unsaved phrase edits when Escape closes only the nested confirmation', async () => {
+    const original = (await invoke('get_app_snapshot')).cards.find(card => card.id === fixture.cardId);
+    assert(original, 'Expected a seeded phrase in the disposable profile');
+    await navigate('/cards');
+    await $(`summary[aria-label="Actions for ${original.term}"]`).click();
+    await browser.saveScreenshot(resolve('test-results/native/cards-success-notification-menu.png'));
+    await $('.phrase-options[open]').$('button=Edit').click();
+    const editor = $('dialog');
+    await editor.waitForDisplayed();
+    const meaning = editor.$('textarea');
+    await meaning.click();
+    await browser.keys([Key.Ctrl, 'a']);
+    await browser.keys(Key.Backspace);
+    await meaning.addValue('Native unsaved phrase edit');
+    await editor.$('button=Cancel').click();
+    await browser.waitUntil(async () => (await $$('dialog[open]')).length === 2);
+    await browser.keys(Key.Escape);
+    await browser.waitUntil(async () => (await $$('dialog[open]')).length === 1);
+    await expect(editor.$('h2')).toHaveText('Edit phrase');
+    await expect(meaning).toHaveValue('Native unsaved phrase edit');
+    await expect(editor.$('button=Cancel')).toBeFocused();
+    await browser.saveScreenshot(resolve('test-results/native/nested-edit-confirmation.png'));
+    await editor.$('button=Cancel').click();
+    await $('button=Discard changes').click();
+    await expect($('dialog')).not.toExist();
+    assert.equal((await invoke('get_app_snapshot')).cards.find(card => card.id === original.id).meaning, original.meaning);
+    await navigate(`/study/${mediaId}`);
+    await $('.play-button').waitForEnabled();
+    await browser.waitUntil(async () => (await player()).surfaceVisible);
   });
   it('restores video bounds after fullscreen and page scrolling', async () => {
     const fullscreen = $('[aria-label="Toggle fullscreen"]');
@@ -178,6 +262,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
       if (transcription) {
         const transcript = $('.study-top-actions button');
         if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
+        await $('.transcript-tabs').$('button=Transcription').click();
         await $('.transcription-workspace').waitForDisplayed();
       }
       const details = transcription ? $('.transcription-workspace > details') : $('.study-jobs');

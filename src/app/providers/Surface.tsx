@@ -9,24 +9,29 @@ import {
 import type { ReactNode } from 'react';
 interface Surface {
   surfaceHidden: boolean;
-  registerModal: () => () => void;
+  activeModal: HTMLDialogElement | null;
+  notificationHost: HTMLElement | null;
+  registerModal: (dialog: HTMLDialogElement, notificationHost: HTMLElement) => () => void;
 }
+interface ModalSurface { dialog: HTMLDialogElement; notificationHost: HTMLElement }
 const Context = createContext<Surface | null>(null);
 export function SurfaceProvider({ children }: { children: ReactNode }) {
-  const [modalCount, setModalCount] = useState(0);
-  const registerModal = useCallback(() => {
-    setModalCount((value) => value + 1);
-    let registered = true;
+  const [modals, setModals] = useState<ModalSurface[]>([]);
+  const registerModal = useCallback((dialog: HTMLDialogElement, notificationHost: HTMLElement) => {
+    const entry = { dialog, notificationHost };
+    setModals(current => [...current, entry]);
     return () => {
-      if (registered) {
-        registered = false;
-        setModalCount((value) => value - 1);
-      }
+      setModals(current => current.filter(item => item !== entry));
     };
   }, []);
   const value = useMemo(
-    () => ({ surfaceHidden: modalCount > 0, registerModal }),
-    [modalCount, registerModal],
+    () => ({
+      surfaceHidden: modals.length > 0,
+      activeModal: modals.at(-1)?.dialog ?? null,
+      notificationHost: modals.at(-1)?.notificationHost ?? null,
+      registerModal,
+    }),
+    [modals, registerModal],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

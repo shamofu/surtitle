@@ -92,6 +92,7 @@ async function openDraft(id = mediaId) {
   const transcript = $('.study-top-actions button');
   await transcript.waitForClickable();
   if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
+  await clickVisible($('.transcript-tabs').$('button=Transcription'));
   const history = $('.transcription-workspace > details');
   await history.waitForDisplayed();
   if ((await history.getAttribute('open')) === null) await clickVisible(history.$('summary'));

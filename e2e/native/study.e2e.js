@@ -25,7 +25,7 @@ async function clickInView(selector) {
 async function openTranscript() {
   const transcript = $('button=Transcript');
   await transcript.waitForClickable();
-  if (!(await $('[aria-label="Search transcript"]').isExisting())) await transcript.click();
+  if (!(await $('[aria-label="Search transcript"]').isDisplayed())) await transcript.click();
 }
 async function expectPageTop(path) {
   await browser.waitUntil(async () => browser.execute(expected =>
@@ -141,6 +141,8 @@ describe('real native learning workflow (no cloud requests)', () => {
   });
   it('preserves milliseconds in the subtitle editor and replaces the generated subtitle track after repeated edits', async () => {
     await navigate(`/study/${mediaId}`);
+    await $('.play-button').waitForEnabled();
+    await browser.waitUntil(async () => (await invoke('get_player_state')).ready);
     await invoke('player_control', { request: { action: 'seek', value: 0 } });
     const original = (await invoke('list_segments', { mediaId })).find(segment => segment.id === 'fixture-0');
     assert(original);

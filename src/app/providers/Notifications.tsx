@@ -9,6 +9,8 @@ import {
   useState,
 } from 'react';
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { useSurface } from './Surface';
 
 interface Toast {
   id: number;
@@ -17,6 +19,7 @@ interface Toast {
 }
 interface Notifications {
   notify: (text: string, kind?: Toast['kind']) => void;
+  registerRegion: (element: HTMLDivElement | null) => void;
   report: <T>(
     action: () => Promise<T>,
     success?: string,
@@ -24,6 +27,8 @@ interface Notifications {
 }
 const Context = createContext<Notifications | null>(null);
 export function NotificationsProvider({ children }: { children: ReactNode }) {
+  const { notificationHost } = useSurface();
+  const [pageHost, setPageHost] = useState<HTMLDivElement | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const nextId = useRef(0);
@@ -60,25 +65,31 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     },
     [notify],
   );
-  const value = useMemo(() => ({ notify, report }), [notify, report]);
+  const value = useMemo(() => ({ notify, report, registerRegion: setPageHost }), [notify, report]);
+  const host = notificationHost ?? pageHost;
+  const notifications = (
+    <div className="toast-stack" aria-live="polite" aria-atomic="false">
+      {toasts.map(toast => (
+        <button
+          key={toast.id}
+          className={`toast ${toast.kind}`}
+          onClick={() => setToasts(items => items.filter(item => item.id !== toast.id))}
+        >
+          {toast.text}
+        </button>
+      ))}
+    </div>
+  );
   return (
     <Context.Provider value={value}>
       {children}
-      <div className="toast-stack" aria-live="polite" aria-atomic="false">
-        {toasts.map((toast) => (
-          <button
-            key={toast.id}
-            className={`toast ${toast.kind}`}
-            onClick={() =>
-              setToasts((items) => items.filter((item) => item.id !== toast.id))
-            }
-          >
-            {toast.text}
-          </button>
-        ))}
-      </div>
+      {host ? createPortal(notifications, host) : notifications}
     </Context.Provider>
   );
+}
+export function NotificationRegion() {
+  const { registerRegion } = useNotifications();
+  return <div className="app-notifications" ref={registerRegion} />;
 }
 export function useNotifications() {
   const value = useContext(Context);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import {
   ArrowDownToLine,
@@ -10,6 +10,7 @@ import {
   MoreHorizontal,
   Search,
   Volume2,
+  X,
 } from 'lucide-react';
 import { cardsApi } from './api';
 import { playerApi } from '../study/playback/api';
@@ -26,20 +27,21 @@ import {
   Button,
   EmptyState,
   PageTitle,
+  IconButton,
 } from '../../shared/ui/index';
 import { TransferDialog } from '../transfer/TransferDialog';
 import { EditCardDialog, DeleteCardDialog } from './CardManagement';
 
-function closePhraseMenu(element: HTMLElement) {
+function closePhraseMenu(element: HTMLElement, restoreFocus = true) {
   const menu = element.closest('details');
   if (!menu) return;
   menu.removeAttribute('open');
-  menu.querySelector('summary')?.focus({ preventScroll: true });
+  if (restoreFocus) menu.querySelector('summary')?.focus({ preventScroll: true });
 }
 
 export function CardsPage() {
-  const { mutate } = useDataActions();
-  const { data } = useSnapshot();
+  const { mutate, refresh } = useDataActions();
+  const { data, loading, error } = useSnapshot();
   const { t, locale } = useAppearance();
   const { report } = useNotifications();
   const [search, setSearch] = useState('');
@@ -48,6 +50,23 @@ export function CardsPage() {
   const [edit, setEdit] = useState<StudyCard>();
   const [deleting, setDeleting] = useState<StudyCard>();
   const [busyCard, setBusyCard] = useState<string>();
+  const [openMenu, setOpenMenu] = useState<string>();
+  const activeMenu = useRef<HTMLDetailsElement | null>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!openMenu) return;
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Node && !activeMenu.current?.contains(event.target)) {
+        setOpenMenu(undefined);
+      }
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [openMenu]);
+  function closeMenu(element: HTMLElement) {
+    setOpenMenu(undefined);
+    closePhraseMenu(element);
+  }
   async function suspend(card: StudyCard) {
     setBusyCard(card.id);
     await report(() =>
@@ -64,7 +83,7 @@ export function CardsPage() {
       (language === 'all' || card.language === language) &&
       `${card.term} ${card.meaning} ${card.example}`
         .toLocaleLowerCase()
-        .includes(search.toLocaleLowerCase()),
+        .includes(search.trim().toLocaleLowerCase()),
   );
   const due = dueCards(cards);
   return (
@@ -96,7 +115,7 @@ export function CardsPage() {
             className="compact-select"
             aria-label={t('学習言語で絞り込む', 'Filter by learning language')}
             value={language}
-            onChange={(event) => setLanguage(event.target.value)}
+            onChange={(event) => { setLanguage(event.target.value); setOpenMenu(undefined); }}
           >
             <option value="all">{t('すべての言語', 'All languages')}</option>
             {languages.map((code) => (
@@ -108,15 +127,24 @@ export function CardsPage() {
           <div className="search-box">
             <Search size={16} />
             <input
+              ref={searchInput}
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => { setSearch(event.target.value); setOpenMenu(undefined); }}
               placeholder={t('フレーズを検索', 'Search your phrases')}
               aria-label={t('フレーズを検索', 'Search your phrases')}
             />
+            {search && <IconButton label={t('検索をクリア', 'Clear search')} onClick={() => {
+              setSearch(''); searchInput.current?.focus();
+            }}><X size={15} /></IconButton>}
           </div>
         </div>
       </div>
-      {!filtered.length ? (
+      {!data && loading ? <p role="status">{t('フレーズを読み込み中…', 'Loading your phrases…')}</p>
+      : !data && error ? <div className="notice warning" role="alert">
+        <span>{t('フレーズを読み込めませんでした。', 'Could not load your phrases.')} {error.message}</span>
+        <Button onClick={() => void report(() => refresh())}>{t('再試行', 'Retry')}</Button>
+      </div>
+      : !filtered.length ? (
         <div className="library-empty">
           <EmptyState
             icon={<Layers3 size={33} strokeWidth={1.4} />}
@@ -135,10 +163,12 @@ export function CardsPage() {
                   'Save a phrase while watching, then listen to its original audio here.',
                 )}
           >
-            <Link to="/" className="button primary">
+            {cards.length ? <Button variant="primary" onClick={() => {
+              setSearch(''); setLanguage('all'); searchInput.current?.focus();
+            }}>{t('絞り込みをリセット', 'Reset filters')}</Button> : <Link to="/" className="button primary">
               {t('作品を選ぶ', 'Choose something to watch')}
               <ArrowRight size={16} />
-            </Link>
+            </Link>}
           </EmptyState>
         </div>
       ) : (
@@ -164,33 +194,41 @@ export function CardsPage() {
                     </Button>
                     <details
                       className="phrase-options"
+                      open={openMenu === card.id}
+                      onBlur={(event) => {
+                        if (!event.currentTarget.contains(event.relatedTarget)) setOpenMenu(undefined);
+                      }}
                       onKeyDown={(event) => {
                         if (event.key !== 'Escape' || !event.currentTarget.open) return;
                         event.preventDefault();
                         event.stopPropagation();
-                        closePhraseMenu(event.currentTarget);
+                        closeMenu(event.currentTarget);
                       }}
                     >
-                      <summary aria-label={t(`${card.term}の操作`, `Actions for ${card.term}`)}>
+                      <summary aria-label={t(`${card.term}の操作`, `Actions for ${card.term}`)} onClick={(event) => {
+                        event.preventDefault();
+                        activeMenu.current = event.currentTarget.closest('details');
+                        setOpenMenu(current => current === card.id ? undefined : card.id);
+                      }}>
                         <MoreHorizontal size={20} />
                       </summary>
                       <div className="phrase-options-panel">
                         <Button onClick={(event) => {
-                          closePhraseMenu(event.currentTarget);
+                          closeMenu(event.currentTarget);
                           setEdit(card);
                         }}>
                           {t('編集', 'Edit')}
                         </Button>
                         <Button
                           busy={busyCard === card.id}
-                          onClick={() => void suspend(card)}
+                          onClick={(event) => { closeMenu(event.currentTarget); void suspend(card); }}
                         >
                           {card.suspended
                             ? t('復習を再開', 'Resume reviews')
                             : t('復習を停止', 'Suspend reviews')}
                         </Button>
                         <Button variant="danger" onClick={(event) => {
-                          closePhraseMenu(event.currentTarget);
+                          closeMenu(event.currentTarget);
                           setDeleting(card);
                         }}>
                           {t('削除', 'Delete')}

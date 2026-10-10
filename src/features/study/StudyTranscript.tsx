@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { VirtualItem } from '@tanstack/react-virtual';
 import {
@@ -25,7 +25,7 @@ import { timestamp } from '../../shared/format';
 import { Badge, Button, EmptyState, IconButton } from '../../shared/ui/index';
 import { DraftStudyPanel } from './drafts/DraftStudyPanel';
 import type { PlayRange } from './drafts/lifecycle';
-export type TranscriptTab = 'transcript' | 'vocabulary' | 'draft';
+export type TranscriptTab = 'transcript' | 'transcription' | 'vocabulary' | 'draft';
 export interface TranscriptViewState {
   search: string;
   following: boolean;
@@ -60,6 +60,8 @@ export function StudyTranscript({
   onReview,
   onDraftPlay,
   transcriptionWorkspace,
+  transcriptionStatus,
+  active = true,
   onTranscribeRange,
 }: {
   media: Media;
@@ -87,9 +89,19 @@ export function StudyTranscript({
   onReview: (jobId: string) => void;
   onDraftPlay: PlayRange;
   transcriptionWorkspace?: ReactNode;
+  transcriptionStatus?: ReactNode;
+  active?: boolean;
   onTranscribeRange?: (range: { startMs: number; endMs: number }) => void;
 }) {
   const { t } = useAppearance();
+  const tabsId = useId();
+  const visibleTab = tab === 'draft' ? 'transcription' : tab;
+  const tabs = [
+    ['transcript', t('字幕', 'Transcript')],
+    ...(transcriptionWorkspace ? [['transcription', t('文字起こし', 'Transcription')]] : []),
+    ['vocabulary', t('AI の提案', 'Suggestions')],
+    ...(!transcriptionWorkspace ? [['draft', t('下書きから学ぶ', 'Study a draft')]] : []),
+  ] as [TranscriptTab, string][];
   const { search, following, showTranslations } = viewState;
   const [markedOnly, setMarkedOnly] = useState(false);
   const viewStateRef = useRef(viewState);
@@ -115,7 +127,7 @@ export function StudyTranscript({
   });
 
   useLayoutEffect(() => {
-    if (tab !== 'transcript' || !scrollRef.current) return;
+    if (!active || tab !== 'transcript' || !scrollRef.current) return;
     const width = scrollRef.current.clientWidth;
     const previous = previousLayout.current;
     // Keep measured heights when returning from the inspector. Replacing them
@@ -126,42 +138,63 @@ export function StudyTranscript({
     if (!following || search) {
       virtualizer.scrollToOffset(viewStateRef.current.scrollOffset, { behavior: 'auto' });
     }
-  }, [tab, search, showTranslations, filtered.length]);
+  }, [active, tab, search, showTranslations, filtered.length]);
 
   useLayoutEffect(
     () => {
-      if (!following || search || tab !== 'transcript') return;
+      if (!active || !following || search || tab !== 'transcript') return;
       const index = filtered.findIndex(item => item.id === activeId);
       if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center', behavior: 'auto' });
     },
-    [activeId, following, search, tab, filtered.length, showTranslations]
+    [active, activeId, following, search, tab, filtered.length, showTranslations]
   );
 
   return (
     <>
-      {transcriptionWorkspace}
       <div
         className="transcript-tabs"
+        role="tablist"
         aria-label={t('字幕の表示内容', 'Transcript content')}
       >
-        {([
-          ['transcript', t('字幕', 'Transcript')],
-          ['vocabulary', t('AI の提案', 'Suggestions')],
-          ['draft', t('下書きから学ぶ', 'Study a draft')],
-        ] as const).filter(([id]) => id !== 'draft' || transcriptionWorkspace === undefined).map(([id, label]) => (
+        {tabs.map(([id, label], index) => (
           <button
             key={id}
+            id={`${tabsId}-${id}-tab`}
+            role="tab"
             type="button"
-            aria-pressed={tab === id}
-            className={tab === id ? 'active' : ''}
+            aria-selected={(transcriptionWorkspace ? visibleTab : tab) === id}
+            aria-controls={`${tabsId}-${id === 'transcription' && tab === 'draft' ? 'draft' : id}-panel`}
+            tabIndex={(transcriptionWorkspace ? visibleTab : tab) === id ? 0 : -1}
+            className={(transcriptionWorkspace ? visibleTab : tab) === id ? 'active' : ''}
             onClick={() => onTab(id)}
+            onKeyDown={event => {
+              if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.nativeEvent.isComposing) return;
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+                : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+              onTab(tabs[next][0]);
+              document.getElementById(`${tabsId}-${tabs[next][0]}-tab`)?.focus();
+            }}
           >
             {label}
           </button>
         ))}
       </div>
+      {transcriptionWorkspace && <div
+        className="transcription-view"
+        role="tabpanel"
+        id={`${tabsId}-transcription-panel`}
+        aria-labelledby={`${tabsId}-transcription-tab`}
+        hidden={tab !== 'transcription'}
+      >{transcriptionWorkspace}</div>}
       {tab === 'draft'
         ? (
+          <div className="transcript-draft-view" role="tabpanel" id={`${tabsId}-draft-panel`} aria-labelledby={`${tabsId}-${transcriptionWorkspace ? 'transcription' : 'draft'}-tab`}>
+          {transcriptionWorkspace && <Button variant="ghost" onClick={() => {
+            onTab('transcription');
+            document.getElementById(`${tabsId}-transcription-tab`)?.focus();
+          }}>{t('文字起こしの履歴へ戻る', 'Back to transcription history')}</Button>}
           <DraftStudyPanel
             media={media}
             playbackReady={ready}
@@ -170,10 +203,11 @@ export function StudyTranscript({
             onAddSubtitles={onImport}
             onEstimate={() => onEstimate('transcribe')}
           />
+          </div>
         )
         : tab === 'vocabulary'
           ? (
-            <div className="suggestions-panel">
+            <div className="suggestions-panel" role="tabpanel" id={`${tabsId}-vocabulary-panel`} aria-labelledby={`${tabsId}-vocabulary-tab`}>
               {candidatesError &&
                 <p
                   className="notice warning"
@@ -227,8 +261,9 @@ export function StudyTranscript({
                 })}
             </div>
           )
-          : (
-            <>
+          : tab === 'transcript' ? (
+            <div className="transcript-view" role="tabpanel" id={`${tabsId}-transcript-panel`} aria-labelledby={`${tabsId}-transcript-tab`}>
+              {transcriptionStatus}
               <div className="transcript-tools">
                 <div className="search-box">
                   <Search size={16} />
@@ -393,8 +428,8 @@ export function StudyTranscript({
                     : t('再生に戻る', 'Follow playback')}
                 </button>
               </footer>
-            </>
-          )}
+            </div>
+          ) : null}
     </>
   );
 }

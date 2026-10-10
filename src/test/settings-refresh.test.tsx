@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   act,
   cleanup,
@@ -20,6 +20,7 @@ import type { AppSnapshot } from '../shared/contracts/snapshot';
 const context = vi.hoisted(() => ({
   data: undefined as AppSnapshot | undefined,
   notify: vi.fn(),
+  registerModal: () => () => {},
 }));
 
 vi.mock('../features/settings/api', () => ({
@@ -35,7 +36,8 @@ vi.mock('../features/ai/api', () => ({
 }));
 
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
-vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn() }));
+vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn(), useBlocker: () => ({ status: 'idle' }) }));
+vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, closeWindow: vi.fn() }));
 vi.mock('../features/ai/continuations', () => ({ continuationApi: { list: vi.fn().mockResolvedValue([]) } }));
 vi.mock('../app/runtime', () => {
   const useFixture = () => ({
@@ -44,6 +46,7 @@ vi.mock('../app/runtime', () => {
     t: (_ja: string, en: string) => en,
     report: (action: () => Promise<unknown>) => action().catch(() => undefined),
     notify: context.notify,
+    registerModal: context.registerModal,
   });
   return {
     useSnapshot: useFixture,
@@ -52,6 +55,9 @@ vi.mock('../app/runtime', () => {
     useNotifications: useFixture,
     useSurface: useFixture,
   };
+});
+beforeAll(() => {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
 });
 afterEach(() => {
   cleanup();
@@ -384,6 +390,83 @@ describe('guided settings and shared model catalogue', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled());
     expect(budget).toHaveValue(4);
+    expect(screen.getByText('You have unsaved changes')).toBeVisible();
+  });
+
+  it('associates validation with language and wrapped budget inputs and focuses the first error', () => {
+    context.data = snapshot(settings());
+    render(<SettingsPage />);
+    const language = screen.getByRole('combobox', { name: 'Learning language' });
+    const budget = screen.getByRole('spinbutton', { name: 'Monthly AI budget (USD)' });
+    fireEvent.change(language, { target: { value: '' } });
+    fireEvent.change(budget, { target: { value: '1001' } });
+    expect(language).toHaveAttribute('aria-invalid', 'true');
+    expect(language).toHaveAccessibleDescription(/Choose a learning language/);
+    expect(budget).toHaveAttribute('aria-invalid', 'true');
+    expect(budget).toHaveAccessibleDescription(/Enter an amount between 0 and 1,000 USD/);
+    fireEvent.click(screen.getByRole('button', { name: 'Review errors' }));
+    expect(language).toHaveFocus();
+    fireEvent.change(language, { target: { value: 'French' } });
+    fireEvent.change(budget, { target: { value: '4' } });
+    expect(screen.queryByRole('button', { name: 'Review errors' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+  });
+
+  it('opens collapsed budget and model details to focus the invalid setting', () => {
+    context.data = snapshot({ ...settings(), dailyBudgetUsd: -1, monthlyBudgetUsd: 0, perJobBudgetUsd: 0 });
+    const view = render(<SettingsPage />);
+    const daily = screen.getByLabelText('Daily limit (USD)');
+    const budgetDetails = daily.closest('details')!;
+    expect(budgetDetails.open).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Review errors' }));
+    expect(budgetDetails.open).toBe(true);
+    expect(daily).toHaveFocus();
+    view.unmount();
+
+    context.data = snapshot({ ...settings(), aiModels: { vocabulary: { ...model(), maxOutputTokens: 0 } } });
+    render(<SettingsPage />);
+    const tokens = screen.getByLabelText('Maximum output tokens per request');
+    const modelDetails = tokens.closest('details')!;
+    expect(modelDetails.open).toBe(false);
+    expect(tokens).toHaveAttribute('aria-invalid', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Review errors' }));
+    expect(modelDetails.open).toBe(true);
+    expect(tokens).toHaveFocus();
+    fireEvent.change(tokens, { target: { value: '' } });
+    expect(tokens).toHaveValue(null);
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    fireEvent.change(tokens, { target: { value: '8000' } });
+    expect(tokens).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+  });
+
+  it('identifies out-of-range retention and non-integer playback context', () => {
+    context.data = snapshot({ ...settings(), retention: 0.5, replayContextMs: 1.5 });
+    render(<SettingsPage />);
+    const retention = screen.getByRole('spinbutton', { name: 'Target retention (%)' });
+    const contextInput = screen.getByRole('spinbutton', { name: 'Playback context on each side (ms)' });
+    expect(retention).toHaveAccessibleDescription(/between 70% and 97%/);
+    expect(contextInput).toHaveAccessibleDescription(/whole number between 0 and 1,000 ms/);
+    fireEvent.change(retention, { target: { value: '90' } });
+    fireEvent.change(contextInput, { target: { value: '150' } });
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+  });
+
+  it('locks editable settings during an in-flight save and retains them on failure', async () => {
+    context.data = snapshot({ ...settings(), aiModels: { vocabulary: model() } });
+    let reject!: (error: Error) => void;
+    vi.mocked(settingsApi.updateSettings).mockReturnValueOnce(new Promise((_resolve, rejectSave) => { reject = rejectSave; }));
+    render(<SettingsPage />);
+    const language = screen.getByRole('combobox', { name: 'Learning language' });
+    fireEvent.change(language, { target: { value: 'French' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(language).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: 'Monthly AI budget (USD)' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'yt-dlp update channel' })).toBeDisabled();
+    expect(screen.getAllByRole('combobox', { name: 'Gemini model ID' }).every(input => input.hasAttribute('disabled'))).toBe(true);
+    await act(async () => { reject(new Error('write failed')); });
+    expect(language).toBeEnabled();
+    expect(language).toHaveValue('French');
     expect(screen.getByText('You have unsaved changes')).toBeVisible();
   });
 

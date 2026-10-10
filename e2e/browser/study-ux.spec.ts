@@ -157,3 +157,61 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
     await expect(page.getByRole('button', { name: /入力途中のフレーズ \(1\)|Unfinished phrases \(1\)/ })).toHaveCount(0);
   });
 }
+
+for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'] as const) {
+  for (const size of [{ width: 1024, height: 700 }, { width: 1440, height: 900 }, { width: 800, height: 900 }]) {
+  test(`study keeps controls reachable with drafts, notices, tools and expanded history ${locale} ${theme} ${size.width}x${size.height}`, async ({ page }, testInfo) => {
+    await page.setViewportSize(size);
+    await installLearningFixture(page, locale, theme);
+    await page.route(/\/src\/shared\/native\/transport\.ts(?:\?|$)/, route => route.fulfill({
+      contentType: 'application/javascript', body: `
+        export const nativeAvailable = () => true;
+        export const call = async (command, args = {}) => {
+          const value = await window.__learningFixture.call(command, args);
+          if (command === 'get_app_snapshot') value.jobs = [
+            { id: 'active', mediaId: 'visual-fixture', kind: 'translate', status: 'running', progress: .5, createdAt: '', message: 'Translation in progress' },
+            ...Array.from({ length: 12 }, (_, index) => ({ id: 'history-' + index, mediaId: 'visual-fixture', kind: 'translate', status: 'completed', progress: 1, createdAt: '', message: 'Completed translation ' + index }))
+          ];
+          if (command === 'list_ai_continuations') return Array.from({ length: 3 }, (_, index) => ({
+            id: 'pending-' + index, mediaId: 'visual-fixture', kind: 'vocabulary', start: '0:00', end: '0:07', wholeMedia: false, focusTerm: 'phrase', models: {}
+          }));
+          return value;
+        }`,
+    }));
+    await page.goto('/study/visual-fixture');
+    await createDraft(page, locale);
+    const longTerm = 'LongUnbrokenPhrase'.repeat(20);
+    await page.getByLabel(locale === 'ja' ? '語彙・フレーズ' : 'Word or phrase', { exact: true }).fill(longTerm);
+    await page.getByRole('button', { name: locale === 'ja' ? 'あとで続ける' : 'Continue later', exact: true }).click();
+    await page.getByRole('button', { name: locale === 'ja' ? 'パネルを閉じる' : 'Close panel', exact: true }).click();
+    await page.getByRole('button', { name: locale === 'ja' ? 'その他' : 'More', exact: true }).click();
+    await page.getByRole('button', { name: locale === 'ja' ? '入力途中のフレーズ (1)' : 'Unfinished phrases (1)', exact: true }).click();
+    const draft = page.locator('.study-phrase-draft');
+    await draft.scrollIntoViewIfNeeded();
+    expect(await draft.evaluate(element => {
+      const label = element.querySelector('.study-draft-label')!.getBoundingClientRect();
+      const time = element.querySelector('.study-draft-time')!.getBoundingClientRect();
+      const remove = element.querySelector('.icon-button')!.getBoundingClientRect();
+      return label.right <= time.left && time.right <= remove.left && element.scrollWidth <= element.clientWidth;
+    })).toBe(true);
+    await page.locator('.study-jobs > summary').filter({ hasText: locale === 'ja' ? '処理履歴' : 'Job history' }).click();
+    const history = page.locator('.study-jobs').last().locator(':scope > div');
+    expect(await history.evaluate(element => element.clientHeight <= 72 && element.scrollHeight > element.clientHeight)).toBe(true);
+    expect(await page.locator('.study-auxiliary').evaluate(element => element.clientHeight <= 180 && element.scrollHeight > element.clientHeight)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('study-expanded-history.png'), animations: 'disabled' });
+    await page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true }).click();
+    for (const control of [
+      page.getByRole('button', { name: locale === 'ja' ? '次の字幕' : 'Next subtitle', exact: true }),
+      page.getByRole('button', { name: locale === 'ja' ? '再生に追従中' : 'Following playback', exact: true }),
+    ]) {
+      await control.scrollIntoViewIfNeeded();
+      expect(await control.evaluate(element => {
+        const bounds = element.getBoundingClientRect();
+        return element.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
+      })).toBe(true);
+    }
+    expect(await page.locator('.page-content').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('study-controls-and-transcript.png'), animations: 'disabled' });
+  });
+  }
+}

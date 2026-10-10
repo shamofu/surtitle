@@ -20,6 +20,8 @@ export const emptyModel = (purpose: AiPurpose): AiModelPreference => ({
   price: null,
 });
 
+export const validOutputTokens = (value: number) => Number.isInteger(value) && value >= 1 && value <= 1048576;
+
 export function ModelEditor({
   value,
   onChange,
@@ -27,6 +29,7 @@ export function ModelEditor({
   location,
   disabled = false,
   candidates,
+  onPricePendingChange,
 }: {
   value: AiModelPreference;
   onChange: (value: AiModelPreference) => void;
@@ -34,6 +37,7 @@ export function ModelEditor({
   location: string;
   disabled?: boolean;
   candidates?: DiscoveredModel[];
+  onPricePendingChange?: (pending: boolean) => void;
 }) {
   const { t } = useAppearance();
   const id = useId();
@@ -47,10 +51,13 @@ export function ModelEditor({
     );
   latest.current = { value, onChange, location, purpose, revision };
   const mounted = useRef(true);
+  const pendingPrice = useRef<(() => void) | null>(null);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      pendingPrice.current?.();
+      pendingPrice.current = null;
     };
   }, []);
   const [models, setModels] = useState<DiscoveredModel[]>([]);
@@ -122,6 +129,11 @@ export function ModelEditor({
     }
   }
   async function price() {
+    if (pendingPrice.current) return;
+    // Pair completion with the callback that owns this request, including unmount.
+    const finish = () => onPricePendingChange?.(false);
+    pendingPrice.current = finish;
+    onPricePendingChange?.(true);
     const requestedRevision = latest.current.revision;
     setBusy(true);
     setNotice('');
@@ -159,6 +171,10 @@ export function ModelEditor({
           ),
         );
     } finally {
+      if (pendingPrice.current === finish) {
+        pendingPrice.current = null;
+        finish();
+      }
       if (mounted.current) setBusy(false);
     }
   }
@@ -309,6 +325,7 @@ export function ModelEditor({
         <div className="model-editor-detail-content">
           {customOutput && (
             <Field
+              error={!validOutputTokens(value.maxOutputTokens) ? t('1〜1,048,576 の整数を入力してください。', 'Enter a whole number between 1 and 1,048,576.') : undefined}
               label={t(
                 '1要求の出力トークン上限',
                 'Maximum output tokens per request',
@@ -323,12 +340,12 @@ export function ModelEditor({
                 min="1"
                 max="1048576"
                 step="1"
-                value={value.maxOutputTokens}
+                value={Number.isNaN(value.maxOutputTokens) ? '' : value.maxOutputTokens}
                 disabled={frozen}
                 onChange={(event) =>
                   onChange({
                     ...value,
-                    maxOutputTokens: Number(event.target.value),
+                    maxOutputTokens: event.target.value === '' ? Number.NaN : Number(event.target.value),
                   })
                 }
               />

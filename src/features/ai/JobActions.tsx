@@ -140,6 +140,7 @@ export function JobActions({
       {saved && (
         <Modal
           title={t('保存済み翻訳を確認', 'Review saved translations')}
+          closeDisabled={busy}
           eyebrow="SAVED ON THIS DEVICE"
           onClose={() => {
             if (!busy) setSaved(undefined);
@@ -191,6 +192,7 @@ export function JobActions({
       {quote && (
         <JobQuoteSurface
           inline={inlineTranscription}
+          busy={busy}
           title={quote.isRetry ? t('残りの処理を確認', 'Review remaining work') : t('実行の見積もり', 'Job estimate')}
           onClose={() => {
             if (!busy) setQuote(undefined);
@@ -220,8 +222,8 @@ export function JobActions({
   );
 }
 
-function JobQuoteSurface({ inline, title, onClose, children }: { inline: boolean; title: string; onClose: () => void; children: ReactNode }) {
+function JobQuoteSurface({ inline, title, onClose, children, busy }: { inline: boolean; title: string; onClose: () => void; children: ReactNode; busy: boolean }) {
   const { t } = useAppearance();
-  return inline ? <section aria-label={title}><h4>{title}</h4>{children}<Button variant="ghost" onClick={onClose}>{t('閉じる', 'Close')}</Button></section>
-    : <Modal title={title} eyebrow="A NEW QUOTE, A NEW DECISION" onClose={onClose}>{children}</Modal>;
+  return inline ? <section aria-label={title}><h4>{title}</h4>{children}<Button variant="ghost" disabled={busy} onClick={onClose}>{t('閉じる', 'Close')}</Button></section>
+    : <Modal title={title} eyebrow="A NEW QUOTE, A NEW DECISION" closeDisabled={busy} onClose={onClose}>{children}</Modal>;
 }

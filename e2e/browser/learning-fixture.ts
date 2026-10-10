@@ -229,6 +229,12 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
         if (command === 'load_media') return;
         if (command === 'get_player_state') return { ...state };
         if (command === 'update_appearance') { Object.assign(snapshot.settings, args); persist(); return; }
+        if (command === 'update_settings') { Object.assign(snapshot.settings, structuredClone(args.settings)); persist(); return; }
+        if (command === 'edit_card') {
+          const card = snapshot.cards.find(item => item.id === args.request.id);
+          if (!card) throw new Error('Phrase not found');
+          Object.assign(card, structuredClone(args.request)); persist(); return;
+        }
         if (command === 'player_control') {
           const request = args.request;
           if (request.action === 'pause') state.paused = true;

@@ -72,6 +72,7 @@ export function DraftCardDialog({
   return (
     <Modal
       title={t('この表現を覚える', 'Keep this phrase')}
+      closeDisabled={busy}
       onClose={() => {
         if (!busy) onClose();
       }}
@@ -204,6 +205,7 @@ export function DraftAiDialog({
   return (
     <Modal
       title={t('この表現に、AIの助けを', 'AI for this phrase')}
+      closeDisabled={busy}
       onClose={() => {
         if (!busy) onClose();
       }}

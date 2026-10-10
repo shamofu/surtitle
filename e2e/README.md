@@ -17,9 +17,9 @@ docker build --platform linux/amd64 -f e2e/browser/Dockerfile -t surtitle-browse
 docker run --rm --init --ipc=host surtitle-browser-tests
 ```
 
-The six visual checks cover the study screen, phrase save form and partial import failure, each in Japanese/light and English/dark at 1024×700. Browser locale, time zone, clock, scale and fonts are fixed; animations and the caret are disabled. Baselines live under `e2e/visual/snapshots`. Ordinary runs reject missing or changed images and never update them. The broader language/theme/viewport coverage remains in the functional suite.
+The ten visual checks cover the study screen, phrase save form, partial import failure, transcription tab with its history entry, and the nested unsaved-phrase confirmation, each in Japanese/light and English/dark at 1024×700. Browser locale, time zone, clock, scale and fonts are fixed; animations and the caret are disabled. Baselines live under `e2e/visual/snapshots`. Ordinary runs reject missing or changed images and never update them. The broader language/theme/viewport coverage remains in the functional suite.
 
-Generate or deliberately update the six baselines in this same container, then inspect every PNG before including it in a change. The following PowerShell commands bind only the snapshots and diagnostic output; dependencies remain inside the container:
+Generate or deliberately update the ten baselines in this same container, then inspect every PNG before including it in a change. The following PowerShell commands bind only the snapshots and diagnostic output; dependencies remain inside the container:
 
 ```powershell
 New-Item -ItemType Directory -Force e2e/visual/snapshots, test-results, playwright-report | Out-Null

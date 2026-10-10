@@ -62,8 +62,8 @@ async function openWorkspace(targetMediaId = mediaId) {
   const transcript = $('.study-top-actions button');
   await transcript.waitForClickable();
   if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
+  await clickVisible($('.transcript-tabs').$('button=Transcription'));
   await $('.transcription-workspace').waitForDisplayed();
-  await clickVisible($('.transcript-tabs').$('button=Transcript'));
   const saved = $('.transcription-workspace > details');
   if ((await saved.getAttribute('open')) === null) await clickVisible(saved.$('summary'));
 }

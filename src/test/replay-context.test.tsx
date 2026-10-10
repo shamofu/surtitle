@@ -23,7 +23,8 @@ vi.mock('../features/settings/api', () => ({
 }));
 
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
-vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn() }));
+vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn(), useBlocker: () => ({ status: 'idle' }) }));
+vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, closeWindow: vi.fn() }));
 vi.mock('../features/ai/continuations', () => ({ continuationApi: { list: vi.fn().mockResolvedValue([]) } }));
 vi.mock('../app/runtime', () => {
   const useFixture = () => ({

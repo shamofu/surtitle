@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 .modal:has(.media-import) { width: min(720px, calc(100vw - 48px)); overflow: hidden; }
-.modal:has(.media-import) .modal-inner { max-height: calc(100dvh - 62px); display: flex; flex-direction: column; }
+.modal:has(.media-import) .modal-body { display: flex; flex-direction: column; overflow: hidden; }
 .modal:has(.media-import) .modal-header { flex-shrink: 0; margin-bottom: 18px; }
 .media-import { display: flex; flex-direction: column; min-height: 0; }
 .import-body { overflow: auto; min-height: 0; padding-right: 5px; }

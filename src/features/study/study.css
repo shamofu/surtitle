@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-.page-content:has(.study-page) { padding: 16px 24px 20px; overflow: hidden; scroll-behavior: auto; }
+.page-content:has(.study-page) { padding: 16px 24px 20px; overflow: auto; scroll-behavior: auto; }
 .page-content > .study-page { max-width: 1600px; }
 .study-page { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
 .study-top { display: flex; gap: 16px; align-items: center; flex-shrink: 0; min-height: 48px; }
@@ -10,11 +10,17 @@
 .study-top-actions, .study-secondary-tools { display: flex; gap: 8px; align-items: center; }
 .study-top-actions { flex-wrap: wrap; justify-content: flex-end; }
 .study-top-actions .button { font-size: 13px; }
+.study-auxiliary { flex: 0 0 auto; max-height: min(180px, 25dvh); overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 8px; }
+.study-auxiliary:empty { display: none; }
+.study-auxiliary > * { flex-shrink: 0; }
+.study-auxiliary > .notice { margin: 0; flex-wrap: wrap; }
+.study-auxiliary > details.notice { display: block; }
 .study-phrase-drafts { flex-shrink: 0; max-height: 128px; overflow: auto; overscroll-behavior: contain; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
 .study-phrase-draft { display: flex; gap: 8px; align-items: center; min-width: 0; }
 .study-phrase-draft + .study-phrase-draft { border-top: 1px solid var(--border); }
-.study-phrase-draft > .button { flex: 1; min-width: 0; justify-content: space-between; text-align: left; overflow-wrap: anywhere; font-size: 13px; }
-.study-phrase-draft > .button span { flex-shrink: 0; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+.study-phrase-draft > .button { flex: 1; min-width: 0; justify-content: space-between; text-align: left; font-size: 13px; }
+.study-draft-label { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.study-draft-time { flex-shrink: 0; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
 .study-phrase-draft > span { color: var(--warning); font-size: 12px; flex-shrink: 0; }
 .orphan-phrase-drafts { max-width: 760px; max-height: min(520px, 65dvh); margin: 0 auto 24px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border); border-radius: 8px; padding: 20px; background: var(--surface); }
 .orphan-phrase-drafts > p { color: var(--muted); font-size: 14px; line-height: 1.7; margin-bottom: 16px; }
@@ -23,7 +29,7 @@
 .orphan-phrase-drafts textarea { width: 100%; min-height: 160px; resize: vertical; font-size: 14px; line-height: 1.7; }
 .study-secondary-tools { flex-shrink: 0; padding: 6px 0; border-block: 1px solid var(--border); overflow: auto; }
 .study-secondary-tools .button { font-size: 12px; flex-shrink: 0; }
-.study-grid { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1; min-height: 0; gap: 24px; }
+.study-grid { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1; min-height: 400px; gap: 24px; }
 .has-companion .study-grid { grid-template-columns: minmax(0, 1fr) minmax(320px, 360px); }
 .study-left { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .current-caption { flex: 0 1 208px; padding: 18px 20px 0; min-height: 152px; max-height: 264px; overflow: auto; overscroll-behavior: contain; }
@@ -35,6 +41,9 @@
 .caption-navigation .button { font-size: 12px; padding-inline: 10px; }
 .caption-empty { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 96px; color: var(--muted); font-size: 14px; line-height: 1.8; }
 .study-companion { min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--surface); border-radius: 8px; overflow: hidden; }
+.study-transcript, .transcript-view, .transcription-view, .transcript-draft-view { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
+.study-companion[hidden], .study-transcript[hidden], .transcription-view[hidden] { display: none; }
+.transcript-draft-view > .button { flex-shrink: 0; align-self: flex-start; margin: 8px; white-space: normal; }
 .companion-heading { flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
 .companion-heading h2 { font-size: 15px; font-weight: 600; }
 .companion-heading h2:focus { outline: none; }
@@ -62,7 +71,7 @@
 .transcript-tools { display: flex; align-items: center; gap: 8px; padding: 12px; flex-shrink: 0; }
 .transcript-tools .search-box { flex: 1; min-width: 0; }
 .transcript-tools .search-box input { width: 100%; }
-.transcript-scroll { flex: 1; min-height: 120px; overflow: auto; overscroll-behavior: contain; position: relative; }
+.transcript-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; position: relative; }
 .virtual-transcript { position: relative; width: 100%; }
 .transcript-row { position: absolute; left: 0; top: 0; width: 100%; display: flex; align-items: flex-start; gap: 12px; padding: 16px 12px; border-left: 3px solid transparent; border-bottom: 1px solid var(--border); }
 .transcript-row.playing { background: var(--accent-soft); border-left-color: var(--accent); }
@@ -83,6 +92,7 @@
 .suggestion-card blockquote { border-left: 2px solid var(--border); padding-left: 12px; margin: 16px 0; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
 .suggestion-card .inline-actions { flex-wrap: wrap; }
 .study-companion > .empty-state { overflow: auto; }
+.transcript-view > .empty-state { flex: 1; min-height: 0; overflow: auto; }
 .study-companion .empty-state { padding: 28px 20px; }
 .study-companion .empty-state h3 { font-size: 18px; }
 .study-companion .draft-study { flex: 1; min-height: 0; max-height: none; border: 0; border-radius: 0; margin: 0; padding: 16px; }
@@ -104,7 +114,7 @@
 @media (max-width: 999px) {
   .page-content:has(.study-page) { overflow: auto; padding: 16px; }
   .study-page { height: auto; min-height: 100%; }
-  .study-grid, .has-companion .study-grid { display: flex; flex-direction: column; flex: none; }
+  .study-grid, .has-companion .study-grid { display: flex; flex-direction: column; flex: none; min-height: 0; }
   .study-left { height: max(430px, calc(100dvh - 200px)); }
   .study-companion { height: 620px; max-height: calc(100dvh - 100px); min-height: 340px; }
   .current-caption { padding-inline: 4px; }

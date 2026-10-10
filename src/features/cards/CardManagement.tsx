@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { cardsApi } from './api';
 import type { StudyCard } from '../../shared/contracts/cards';
 import {
@@ -25,13 +25,27 @@ export function EditCardDialog({
     [translation, setTranslation] = useState(card.translation || ''),
     [explanation, setExplanation] = useState(card.explanation || '');
   const [busy, setBusy] = useState(false);
+  const pending = useRef(false);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const dirty = term.trim() !== card.term || meaning !== card.meaning ||
+    example !== card.example || translation !== (card.translation || '') ||
+    explanation !== (card.explanation || '');
+  function close() {
+    if (pending.current) return;
+    if (dirty) setConfirmClose(true);
+    else onClose();
+  }
   async function save() {
+    if (pending.current || !dirty || !term.trim()) return;
+    pending.current = true;
     setBusy(true);
+    setSaveError('');
     const ok = await report(
       async () => {
-        await mutate(
-          () =>
-            cardsApi.editCard({
+        try {
+          await mutate(
+            () => cardsApi.editCard({
               id: card.id,
               term: term.trim(),
               meaning,
@@ -39,77 +53,97 @@ export function EditCardDialog({
               translation: translation || undefined,
               explanation: explanation || undefined,
             }),
-          { kind: 'snapshot' },
-        );
+            { kind: 'snapshot' },
+          );
+        } catch (error) {
+          setSaveError(error instanceof Error ? error.message : String(error));
+          throw error;
+        }
         return true;
       },
       t('フレーズを更新しました。', 'Phrase updated.'),
     );
     setBusy(false);
+    pending.current = false;
     if (ok) onClose();
   }
   return (
     <Modal
       title={t('フレーズを編集', 'Edit phrase')}
-      onClose={() => {
-        if (!busy) onClose();
-      }}
+      onClose={close}
+      closeDisabled={busy}
     >
-      <Field label={t('語彙・フレーズ', 'Word or phrase')}>
-        <input
-          autoFocus
-          value={term}
-          onChange={(event) => setTerm(event.target.value)}
-          maxLength={4095}
-        />
-      </Field>
-      <Field label={t('意味', 'Meaning')}>
-        <textarea
-          value={meaning}
-          onChange={(event) => setMeaning(event.target.value)}
-          rows={2}
-        />
-      </Field>
-      <Field label={t('例文', 'Example')}>
-        <textarea
-          value={example}
-          onChange={(event) => setExample(event.target.value)}
-          rows={3}
-        />
-      </Field>
-      <Field label={t('翻訳', 'Translation')}>
-        <textarea
-          value={translation}
-          onChange={(event) => setTranslation(event.target.value)}
-          rows={2}
-        />
-      </Field>
-      <Field label={t('解説・メモ', 'Explanation or notes')}>
-        <textarea
-          value={explanation}
-          onChange={(event) => setExplanation(event.target.value)}
-          rows={3}
-        />
-      </Field>
-      <p className="helper-text">
-        {t(
-          '保存済み音声と復習の予定はそのまま保持します。',
-          'Saved audio and your review schedule stay unchanged.',
-        )}
-      </p>
-      <footer className="modal-footer">
-        <Button disabled={busy} onClick={onClose}>
-          {t('キャンセル', 'Cancel')}
-        </Button>
-        <Button
-          variant="primary"
-          busy={busy}
-          disabled={!term.trim()}
-          onClick={() => void save()}
-        >
-          {t('保存', 'Save')}
-        </Button>
-      </footer>
+      <fieldset disabled={busy}>
+        <Field label={t('語彙・フレーズ', 'Word or phrase')}>
+          <input
+            autoFocus
+            value={term}
+            onChange={(event) => setTerm(event.target.value)}
+            maxLength={4095}
+          />
+        </Field>
+        <Field label={t('意味', 'Meaning')}>
+          <textarea
+            value={meaning}
+            onChange={(event) => setMeaning(event.target.value)}
+            rows={2}
+          />
+        </Field>
+        <Field label={t('例文', 'Example')}>
+          <textarea
+            value={example}
+            onChange={(event) => setExample(event.target.value)}
+            rows={3}
+          />
+        </Field>
+        <Field label={t('翻訳', 'Translation')}>
+          <textarea
+            value={translation}
+            onChange={(event) => setTranslation(event.target.value)}
+            rows={2}
+          />
+        </Field>
+        <Field label={t('解説・メモ', 'Explanation or notes')}>
+          <textarea
+            value={explanation}
+            onChange={(event) => setExplanation(event.target.value)}
+            rows={3}
+          />
+        </Field>
+        <p className="helper-text">
+          {t(
+            '保存済み音声と復習の予定はそのまま保持します。',
+            'Saved audio and your review schedule stay unchanged.',
+          )}
+        </p>
+        {saveError && <p className="notice warning" role="alert">{saveError}</p>}
+        <footer className="modal-footer">
+          <Button onClick={close}>
+            {t('キャンセル', 'Cancel')}
+          </Button>
+          <Button
+            variant="primary"
+            busy={busy}
+            disabled={!dirty || !term.trim()}
+            onClick={() => void save()}
+          >
+            {t('保存', 'Save')}
+          </Button>
+        </footer>
+      </fieldset>
+      {confirmClose && <Modal
+        title={t('変更を保存しますか？', 'Save your changes?')}
+        onClose={() => { if (!pending.current) setConfirmClose(false); }}
+        closeDisabled={busy}
+      >
+        <p>{t('このフレーズには未保存の変更があります。', 'This phrase has unsaved changes.')}</p>
+        {saveError && <p className="notice warning" role="alert">{saveError}</p>}
+        <footer className="modal-footer">
+          <Button disabled={busy} onClick={() => setConfirmClose(false)}>{t('編集を続ける', 'Keep editing')}</Button>
+          <Button variant="danger" disabled={busy} onClick={onClose}>{t('保存せずに閉じる', 'Discard changes')}</Button>
+          <Button variant="primary" busy={busy} disabled={!term.trim()} onClick={() => void save()}>{t('保存して閉じる', 'Save and close')}</Button>
+        </footer>
+      </Modal>}
     </Modal>
   );
 }
@@ -137,6 +171,7 @@ export function DeleteCardDialog({
   return (
     <Modal
       title={t('フレーズを削除', 'Delete phrase')}
+      closeDisabled={busy}
       onClose={() => {
         if (!busy) onClose();
       }}

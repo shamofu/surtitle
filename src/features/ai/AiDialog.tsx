@@ -239,6 +239,7 @@ export function AiDialog({
   }
   return (
     <Modal
+      closeDisabled={busy || preparing}
       title={t('AIで学習を補助', 'AI assistance')}
       onClose={() => {
         if (!busy && !preparing) onClose();

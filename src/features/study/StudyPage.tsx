@@ -25,8 +25,10 @@ import {
   useAppearance,
   useDataActions,
   useNotifications,
-  useSnapshot
+  useSnapshot,
+  useSurface
 } from '../../app/runtime';
+import { shouldIgnoreShortcut } from '../../shared/keyboard';
 import { activeSegment, languageName, timestamp } from '../../shared/format';
 import { nativeAvailable } from '../../shared/native/transport';
 import { Button, EmptyState, IconButton, Modal } from '../../shared/ui/index';
@@ -46,7 +48,7 @@ import { StudyTranscript } from './StudyTranscript';
 import { CurrentCaption } from './CurrentCaption';
 import type { TranscriptTab, TranscriptViewState } from './StudyTranscript';
 import { TranscriptReviewDialog } from './transcript/TranscriptReview';
-import { TranscriptionWorkspace, type TranscriptionRequest } from './transcript/TranscriptionWorkspace';
+import { TranscriptionStatus, TranscriptionWorkspace, type TranscriptionRequest } from './transcript/TranscriptionWorkspace';
 import { resolveSourceSelection } from './source-selection';
 import type { SelectedContext } from './source-selection';
 import { useStudyExitGuard } from './useStudyExitGuard';
@@ -130,6 +132,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const { data } = useSnapshot();
   const { t, locale } = useAppearance();
   const { report } = useNotifications();
+  const { surfaceHidden } = useSurface();
   const media = data?.media.find(item => item.id === mediaId);
   const mediaSignature = JSON.stringify([media?.path, media?.audioStreamIndex]);
   const aiMediaSignature = JSON.stringify([media?.path, media?.audioStreamIndex, media?.learningLanguage, media?.explanationLanguage]);
@@ -238,7 +241,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
   function resumeAi(item: AiContinuation) {
     if (!segmentsQuery.isSuccess) return;
     if (item.kind === 'transcribe') {
-      setAiKind(undefined); setPanel('transcript'); setTab('transcript');
+      setAiKind(undefined); setPanel('transcript'); setTab('transcription');
       setTranscriptionRequest({ id: item.id, continuation: item });
       return;
     }
@@ -546,13 +549,10 @@ function StudySession({ mediaId }: { mediaId: string }) {
     });
   }
 
-  const modalOpen = !!(edit || aiKind || draftReview || subtitleSource || removing || transfer ||
-    playbackSettings || exitGuard.open);
-
   useEffect(
     () => {
       const escape = (event: KeyboardEvent) => {
-        if (!event.defaultPrevented && event.key === 'Escape' && panel && !modalOpen && !busy && !saveBusy) {
+        if (!shouldIgnoreShortcut(event) && event.key === 'Escape' && panel && !surfaceHidden && !busy && !saveBusy) {
           event.preventDefault();
           void closePanel();
         }
@@ -560,7 +560,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
       window.addEventListener('keydown', escape);
       return () => window.removeEventListener('keydown', escape);
     },
-    [panel, modalOpen, busy, saveBusy, inspection, draftMode, draftPlayback, playerReady]
+    [panel, surfaceHidden, busy, saveBusy, inspection, draftMode, draftPlayback, playerReady]
   );
 
   if (!media) return <>
@@ -592,9 +592,10 @@ function StudySession({ mediaId }: { mediaId: string }) {
     !!job.needsAttention);
   const completedJobs = data?.jobs.filter(job => job.mediaId === mediaId && job.kind !== 'transcribe' && !job.automaticTranscript && job.status === 'completed' && !job.needsAttention && !(job.pendingResults || 0)) || [];
   function openTranscription(range?: { startMs: number; endMs: number }) {
-    setPanel('transcript'); setTab('transcript'); setAiKind(undefined);
+    rememberTrigger();
+    setPanel('transcript'); setTab('transcription'); setAiKind(undefined);
     const running = data?.jobs.some(job => job.mediaId === mediaId && (job.kind === 'transcribe' || job.automaticTranscript) && ['running', 'paused', 'queued'].includes(job.status));
-    if (range || !running) setTranscriptionRequest({ id: crypto.randomUUID(), range });
+    if (range || (!running && !transcriptionRequest)) setTranscriptionRequest({ id: crypto.randomUUID(), range });
   }
   function openAi(kind: AiQuote['kind']) {
     if (kind === 'transcribe') { openTranscription(); return; }
@@ -648,6 +649,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
           </Button>
         </div>
       </header>
+      <div className="study-auxiliary">
       {emptyRangeIssues.length > 0 && <details className="notice warning">
         <summary>{t(`字幕がない要確認区間 (${emptyRangeIssues.length})`, `Passages without subtitles to check (${emptyRangeIssues.length})`)}</summary>
         <p>{t('発話なしと判定された区間などです。再生して確認できます。学習はそのまま続けられます。', 'These include passages detected as having no speech. Play them to check; you can continue studying.')}</p>
@@ -668,8 +670,8 @@ function StudySession({ mediaId }: { mediaId: string }) {
       {showDrafts && dirtyDrafts.length > 0 && <section className="study-phrase-drafts" aria-label={t('入力途中のフレーズ', 'Unfinished phrases')}>
         {dirtyDrafts.map(([key, draft]) => <div className="study-phrase-draft" key={key}>
           <Button variant="ghost" disabled={busy || saveBusy} onClick={() => void resumeDraft(draft)}>
-            {draft.value.term || draft.inspection.source.text}
-            <span>{timestamp(draft.inspection.source.startMs)}</span>
+            <span className="study-draft-label">{draft.value.term || draft.inspection.source.text}</span>
+            <span className="study-draft-time">{timestamp(draft.inspection.source.startMs)}</span>
           </Button>
           {draft.invalidated && <span>{t('出典を要確認', 'Source changed')}</span>}
           <IconButton label={t('この入力を破棄', 'Discard this draft')} disabled={busy || saveBusy} onClick={() => discardDraft(key)}>
@@ -721,7 +723,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             />
           </div>)}</div>
         </details>}
-      {completedJobs.length > 0 && <details className="study-jobs"><summary>{t('処理履歴', 'Job history')} ({completedJobs.length})</summary>{completedJobs.map(job => <div className="job-status" key={job.id}><span>{job.resultState === 'applied_with_warnings' ? t('完了・注意箇所あり', 'Complete · marked passages') : job.message || job.kind}</span><JobActions job={job} onReviewTranscript={setDraftReview} /></div>)}</details>}
+      {completedJobs.length > 0 && <details className="study-jobs"><summary>{t('処理履歴', 'Job history')} ({completedJobs.length})</summary><div>{completedJobs.map(job => <div className="job-status" key={job.id}><span>{job.resultState === 'applied_with_warnings' ? t('完了・注意箇所あり', 'Complete · marked passages') : job.message || job.kind}</span><JobActions job={job} onReviewTranscript={setDraftReview} /></div>)}</div></details>}
       {(media.status === 'missing' || media.status === 'error') &&
         <div
           className="job-status warning"
@@ -739,6 +741,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             {t('ファイルを指定', 'Locate file')}
           </Button>
         </div>}
+      </div>
       <div className="study-grid">
         <div className="study-left">
           <NativePlayer
@@ -760,7 +763,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             loading={segmentsQuery.isLoading}
             hasSubtitles={segments.length > 0}
             draftMode={draftMode}
-            enabled={playerReady && !busy && !saveBusy && !modalOpen}
+            enabled={playerReady && !busy && !saveBusy && !surfaceHidden}
             error={segmentsQuery.error}
             inspectButton={inspectButton}
             onInspect={(source, term) => void inspect(source, term)}
@@ -772,8 +775,9 @@ function StudySession({ mediaId }: { mediaId: string }) {
             onReplay={() => void moveCaption(active, true)}
           />
         </div>
-        {panel &&
+          {/* Keep setup and estimates alive while inspecting a phrase or closing the panel. */}
           <aside
+            hidden={!panel}
             className={`study-companion transcript-panel ${panel === 'phrase' ? 'phrase-panel' : ''}`}
             aria-label={panel === 'phrase' ? t('言葉を確認', 'Inspect phrase') : t('字幕パネル', 'Transcript panel')}
           >
@@ -792,9 +796,11 @@ function StudySession({ mediaId }: { mediaId: string }) {
                 <X size={19} />
               </IconButton>
             </header>
-            {panel === 'transcript'
-              ? <StudyTranscript
-                transcriptionWorkspace={<TranscriptionWorkspace media={media} request={transcriptionRequest} onRequest={openTranscription} continuations={continuationsQuery.data} onResume={resumeAi} onOpenEarlierDrafts={() => setTab('draft')} onDone={() => { setTranscriptionRequest(undefined); void continuationsQuery.refetch(); }} />}
+            <div className="study-transcript" hidden={panel !== 'transcript'}>
+              <StudyTranscript
+                active={panel === 'transcript'}
+                transcriptionWorkspace={<TranscriptionWorkspace media={media} request={transcriptionRequest} onRequest={openTranscription} continuations={continuationsQuery.data} onResume={resumeAi} onOpenEarlierDrafts={() => setTab('draft')} onDone={() => { setTranscriptionRequest(undefined); void continuationsQuery.refetch(); }} onStarted={() => { setTranscriptionRequest(undefined); setTab('transcript'); void continuationsQuery.refetch(); }} />}
+                transcriptionStatus={<TranscriptionStatus mediaId={mediaId} hasRequest={!!transcriptionRequest} onOpen={() => setTab('transcription')} />}
                 onTranscribeRange={openTranscription}
                 media={media}
                 segments={segments}
@@ -834,7 +840,8 @@ function StudySession({ mediaId }: { mediaId: string }) {
                   }
                 }}
               />
-              : <div className="phrase-inspector">
+            </div>
+            {panel === 'phrase' && <div className="phrase-inspector">
                 {fromTranscript && <Button
                   variant="ghost"
                   disabled={busy || saveBusy}
@@ -979,7 +986,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                   {t('視聴に戻る', 'Return to watching')}
                 </Button>
               </div>}
-          </aside>}
+          </aside>
       </div>
       <StudyExitDialog guard={exitGuard} saving={saveBusy} />
       {draftReview &&

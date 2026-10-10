@@ -111,6 +111,7 @@ export function EditDialog({
   return (
     <Modal
       title={t('字幕を編集', 'Edit subtitle')}
+      closeDisabled={busy}
       onClose={() => void close()}
     >
       {!!segment.reviewIssues?.length && <details className="notice warning">
@@ -198,7 +199,7 @@ export function SaveCardDialog({
   const { report } = useNotifications();
   const [busy, setBusy] = useState(false);
   return (
-    <Modal title={t('フレーズを保存', 'Save phrase')} onClose={() => { if (!busy) void report(async () => { await flushEditorDrafts(); onClose(); }); }}>
+    <Modal title={t('フレーズを保存', 'Save phrase')} closeDisabled={busy} onClose={() => { if (!busy) void report(async () => { await flushEditorDrafts(); onClose(); }); }}>
       <SaveCardForm segment={segment} candidate={candidate} initialTerm={initialTerm} onClose={onClose} onBusyChange={setBusy} />
     </Modal>
   );

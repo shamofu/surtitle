@@ -213,6 +213,7 @@ export function SubtitleSourceDialog({
   return (
     <Modal
       title={t('字幕を用意する', 'Set up study subtitles')}
+      closeDisabled={busy}
       onClose={() => {
         if (!busy) onClose();
       }}
@@ -401,6 +402,7 @@ export function RemoveMediaDialog({
   return (
     <Modal
       title={t('ライブラリから除外', 'Remove from library')}
+      closeDisabled={busy}
       onClose={() => {
         if (!busy) onClose();
       }}

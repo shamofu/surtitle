@@ -163,6 +163,7 @@ export function TransferDialog({
   }
   return (
     <Modal
+      closeDisabled={busy}
       title={t('学びを持ち運ぶ', 'Take your learning with you')}
       eyebrow="YOUR WORDS, YOUR DATA"
       onClose={() => {

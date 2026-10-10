@@ -58,6 +58,24 @@ it('prepares and estimates on entry, then starts only after one explicit priced 
   expect(done).toHaveBeenCalledOnce();
 });
 
+it('keeps opening the transcription workspace read-only until an explicit request', () => {
+  const request = vi.fn();
+  render(<TranscriptionWorkspace media={media} onRequest={request} onDone={vi.fn()} />);
+  expect(aiApi.prepareTranscription).not.toHaveBeenCalled();
+  expect(aiApi.createTranscriptionQuote).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Create subtitles' }));
+  expect(request).toHaveBeenCalledOnce();
+});
+
+it('distinguishes successful approval from closing setup so the caller can return to subtitles', async () => {
+  const done = vi.fn();
+  const started = vi.fn();
+  render(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={done} onStarted={started} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Start transcription' }));
+  await waitFor(() => expect(started).toHaveBeenCalledOnce());
+  expect(done).not.toHaveBeenCalled();
+});
+
 it('requires explicit acknowledgement when the price is unknown', async () => {
   vi.mocked(aiApi.createTranscriptionQuote).mockResolvedValue({ ...quote, estimatedUsd: null, maximumUsd: null, unpriced: true });
   render(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);

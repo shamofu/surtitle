@@ -1,6 +1,15 @@
-.transcription-workspace { padding: 14px 18px; border-bottom: 1px solid var(--border); flex: 0 0 auto; max-height: 58vh; overflow: auto; }
-.transcription-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.transcription-workspace { padding: 14px 18px; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.transcription-workspace .button { white-space: normal; overflow-wrap: anywhere; }
+.transcription-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .transcription-heading h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; }
+.transcription-intro { margin-top: 12px; color: var(--muted); font-size: 13px; }
+.transcription-status { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; font-size: 12px; color: var(--muted); background: var(--accent-soft); }
+.transcription-status > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transcription-status-action { flex-shrink: 0; color: var(--accent); }
+.transcription-status progress { width: 100%; height: 4px; accent-color: var(--accent); order: 1; }
+.transcription-workspace .notice { flex-wrap: wrap; }
+.transcription-workspace .field-row { flex-wrap: wrap; }
+.transcription-workspace .field-row > .field { flex-basis: 160px; min-width: 0; }
 .transcription-setup { display: grid; gap: 12px; padding-top: 12px; }
 .transcription-setup p, .transcription-job p { margin: 0; line-height: 1.65; }
 .transcription-setup > p { font-size: 13px; }

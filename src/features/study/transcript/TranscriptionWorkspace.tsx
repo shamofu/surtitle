@@ -19,7 +19,7 @@ import './transcription-workspace.css';
 
 export type TranscriptionRequest = { id: string; range?: { startMs: number; endMs: number }; continuation?: AiContinuation };
 
-function TranscriptionSetup({ media, request, onDone }: { media: Media; request: TranscriptionRequest; onDone: () => void }) {
+function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Media; request: TranscriptionRequest; onDone: () => void; onStarted?: () => void }) {
   const { t } = useAppearance();
   const { data } = useSnapshot();
   const { report } = useNotifications();
@@ -104,7 +104,7 @@ function TranscriptionSetup({ media, request, onDone }: { media: Media; request:
     });
     if (result) {
       await report(() => continuationApi.discard(continuation?.id ?? request.id));
-      if (mounted.current) onDone();
+      if (mounted.current) (onStarted ?? onDone)();
     }
     pending.current = false; if (mounted.current) setPhase(undefined);
   }
@@ -179,8 +179,9 @@ function StoredResponse({ jobId, ordinal }: { jobId: string; ordinal: number }) 
   return <>{evidence === undefined ? <Button variant="ghost" onClick={() => void report(() => studyApi.transcriptResultDetail(jobId, ordinal)).then(result => { if (result) setEvidence(JSON.stringify(result.evidence?.response ?? result, null, 2)); })}>{t('元の応答を表示', 'Show original response')}</Button> : <pre>{evidence}</pre>}</>;
 }
 
-export function TranscriptionWorkspace({ media, request, onRequest, onDone, onOpenEarlierDrafts, continuations = [], onResume }: {
+export function TranscriptionWorkspace({ media, request, onRequest, onDone, onStarted, onOpenEarlierDrafts, continuations = [], onResume }: {
   media: Media; request?: TranscriptionRequest; onRequest: (range?: { startMs: number; endMs: number }) => void; onDone: () => void;
+  onStarted?: () => void;
   onOpenEarlierDrafts?: () => void; continuations?: AiContinuation[]; onResume?: (continuation: AiContinuation) => void;
 }) {
   const { t } = useAppearance();
@@ -198,12 +199,26 @@ export function TranscriptionWorkspace({ media, request, onRequest, onDone, onOp
     {history === job.id && <TranscriptHistory jobId={job.id} />}
   </div>;
   return <section className="transcription-workspace" aria-label={t('文字起こし', 'Transcription')}>
-    <div className="transcription-heading"><h3><Mic2 size={17} />{t('文字起こし', 'Transcription')}</h3>{!request && !current.length && (media.segmentCount > 0 || jobs.length > 0) && <Button variant="ghost" onClick={() => onRequest()}>{media.segmentCount ? t('文字起こしを作り直す', 'Transcribe again') : t('字幕を作成', 'Create subtitles')}</Button>}</div>
-    {request && <TranscriptionSetup key={request.id} media={media} request={request} onDone={onDone} />}
+    <div className="transcription-heading"><h3><Mic2 size={17} />{t('文字起こし', 'Transcription')}</h3>{!request && !current.length && <Button variant="ghost" onClick={() => onRequest()}>{media.segmentCount ? t('文字起こしを作り直す', 'Transcribe again') : t('字幕を作成', 'Create subtitles')}</Button>}</div>
+    {!request && !jobs.length && <p className="transcription-intro">{t('音声から字幕を作成できます。範囲と見積もりを確認してから開始します。', 'Create subtitles from the audio. Review the range and estimate before starting.')}</p>}
+    {request && <TranscriptionSetup key={request.id} media={media} request={request} onDone={onDone} onStarted={onStarted} />}
     {!request && continuations.filter(item => item.kind === 'transcribe' && item.mediaId === media.id && (!item.quoteId || !jobs.some(job => job.id === item.quoteId))).map(item => <Button key={item.id} onClick={() => onResume?.(item)}>{t('途中の文字起こしを続ける', 'Continue transcription setup')}</Button>)}
     {!request && current.map(showJob)}
     {(completed.length > 0 || onOpenEarlierDrafts) && <details><summary>{t('文字起こしの履歴', 'Transcription history')}{completed.length > 0 ? ` (${completed.length})` : ''}</summary>{completed.map(showJob)}
       {onOpenEarlierDrafts && <Button variant="ghost" onClick={onOpenEarlierDrafts}>{t('以前の下書きを開く', 'Open earlier drafts')}</Button>}
     </details>}
   </section>;
+}
+
+export function TranscriptionStatus({ mediaId, hasRequest, onOpen }: { mediaId: string; hasRequest: boolean; onOpen: () => void }) {
+  const { data } = useSnapshot();
+  const { t } = useAppearance();
+  const jobs = (data?.jobs ?? []).filter(job => job.mediaId === mediaId && (job.kind === 'transcribe' || job.automaticTranscript));
+  const current = jobs.find(job => !['completed', 'cancelled'].includes(job.status));
+  if (!current && !hasRequest) return null;
+  return <button type="button" className="transcription-status" onClick={onOpen}>
+    <span>{current?.message || (hasRequest ? t('文字起こしの設定を続ける', 'Continue transcription setup') : t('文字起こし中', 'Transcribing'))}</span>
+    {current?.status === 'running' && <progress aria-label={t('文字起こしの進捗', 'Transcription progress')} value={current.progress} max={1} />}
+    <span className="transcription-status-action">{t('詳細を開く', 'View details')}</span>
+  </button>;
 }

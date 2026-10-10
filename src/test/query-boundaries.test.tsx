@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { SurfaceProvider } from '../app/providers/Surface';
 import {
   QueryClient,
   QueryClientProvider,
@@ -193,7 +194,7 @@ it('reports read/action failures separately from void success without touching q
   cache.setQueryData(queryKeys.snapshot, {});
   const { result } = renderHook(useNotifications, {
     wrapper: ({ children }: { children: ReactNode }) => (
-      <NotificationsProvider>{children}</NotificationsProvider>
+      <SurfaceProvider><NotificationsProvider>{children}</NotificationsProvider></SurfaceProvider>
     ),
   });
   await act(async () => {

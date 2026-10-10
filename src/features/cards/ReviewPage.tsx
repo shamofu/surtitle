@@ -16,7 +16,9 @@ import {
   useSnapshot,
   useAppearance,
   useNotifications,
+  useSurface,
 } from '../../app/runtime';
+import { shouldIgnoreShortcut } from '../../shared/keyboard';
 import { dueCards, languageName } from '../../shared/format';
 import { Badge, Button } from '../../shared/ui/index';
 
@@ -33,6 +35,7 @@ export function ReviewCard({
   const { data } = useSnapshot();
   const { t, locale } = useAppearance();
   const { report } = useNotifications();
+  const { surfaceHidden } = useSurface();
   const [revealed, setRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
   const media = data?.media.find((item) => item.id === card.mediaId);
@@ -72,11 +75,7 @@ export function ReviewCard({
   }
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (
-        event.target instanceof HTMLElement &&
-        ['INPUT', 'TEXTAREA', 'BUTTON', 'SELECT'].includes(event.target.tagName)
-      )
-        return;
+      if (surfaceHidden || busy || event.repeat || shouldIgnoreShortcut(event)) return;
       if (event.code === 'Space') {
         event.preventDefault();
         setRevealed(true);
@@ -89,7 +88,7 @@ export function ReviewCard({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [revealed, busy, card.id]);
+  }, [revealed, busy, card.id, surfaceHidden]);
   return (
     <>
       <article className={`review-card ${revealed ? 'revealed' : ''}`}>

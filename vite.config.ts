@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
-  server: { port: 1420, strictPort: true, watch: { ignored: ['**/target/**', '**/src-tauri/**', '**/crates/**', '**/work/**', '**/test-results/**'] } },
+  server: { port: 1420, strictPort: true, watch: { ignored: ['**/target/**', '**/src-tauri/**', '**/crates/**', '**/work/**', '**/test-results/**', '**/playwright-report/**'] } },
   envPrefix: ['VITE_', 'TAURI_ENV_'],
   build: { target: 'es2022' },
   test: {

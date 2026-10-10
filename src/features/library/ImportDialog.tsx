@@ -218,7 +218,7 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
     };
     return row.reason ? reasons[row.reason] : t('追加できないファイルです', 'This file cannot be added');
   }
-  return <Modal title={t('作品を追加', 'Add a video or audio file')} onClose={() => { if (!pending.current && !checkingLanguages.current) onClose(); }}>
+  return <Modal title={t('作品を追加', 'Add a video or audio file')} closeDisabled={busy} onClose={() => { if (!pending.current && !checkingLanguages.current) onClose(); }}>
     <div className="media-import">
       <div className="import-body">
       <div className="segmented-control" role="group" aria-label={t('追加する方法', 'Import source')}>

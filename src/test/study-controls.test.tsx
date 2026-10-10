@@ -214,8 +214,12 @@ describe('transcript session state', () => {
     expect(screen.getByText('最初の字幕')).toBeInTheDocument();
     expect(fixture.scrollToOffset).toHaveBeenLastCalledWith(180, { behavior: 'auto' });
     expect(fixture.scrollToIndex).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Suggestions' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Transcript' }));
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Transcript' }), { key: 'ArrowRight' });
+    expect(screen.getByRole('tab', { name: 'Suggestions' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Suggestions' })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Suggestions' }), { key: 'ArrowRight', ctrlKey: true });
+    expect(screen.getByRole('tab', { name: 'Suggestions' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('tab', { name: 'Transcript' }));
     expect(fixture.scrollToOffset).toHaveBeenLastCalledWith(180, { behavior: 'auto' });
     fireEvent.click(screen.getByRole('button', { name: 'Follow playback' }));
     expect(screen.getByRole('textbox', { name: 'Search transcript' })).toHaveValue('');

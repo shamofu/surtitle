@@ -2,6 +2,7 @@
 import { PausedJobs } from './PausedJobs';
 import { ToolRow } from './ToolRow';
 import { equalSetting, mergeSettingsRefresh } from './merge-settings';
+import { useSettingsExitGuard } from './useSettingsExitGuard';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { continuationApi, type AiContinuation } from '../ai/continuations';
@@ -38,11 +39,11 @@ import {
   useNotifications,
 } from '../../app/runtime';
 import { money } from '../../shared/format';
-import { Button, Field, PageTitle } from '../../shared/ui/index';
+import { Button, Field, Modal, PageTitle } from '../../shared/ui/index';
 import { LanguageInput } from '../../shared/ui/LanguageInput';
 import { TransferDialog } from '../transfer/TransferDialog';
 
-import { ModelEditor, emptyModel } from '../ai/ModelEditor';
+import { ModelEditor, emptyModel, validOutputTokens } from '../ai/ModelEditor';
 
 function completeBudgets(settings: AppSettings): AppSettings {
   return {
@@ -74,6 +75,10 @@ export function SettingsPage() {
   const savedSettings = useRef<AppSettings | undefined>(undefined);
   const lastMonthlyBudget = useRef(0);
   const [busy, setBusy] = useState(false);
+  const savePending = useRef(false);
+  const priceRequests = useRef(new Set<AiPurpose>());
+  const [pricing, setPricing] = useState(false);
+  const page = useRef<HTMLDivElement>(null);
   const [scanning, setScanning] = useState(false);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [candidates, setCandidates] = useState<ExternalToolCandidate[]>([]);
@@ -147,9 +152,10 @@ export function SettingsPage() {
     });
   }
   async function save() {
-    if (!draft) return;
+    if (!draft || !valid || credentialBusy || savePending.current || priceRequests.current.size) return false;
     const submitted = completeBudgets(draft);
     const previousSaved = savedSettings.current;
+    savePending.current = true;
     setBusy(true);
     try {
       const saved = await report(async () => {
@@ -159,6 +165,7 @@ export function SettingsPage() {
       if (saved && savedSettings.current === previousSaved) savedSettings.current = submitted;
       return saved;
     } finally {
+      savePending.current = false;
       setBusy(false);
     }
   }
@@ -212,26 +219,37 @@ export function SettingsPage() {
       setCheckingUpdates(false);
     }
   }
-  const valid =
-    !!draft &&
-    [draft.dailyBudgetUsd, draft.monthlyBudgetUsd ?? draft.dailyBudgetUsd, draft.perJobBudgetUsd ?? draft.dailyBudgetUsd].every((budget) => Number.isFinite(budget) && budget >= 0 && budget <= 1000) &&
-    draft.retention >= 0.7 - 0.0000001 &&
-    draft.retention <= 0.97 + 0.0000001 &&
-    Number.isInteger(draft.replayContextMs ?? 150) &&
-    (draft.replayContextMs ?? 150) >= 0 &&
-    (draft.replayContextMs ?? 150) <= 1000 &&
-    !!draft.learningLanguage.trim() &&
-    !!draft.explanationLanguage.trim() &&
-    Object.values(draft.aiModels || {}).every((model) => !model || (Number.isInteger(model.maxOutputTokens) && model.maxOutputTokens >= 1 && model.maxOutputTokens <= 1048576));
-  const dirty = !!draft && !equalSetting(draft, savedSettings.current);
   const monthlyBudget = draft?.monthlyBudgetUsd ?? draft?.dailyBudgetUsd ?? 0;
   const perJobBudget = draft?.perJobBudgetUsd ?? draft?.dailyBudgetUsd ?? 0;
+  const budgetError = (value: number) => draft && !(Number.isFinite(value) && value >= 0 && value <= 1000)
+    ? t('0〜1000 USD の金額を入力してください。', 'Enter an amount between 0 and 1,000 USD.') : undefined;
+  const errors = {
+    learningLanguage: draft && !draft.learningLanguage.trim() ? t('学習する言語を指定してください。', 'Choose a learning language.') : undefined,
+    explanationLanguage: draft && !draft.explanationLanguage.trim() ? t('説明・翻訳の言語を指定してください。', 'Choose an explanation language.') : undefined,
+    retention: draft && !(draft.retention >= 0.7 - 0.0000001 && draft.retention <= 0.97 + 0.0000001) ? t('70〜97% の保持率を入力してください。', 'Enter a retention rate between 70% and 97%.') : undefined,
+    replayContextMs: draft && !(Number.isInteger(draft.replayContextMs ?? 150) && (draft.replayContextMs ?? 150) >= 0 && (draft.replayContextMs ?? 150) <= 1000) ? t('0〜1000 ms の整数を入力してください。', 'Enter a whole number between 0 and 1,000 ms.') : undefined,
+    monthlyBudgetUsd: budgetError(monthlyBudget),
+    dailyBudgetUsd: budgetError(draft?.dailyBudgetUsd ?? 0),
+    perJobBudgetUsd: budgetError(perJobBudget),
+  };
+  const valid = !!draft && !Object.values(errors).some(Boolean) && Object.values(draft.aiModels || {}).every(model => !model || validOutputTokens(model.maxOutputTokens));
+  const dirty = !!draft && !equalSetting(draft, savedSettings.current);
+  const exitGuard = useSettingsExitGuard(dirty, busy, save, pricing);
+  function reviewErrors() {
+    const invalid = page.current?.querySelector<HTMLElement>('input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"]');
+    if (!invalid) return;
+    for (let ancestor = invalid.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+    }
+    invalid.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    invalid.focus({ preventScroll: true });
+  }
   const customBudget = !!draft && (draft.dailyBudgetUsd !== monthlyBudget || perJobBudget !== monthlyBudget);
   const retentionPreset = [0.85, 0.9, 0.95].find((value) => Math.abs(value - (draft?.retention ?? 0.9)) < 0.000001);
   const continuation = continuations.find(item => item.id === resume) || continuations[0];
   return (
-    <div className="settings-page page-enter">
-      {continuation && <div className="notice"><span>{t('途中のAI依頼に戻れます。', 'You can return to your unfinished AI request.')}</span><Button disabled={!valid || credentialBusy} busy={busy} onClick={async () => { if (await save()) void navigate({ to: '/study/$mediaId', params: { mediaId: continuation.mediaId }, search: { resume: continuation.id } }); }}>{t('保存して元の操作に戻る', 'Save and return to your request')}</Button></div>}
+    <div ref={page} className="settings-page page-enter">
+      {continuation && <div className="notice"><span>{t('途中のAI依頼に戻れます。', 'You can return to your unfinished AI request.')}</span><Button disabled={!valid || credentialBusy || pricing} busy={busy} onClick={async () => { if (await save()) { exitGuard.allowSavedNavigation(); void navigate({ to: '/study/$mediaId', params: { mediaId: continuation.mediaId }, search: { resume: continuation.id } }); } }}>{t('保存して元の操作に戻る', 'Save and return to your request')}</Button></div>}
       <PageTitle
         title={t('設定', 'Settings')}
         description={t(
@@ -279,6 +297,7 @@ export function SettingsPage() {
               <div className="field-row">
                 <Field
                   label={t('学習する言語', 'Learning language')}
+                  error={errors.learningLanguage}
                   hint={t(
                     '一覧にない言語はコードでも指定できます。',
                     'You can also enter a language code.',
@@ -291,7 +310,7 @@ export function SettingsPage() {
                     }
                   />
                 </Field>
-                <Field label={t('説明・翻訳の言語', 'Explanation language')}>
+                <Field label={t('説明・翻訳の言語', 'Explanation language')} error={errors.explanationLanguage}>
                   <LanguageInput
                     value={draft?.explanationLanguage || ''}
                     onChange={(code) =>
@@ -333,7 +352,7 @@ export function SettingsPage() {
                 </Field>
                 <details className="settings-details" open={retentionCustom || retentionPreset == null}>
                   <summary>{t('復習の詳細設定', 'Advanced review settings')}</summary>
-                  <Field label={t('目標の記憶保持率（%）', 'Target retention (%)')} hint={t('次の復習まで覚えていることを目指す割合です。高いほど復習が増えます。標準は90%です。', 'The proportion you aim to remember until the next review. Higher values mean more reviews. The standard is 90%.')}>
+                  <Field label={t('目標の記憶保持率（%）', 'Target retention (%)')} error={errors.retention} hint={t('次の復習まで覚えていることを目指す割合です。高いほど復習が増えます。標準は90%です。', 'The proportion you aim to remember until the next review. Higher values mean more reviews. The standard is 90%.')}>
                   <input
                     type="number"
                     min="70"
@@ -350,6 +369,7 @@ export function SettingsPage() {
                 </div>
               </div>
               <Field
+                error={errors.replayContextMs}
                 label={t(
                   '区間再生の前後の余白（ms）',
                   'Playback context on each side (ms)',
@@ -533,6 +553,11 @@ export function SettingsPage() {
                   location={draft?.vertexLocation || 'global'}
                   candidates={modelCatalogue.key === catalogueKey ? modelCatalogue.models : []}
                   disabled={!draft || busy}
+                  onPricePendingChange={(pending) => {
+                    if (pending) priceRequests.current.add(purpose);
+                    else priceRequests.current.delete(purpose);
+                    setPricing(priceRequests.current.size > 0);
+                  }}
                   onChange={(model) =>
                     setDraft((current) =>
                       current
@@ -584,6 +609,7 @@ export function SettingsPage() {
               </p>
             )}
             <Field
+              error={errors.monthlyBudgetUsd}
               label={t(
                 '1か月のAI予算（USD）',
                 'Monthly AI budget (USD)',
@@ -617,13 +643,13 @@ export function SettingsPage() {
               <p className="helper-text">{t('月額と同じ上限は月額の変更に合わせて調整します。個別の上限はそのまま維持します。各上限の0は、その期間・処理の上限なしを意味します。', 'Limits matching the monthly budget follow its changes. Independent limits are kept. Zero removes the limit for that period or job.')}</p>
               <div className="field-row">
                 <div className="settings-field-group">
-                  <Field label={t('1日の上限（USD）', 'Daily limit (USD)')} hint={t('UTC基準の暦日ごとに集計します。', 'Usage is counted by UTC calendar day.')}>
+                  <Field label={t('1日の上限（USD）', 'Daily limit (USD)')} error={errors.dailyBudgetUsd} hint={t('UTC基準の暦日ごとに集計します。', 'Usage is counted by UTC calendar day.')}>
                     <input type="number" min="0" max="1000" step="0.01" value={Number.isNaN(draft?.dailyBudgetUsd) ? '' : draft?.dailyBudgetUsd ?? 0} disabled={!draft || busy} onChange={(event) => change('dailyBudgetUsd', event.target.value === '' ? Number.NaN : Number(event.target.value))} />
                   </Field>
                   <Button disabled={!draft || busy || !Number.isFinite(monthlyBudget) || draft.dailyBudgetUsd === monthlyBudget} onClick={() => change('dailyBudgetUsd', monthlyBudget)}>{t('月額と同じに戻す', 'Match the monthly budget')}</Button>
                 </div>
                 <div className="settings-field-group">
-                  <Field label={t('1処理の上限（USD）', 'Per-job limit (USD)')} hint={t('1処理には、文字起こしなどの複数のリクエストを含む場合があります。', 'One job can include multiple requests, such as transcription chunks.')}>
+                  <Field label={t('1処理の上限（USD）', 'Per-job limit (USD)')} error={errors.perJobBudgetUsd} hint={t('1処理には、文字起こしなどの複数のリクエストを含む場合があります。', 'One job can include multiple requests, such as transcription chunks.')}>
                     <input type="number" min="0" max="1000" step="0.01" value={Number.isNaN(perJobBudget) ? '' : perJobBudget} disabled={!draft || busy} onChange={(event) => change('perJobBudgetUsd', event.target.value === '' ? Number.NaN : Number(event.target.value))} />
                   </Field>
                   <Button disabled={!draft || busy || !Number.isFinite(monthlyBudget) || perJobBudget === monthlyBudget} onClick={() => change('perJobBudgetUsd', monthlyBudget)}>{t('月額と同じに戻す', 'Match the monthly budget')}</Button>
@@ -756,13 +782,27 @@ export function SettingsPage() {
       <div className="settings-save">
         <div>
           <strong role="status">{busy ? t('保存中…', 'Saving…') : !draft ? t('デスクトップアプリで設定できます', 'Settings are available in the desktop app') : dirty ? t('未保存の変更があります', 'You have unsaved changes') : t('設定は保存済みです', 'Settings are saved')}</strong>
-          <p>{draft && !valid ? t('入力内容を確認してください。', 'Check the entered values.') : t('学習・AI・更新チャンネルの変更は保存すると反映されます。', 'Save to apply learning, AI, and update-channel changes.')}</p>
+          <p>{pricing ? t('モデルの料金を取得中です。取得が終わると保存できます。', 'Retrieving model prices. You can save when the requests finish.') : draft && !valid ? t('入力内容を確認してください。', 'Check the entered values.') : t('学習・AI・更新チャンネルの変更は保存すると反映されます。', 'Save to apply learning, AI, and update-channel changes.')}</p>
         </div>
-        <Button variant="primary" busy={busy} disabled={!valid || !dirty || credentialBusy} onClick={() => void save()}>
-          <Save size={16} />
-          {t('変更を保存', 'Save changes')}
-        </Button>
+        <div className="settings-save-actions">
+          {draft && !valid && <Button disabled={busy} onClick={reviewErrors}>{t('入力エラーを確認', 'Review errors')}</Button>}
+          <Button variant="primary" busy={busy} disabled={!valid || !dirty || credentialBusy || pricing} onClick={() => void save()}>
+            <Save size={16} />
+            {t('変更を保存', 'Save changes')}
+          </Button>
+        </div>
       </div>
+      {exitGuard.open && <Modal title={t('変更を保存しますか？', 'Save your changes?')} onClose={exitGuard.keepEditing} closeDisabled={exitGuard.busy}>
+        <p>{t('設定に未保存の変更があります。保存してから移動するか、変更を破棄できます。', 'Your settings have unsaved changes. Save them before leaving, or discard them.')}</p>
+        {exitGuard.error && <p className="notice warning" role="alert">{exitGuard.error}</p>}
+        {pricing && <p role="status">{t('モデルの料金を取得中です。取得が終わると保存できます。', 'Retrieving model prices. You can save when the requests finish.')}</p>}
+        {!valid && <p className="helper-text">{t('入力内容を修正するには「編集を続ける」を選んでください。', 'Choose Keep editing to correct the values before saving.')}</p>}
+        <footer className="modal-footer settings-exit-actions">
+          <Button disabled={exitGuard.busy} onClick={exitGuard.keepEditing}>{t('編集を続ける', 'Keep editing')}</Button>
+          <Button variant="danger" disabled={exitGuard.busy} onClick={() => void exitGuard.discardAndLeave()}>{t('破棄して移動', 'Discard and leave')}</Button>
+          <Button variant="primary" busy={exitGuard.busy} disabled={!valid || credentialBusy || pricing} onClick={() => void exitGuard.saveAndLeave()}>{t('保存して移動', 'Save and leave')}</Button>
+        </footer>
+      </Modal>}
       {transfer && <TransferDialog onClose={() => setTransfer(false)} />}
     </div>
   );

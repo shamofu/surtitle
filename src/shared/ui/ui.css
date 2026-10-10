@@ -5,6 +5,7 @@
   padding: 0;
   width: min(640px, calc(100vw - 48px));
   max-height: calc(100dvh - 60px);
+  overflow: hidden;
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--shadow);
@@ -18,13 +19,26 @@
 }
 .modal-inner {
   padding: 28px;
+  max-height: calc(100dvh - 62px);
+  display: flex;
+  flex-direction: column;
 }
 .modal-header {
   display: flex;
+  flex-shrink: 0;
   align-items: flex-start;
   justify-content: space-between;
   gap: 15px;
   margin-bottom: 25px;
+}
+.modal-header > div { min-width: 0; overflow-wrap: anywhere; }
+.modal-body {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  /* Leave room for keyboard focus outlines without shifting the content. */
+  margin: -4px;
+  padding: 4px;
 }
 .modal-header h2 {
   font-size: 23px;
@@ -37,6 +51,17 @@
   margin-top: -5px;
   margin-right: -7px;
 }
+.modal-notifications { flex-shrink: 0; min-width: 0; }
+.modal-notifications .toast-stack {
+  position: static;
+  max-width: none;
+  max-height: min(160px, 24dvh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+}
+.modal-notifications .toast-stack:not(:empty) { margin-bottom: 16px; padding: 2px; }
+.modal-notifications .toast { box-shadow: none; }
 .modal-footer {
   display: flex;
   justify-content: flex-end;
@@ -156,6 +181,8 @@
   line-height: 1.8;
   margin-bottom: 10px;
 }
+.field small.field-error { color: var(--danger); margin-bottom: 0; }
+[aria-invalid='true'] { border-color: var(--danger); }
 .helper-text {
   display: flex;
   align-items: flex-start;

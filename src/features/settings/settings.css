@@ -376,6 +376,8 @@
   background: var(--bg);
 }
 .settings-save strong { font-size: 14px; font-weight: 600; }
+.settings-save-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex-shrink: 0; }
+.settings-exit-actions { flex-wrap: wrap; }
 .settings-save p {
   font-size: 12px;
   color: var(--faint);
@@ -404,7 +406,7 @@
   .settings-page .credential-row {
     flex-wrap: wrap;
   }
-  .settings-save { gap: 12px; }
+  .settings-save { gap: 12px; flex-wrap: wrap; }
   .settings-save > div { min-width: 0; }
 }
 .toast-stack {

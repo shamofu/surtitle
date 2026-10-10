@@ -63,3 +63,24 @@ it('offers the selected embedded playback track to the study subtitle chooser', 
   fireEvent.click(await screen.findByRole('button', { name: 'Use these captions for study' }));
   expect(choose).toHaveBeenCalledExactlyOnceWith(4);
 });
+
+it('keeps browser and IME shortcuts local and does not repeat a held play toggle', async () => {
+  const view = render(player());
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Play' })).toBeEnabled());
+  vi.mocked(playerApi.player).mockClear();
+  fireEvent.keyDown(document.body, { key: 'ArrowLeft', code: 'ArrowLeft', altKey: true });
+  fireEvent.keyDown(document.body, { key: ' ', code: 'Space', isComposing: true });
+  fireEvent.keyDown(document.body, { key: ' ', code: 'Space', repeat: true });
+  expect(playerApi.player).not.toHaveBeenCalled();
+  fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
+  await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' }));
+  vi.mocked(playerApi.player).mockClear();
+  fireEvent.keyDown(document.body, { key: 'ArrowRight', code: 'ArrowRight' });
+  await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'seek', value: 5000 }));
+  fixture.hidden = true;
+  view.rerender(player());
+  await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'hide' }));
+  vi.mocked(playerApi.player).mockClear();
+  fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
+  expect(playerApi.player).not.toHaveBeenCalled();
+});

@@ -19,7 +19,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await page.goto('/study/visual-fixture');
       await expect(page.getByRole('heading', { name: 'A walk along the coast' })).toBeVisible();
       await expect(page.locator('.current-caption-text')).toHaveText('Sometimes the best way to find your way is to take a little detour.');
-      await expect(page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript')).toHaveCount(0);
+      await expect(page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript')).toBeHidden();
       const viewport = await page.getByTestId('native-player-viewport').boundingBox();
       expect(viewport).not.toBeNull();
       expect(viewport!.y + viewport!.height).toBeLessThan(size.height);
@@ -55,7 +55,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await capture('phrase-save');
       await page.locator('.save-phrase-form').getByRole('button', { name: locale === 'ja' ? 'あとで続ける' : 'Continue later', exact: true }).click();
       await page.getByRole('button', { name: locale === 'ja' ? '視聴に戻る' : 'Return to watching', exact: true }).click();
-      await expect(page.locator('.study-companion')).toHaveCount(0);
+      await expect(page.locator('.study-companion')).toBeHidden();
       if (size.width < 1000) {
         await expect(page.getByTestId('native-player-viewport')).toBeInViewport();
         await expect.poll(() => page.locator('.page-content').evaluate(element => element.scrollTop)).toBe(0);

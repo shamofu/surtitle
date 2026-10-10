@@ -19,6 +19,7 @@
   gap: 20px;
 }
 .phrase-card h3 {
+  min-width: 0;
   font-size: clamp(22px, 2.4vw, 28px);
   font-weight: 600;
   line-height: 1.4;
@@ -33,6 +34,7 @@
   flex-shrink: 0;
 }
 .phrase-meaning {
+  overflow-wrap: anywhere;
   font-size: 15px;
   line-height: 1.75;
   color: var(--text);
@@ -69,6 +71,12 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.phrase-card footer > span:not(.badge) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.phrases-page .search-box input { min-width: 0; }
+.phrases-page .search-box > .icon-button { flex-shrink: 0; width: 30px; height: 30px; min-height: 30px; }
 .phrase-card footer .badge {
   flex-shrink: 0;
 }

@@ -363,6 +363,7 @@ describe('draft study in the real study page', () => {
     );
     vi.mocked(playerApi.player).mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Transcript' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Transcription' }));
     fireEvent.click(screen.getByText('Transcription history'));
     fireEvent.click(screen.getByRole('button', { name: 'Open earlier drafts' }));
     await screen.findByRole('list', { name: 'Available draft subtitles' });
@@ -398,7 +399,11 @@ describe('draft study in the real study page', () => {
       screen.queryByRole('button', { name: 'Repeat selected segment' }),
     ).not.toBeInTheDocument();
     vi.mocked(playerApi.player).mockClear();
-    fireEvent.click(within(document.querySelector('.transcript-tabs') as HTMLElement).getByRole('button', { name: 'Transcript' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to transcription history' }));
+    expect(screen.getByRole('tab', { name: 'Transcription' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Transcription' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Open earlier drafts' })).toBeVisible();
+    fireEvent.click(within(document.querySelector('.transcript-tabs') as HTMLElement).getByRole('tab', { name: 'Transcript' }));
     await waitFor(() =>
       expect(playerApi.player).toHaveBeenCalledWith({
         action: 'draft-mode',
@@ -432,6 +437,7 @@ describe('draft study in the real study page', () => {
       ).toBeEnabled(),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Transcript' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Transcription' }));
     fireEvent.click(screen.getByText('Transcription history'));
     fireEvent.click(screen.getByRole('button', { name: 'Open earlier drafts' }));
     fireEvent.click(
@@ -482,7 +488,7 @@ describe('draft study in the real study page', () => {
     // A draft replay still has a native range stop after changing tabs. Closing
     // the companion must clear it even though the active tab is no longer draft.
     vi.mocked(playerApi.player).mockClear();
-    fireEvent.click(within(document.querySelector('.transcript-tabs') as HTMLElement).getByRole('button', { name: 'Transcript' }));
+    fireEvent.click(within(document.querySelector('.transcript-tabs') as HTMLElement).getByRole('tab', { name: 'Transcript' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Close panel' })).not.toBeInTheDocument());
     expect(playerApi.player).toHaveBeenCalledWith({ action: 'pause' });

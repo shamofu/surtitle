@@ -5,6 +5,7 @@ import { useSnapshot, useAppearance, useDataActions } from './runtime';
 import { nativeAvailable } from '../shared/native/transport';
 import { dueCards } from '../shared/format';
 import { IconButton } from '../shared/ui/index';
+import { NotificationRegion } from './providers/Notifications';
 
 export function AppShell() {
   const { data, error } = useSnapshot();
@@ -66,6 +67,7 @@ export function AppShell() {
             <button onClick={() => void refresh()}>{t('再試行', 'Retry')}<RefreshCw size={14} aria-hidden="true" /></button>
           </div>
         )}
+        <NotificationRegion />
         <main className="page-content"><Outlet /></main>
       </div>
     </div>
