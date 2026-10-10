@@ -8,6 +8,15 @@ use crate::{AiError, ParsedOutput, PreparedJob, Result};
 use rusqlite::params;
 
 impl AiStore {
+    /// File-backed application metadata may outlive the ledger job it refers to.
+    pub fn job_exists(&self, job_id: &str) -> Result<bool> {
+        Ok(self.connect()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM ai_jobs WHERE id=?)",
+            [job_id],
+            |row| row.get(0),
+        )?)
+    }
+
     pub fn budget(&self) -> Result<BudgetLimits> {
         limits(&self.connect()?)
     }

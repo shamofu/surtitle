@@ -18,6 +18,67 @@ const PENDING: &str = "22222222-2222-4222-8222-222222222222";
 const REPAIR: &str = "33333333-3333-4333-8333-333333333333";
 
 #[test]
+fn startup_preserves_orphan_transcript_metadata_without_recovering_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let binding = TranscriptJob {
+        job_id: uuid::Uuid::new_v4().to_string(),
+        job_digest: "orphan-digest".into(),
+        preparation_id: uuid::Uuid::new_v4().to_string(),
+        receipt_sha256: "orphan-receipt".into(),
+        repair_parent: None,
+        progressive: true,
+        publication_detached: false,
+    };
+    let bindings = directory.path().join("transcript-jobs");
+    fs::create_dir(&bindings).unwrap();
+    let path = bindings.join(format!("{}.json", binding.job_id));
+    let original = serde_json::to_vec(&binding).unwrap();
+    fs::write(&path, &original).unwrap();
+
+    let state = Services::open(directory.path().to_path_buf()).unwrap();
+    assert!(job_bindings(&state).unwrap().is_empty());
+    assert!(state.ai.list_jobs().unwrap().is_empty());
+    assert!(state.ai.job_issue(&binding.job_id).unwrap().is_none());
+    assert!(lock(&state.db).unwrap().list_media().unwrap().is_empty());
+    assert_eq!(fs::read(&path).unwrap(), original);
+    drop(state);
+    assert!(Services::open(directory.path().to_path_buf()).is_ok());
+    assert_eq!(fs::read(path).unwrap(), original);
+}
+
+#[test]
+fn transcript_bindings_keep_ledger_jobs_and_report_ledger_query_failures() {
+    let (directory, state) = fixture();
+    let mut expected: Vec<_> = job_bindings(&state)
+        .unwrap()
+        .into_iter()
+        .map(|binding| binding.job_id)
+        .collect();
+    expected.sort();
+    assert!(!expected.is_empty());
+    let mut orphan = load_binding(&state, &expected[0]).unwrap();
+    orphan.job_id = uuid::Uuid::new_v4().to_string();
+    save_binding(&state, &orphan).unwrap();
+    let path = binding_path(&state, &orphan.job_id).unwrap();
+    let original = fs::read(&path).unwrap();
+
+    let mut actual: Vec<_> = job_bindings(&state)
+        .unwrap()
+        .into_iter()
+        .map(|binding| binding.job_id)
+        .collect();
+    actual.sort();
+    assert_eq!(actual, expected);
+    assert_eq!(fs::read(path).unwrap(), original);
+
+    let charges = rusqlite::Connection::open(directory.path().join("charges.sqlite")).unwrap();
+    charges
+        .execute("ALTER TABLE ai_jobs RENAME TO unavailable_jobs", [])
+        .unwrap();
+    assert!(job_bindings(&state).is_err());
+}
+
+#[test]
 fn preparation_summaries_identify_the_recorded_audio_stream_not_current_selection() {
     let (_directory, state) = fixture();
     let receipt = load_receipt(&state, COMPLETE).unwrap();

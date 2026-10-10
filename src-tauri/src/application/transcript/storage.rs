@@ -45,7 +45,10 @@ pub(super) fn job_bindings(state: &AppState) -> Result<Vec<TranscriptJob>> {
         let path = entry?.path();
         if path.extension().is_some_and(|s| s == "json")
             && let Ok(binding) = read_json::<TranscriptJob>(&path)
+            && state.ai.job_exists(&binding.job_id)?
         {
+            // Preserve orphan files as evidence, but never recover or reuse a
+            // session without its durable ledger job. Database errors still propagate.
             bindings.push(binding);
         }
     }
