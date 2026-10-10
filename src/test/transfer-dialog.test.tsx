@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
+vi.mock('../features/ai/PreparationSessions', () => ({ useClearPreparationSessions: () => () => {} }));
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import {
   cleanup,
@@ -33,7 +35,7 @@ vi.mock('../app/runtime', () => {
     mutate: (action: () => Promise<unknown>) => action(),
     registerModal: modal.register,
     t: (_ja: string, en: string) => en,
-    report: (action: () => Promise<unknown>) => action(),
+    report: async (action: () => Promise<unknown>) => { try { return await action(); } catch { return undefined; } },
   });
   return {
     useSnapshot: useFixture,
@@ -112,6 +114,31 @@ it('waits for pending editor changes before creating a backup', async () => {
   finish();
   await screen.findByText('C:/exports/backup.zip');
   expect(clearEditorDraftSessions).not.toHaveBeenCalled();
+});
+
+it('keeps export progress visible and dismissal locked until the export settles', async () => {
+  let finish!: (paths: string[]) => void;
+  vi.mocked(transferApi.exportLearning).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  const close = vi.fn();
+  render(<TransferDialog onClose={close} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Choose destination' }));
+  const bar = await screen.findByRole('progressbar', { name: 'Export learning data' });
+  expect(bar).not.toHaveAttribute('value');
+  expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
+  expect(close).not.toHaveBeenCalled();
+  finish(['C:/exports/backup.zip']);
+  await screen.findByText('Your export is ready.');
+  expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+});
+
+it('removes export progress and unlocks retry when writing fails', async () => {
+  vi.mocked(transferApi.exportLearning).mockRejectedValueOnce(new Error('Disk full'));
+  render(<TransferDialog onClose={() => {}} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Choose destination' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Choose destination' })).toBeEnabled());
+  expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  expect(screen.queryByText('Your export is ready.')).not.toBeInTheDocument();
 });
 
 it('releases only the selected preview token when its dialog is unmounted', async () => {

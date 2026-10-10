@@ -32,6 +32,7 @@ import { cardsApi } from '../features/cards/api';
 import { queryKeys } from '../shared/query/keys';
 import type { PlayerState } from '../shared/contracts/player';
 import type { SubtitleSegment } from '../shared/contracts/media';
+vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
 
 const fixture = vi.hoisted(() => ({
   resumeId: undefined as string | undefined,
@@ -746,7 +747,7 @@ describe('study navigation and unfinished phrases', () => {
     await waitFor(() => expect(cardsApi.saveCard).toHaveBeenCalledWith(expect.objectContaining({
       term: 'restart phrase', meaning: 'meaning before restart', example: 'my retained context', explanation: 'unfinished\nnotes',
     })));
-    expect(editorDraftApi.savePhrase).toHaveBeenCalledWith(expect.objectContaining({ id: storedId }), expect.anything());
+    expect(editorDraftApi.savePhrase).toHaveBeenCalledWith(expect.objectContaining({ id: storedId }), expect.anything(), expect.stringMatching(/^local:/));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Unfinished phrases (1)' })).not.toBeInTheDocument());
     expect(persisted).toEqual([]);
   });

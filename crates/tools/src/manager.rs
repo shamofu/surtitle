@@ -1,7 +1,7 @@
 use crate::{
     CancellationToken, ProbeReport, ResolvedTool, ToolKind, ToolSelection, ToolSelections,
     ToolSnapshot, ToolSource, YtDlpChannel, probe, resolve_external, sha256_file,
-    upstream::{self, DownloadProgress, ReleaseCandidate, Verification},
+    upstream::{self, DownloadProgress, ReleaseCandidate, ToolUpdateProgress, Verification},
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -186,7 +186,23 @@ impl ToolManager {
         cancel: &CancellationToken,
         progress: Option<&tokio::sync::mpsc::UnboundedSender<DownloadProgress>>,
     ) -> Result<UpdateOutcome> {
-        let _serial = tokio::select! { _ = cancel.cancelled() => anyhow::bail!("operation cancelled"), lock = self.inner.updates.lock() => lock };
+        self.update_with_observer(kind, channel, cancel, |event| {
+            if let (Some(sender), Some(download)) = (progress, event.download) {
+                let _ = sender.send(download);
+            }
+        })
+        .await
+    }
+    pub async fn update_with_observer(
+        &self,
+        kind: ToolKind,
+        channel: YtDlpChannel,
+        cancel: &CancellationToken,
+        mut progress: impl FnMut(ToolUpdateProgress) + Send,
+    ) -> Result<UpdateOutcome> {
+        progress(ToolUpdateProgress::phase("waiting"));
+        let _serial = tokio::select! { biased; _ = cancel.cancelled() => anyhow::bail!("operation cancelled"), lock = self.inner.updates.lock() => lock };
+        progress(ToolUpdateProgress::phase("checking"));
         let candidate = self.check_latest(kind, channel, cancel).await?;
         if let Some(active) = self.installed(kind)?
             && active.version == candidate.version
@@ -203,9 +219,16 @@ impl ToolManager {
             .prefix("incoming-")
             .tempdir_in(staging_parent)?;
         let archive = staging.path().join("download.package");
-        let receipt =
-            upstream::download(&self.inner.client, &candidate, &archive, cancel, progress).await?;
+        let receipt = upstream::download(
+            &self.inner.client,
+            &candidate,
+            &archive,
+            cancel,
+            &mut progress,
+        )
+        .await?;
         ensure!(!cancel.is_cancelled(), "operation cancelled");
+        progress(ToolUpdateProgress::phase("extracting"));
         let payload = staging.path().join("payload");
         fs::create_dir(&payload)?;
         let (executable_relative, companion_relative) = unpack(&archive, &payload, kind)?;
@@ -213,6 +236,7 @@ impl ToolManager {
         let mut tool = resolve_external(kind, &payload.join(&executable_relative))?;
         tool.source = ToolSource::Managed;
         let snapshot = ToolSnapshot::capture(tool)?;
+        progress(ToolUpdateProgress::phase("verifying"));
         let report = probe(&snapshot, cancel).await.context(
             "downloaded tool failed its capability probe; previous version remains active",
         )?;
@@ -242,6 +266,7 @@ impl ToolManager {
         };
         // The package's own notices remain in payload; this receipt distinguishes
         // direct third-party downloads from files built or redistributed by us.
+        progress(ToolUpdateProgress::phase("installing"));
         atomic_json(&payload.join("surtitle-receipt.json"), &installed)?;
         let _lock = self.write_lock()?;
         ensure!(!cancel.is_cancelled(), "operation cancelled");
@@ -461,6 +486,23 @@ use archive::{safe_relative, unpack};
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn cancelled_update_reports_waiting_and_never_starts_a_download() {
+        let storage = tempfile::tempdir().unwrap();
+        let manager = ToolManager::new(storage.path()).unwrap();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let mut phases = vec![];
+        let result = manager
+            .update_with_observer(ToolKind::Deno, YtDlpChannel::Stable, &cancel, |progress| {
+                assert!(progress.download.is_none());
+                phases.push(progress.phase);
+            })
+            .await;
+        assert!(result.is_err());
+        assert_eq!(phases, ["waiting"]);
+        assert!(manager.installed(ToolKind::Deno).unwrap().is_none());
+    }
     use sha2::Digest;
     #[test]
     fn external_selection_is_never_managed_update_target() {

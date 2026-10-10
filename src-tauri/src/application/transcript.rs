@@ -46,6 +46,8 @@ pub struct TranscriptionPreparation {
     repair_parent_job_id: Option<String>,
     repair_boundary_id: Option<String>,
     whole_media: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audio_stream_index: Option<u32>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -27,6 +27,35 @@ include!(concat!(env!("OUT_DIR"), "/silero_model.rs"));
 /// Explicit first-use installation; downloads a pinned public model, never media.
 /// The native app chooses model_directory. No executable/runtime is downloaded here.
 pub async fn install_silero_model(model_directory: &Path) -> Result<PathBuf> {
+    install_silero_model_with_progress(
+        model_directory,
+        &surtitle_tools::CancellationToken::new(),
+        |_| {},
+    )
+    .await
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelInstallationProgress {
+    pub phase: &'static str,
+    pub downloaded_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+}
+
+/// The existing installer remains a wrapper for callers that do not display progress.
+pub async fn install_silero_model_with_progress(
+    model_directory: &Path,
+    cancel: &surtitle_tools::CancellationToken,
+    mut progress: impl FnMut(ModelInstallationProgress) + Send,
+) -> Result<PathBuf> {
+    if cancel.is_cancelled() {
+        return Err(local_error("cancelled"));
+    }
+    progress(ModelInstallationProgress {
+        phase: "checking",
+        downloaded_bytes: None,
+        total_bytes: None,
+    });
     std::fs::create_dir_all(model_directory)?;
     let directory = model_directory.canonicalize()?;
     let path = directory.join(SILERO_MODEL_FILENAME);
@@ -40,11 +69,16 @@ pub async fn install_silero_model(model_directory: &Path) -> Result<PathBuf> {
         .timeout(Duration::from_secs(120))
         .build()
         .map_err(local_error)?;
-    let mut response = client
-        .get(SILERO_MODEL_URL)
-        .send()
-        .await
-        .map_err(local_error)?;
+    progress(ModelInstallationProgress {
+        phase: "connecting",
+        downloaded_bytes: None,
+        total_bytes: None,
+    });
+    let mut response = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => return Err(local_error("cancelled")),
+        response = client.get(SILERO_MODEL_URL).send() => response.map_err(local_error)?,
+    };
     if !response.status().is_success() {
         return Err(AiError::Invalid(format!(
             "Silero model download failed: HTTP {}",
@@ -53,7 +87,19 @@ pub async fn install_silero_model(model_directory: &Path) -> Result<PathBuf> {
     }
     let mut temp = tempfile::NamedTempFile::new_in(&directory)?;
     let mut total = 0usize;
-    while let Some(bytes) = response.chunk().await.map_err(local_error)? {
+    let expected = response.content_length();
+    progress(ModelInstallationProgress {
+        phase: "downloading",
+        downloaded_bytes: Some(0),
+        total_bytes: expected,
+    });
+    loop {
+        let bytes = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(local_error("cancelled")),
+            bytes = response.chunk() => bytes.map_err(local_error)?,
+        };
+        let Some(bytes) = bytes else { break };
         total = total
             .checked_add(bytes.len())
             .ok_or_else(|| local_error("model size overflow"))?;
@@ -61,11 +107,32 @@ pub async fn install_silero_model(model_directory: &Path) -> Result<PathBuf> {
             return Err(local_error("model download exceeded 16 MB"));
         }
         temp.write_all(&bytes)?;
+        progress(ModelInstallationProgress {
+            phase: "downloading",
+            downloaded_bytes: Some(total as u64),
+            total_bytes: expected,
+        });
     }
+    if cancel.is_cancelled() {
+        return Err(local_error("cancelled"));
+    }
+    progress(ModelInstallationProgress {
+        phase: "verifying",
+        downloaded_bytes: None,
+        total_bytes: None,
+    });
     temp.as_file().sync_all()?;
     if hash_file(temp.path())? != SILERO_MODEL_SHA256 {
         return Err(local_error("Silero model checksum mismatch"));
     }
+    if cancel.is_cancelled() {
+        return Err(local_error("cancelled"));
+    }
+    progress(ModelInstallationProgress {
+        phase: "installing",
+        downloaded_bytes: None,
+        total_bytes: None,
+    });
     temp.persist(&path).map_err(|e| AiError::Io(e.error))?;
     Ok(path)
 }
@@ -281,6 +348,13 @@ pub fn prepare_audio(
     }
     let mut requests = Vec::with_capacity(chunks.len());
     let mut spool = std::fs::File::open(&spool_path)?;
+    progress(PreparationProgress {
+        phase: "extracting".into(),
+        processed_ms: 0,
+        total_ms,
+        completed_chunks: 0,
+        total_chunks,
+    });
     for chunk in &chunks {
         check_cancel(&cancel)?;
         let path = temporary
@@ -355,6 +429,13 @@ pub fn prepare_audio(
     drop(spool);
     std::fs::remove_file(&spool_path)?;
     check_cancel(&cancel)?;
+    progress(PreparationProgress {
+        phase: "verifying".into(),
+        processed_ms: 0,
+        total_ms,
+        completed_chunks: total_chunks,
+        total_chunks,
+    });
     if hash_source(&source, &cancel)? != source_sha256 {
         return Err(AiError::PreparationChanged);
     }
@@ -480,6 +561,20 @@ fn check_cancel(cancel: &AtomicBool) -> Result<()> {
 mod tests {
     use super::*;
     use std::time::Instant;
+    #[tokio::test]
+    async fn model_install_cancellation_does_not_start_network_or_change_existing_files() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join(SILERO_MODEL_FILENAME);
+        std::fs::write(&destination, b"previous model").unwrap();
+        let cancel = surtitle_tools::CancellationToken::new();
+        cancel.cancel();
+        let result = install_silero_model_with_progress(root.path(), &cancel, |_| {
+            panic!("cancelled installation must not start")
+        })
+        .await;
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(destination).unwrap(), b"previous model");
+    }
     #[test]
     fn vad_warning_requires_entire_sent_range_including_overlap_to_have_no_speech() {
         let chunks = vec![AudioChunk {
@@ -690,6 +785,7 @@ mod tests {
             chunks: ChunkOptions::default(),
             provider: AudioTranscriptionProvider::TranscribePreview,
         };
+        let mut observed_progress = Vec::new();
         let receipt = prepare_audio(
             &source,
             &temp.path().join("prepared"),
@@ -697,9 +793,22 @@ mod tests {
             assets,
             options,
             Arc::new(AtomicBool::new(false)),
-            |_| {},
+            |progress| observed_progress.push(progress),
         )
         .unwrap();
+        let extraction = observed_progress
+            .iter()
+            .position(|progress| progress.phase == "extracting")
+            .unwrap();
+        assert_eq!(observed_progress[extraction].completed_chunks, 0);
+        assert_eq!(observed_progress[extraction].processed_ms, 0);
+        let verification = observed_progress
+            .iter()
+            .position(|progress| progress.phase == "verifying")
+            .unwrap();
+        assert!(verification > extraction);
+        assert_eq!(observed_progress[verification].processed_ms, 0);
+        assert_eq!(observed_progress.last().unwrap().phase, "prepared");
         assert_eq!(receipt.chunks.len(), 1);
         assert!(
             receipt.prepared_job.validate().is_err(),

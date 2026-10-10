@@ -1,5 +1,5 @@
 use super::{DownloadJob, MAX_DOWNLOAD_BYTES, check_capacity, stored_bytes};
-use crate::application::{Services, media_tools::lease_with_cancel};
+use crate::application::{Services, media_tools::lease_with_context};
 use anyhow::{Context, Result, bail, ensure};
 use std::{
     path::{Path, PathBuf},
@@ -34,10 +34,13 @@ pub async fn download_url(
             "playlists are not supported"
         );
         job.progress("preparing_tools", 0, None)?;
-        let (lease, receipt_id) = lease_with_cancel(
+        let parent_id = format!("download:{}", job.id()?);
+        let (lease, receipt_id) = lease_with_context(
             state,
             &[ToolKind::FfmpegPair, ToolKind::YtDlp, ToolKind::Deno],
             &job.cancel,
+            Some(&parent_id),
+            None,
         )
         .await?;
         state.downloads.bind_tool_receipt(job, &receipt_id)?;
@@ -160,7 +163,7 @@ pub async fn download_url(
     if let Some(size) = expected {
         check_capacity(fs2::available_space(&directory)?, size, 0)?;
     }
-    job.progress("downloading", 0, expected)?;
+    job.progress_with_total_exact("downloading", 0, expected, true)?;
     loop {
         let bytes = tokio::select! { biased; _ = job.cancel.cancelled() => bail!("Download cancelled"), bytes = response.chunk() => bytes? };
         let Some(bytes) = bytes else {
@@ -173,7 +176,7 @@ pub async fn download_url(
             .context("download size overflow")?;
         ensure!(total <= MAX, "download exceeds safety limit");
         file.write_all(&bytes)?;
-        job.progress("downloading", total, expected)?;
+        job.progress_with_total_exact("downloading", total, expected, true)?;
     }
     ensure!(total > 0, "empty media download");
     file.sync_all()?;
@@ -182,7 +185,7 @@ pub async fn download_url(
     std::fs::rename(temporary, &destination)?;
     let final_directory = state.root.join("media").join(surtitle_core::id());
     std::fs::rename(&directory, &final_directory)?;
-    job.progress("importing", total, expected)?;
+    job.progress_with_total_exact("importing", total, expected, true)?;
     Ok((
         final_directory.join(
             destination

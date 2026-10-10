@@ -53,6 +53,29 @@ pub struct DownloadProgress {
     pub downloaded_bytes: u64,
     pub total_bytes: Option<u64>,
 }
+/// Work within an installation. Download completion is not installation completion.
+#[derive(Debug, Clone)]
+pub struct ToolUpdateProgress {
+    pub phase: &'static str,
+    pub download: Option<DownloadProgress>,
+}
+impl ToolUpdateProgress {
+    pub(crate) fn phase(phase: &'static str) -> Self {
+        Self {
+            phase,
+            download: None,
+        }
+    }
+    pub(crate) fn download(downloaded_bytes: u64, total_bytes: Option<u64>) -> Self {
+        Self {
+            phase: "downloading",
+            download: Some(DownloadProgress {
+                downloaded_bytes,
+                total_bytes,
+            }),
+        }
+    }
+}
 pub(crate) struct DownloadReceipt {
     pub sha256: String,
     pub verification: Verification,
@@ -241,7 +264,7 @@ pub(crate) async fn download(
     candidate: &ReleaseCandidate,
     destination: &Path,
     cancel: &CancellationToken,
-    progress: Option<&tokio::sync::mpsc::UnboundedSender<DownloadProgress>>,
+    progress: &mut (impl FnMut(ToolUpdateProgress) + Send),
 ) -> Result<DownloadReceipt> {
     let sums = small(client, &candidate.checksum_url, cancel).await?;
     let verification = if let Some(url) = &candidate.signature_url {
@@ -259,8 +282,10 @@ pub(crate) async fn download(
     let url = Url::parse(&candidate.asset_url)?;
     ensure!(trusted_url(&url), "untrusted artifact URL");
     let work = async {
+        progress(ToolUpdateProgress::phase("connecting"));
         let mut response = client.get(url).send().await?.error_for_status()?;
         let total = response.content_length();
+        progress(ToolUpdateProgress::download(0, total));
         const MAX: u64 = 512 * 1024 * 1024;
         ensure!(
             total.is_none_or(|n| n <= MAX),
@@ -274,17 +299,13 @@ pub(crate) async fn download(
             ensure!(bytes <= MAX, "tool package exceeds 512 MiB limit");
             hash.update(&chunk);
             file.write_all(&chunk)?;
-            if let Some(sender) = progress {
-                let _ = sender.send(DownloadProgress {
-                    downloaded_bytes: bytes,
-                    total_bytes: total,
-                });
-            }
+            progress(ToolUpdateProgress::download(bytes, total));
         }
         ensure!(
             bytes > 0 && total.is_none_or(|n| n == bytes),
             "incomplete tool package"
         );
+        progress(ToolUpdateProgress::phase("verifying"));
         file.sync_all()?;
         let actual = format!("{:x}", hash.finalize());
         ensure!(

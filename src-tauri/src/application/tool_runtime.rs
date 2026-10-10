@@ -242,7 +242,7 @@ pub async fn set_tool_provider(
 }
 async fn update(state: &Services, id: &str) -> Result<()> {
     if id == "vad" {
-        surtitle_ai::install_silero_model(&state.root.join("models")).await?;
+        install_vad(state, &CancellationToken::new(), None, None).await?;
         return Ok(());
     }
     let k = kind(id)?;
@@ -254,12 +254,87 @@ async fn update(state: &Services, id: &str) -> Result<()> {
         );
         channel(&p)
     };
-    state
+    update_managed(state, k, c, &CancellationToken::new(), None, None).await
+}
+
+pub(crate) async fn update_managed(
+    state: &Services,
+    kind: ToolKind,
+    channel: YtDlpChannel,
+    cancel: &CancellationToken,
+    parent_id: Option<&str>,
+    media_id: Option<&str>,
+) -> Result<()> {
+    let label = match kind {
+        ToolKind::FfmpegPair => "FFmpeg / ffprobe",
+        ToolKind::YtDlp => "yt-dlp",
+        ToolKind::Deno => "Deno",
+    };
+    let operation = state.operations.start(
+        "tool",
+        label,
+        super::operations::OperationContext {
+            media_id,
+            tool_id: Some(kind.directory()),
+            parent_id,
+            ..Default::default()
+        },
+    )?;
+    let reporter = operation.reporter();
+    let result = state
         .tools
         .manager
-        .update(k, c, &CancellationToken::new())
-        .await?;
-    Ok(())
+        .update_with_observer(kind, channel, cancel, |progress| {
+            if let Some(download) = progress.download {
+                reporter.progress(
+                    progress.phase,
+                    Some(download.downloaded_bytes),
+                    download.total_bytes,
+                    Some("bytes"),
+                );
+            } else {
+                reporter.progress(progress.phase, None, None, None);
+            }
+        })
+        .await
+        .map(|_| ());
+    operation.finish(&result, cancel.is_cancelled(), None);
+    result
+}
+
+pub(crate) async fn install_vad(
+    state: &Services,
+    cancel: &CancellationToken,
+    parent_id: Option<&str>,
+    media_id: Option<&str>,
+) -> Result<PathBuf> {
+    let operation = state.operations.start(
+        "tool",
+        "Silero VAD",
+        super::operations::OperationContext {
+            media_id,
+            tool_id: Some("vad"),
+            parent_id,
+            ..Default::default()
+        },
+    )?;
+    let reporter = operation.reporter();
+    let result = surtitle_ai::install_silero_model_with_progress(
+        &state.root.join("models"),
+        cancel,
+        |progress| {
+            reporter.progress(
+                progress.phase,
+                progress.downloaded_bytes,
+                progress.total_bytes,
+                progress.downloaded_bytes.map(|_| "bytes"),
+            );
+        },
+    )
+    .await
+    .map_err(anyhow::Error::from);
+    operation.finish(&result, cancel.is_cancelled(), None);
+    result
 }
 pub async fn install_tool(state: AppState, tool_id: String) -> std::result::Result<(), String> {
     update(&state, &tool_id).await.map_err(err)

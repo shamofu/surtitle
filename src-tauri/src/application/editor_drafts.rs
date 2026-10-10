@@ -58,6 +58,7 @@ pub async fn save_phrase_editor_draft(
     state: AppState,
     reference: EditorDraftVersion,
     request: SaveCard,
+    operation_id: Option<String>,
 ) -> IpcResult<()> {
-    super::cards::save_card_with_editor_draft(state, request, Some(reference)).await
+    super::cards::save_card_with_editor_draft(state, request, Some(reference), operation_id).await
 }

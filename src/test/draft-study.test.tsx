@@ -20,6 +20,7 @@ import {
   within,
 } from '@testing-library/react';
 import { DraftStudyPanel } from '../features/study/drafts/DraftStudyPanel';
+vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
 import { studyApi } from '../features/study/api';
 import { aiApi } from '../features/ai/api';
 import type { AiModelPreference } from '../shared/contracts/ai';
@@ -276,7 +277,7 @@ beforeEach(() => {
   });
   vi.mocked(draftStudyApi.candidates).mockResolvedValue([]);
   vi.mocked(draftStudyApi.saveCard).mockResolvedValue(undefined);
-  vi.mocked(draftStudyApi.export).mockResolvedValue(undefined);
+  vi.mocked(draftStudyApi.export).mockResolvedValue(true);
   vi.mocked(draftStudyApi.remove).mockImplementation(async () => {
     bookmarks = [];
   });
@@ -591,7 +592,7 @@ describe('study from independently saved draft excerpts', () => {
         meaning: 'A type of dog.',
         explanation: undefined,
         translation: undefined,
-      }),
+      }, expect.stringMatching(/^local:/)),
     );
     expect(draftStudyApi.createQuote).not.toHaveBeenCalled();
     expect(aiApi.approveQuote).not.toHaveBeenCalled();
@@ -692,7 +693,7 @@ describe('study from independently saved draft excerpts', () => {
         meaning: 'A breed of small hound.',
         explanation: 'Dog breed.',
         translation: 'ビーグル',
-      }),
+      }, expect.stringMatching(/^local:/)),
     );
   });
 

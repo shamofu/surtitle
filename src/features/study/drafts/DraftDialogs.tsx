@@ -21,6 +21,8 @@ import { timestamp } from '../../../shared/format';
 import { QuoteApproval } from '../../ai/QuoteApproval';
 import { ModelEditor, emptyModel } from '../../ai/ModelEditor';
 import { Button, Field, Modal } from '../../../shared/ui/index';
+import { useActivities } from '../../../app/providers/Activities';
+import { ProgressStatus } from '../../../shared/ui/ProgressStatus';
 import './draft-study.css';
 
 export function DraftCardDialog({
@@ -35,6 +37,7 @@ export function DraftCardDialog({
   const { mutate } = useDataActions();
   const { t } = useAppearance();
   const { report } = useNotifications();
+  const { runTracked } = useActivities();
   const mounted = useMounted();
   const [term, setTerm] = useState(candidate?.term || '');
   const [meaning, setMeaning] = useState(candidate?.meaning || '');
@@ -46,8 +49,9 @@ export function DraftCardDialog({
     if (locked.current || !term.trim() || !meaning.trim()) return;
     locked.current = true;
     setBusy(true);
+    const operationId = `local:${crypto.randomUUID()}`;
     const result = await report(
-      async () => {
+      () => runTracked({ id: operationId, kind: 'audio', label: term.trim(), mediaId: selection.mediaId, phase: 'saving_audio' }, async () => {
         await mutate(
           () =>
             draftStudyApi.saveCard({
@@ -57,11 +61,11 @@ export function DraftCardDialog({
               meaning: meaning.trim(),
               explanation: explanation.trim() || undefined,
               translation: translation.trim() || undefined,
-            }),
+            }, operationId),
           { kind: 'snapshot' },
         );
         return true;
-      },
+      }),
       t('音声付きカードを保存しました。', 'Audio card saved.'),
     );
     if (!mounted.current) return;
@@ -78,6 +82,7 @@ export function DraftCardDialog({
       }}
     >
       <p className="draft-study-example">{selection.text}</p>
+      {busy && <ProgressStatus label={term.trim()} phase="saving_audio" />}
       <p className="helper-text">
         {timestamp(selection.startMs, true)}–{timestamp(selection.endMs, true)}{' '}
         ·{' '}
@@ -146,6 +151,7 @@ export function DraftAiDialog({
   const { t } = useAppearance();
   const { data } = useSnapshot();
   const { report } = useNotifications();
+  const { runTracked } = useActivities();
   const mounted = useMounted();
   const [focusTerm, setFocusTerm] = useState('');
   const [models, setModels] = useState<
@@ -169,7 +175,7 @@ export function DraftAiDialog({
       return;
     locked.current = true;
     setBusy(true);
-    const result = await report(() =>
+    const result = await report(() => runTracked({ kind: 'estimate', label: selection.text, mediaId: selection.mediaId, phase: 'estimating' }, () =>
       mutate(
         () =>
           draftStudyApi.createQuote({
@@ -179,7 +185,7 @@ export function DraftAiDialog({
             model,
           }),
         { kind: 'snapshot' },
-      ),
+      )),
     );
     if (!mounted.current) return;
     locked.current = false;
@@ -211,6 +217,7 @@ export function DraftAiDialog({
       }}
     >
       <p className="draft-study-example">{selection.text}</p>
+      {busy && <ProgressStatus label={selection.text} phase={quote ? 'starting' : 'estimating'} />}
       {quote ? (
         <QuoteApproval
           key={quote.id}

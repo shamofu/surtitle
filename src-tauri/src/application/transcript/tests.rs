@@ -17,6 +17,29 @@ const COMPLETE: &str = "11111111-1111-4111-8111-111111111111";
 const PENDING: &str = "22222222-2222-4222-8222-222222222222";
 const REPAIR: &str = "33333333-3333-4333-8333-333333333333";
 
+#[test]
+fn preparation_summaries_identify_the_recorded_audio_stream_not_current_selection() {
+    let (_directory, state) = fixture();
+    let receipt = load_receipt(&state, COMPLETE).unwrap();
+    let media_id = receipt.prepared_job.binding.media_id;
+    {
+        let db = lock(&state.db).unwrap();
+        let mut media = db.media(&media_id).unwrap();
+        media.audio_stream_index = Some(99);
+        db.put_media(&media).unwrap();
+    }
+    let summaries = list_transcription_preparations(state, media_id).unwrap();
+    let summary = summaries
+        .iter()
+        .find(|summary| summary.id == COMPLETE)
+        .unwrap();
+    assert_eq!(summary.audio_stream_index, Some(0));
+    assert_eq!(
+        serde_json::to_value(summary).unwrap()["audioStreamIndex"],
+        0
+    );
+}
+
 fn automatic_job(state: &AppState) -> JobQuote {
     let mut receipt = load_receipt(state, COMPLETE).unwrap();
     receipt.prepared_job = receipt

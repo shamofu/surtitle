@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
 import { useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';

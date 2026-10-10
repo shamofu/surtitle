@@ -14,6 +14,7 @@ pub fn list_transcription_preparations(
                 let range = build_transcript_draft(&receipt, &[])?;
                 Ok(TranscriptionPreparation {
                     id: receipt.id.clone(),
+                    audio_stream_index: receipt.audio_stream_index,
                     media_id: media_id.clone(),
                     start_ms: range.start_ms,
                     end_ms: range.end_ms,

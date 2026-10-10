@@ -49,9 +49,14 @@ pub fn remove_draft_selection(
 pub async fn save_draft_selection_card(
     state: State<'_, AppState>,
     request: SelectionCard,
+    operation_id: Option<String>,
 ) -> std::result::Result<(), String> {
-    crate::application::transcript::study::save_draft_selection_card(state.inner().clone(), request)
-        .await
+    crate::application::transcript::study::save_draft_selection_card(
+        state.inner().clone(),
+        request,
+        operation_id,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -82,7 +87,7 @@ pub async fn list_draft_selection_candidates(
 pub async fn export_draft_selection(
     state: State<'_, AppState>,
     request: ExportSelection,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<bool, String> {
     crate::application::transcript::study::export_draft_selection(state.inner().clone(), request)
         .await
 }

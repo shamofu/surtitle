@@ -6,6 +6,13 @@ use crate::application::tool_runtime::ProviderRequest;
 use tauri::State;
 
 #[tauri::command]
+pub fn list_operation_progress(
+    state: State<'_, AppState>,
+) -> std::result::Result<Vec<crate::application::operations::OperationProgress>, String> {
+    crate::application::operations::list_operation_progress(state.inner().clone())
+}
+
+#[tauri::command]
 pub fn list_download_jobs(
     state: State<'_, AppState>,
 ) -> std::result::Result<Vec<DownloadJobSnapshot>, String> {
@@ -24,8 +31,14 @@ pub fn cancel_download(
 pub async fn list_media_streams(
     state: State<'_, AppState>,
     media_id: String,
+    operation_id: Option<String>,
 ) -> std::result::Result<Vec<MediaStream>, String> {
-    crate::application::media_tools::list_media_streams(state.inner().clone(), media_id).await
+    crate::application::media_tools::list_media_streams(
+        state.inner().clone(),
+        media_id,
+        operation_id,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -34,12 +47,14 @@ pub async fn select_audio_stream(
     state: State<'_, AppState>,
     media_id: String,
     stream_index: u32,
+    operation_id: Option<String>,
 ) -> std::result::Result<(), String> {
     crate::application::media_tools::select_audio_stream(
         app,
         state.inner().clone(),
         media_id,
         stream_index,
+        operation_id,
     )
     .await
 }
@@ -50,12 +65,14 @@ pub async fn extract_embedded_subtitles(
     media_id: String,
     stream_index: u32,
     replace_existing: Option<bool>,
+    operation_id: Option<String>,
 ) -> std::result::Result<(), String> {
     crate::application::media_tools::extract_embedded_subtitles(
         state.inner().clone(),
         media_id,
         stream_index,
         replace_existing,
+        operation_id,
     )
     .await
 }

@@ -396,6 +396,7 @@ fn confirmed_selection(
 pub async fn save_draft_selection_card(
     state: AppState,
     request: SelectionCard,
+    operation_id: Option<String>,
 ) -> std::result::Result<(), String> {
     let state = state.clone();
     async {
@@ -403,7 +404,13 @@ pub async fn save_draft_selection_card(
             let _guard = lock(&state.ai_session.transcript_review)?;
             confirmed_selection(&state, &request.selection_id, request.version, true)?
         };
-        crate::application::media_tools::ensure_audio_stream(&state, &selected.media_id).await?;
+        crate::application::media_tools::ensure_audio_stream_with_context(
+            &state,
+            &selected.media_id,
+            &surtitle_tools::CancellationToken::new(),
+            operation_id.as_deref(),
+        )
+        .await?;
         let media = lock(&state.db)?.media(&selected.media_id)?;
         let clip = surtitle_core::replay_range(
             cue.start_ms,
@@ -411,8 +418,14 @@ pub async fn save_draft_selection_card(
             media.duration_ms,
             state.settings()?.replay_context_ms,
         )?;
-        let audio =
-            crate::application::media_tools::extract_card_audio(&state, &media, &cue, clip).await?;
+        let audio = crate::application::media_tools::extract_card_audio(
+            &state,
+            &media,
+            &cue,
+            clip,
+            operation_id.as_deref(),
+        )
+        .await?;
         let saved = (|| {
             let _guard = lock(&state.ai_session.transcript_review)?;
             let (current, _) =
@@ -638,7 +651,7 @@ pub struct ExportSelection {
 pub async fn export_draft_selection(
     state: AppState,
     request: ExportSelection,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<bool, String> {
     async {
         ensure!(["json", "srt", "vtt"].contains(&request.format.as_str()), "Unsupported excerpt format");
         if request.format != "json" {
@@ -646,7 +659,7 @@ pub async fn export_draft_selection(
             let (_, cue) = confirmed_selection(&state, &request.id, request.version, false)?;
             ensure!(cue.timing_precision == "cue", "Subtitle timing is unavailable. Export this text as JSON or set precise excerpt times first.");
         }
-        let Some(file) = rfd::AsyncFileDialog::new().set_file_name(format!("study-excerpt.{}", request.format)).save_file().await else { return Ok(()); };
+        let Some(file) = rfd::AsyncFileDialog::new().set_file_name(format!("study-excerpt.{}", request.format)).save_file().await else { return Ok(false); };
         let _guard = lock(&state.ai_session.transcript_review)?;
         let selected = lock(&state.db)?.draft_study_selection(&request.id)?;
         ensure!(selected.version == request.version, "The bookmark changed; export it again");
@@ -667,7 +680,7 @@ pub async fn export_draft_selection(
             std::io::Write::write_all(&mut output, &serde_json::to_vec_pretty(&coverage)?)?;
         }
         std::fs::write(file.path(), contents)?;
-        Ok(())
+        Ok(true)
     }.await.map_err(err)
 }
 

@@ -9,6 +9,7 @@ pub(crate) mod download;
 pub(crate) mod library;
 pub(crate) mod media_tools;
 pub(crate) mod models;
+pub(crate) mod operations;
 pub(crate) mod tool_updates;
 pub(crate) mod transcript;
 use crate::player::PlayerState;
@@ -39,11 +40,18 @@ pub struct Services {
     runtime_dir: Mutex<PathBuf>,
     ai_session: AiSession,
     downloads: download::DownloadManager,
+    operations: operations::OperationRegistry,
 }
 #[derive(Default)]
 struct AiSession {
-    preparation: Mutex<Option<Arc<std::sync::atomic::AtomicBool>>>,
+    preparation: Mutex<Option<PreparationCancellation>>,
     transcript_review: Mutex<()>,
+}
+#[derive(Clone)]
+struct PreparationCancellation {
+    id: String,
+    local: Arc<std::sync::atomic::AtomicBool>,
+    network: surtitle_tools::CancellationToken,
 }
 pub struct RestorePlan {
     pub snapshot: crate::restore_snapshot::RestoreSnapshot,
@@ -102,6 +110,7 @@ impl Services {
             runtime_dir: Mutex::new(PathBuf::new()),
             ai_session: AiSession::default(),
             downloads,
+            operations: operations::OperationRegistry::default(),
         });
         transcript::automatic::recover(&state)?;
         Ok(state)

@@ -23,7 +23,7 @@ export const cardsApi = {
     example: string;
     explanation?: string;
     translation?: string;
-  }) => call<void>('save_card', { request }),
+  }, operationId?: string) => call<void>('save_card', { request, operationId }),
   rateCard: (cardId: string, rating: 'again' | 'hard' | 'good' | 'easy') =>
     call<void>('rate_card', { cardId, rating }),
 };

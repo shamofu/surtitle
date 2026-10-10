@@ -152,6 +152,7 @@ pub fn run() {
             commands::media_tools::list_media_streams,
             commands::media_tools::select_audio_stream,
             commands::media_tools::list_download_jobs,
+            commands::media_tools::list_operation_progress,
             commands::media_tools::cancel_download,
             commands::media_tools::set_tool_provider,
             commands::media_tools::install_tool,

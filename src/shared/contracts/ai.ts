@@ -81,6 +81,7 @@ export interface TranscriptionPreparation {
   repairParentJobId?: string;
   repairBoundaryId?: string;
   wholeMedia?: boolean;
+  audioStreamIndex?: number;
 }
 
 export interface SavedAiResult {

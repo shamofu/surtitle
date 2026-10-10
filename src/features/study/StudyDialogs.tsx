@@ -18,6 +18,8 @@ import {
 } from '../../app/runtime';
 import { parseTimestamp, timestamp } from '../../shared/format';
 import { Button, Field, Modal } from '../../shared/ui/index';
+import { ProgressStatus } from '../../shared/ui/ProgressStatus';
+import { useActivities } from '../../app/providers/Activities';
 
 import type { SelectedContext } from './source-selection';
 
@@ -238,6 +240,7 @@ export function SaveCardForm({
   const { t } = useAppearance();
   const { report } = useNotifications();
   const [localValue, setLocalValue] = useState(() => phraseFormValues(segment, candidate, initialTerm));
+  const { runTracked } = useActivities();
   const values = value ?? localValue;
   const { term, meaning, example, explanation } = values;
   const restore = (next: PhraseFormValues) => { if (onChange) onChange(next); else setLocalValue(next); };
@@ -275,8 +278,9 @@ export function SaveCardForm({
     setBusy(true);
     setSaveError('');
     onBusyChange?.(true);
+    const operationId = `local:${crypto.randomUUID()}`;
     const success = await report(
-      async () => {
+      () => runTracked({ id: operationId, kind: 'audio', label: term.trim(), mediaId: segment.mediaId, phase: 'saving_audio' }, async () => {
         try {
           const stored = await draft.flush(true);
           const request = {
@@ -288,7 +292,7 @@ export function SaveCardForm({
             translation: candidate ? candidate.translation : segment.translation,
           };
           await mutate(
-            () => stored ? editorDraftApi.savePhrase(stored, request) : cardsApi.saveCard(request),
+            () => stored ? editorDraftApi.savePhrase(stored, request, operationId) : cardsApi.saveCard(request, operationId),
             { kind: 'snapshot' },
           );
           draft.consume(); onDraftSaved?.();
@@ -297,7 +301,7 @@ export function SaveCardForm({
           throw error;
         }
         return true;
-      },
+      }),
       t('マイフレーズに保存しました。', 'Saved to your phrases.'),
     );
     setBusy(false);
@@ -316,6 +320,7 @@ export function SaveCardForm({
   }
   return (
     <fieldset className="save-phrase-form" disabled={busy}>
+      {busy && pending.current && <ProgressStatus label={term.trim()} phase="saving_audio" />}
       <Field label={t('語彙・フレーズ', 'Word or phrase')}>
         <input
           autoFocus

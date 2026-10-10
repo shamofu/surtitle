@@ -13,8 +13,11 @@ import {
   useNotifications,
 } from '../../app/runtime';
 import { Button, Field, Modal } from '../../shared/ui/index';
+import { ProgressStatus } from '../../shared/ui/ProgressStatus';
+import { useActivities } from '../../app/providers/Activities';
 
 export function DownloadJobs() {
+  const { activities } = useActivities();
   const { mutate } = useDataActions();
   const { t } = useAppearance();
   const { report } = useNotifications();
@@ -22,7 +25,6 @@ export function DownloadJobs() {
     queryKey: queryKeys.downloads,
     queryFn: libraryApi.downloadJobs,
     enabled: nativeAvailable(),
-    refetchInterval: 1000,
   });
   const [busyId, setBusyId] = useState<string>();
   async function perform(id: string, action: () => Promise<unknown>) {
@@ -60,7 +62,14 @@ export function DownloadJobs() {
         >
           <div>
             <strong>{job.request.title || job.request.pathOrUrl}</strong>
-            <p role="status">
+            {job.status === 'running' ? <ProgressStatus
+              label={t('ダウンロード中', 'Downloading')}
+              phase={job.phase}
+              completed={job.phase === 'downloading' ? job.storedBytes : undefined}
+              total={job.phase === 'downloading' && job.totalBytesExact ? job.totalBytes : undefined}
+              unit="bytes"
+              compact
+            /> : <p role="status">
               {statuses[job.status] ||
                 phases[job.phase] ||
                 t('処理中', 'Working')}
@@ -68,13 +77,16 @@ export function DownloadJobs() {
                 <>
                   {' '}
                   ·{' '}
-                  {job.status === 'running' || job.status === 'completed'
+                  {job.status === 'completed'
                     ? t('保存中の容量', 'Stored size')
                     : t('削除前の保存容量', 'Size before cleanup')}{' '}
                   {(job.storedBytes / 1024 / 1024).toFixed(1)} MiB
                 </>
               )}
-            </p>
+            </p>}
+            {activities.filter(activity => activity.parentId === `download:${job.id}` && activity.status === 'running').map(activity =>
+              <ProgressStatus key={activity.id} {...activity} compact />,
+            )}
             {job.error && (
               <details>
                 <summary>{t('詳細', 'Details')}</summary>
@@ -84,7 +96,6 @@ export function DownloadJobs() {
           </div>
           {job.status === 'running' ? (
             <>
-              <progress aria-label={t('ダウンロード中', 'Downloading')} />
               <Button
                 busy={busyId === job.id}
                 onClick={() =>
@@ -151,7 +162,8 @@ export function SubtitleSourceDialog({
 }) {
   const { mutate } = useDataActions();
   const { t, locale } = useAppearance();
-  const { report } = useNotifications();
+  const { report, notify } = useNotifications();
+  const { runTracked } = useActivities();
   const [mode, setMode] = useState(initialMode === 'choose' ? 'embedded' : initialMode);
   const [stream, setStream] = useState('');
   const [version, setVersion] = useState('');
@@ -159,7 +171,10 @@ export function SubtitleSourceDialog({
   const [busy, setBusy] = useState(false);
   const streams = useQuery({
     queryKey: queryKeys.streams(media.id),
-    queryFn: () => libraryApi.mediaStreams(media.id),
+    queryFn: () => {
+      const operationId = `local:${crypto.randomUUID()}`;
+      return runTracked({ id: operationId, kind: 'inspect', label: media.title, mediaId: media.id, phase: 'inspecting' }, () => libraryApi.mediaStreams(media.id, operationId));
+    },
     enabled: mode === 'embedded' && !busy,
   });
   const versions = useQuery({
@@ -181,8 +196,9 @@ export function SubtitleSourceDialog({
     if (!canSubmit) return;
     if (mode === 'transcribe') { onTranscribe?.(); return; }
     setBusy(true);
+    const operationId = `local:${crypto.randomUUID()}`;
     const success = await report(
-      async () => {
+      () => runTracked({ id: operationId, kind: 'subtitles', label: media.title, mediaId: media.id, phase: mode === 'embedded' ? 'extracting_subtitles' : mode === 'file' ? 'importing' : 'restoring' }, async () => {
         if (mode === 'embedded')
           await mutate(
             () =>
@@ -190,11 +206,12 @@ export function SubtitleSourceDialog({
                 media.id,
                 Number(stream),
                 replace,
+                operationId,
               ),
             { kind: 'subtitles', mediaId: media.id },
           );
         else if (mode === 'file')
-          await mutate(() => libraryApi.importSubtitles(media.id, replace), {
+          return mutate(() => libraryApi.importSubtitles(media.id, replace), {
             kind: 'subtitles',
             mediaId: media.id,
           });
@@ -204,11 +221,13 @@ export function SubtitleSourceDialog({
             { kind: 'subtitles', mediaId: media.id },
           );
         return true;
-      },
-      t('字幕を更新しました。', 'Subtitles updated.'),
+      }, { classifyResult: result => ({ status: result ? 'completed' : 'cancelled' }) }),
     );
     setBusy(false);
-    if (success) onClose();
+    if (success) {
+      notify(t('字幕を更新しました。', 'Subtitles updated.'));
+      onClose();
+    }
   }
   return (
     <Modal
@@ -244,12 +263,10 @@ export function SubtitleSourceDialog({
       {mode === 'embedded' && (
         <>
           {streams.isLoading && (
-            <p role="status">
-              {t(
+            <ProgressStatus label={t(
                 'メディアツールで字幕一覧を確認しています。初回はツールの取得が必要です。',
                 'Inspecting subtitles with media tools. Tools may download on first use.',
-              )}
-            </p>
+              )} phase="inspecting" />
           )}
           {streams.error && <p role="alert">{streams.error.message}</p>}
           {streams.data && initialStreamIndex !== undefined && !streams.data.some(item => item.index === initialStreamIndex && item.kind === 'subtitle' && item.supportedText) && <p className="notice warning">
@@ -355,6 +372,7 @@ export function SubtitleSourceDialog({
           'Saved phrases keep their context, audio, and review history.',
         )}
       </p>
+      {busy && <ProgressStatus label={media.title} phase={mode === 'embedded' ? 'extracting_subtitles' : mode === 'file' ? 'importing' : 'restoring'} />}
       <footer className="modal-footer">
         <Button disabled={busy} onClick={onClose}>
           {t('キャンセル', 'Cancel')}

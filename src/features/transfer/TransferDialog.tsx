@@ -19,6 +19,9 @@ import {
   useNotifications,
 } from '../../app/runtime';
 import { Button, Modal } from '../../shared/ui/index';
+import { ProgressStatus } from '../../shared/ui/ProgressStatus';
+import { useActivities } from '../../app/providers/Activities';
+import { useClearPreparationSessions } from '../ai/PreparationSessions';
 import { clearEditorDraftSessions, flushEditorDrafts } from '../study/editor-drafts/useEditorDraft';
 
 export function TransferDialog({
@@ -31,10 +34,13 @@ export function TransferDialog({
   const { mutate } = useDataActions();
   const { t } = useAppearance();
   const { report } = useNotifications();
+  const { runTracked } = useActivities();
+  const clearPreparations = useClearPreparationSessions();
   const [tab, setTab] = useState<'export' | 'restore'>('export');
   const [format, setFormat] = useState<ExportFormat>(mediaId ? 'srt' : 'zip');
   const [exportedPaths, setExportedPaths] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState('exporting');
   const [preview, setPreview] = useState<RestorePreview | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const mounted = useRef(true);
@@ -120,17 +126,23 @@ export function TransferDialog({
   ];
   async function exportData() {
     setBusy(true);
-    const paths = await report(async () => {
-      await flushEditorDrafts();
-      return transferApi.exportLearning(format, mediaId);
-    });
-    if (paths?.length) setExportedPaths(paths);
-    setBusy(false);
+    setPhase('exporting');
+    try {
+      const paths = await report(() => runTracked({ kind: 'export', label: t('学習データの書き出し', 'Export learning data'), phase: 'exporting', mediaId }, async () => {
+        await flushEditorDrafts();
+        return transferApi.exportLearning(format, mediaId);
+      }, { classifyResult: paths => ({ status: paths.length ? 'completed' : 'cancelled' }) }));
+      if (mounted.current && paths?.length) setExportedPaths(paths);
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
   }
   async function chooseBackup() {
     const request = ++previewRequest.current;
     setBusy(true);
-    const result = await report(transferApi.previewRestore);
+    setPhase('reading_backup');
+    const result = await report(() => runTracked({ kind: 'restore_preview', label: t('バックアップの確認', 'Review backup'), phase: 'reading_backup' }, transferApi.previewRestore,
+      { classifyResult: result => ({ status: result ? 'completed' : 'cancelled' }) }));
     if (!mounted.current || request !== previewRequest.current) {
       if (result)
         await transferApi.discardRestorePreview(result.token).catch(() => {});
@@ -145,17 +157,19 @@ export function TransferDialog({
   async function restoreData() {
     if (!preview || !acknowledged) return;
     setBusy(true);
+    setPhase('restoring');
     const result = await report(
-      async () => {
+      () => runTracked({ kind: 'restore', label: t('学習データの復元', 'Restore learning data'), phase: 'restoring' }, async () => {
         await flushEditorDrafts();
         await mutate(async () => {
           await transferApi.restoreLearning(preview.token);
           clearEditorDraftSessions();
+          clearPreparations();
         }, {
           kind: 'restore',
         });
         return true;
-      },
+      }),
       t('学習データを復元しました。', 'Learning data restored.'),
     );
     setBusy(false);
@@ -188,6 +202,7 @@ export function TransferDialog({
           {t('復元', 'Restore')}
         </button>
       </div>
+      {busy && <ProgressStatus label={phase === 'exporting' ? t('学習データの書き出し', 'Export learning data') : phase === 'reading_backup' ? t('バックアップの確認', 'Review backup') : t('学習データの復元', 'Restore learning data')} phase={phase} />}
       {tab === 'export' && exportedPaths.length > 0 ? <section aria-label={t('書き出し完了', 'Export complete')}>
         <p role="status">{t('書き出しました。', 'Your export is ready.')}</p>
         <ul>{exportedPaths.map(path => <li key={path}><p style={{ overflowWrap: 'anywhere' }}>{path}</p><Button onClick={() => void report(() => transferApi.revealExportFile(path))}><FolderOpen size={16} />{t('保存先を開く', 'Open containing folder')}</Button></li>)}</ul>

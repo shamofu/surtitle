@@ -15,7 +15,7 @@ pub async fn import_subtitles(
     state: State<'_, AppState>,
     media_id: String,
     replace_existing: Option<bool>,
-) -> IpcResult<()> {
+) -> IpcResult<bool> {
     crate::application::subtitles::import_subtitles(
         state.inner().clone(),
         media_id,

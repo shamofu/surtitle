@@ -6,13 +6,13 @@ import { nativeAvailable } from '../shared/native/transport';
 import { dueCards } from '../shared/format';
 import { IconButton } from '../shared/ui/index';
 import { NotificationRegion } from './providers/Notifications';
+import { ActivityButton } from './ActivityModal';
 
 export function AppShell() {
   const { data, error } = useSnapshot();
   const { t, theme, toggleTheme, locale, setLocale } = useAppearance();
   const { refresh } = useDataActions();
   const due = data ? dueCards(data.cards).length : null;
-  const running = data?.jobs.filter((job) => job.status === 'running' || job.status === 'queued') || [];
   return (
     <div className="app-shell">
       <div className="app-main">
@@ -41,12 +41,7 @@ export function AppShell() {
             </Link>
           </nav>
           <div className="topbar-actions">
-            {running.length > 0 && (
-              <span className="running-label" role="status">
-                <RefreshCw size={14} className="spin" aria-hidden="true" />
-                {t(`${running.length} 件を処理中`, `${running.length} running`)}
-              </span>
-            )}
+            <ActivityButton />
             <button className="locale-button" onClick={() => setLocale(locale === 'ja' ? 'en' : 'ja')} aria-label={t('Switch to English', '日本語に切り替える')}>
               {locale === 'ja' ? 'EN' : '日本語'}
             </button>

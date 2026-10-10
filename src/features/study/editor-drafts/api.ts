@@ -39,7 +39,7 @@ export const editorDraftApi = {
     mediaId: string; segmentId: string; sourceCueIds?: string[];
     sourceRange?: { startMs: number; endMs: number };
     term: string; meaning: string; example: string; explanation?: string; translation?: string;
-  }) => call<void>('save_phrase_editor_draft', { reference: versionReference(reference), request }),
+  }, operationId?: string) => call<void>('save_phrase_editor_draft', { reference: versionReference(reference), request, operationId }),
 };
 
 export function editorSourceKey(cues: Pick<SubtitleSegment, 'id'>[]) {

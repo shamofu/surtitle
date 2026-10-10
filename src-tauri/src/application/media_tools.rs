@@ -46,6 +46,13 @@ fn parse_streams(json: &str) -> Result<Vec<MediaStream>> {
         .collect()
 }
 async fn inspect_streams(snapshot: &ToolSnapshot, path: &Path) -> Result<Vec<MediaStream>> {
+    inspect_streams_with_cancel(snapshot, path, &CancellationToken::new()).await
+}
+async fn inspect_streams_with_cancel(
+    snapshot: &ToolSnapshot,
+    path: &Path,
+    cancel: &CancellationToken,
+) -> Result<Vec<MediaStream>> {
     let output = CommandSpec {
         program: snapshot.tool.ffprobe.clone().context("ffprobe missing")?,
         args: ["-v", "error", "-show_streams", "-of", "json"]
@@ -55,7 +62,7 @@ async fn inspect_streams(snapshot: &ToolSnapshot, path: &Path) -> Result<Vec<Med
             .collect(),
         guards: vec![snapshot.clone()],
     }
-    .run(Duration::from_secs(60), &CancellationToken::new())
+    .run(Duration::from_secs(60), cancel)
     .await?;
     ensure!(
         output.code == Some(0),
@@ -67,10 +74,17 @@ async fn inspect_streams(snapshot: &ToolSnapshot, path: &Path) -> Result<Vec<Med
 pub async fn list_media_streams(
     state: AppState,
     media_id: String,
+    operation_id: Option<String>,
 ) -> std::result::Result<Vec<MediaStream>, String> {
     async {
         let media = lock(&state.db)?.media(&media_id)?;
-        let lease = lease(&state, &[ToolKind::FfmpegPair]).await?;
+        let lease = lease_for_media(
+            &state,
+            &[ToolKind::FfmpegPair],
+            &media_id,
+            operation_id.as_deref(),
+        )
+        .await?;
         inspect_streams(lease.get(ToolKind::FfmpegPair)?, Path::new(&media.path)).await
     }
     .await
@@ -95,10 +109,27 @@ fn choose_audio_stream(streams: &[MediaStream], selected: Option<u32>) -> Result
         .context("This media has no audio stream")
 }
 /// Persist a concrete FFmpeg stream before preparing any immutable audio receipt.
-pub async fn ensure_audio_stream(state: &Services, media_id: &str) -> Result<u32> {
+pub(crate) async fn ensure_audio_stream_with_context(
+    state: &Services,
+    media_id: &str,
+    cancel: &CancellationToken,
+    parent_id: Option<&str>,
+) -> Result<u32> {
     let media = lock(&state.db)?.media(media_id)?;
-    let lease = lease(state, &[ToolKind::FfmpegPair]).await?;
-    let streams = inspect_streams(lease.get(ToolKind::FfmpegPair)?, Path::new(&media.path)).await?;
+    let (lease, _) = lease_with_context(
+        state,
+        &[ToolKind::FfmpegPair],
+        cancel,
+        parent_id,
+        Some(media_id),
+    )
+    .await?;
+    let streams = inspect_streams_with_cancel(
+        lease.get(ToolKind::FfmpegPair)?,
+        Path::new(&media.path),
+        cancel,
+    )
+    .await?;
     let mut playback = state.playback.operation()?;
     let selected_in_player = if playback.current_media().as_deref() == Some(media_id) {
         playback.selected_audio_stream()
@@ -121,11 +152,18 @@ pub async fn select_audio_stream(
     state: AppState,
     media_id: String,
     stream_index: u32,
+    operation_id: Option<String>,
 ) -> std::result::Result<(), String> {
     let state = state.clone();
     async {
         let media = lock(&state.db)?.media(&media_id)?;
-        let lease = lease(&state, &[ToolKind::FfmpegPair]).await?;
+        let lease = lease_for_media(
+            &state,
+            &[ToolKind::FfmpegPair],
+            &media_id,
+            operation_id.as_deref(),
+        )
+        .await?;
         choose_audio_stream(
             &inspect_streams(lease.get(ToolKind::FfmpegPair)?, Path::new(&media.path)).await?,
             Some(stream_index),
@@ -155,13 +193,14 @@ pub async fn extract_embedded_subtitles(
     media_id: String,
     stream_index: u32,
     replace_existing: Option<bool>,
+    operation_id: Option<String>,
 ) -> std::result::Result<(), String> {
     async {
         let media = lock(&state.db)?.media(&media_id)?;
         let previous = serde_json::to_vec(&lock(&state.db)?.list_segments(&media_id)?)?;
         let replace = replace_existing.unwrap_or(false);
         ensure!(replace || lock(&state.db)?.list_segments(&media_id)?.is_empty(), "Confirm replacement of the current subtitles; their previous version will be preserved");
-        let lease = lease(&state, &[ToolKind::FfmpegPair]).await?;
+        let lease = lease_for_media(&state, &[ToolKind::FfmpegPair], &media_id, operation_id.as_deref()).await?;
         let snapshot = lease.get(ToolKind::FfmpegPair)?;
         let streams = inspect_streams(snapshot, Path::new(&media.path)).await?;
         ensure!(streams.iter().any(|s| s.index == stream_index && s.kind == "subtitle" && s.supported_text), "Choose an embedded text subtitle stream; image subtitles require OCR and are unsupported");
@@ -188,6 +227,30 @@ impl Drop for TemporaryOutput {
 mod stream_tests {
     use super::super::download::transfer::download_url;
     use super::*;
+    #[tokio::test]
+    async fn automatic_setup_keeps_local_parent_and_media_context_on_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let state =
+            Services::open_with_tool_path(root.path().join("data"), std::ffi::OsStr::new(""))
+                .unwrap();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let result = lease_with_context(
+            &state,
+            &[ToolKind::FfmpegPair],
+            &cancel,
+            Some("local:card-save"),
+            Some("media"),
+        )
+        .await;
+        assert!(result.is_err());
+        let entries = state.operations.list().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].parent_id.as_deref(), Some("local:card-save"));
+        assert_eq!(entries[0].media_id.as_deref(), Some("media"));
+        assert_eq!(entries[0].tool_id.as_deref(), Some("ffmpeg"));
+        assert_eq!(entries[0].status, "cancelled");
+    }
     #[test]
     fn tool_receipts_keep_observed_versions_and_refuse_missing_or_changed_identity() {
         let root = tempfile::tempdir().unwrap();
@@ -234,7 +297,7 @@ mod stream_tests {
     #[tokio::test]
     async fn direct_download_success_cancel_and_truncation_cleanup_are_real() {
         use std::io::{Read, Write};
-        for mode in ["success", "cancel", "truncated"] {
+        for mode in ["success", "unknown_length", "cancel", "truncated"] {
             let root = tempfile::tempdir().unwrap();
             let state = Services::open(root.path().to_owned()).unwrap();
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -250,10 +313,17 @@ mod stream_tests {
                 let mut buffer = [0u8; 4096];
                 let _ = socket.read(&mut buffer);
                 let length = if mode == "success" { 64 } else { 1024 * 1024 };
-                let _ = write!(
-                    socket,
-                    "HTTP/1.1 200 OK\r\nContent-Type: audio/wav\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n"
-                );
+                if mode == "unknown_length" {
+                    let _ = write!(
+                        socket,
+                        "HTTP/1.1 200 OK\r\nContent-Type: audio/wav\r\nConnection: close\r\n\r\n"
+                    );
+                } else {
+                    let _ = write!(
+                        socket,
+                        "HTTP/1.1 200 OK\r\nContent-Type: audio/wav\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n"
+                    );
+                }
                 if mode != "cancel" {
                     let _ = socket.write_all(&[7; 64]);
                 } else {
@@ -287,8 +357,16 @@ mod stream_tests {
                 .await
                 .unwrap()
                 .unwrap();
-            if mode == "success" {
+            if matches!(mode, "success" | "unknown_length") {
                 assert_eq!(std::fs::read(result.unwrap().0).unwrap(), [7; 64]);
+                let snapshot = state.downloads.list().unwrap().remove(0);
+                assert_eq!(snapshot.phase, "importing");
+                assert_eq!(snapshot.stored_bytes, 64);
+                assert_eq!(snapshot.total_bytes_exact, mode == "success");
+                assert_eq!(
+                    snapshot.total_bytes,
+                    if mode == "success" { Some(64) } else { None }
+                );
             } else {
                 assert!(result.is_err());
             }
@@ -305,10 +383,21 @@ mod stream_tests {
         }
     }
 }
-pub async fn lease(state: &Services, kinds: &[ToolKind]) -> Result<JobLease> {
-    Ok(lease_with_cancel(state, kinds, &CancellationToken::new())
-        .await?
-        .0)
+async fn lease_for_media(
+    state: &Services,
+    kinds: &[ToolKind],
+    media_id: &str,
+    parent_id: Option<&str>,
+) -> Result<JobLease> {
+    Ok(lease_with_context(
+        state,
+        kinds,
+        &CancellationToken::new(),
+        parent_id,
+        Some(media_id),
+    )
+    .await?
+    .0)
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -318,17 +407,27 @@ struct ToolUseReceipt {
     created_at: String,
     tools: Vec<ToolSnapshot>,
 }
-pub(super) async fn lease_with_cancel(
+pub(crate) async fn lease_with_context(
     state: &Services,
     kinds: &[ToolKind],
     cancel: &CancellationToken,
+    parent_id: Option<&str>,
+    media_id: Option<&str>,
 ) -> Result<(JobLease, String)> {
     let p = state.preferences.read()?.clone();
     let mut selected = Vec::new();
     for k in kinds {
         let s = selection(&p, *k);
         if matches!(s, ToolSelection::Managed) && state.tools.manager.installed(*k)?.is_none() {
-            state.tools.manager.update(*k, channel(&p), cancel).await?;
+            super::tool_runtime::update_managed(
+                state,
+                *k,
+                channel(&p),
+                cancel,
+                parent_id,
+                media_id,
+            )
+            .await?;
         }
         selected.push((*k, s));
     }
@@ -378,6 +477,7 @@ pub async fn extract_card_audio(
     media: &surtitle_core::Media,
     segment: &surtitle_core::SubtitleSegment,
     range: surtitle_core::AudioClipRange,
+    parent_id: Option<&str>,
 ) -> Result<PathBuf> {
     ensure!(
         surtitle_core::is_usable_subtitle_status(&segment.status) && segment.media_id == media.id,
@@ -392,7 +492,7 @@ pub async fn extract_card_audio(
         range.end_ms <= media.duration_ms,
         "Card audio exceeds media duration"
     );
-    let lease = lease(state, &[ToolKind::FfmpegPair]).await?;
+    let lease = lease_for_media(state, &[ToolKind::FfmpegPair], &media.id, parent_id).await?;
     let snapshot = lease.get(ToolKind::FfmpegPair)?;
     let streams = inspect_streams(snapshot, Path::new(&media.path)).await?;
     let index = media

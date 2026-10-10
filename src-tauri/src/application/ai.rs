@@ -148,6 +148,8 @@ pub struct PreparationSummary {
     send_duration_ms: u64,
     chunk_count: usize,
     whole_media: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audio_stream_index: Option<u32>,
 }
 
 pub(crate) mod bindings;

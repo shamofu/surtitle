@@ -2,6 +2,7 @@
 export const queryKeys = {
   snapshot: ['snapshot'] as const,
   downloads: ['downloads'] as const,
+  operations: ['operations'] as const,
   media: (id: string) => ['media', id] as const,
   segments: (id: string) => ['media', id, 'segments'] as const,
   transcriptIssues: (id: string) => ['media', id, 'transcript-issues'] as const,

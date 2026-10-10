@@ -101,6 +101,7 @@ export interface DownloadJobSnapshot {
   phase: string;
   storedBytes: number;
   totalBytes?: number;
+  totalBytesExact?: boolean;
   mediaId?: string;
   error?: string;
   updatedAt: string;

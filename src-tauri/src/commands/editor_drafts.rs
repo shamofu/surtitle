@@ -55,11 +55,13 @@ pub async fn save_phrase_editor_draft(
     state: State<'_, AppState>,
     reference: EditorDraftVersion,
     request: SaveCard,
+    operation_id: Option<String>,
 ) -> IpcResult<()> {
     crate::application::editor_drafts::save_phrase_editor_draft(
         state.inner().clone(),
         reference,
         request,
+        operation_id,
     )
     .await
 }

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -48,6 +49,19 @@ async function emit(event: string, payload: unknown = {}) {
 function files() { return screen.getByRole('region', { name: 'Selected files' }); }
 
 describe('local media review and import', () => {
+  it('shows completed file counts while another file is still being added', async () => {
+    let finish!: (result: { mediaId: string; created: boolean }) => void;
+    vi.mocked(libraryApi.importLocalMedia)
+      .mockResolvedValueOnce({ mediaId: 'first', created: true })
+      .mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    render(<ImportDialog onClose={() => {}} droppedFiles={{ revision: 1, paths: ['C:/a.mp4', 'C:/b.mp4'] }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add 2 files to library' }));
+    await waitFor(() => expect(screen.getByRole('progressbar', { name: 'Add files to library' })).toHaveAttribute('value', '1'));
+    expect(screen.getByRole('progressbar')).toHaveAttribute('max', '2');
+    await act(async () => { finish({ mediaId: 'second', created: true }); });
+    await screen.findByRole('link', { name: 'Open b.mp4' });
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
   it('opens native drops for review, combines canonical duplicates and keeps invalid files actionable', async () => {
     vi.mocked(libraryApi.validateMediaFiles).mockImplementation(async paths => paths.map(inputPath => inputPath.endsWith('.txt')
       ? { inputPath, status: 'invalid', reason: 'unsupported' }

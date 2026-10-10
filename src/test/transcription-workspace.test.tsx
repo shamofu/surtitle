@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render as renderView, screen, waitFor } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TranscriptionWorkspace } from '../features/study/transcript/TranscriptionWorkspace';
 import { aiApi } from '../features/ai/api';
@@ -9,8 +10,16 @@ import { libraryApi } from '../features/library/api';
 import type { TranscriptReview } from '../shared/contracts/transcript';
 import type { AiQuote, JobSummary } from '../shared/contracts/ai';
 import type { Media } from '../shared/contracts/media';
+import type { Activity } from '../shared/contracts/activity';
+import { PreparationSessionsProvider, useClearPreparationSessions } from '../features/ai/PreparationSessions';
 
-const fixture = vi.hoisted(() => ({ configured: true, jobs: [] as JobSummary[], navigate: vi.fn() }));
+const render = (ui: ReactElement) => renderView(ui, { wrapper: PreparationSessionsProvider });
+function RestoreData() { const clear = useClearPreparationSessions(); return <button onClick={clear}>Restore data</button>; }
+const fixture = vi.hoisted(() => ({ configured: true, jobs: [] as JobSummary[], activities: [] as Activity[], navigate: vi.fn() }));
+vi.mock('../app/providers/Activities', () => {
+  const runTracked = async (_descriptor: unknown, action: () => Promise<unknown>) => action();
+  return { useActivities: () => ({ activities: fixture.activities, runTracked }) };
+});
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => fixture.navigate }));
 vi.mock('../features/ai/ModelEditor', () => ({ emptyModel: () => ({ modelId: '', transcriptionMode: 'transcribe', maxOutputTokens: 12288 }), ModelEditor: () => <div>Model settings</div> }));
 vi.mock('../features/ai/api', () => ({ aiApi: {
@@ -33,7 +42,7 @@ const media: Media = { id: 'media', title: 'Recording', path: 'C:/audio.wav', ki
 const preparation = { id: 'prepared', mediaId: 'media', startMs: 0, endMs: 300000, wholeMedia: true, coreDurationMs: 300000, sendDurationMs: 306000, chunkCount: 3 };
 const quote: AiQuote = { id: 'quote', mediaId: 'media', kind: 'transcribe', startMs: 0, endMs: 300000, model: 'gemini-transcribe', estimatedUsd: .1, maximumUsd: .2, inputTokens: 100, maxOutputTokens: 12288, expiresAt: '2099-01-01T00:00:00Z', warnings: [], canApprove: true, applyPolicy: 'auto' };
 beforeEach(() => {
-  fixture.configured = true; fixture.jobs = [];
+  fixture.configured = true; fixture.jobs = []; fixture.activities = [];
   vi.mocked(libraryApi.mediaStreams).mockResolvedValue([]);
   vi.mocked(aiApi.prepareTranscription).mockResolvedValue(preparation);
   vi.mocked(aiApi.createTranscriptionQuote).mockResolvedValue(quote);
@@ -48,7 +57,7 @@ it('prepares and estimates on entry, then starts only after one explicit priced 
   const done = vi.fn();
   render(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={done} />);
   const start = await screen.findByRole('button', { name: 'Start transcription' });
-  expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith('media', 0, 300000, true);
+  expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith('media', 0, 300000, true, expect.any(String));
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(screen.queryByRole('checkbox', { name: /approve this job/i })).not.toBeInTheDocument();
@@ -102,7 +111,7 @@ it('shows the source file and selected audio track using its position among audi
 it('prepares a selected repair range without a boundary-review or adoption step', async () => {
   render(<TranscriptionWorkspace media={media} request={{ id: 'repair', range: { startMs: 30000, endMs: 55000 } }} onRequest={vi.fn()} onDone={vi.fn()} />);
   await screen.findByRole('button', { name: 'Start transcription' });
-  expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith('media', 30000, 55000, false);
+  expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith('media', 30000, 55000, false, expect.any(String));
   expect(screen.queryByRole('button', { name: 'Adopt these subtitles' })).not.toBeInTheDocument();
 });
 
@@ -141,10 +150,120 @@ it('does not use an old preparation result after the source changed while prepar
   let finish!: (value: typeof preparation) => void;
   vi.mocked(aiApi.prepareTranscription).mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockReturnValue(new Promise(() => {}));
   const view = render(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledOnce());
   view.rerender(<TranscriptionWorkspace media={{ ...media, audioStreamIndex: 2 }} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
   await act(async () => finish(preparation));
   await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledTimes(2));
   expect(aiApi.createTranscriptionQuote).not.toHaveBeenCalled();
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+});
+
+it('keeps the confirmed automatic audio choice and loads track labels after preparation', async () => {
+  let finish!: (value: typeof preparation & { audioStreamIndex: number }) => void;
+  vi.mocked(aiApi.prepareTranscription).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  const view = render(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledOnce());
+  expect(libraryApi.mediaStreams).not.toHaveBeenCalled();
+  const operationId = vi.mocked(aiApi.prepareTranscription).mock.calls[0][4];
+  view.rerender(<TranscriptionWorkspace media={{ ...media, audioStreamIndex: 2 }} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  await act(async () => finish({ ...preparation, audioStreamIndex: 2 }));
+  await screen.findByRole('button', { name: 'Start transcription' });
+  expect(aiApi.prepareTranscription).toHaveBeenCalledOnce();
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
+  expect(libraryApi.mediaStreams).toHaveBeenCalledWith(media.id, operationId);
+  expect(continuationApi.save).toHaveBeenCalledWith(expect.objectContaining({ quoteId: quote.id, sourceMediaSignature: JSON.stringify([media.path, 2, media.learningLanguage, media.explanationLanguage]) }));
+});
+
+it.each([false, true])('reuses audio preparation across navigation whether it finishes away from the workspace (%s)', async finishWhileAway => {
+  let finish!: (value: typeof preparation) => void;
+  vi.mocked(aiApi.prepareTranscription).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  const view = render(<TranscriptionWorkspace media={media} request={{ id: 'original' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledOnce());
+  expect(continuationApi.save).toHaveBeenCalledWith(expect.objectContaining({ id: 'original', wholeMedia: true, sourceMediaSignature: expect.any(String) }));
+  view.rerender(<p>Another page</p>);
+  if (finishWhileAway) await act(async () => finish(preparation));
+  view.rerender(<TranscriptionWorkspace media={media} request={{ id: 'returned' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  if (!finishWhileAway) await act(async () => finish(preparation));
+  await screen.findByRole('button', { name: 'Start transcription' });
+  expect(aiApi.prepareTranscription).toHaveBeenCalledOnce();
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+});
+
+it('reattaches an estimate already running on navigation without another quote or approval', async () => {
+  let finish!: (value: AiQuote) => void;
+  vi.mocked(aiApi.createTranscriptionQuote).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  const view = render(<TranscriptionWorkspace media={media} request={{ id: 'original' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  await waitFor(() => expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce());
+  view.rerender(<p>Another page</p>);
+  view.rerender(<TranscriptionWorkspace media={media} request={{ id: 'returned' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  await act(async () => finish(quote));
+  await screen.findByRole('button', { name: 'Start transcription' });
+  expect(aiApi.prepareTranscription).toHaveBeenCalledOnce();
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+});
+
+it('shows only its correlated operation and resets the percentage when a new phase has no total', async () => {
+  vi.mocked(aiApi.prepareTranscription).mockReturnValue(new Promise(() => {}));
+  const view = render(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledOnce());
+  const operationId = vi.mocked(aiApi.prepareTranscription).mock.calls[0][4]!;
+  fixture.activities = [{ id: 'older-operation', source: 'native', kind: 'preparation', label: media.title, mediaId: media.id, phase: 'extracting_audio', status: 'running', completed: 99, total: 100, updatedAt: '' }];
+  view.rerender(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  expect(screen.getByRole('progressbar', { name: media.title })).not.toHaveAttribute('value');
+  fixture.activities = [{ ...fixture.activities[0], id: operationId, completed: 150000, total: 300000, unit: 'milliseconds' }];
+  view.rerender(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  expect(screen.getByRole('progressbar', { name: media.title })).toHaveAttribute('value', '150000');
+  expect(screen.getByText('2:30 / 5:00 · 50%')).toBeVisible();
+  fixture.activities = [{ ...fixture.activities[0], phase: 'saving', completed: undefined, total: undefined, unit: undefined }];
+  view.rerender(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  expect(screen.getByText('Saving')).toBeVisible();
+  expect(screen.getByRole('progressbar', { name: media.title })).not.toHaveAttribute('value');
+  expect(screen.queryByText(/50%/)).not.toBeInTheDocument();
+});
+
+it('cancels the correlated preparation and releases the pending state for retry', async () => {
+  let cancel!: (error: Error) => void;
+  vi.mocked(aiApi.prepareTranscription).mockReturnValueOnce(new Promise((_resolve, reject) => { cancel = reject; })).mockResolvedValue(preparation);
+  vi.mocked(aiApi.cancelPreparation).mockImplementation(async () => { cancel(new Error('Audio preparation cancelled')); });
+  render(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledOnce());
+  const operationId = vi.mocked(aiApi.prepareTranscription).mock.calls[0][4];
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel preparation' }));
+  const retry = await screen.findByRole('button', { name: 'Prepare estimate' });
+  expect(aiApi.cancelPreparation).toHaveBeenCalledExactlyOnceWith(operationId);
+  expect(aiApi.createTranscriptionQuote).not.toHaveBeenCalled();
+  fireEvent.click(retry);
+  await screen.findByRole('button', { name: 'Start transcription' });
+  expect(aiApi.prepareTranscription).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(aiApi.prepareTranscription).mock.calls[1][4]).not.toBe(operationId);
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+});
+
+it('discards a displayed quote on data restore and waits for an explicit new estimate', async () => {
+  render(<><TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} /><RestoreData /></>);
+  await screen.findByRole('button', { name: 'Start transcription' });
+  fireEvent.click(screen.getByRole('button', { name: 'Restore data' }));
+  expect(screen.queryByRole('button', { name: 'Start transcription' })).not.toBeInTheDocument();
+  expect(screen.getByText('Data was restored. Check the source and prepare a new estimate.')).toBeVisible();
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare estimate' }));
+  await screen.findByRole('button', { name: 'Start transcription' });
+  expect(aiApi.prepareTranscription).toHaveBeenCalledTimes(2);
+});
+
+it('ignores a pending estimate after data restore without starting another request automatically', async () => {
+  let finish!: (value: AiQuote) => void;
+  vi.mocked(aiApi.createTranscriptionQuote).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  render(<><TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} /><RestoreData /></>);
+  await waitFor(() => expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole('button', { name: 'Restore data' }));
+  await act(async () => finish(quote));
+  expect(screen.queryByRole('button', { name: 'Start transcription' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Prepare estimate' })).toBeEnabled();
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
 });
 

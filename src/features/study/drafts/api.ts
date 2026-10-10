@@ -46,7 +46,7 @@ export const draftStudyApi = {
     meaning: string;
     explanation?: string;
     translation?: string;
-  }) => call<void>('save_draft_selection_card', { request }),
+  }, operationId?: string) => call<void>('save_draft_selection_card', { request, operationId }),
   createQuote: (request: {
     selectionId: string;
     version: number;
@@ -59,7 +59,7 @@ export const draftStudyApi = {
     id: string;
     version: number;
     format: 'json' | 'srt' | 'vtt';
-  }) => call<void>('export_draft_selection', { request }),
+  }) => call<boolean>('export_draft_selection', { request }),
   remove: (request: { id: string; version: number }) =>
     call<void>('remove_draft_selection', { request }),
 };

@@ -13,6 +13,8 @@ import {
 } from '../../app/runtime';
 
 import { Badge, Button, Field } from '../../shared/ui/index';
+import { ProgressStatus } from '../../shared/ui/ProgressStatus';
+import { useActivities } from '../../app/providers/Activities';
 
 export function ToolRow({
   tool,
@@ -24,7 +26,10 @@ export function ToolRow({
   const { mutate } = useDataActions();
   const { t } = useAppearance();
   const { report } = useNotifications();
-  const [busy, setBusy] = useState(false);
+  const { activities, runTracked } = useActivities();
+  const [pending, setBusy] = useState(false);
+  const operation = activities.find(item => item.source === 'native' && item.toolId === tool.id && item.status === 'running');
+  const busy = pending || !!operation;
   const [externalPath, setExternalPath] = useState(
     tool.provider === 'external' ? tool.path || '' : '',
   );
@@ -32,10 +37,10 @@ export function ToolRow({
   const available = candidates.filter(
     (candidate) => candidate.toolId === tool.id,
   );
-  async function perform(action: () => Promise<void>) {
+  async function perform(action: () => Promise<void>, nativeProgress = false) {
     setBusy(true);
     try {
-      await report(action);
+      await report(() => nativeProgress ? action() : runTracked({ kind: 'tool_check', label: tool.name, phase: 'verifying' }, action));
     } finally {
       setBusy(false);
     }
@@ -91,6 +96,7 @@ export function ToolRow({
         </div>
       )}
       {tool.error && <p className="field-error">{tool.error}</p>}
+      {busy && <ProgressStatus label={tool.name} phase={operation?.phase || 'preparing'} completed={operation?.completed} total={operation?.total} unit={operation?.unit} />}
       <div className="tool-actions">
         <div className="segmented-control compact" role="group" aria-label={t(`${tool.name}の取得方法`, `${tool.name} source`)}>
           <button
@@ -146,6 +152,7 @@ export function ToolRow({
                       : mutate(() => settingsApi.installTool(tool.id), {
                           kind: 'snapshot',
                         }),
+                    true,
                   )
                 }
               >

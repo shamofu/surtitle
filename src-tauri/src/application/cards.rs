@@ -2,17 +2,28 @@ use super::*;
 use anyhow::bail;
 use surtitle_core::SaveCard;
 type IpcResult<T> = std::result::Result<T, String>;
-pub async fn save_card(state: AppState, request: SaveCard) -> IpcResult<()> {
-    save_card_with_editor_draft(state, request, None).await
+pub async fn save_card(
+    state: AppState,
+    request: SaveCard,
+    operation_id: Option<String>,
+) -> IpcResult<()> {
+    save_card_with_editor_draft(state, request, None, operation_id).await
 }
 pub async fn save_card_with_editor_draft(
     state: AppState,
     request: SaveCard,
     draft: Option<surtitle_core::EditorDraftVersion>,
+    operation_id: Option<String>,
 ) -> IpcResult<()> {
     let state = state.clone();
     async {
-        crate::application::media_tools::ensure_audio_stream(&state, &request.media_id).await?;
+        crate::application::media_tools::ensure_audio_stream_with_context(
+            &state,
+            &request.media_id,
+            &surtitle_tools::CancellationToken::new(),
+            operation_id.as_deref(),
+        )
+        .await?;
         let (media, source_cues, selected_range) = {
             let db = lock(&state.db)?;
             (
@@ -32,7 +43,11 @@ pub async fn save_card_with_editor_draft(
         )?;
         // FFmpeg is a first-use dependency. Failure leaves no partially saved card.
         let audio = crate::application::media_tools::extract_card_audio(
-            &state, &media, &segment, clip_range,
+            &state,
+            &media,
+            &segment,
+            clip_range,
+            operation_id.as_deref(),
         )
         .await?;
         let db = lock(&state.db)?;

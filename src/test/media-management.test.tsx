@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   cleanup,
@@ -26,6 +27,7 @@ import type { StudyCard } from '../shared/contracts/cards';
 
 const context = vi.hoisted(() => ({
   data: undefined as { media: Media[]; cards: StudyCard[] } | undefined,
+  notify: vi.fn(),
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -60,6 +62,7 @@ vi.mock('../app/runtime', () => {
     t: (_ja: string, en: string) => en,
     registerModal,
     report: async (action: () => Promise<unknown>) => action(),
+    notify: context.notify,
   });
   return {
     useSnapshot: useFixture,
@@ -234,7 +237,7 @@ describe('media and card management', () => {
     await waitFor(() =>
       expect(
         libraryApi.extractEmbeddedSubtitles,
-      ).toHaveBeenCalledExactlyOnceWith('media', 4, true),
+      ).toHaveBeenCalledExactlyOnceWith('media', 4, true, expect.stringMatching(/^local:/)),
     );
     expect(close).toHaveBeenCalledOnce();
   });
@@ -331,5 +334,33 @@ describe('media and card management', () => {
         request,
       ),
     );
+  });
+  it('keeps subtitle setup open without a success notification when the picker is cancelled', async () => {
+    vi.mocked(libraryApi.importSubtitles).mockResolvedValue(false);
+    const close = vi.fn();
+    mount(<SubtitleSourceDialog media={{ ...media, segmentCount: 0 }} initialMode="file" onClose={close} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose file' }));
+    await waitFor(() => expect(libraryApi.importSubtitles).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Choose file' })).toBeEnabled());
+    expect(close).not.toHaveBeenCalled();
+    expect(context.notify).not.toHaveBeenCalled();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
+  it.each([
+    { totalBytesExact: true, phase: 'downloading', determinate: true },
+    { totalBytesExact: false, phase: 'downloading', determinate: false },
+    { totalBytesExact: undefined, phase: 'downloading', determinate: false },
+    { totalBytesExact: true, phase: 'importing', determinate: false },
+  ])('shows truthful download progress for $phase with exact total $totalBytesExact', async ({ totalBytesExact, phase, determinate }) => {
+    vi.mocked(libraryApi.downloadJobs).mockResolvedValue([{
+      id: 'progress', request: { kind: 'url', pathOrUrl: 'https://example.com/video.mp4', learningLanguage: 'en', explanationLanguage: 'ja' },
+      status: 'running', phase, storedBytes: 512, totalBytes: 1024, totalBytesExact, updatedAt: new Date().toISOString(),
+    }]);
+    mount(<DownloadJobs />);
+    const bar = await screen.findByRole('progressbar', { name: 'Downloading' });
+    if (determinate) {
+      expect(bar).toHaveAttribute('value', '512');
+      expect(bar).toHaveAttribute('max', '1024');
+    } else expect(bar).not.toHaveAttribute('value');
   });
 });

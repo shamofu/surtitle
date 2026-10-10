@@ -18,6 +18,7 @@ import {
 } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StudyPage } from '../features/study/StudyPage';
+vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
 import { studyApi } from '../features/study/api';
 import { playerApi } from '../features/study/playback/api';
 import { settingsApi } from '../features/settings/api';

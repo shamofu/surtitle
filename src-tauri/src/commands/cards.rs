@@ -4,8 +4,12 @@ type IpcResult<T> = std::result::Result<T, String>;
 use surtitle_core::SaveCard;
 
 #[tauri::command]
-pub async fn save_card(state: State<'_, AppState>, request: SaveCard) -> IpcResult<()> {
-    crate::application::cards::save_card(state.inner().clone(), request).await
+pub async fn save_card(
+    state: State<'_, AppState>,
+    request: SaveCard,
+    operation_id: Option<String>,
+) -> IpcResult<()> {
+    crate::application::cards::save_card(state.inner().clone(), request, operation_id).await
 }
 #[tauri::command]
 pub fn rate_card(state: State<'_, AppState>, card_id: String, rating: String) -> IpcResult<()> {

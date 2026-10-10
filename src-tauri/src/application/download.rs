@@ -21,6 +21,9 @@ pub struct DownloadJobSnapshot {
     /// network-byte counter, so the UI must not label it bandwidth or ETA.
     pub stored_bytes: u64,
     pub total_bytes: Option<u64>,
+    /// True only for exact transport lengths, never yt-dlp estimates/staging sizes.
+    #[serde(default)]
+    pub total_bytes_exact: bool,
     pub media_id: Option<String>,
     pub error: Option<String>,
     pub updated_at: String,
@@ -34,11 +37,24 @@ pub struct DownloadJob {
     snapshot: Mutex<DownloadJobSnapshot>,
 }
 impl DownloadJob {
+    pub fn id(&self) -> Result<String> {
+        Ok(lock(&self.snapshot)?.id.clone())
+    }
     pub fn progress(&self, phase: &str, stored_bytes: u64, total_bytes: Option<u64>) -> Result<()> {
+        self.progress_with_total_exact(phase, stored_bytes, total_bytes, false)
+    }
+    pub fn progress_with_total_exact(
+        &self,
+        phase: &str,
+        stored_bytes: u64,
+        total_bytes: Option<u64>,
+        exact: bool,
+    ) -> Result<()> {
         let mut snapshot = lock(&self.snapshot)?;
         snapshot.phase = phase.into();
         snapshot.stored_bytes = stored_bytes;
         snapshot.total_bytes = total_bytes;
+        snapshot.total_bytes_exact = exact && total_bytes.is_some_and(|total| total > 0);
         snapshot.updated_at = surtitle_core::now();
         Ok(())
     }
@@ -130,6 +146,7 @@ impl DownloadManager {
                 phase: "preparing".into(),
                 stored_bytes: 0,
                 total_bytes: None,
+                total_bytes_exact: false,
                 media_id: None,
                 error: None,
                 updated_at: surtitle_core::now(),
@@ -278,6 +295,41 @@ pub fn cancel_download(state: AppState, job_id: String) -> std::result::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn exact_lengths_are_explicit_and_old_or_estimated_downloads_remain_indeterminate() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = DownloadManager::open(root.path()).unwrap();
+        let (_, job) = manager
+            .start(ImportRequest {
+                kind: "url".into(),
+                path_or_url: "https://example.invalid/file.mp4".into(),
+                title: None,
+                learning_language: "en".into(),
+                explanation_language: "ja".into(),
+            })
+            .unwrap();
+        job.progress("downloading", 120, Some(100)).unwrap();
+        assert!(!manager.list().unwrap()[0].total_bytes_exact);
+        job.progress_with_total_exact("downloading", 50, Some(100), true)
+            .unwrap();
+        let snapshot = manager.list().unwrap().remove(0);
+        assert!(snapshot.total_bytes_exact);
+        let mut historical = serde_json::to_value(&snapshot).unwrap();
+        historical
+            .as_object_mut()
+            .unwrap()
+            .remove("totalBytesExact");
+        assert!(
+            !serde_json::from_value::<DownloadJobSnapshot>(historical)
+                .unwrap()
+                .total_bytes_exact
+        );
+        job.progress_with_total_exact("downloading", 50, None, true)
+            .unwrap();
+        assert!(!manager.list().unwrap()[0].total_bytes_exact);
+        job.progress("importing", 50, Some(100)).unwrap();
+        assert!(!manager.list().unwrap()[0].total_bytes_exact);
+    }
     #[test]
     fn receipt_binding_persists_before_download_and_survives_interruption_without_backfill() {
         let root = tempfile::tempdir().unwrap();

@@ -16,7 +16,9 @@ pub use probe::{ProbeReport, probe, probe_and_record};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 pub use tokio_util::sync::CancellationToken;
-pub use upstream::{DownloadProgress, ReleaseCandidate, Verification, YtDlpChannel};
+pub use upstream::{
+    DownloadProgress, ReleaseCandidate, ToolUpdateProgress, Verification, YtDlpChannel,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -26,25 +26,27 @@ export const libraryApi = {
     call<string>('start_url_import', { request }),
   downloadJobs: () => call<DownloadJobSnapshot[]>('list_download_jobs'),
   cancelDownload: (jobId: string) => call<void>('cancel_download', { jobId }),
-  mediaStreams: (mediaId: string) =>
-    call<MediaStream[]>('list_media_streams', { mediaId }),
-  selectAudioStream: (mediaId: string, streamIndex: number) =>
-    call<void>('select_audio_stream', { mediaId, streamIndex }),
+  mediaStreams: (mediaId: string, operationId?: string) =>
+    call<MediaStream[]>('list_media_streams', { mediaId, operationId }),
+  selectAudioStream: (mediaId: string, streamIndex: number, operationId?: string) =>
+    call<void>('select_audio_stream', { mediaId, streamIndex, operationId }),
   subtitleVersions: (mediaId: string) =>
     call<SubtitleVersion[]>('list_subtitle_versions', { mediaId }),
   restoreSubtitleVersion: (mediaId: string, versionId: string) =>
     call<void>('restore_subtitle_version', { mediaId, versionId }),
   importSubtitles: (mediaId: string, replaceExisting = false) =>
-    call<void>('import_subtitles', { mediaId, replaceExisting }),
+    call<boolean>('import_subtitles', { mediaId, replaceExisting }),
   extractEmbeddedSubtitles: (
     mediaId: string,
     streamIndex?: number,
     replaceExisting = false,
+    operationId?: string,
   ) =>
     call<void>('extract_embedded_subtitles', {
       mediaId,
       streamIndex,
       replaceExisting,
+      operationId,
     }),
   removeMedia: (mediaId: string) => call<void>('remove_media', { mediaId }),
   relinkMedia: (mediaId: string) => call<void>('relink_media', { mediaId }),

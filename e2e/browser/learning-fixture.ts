@@ -138,7 +138,7 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
         calls.push({ command, args });
         if (command === 'get_app_snapshot') return structuredClone(snapshot);
         if (command === 'list_segments') return structuredClone(segments.filter(cue => !args.mediaId || cue.mediaId === args.mediaId));
-        if (['list_vocabulary_candidates', 'list_draft_selections', 'list_download_jobs', 'scan_external_tools', 'list_transcript_issues'].includes(command)) return [];
+        if (['list_vocabulary_candidates', 'list_draft_selections', 'list_download_jobs', 'list_operation_progress', 'scan_external_tools', 'list_transcript_issues'].includes(command)) return [];
         if (command === 'list_ai_continuations') return structuredClone([...continuations.values()]
           .filter(item => snapshot.media.some(media => media.id === item.mediaId))
           .sort((left, right) => (right.updatedAtMs ?? 0) - (left.updatedAtMs ?? 0)));

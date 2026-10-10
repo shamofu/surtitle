@@ -12,7 +12,7 @@ pub async fn import_subtitles(
     state: AppState,
     media_id: String,
     replace_existing: Option<bool>,
-) -> IpcResult<()> {
+) -> IpcResult<bool> {
     let previous = lock(&state.db)
         .and_then(|db| db.list_segments(&media_id))
         .map_err(err)?;
@@ -24,7 +24,7 @@ pub async fn import_subtitles(
         .pick_file()
         .await
     else {
-        return Ok(());
+        return Ok(false);
     };
     (|| {
         ensure!(
@@ -52,7 +52,8 @@ pub async fn import_subtitles(
             )?;
         }
         crate::application::transcript::automatic::detach_publications(&state, Some(&media_id))?;
-        refresh_current_subtitles_locked(&state, &mut playback, &media_id)
+        refresh_current_subtitles_locked(&state, &mut playback, &media_id)?;
+        Ok(true)
     })()
     .map_err(err)
 }

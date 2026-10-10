@@ -151,7 +151,20 @@ pub async fn prepare_transcription(
     start_ms: u64,
     end_ms: u64,
     whole_media: Option<bool>,
+    operation_id: Option<String>,
 ) -> std::result::Result<PreparationSummary, String> {
+    if operation_id.is_some() {
+        return crate::application::ai::preparation::prepare_transcription_with_operation(
+            app,
+            state.inner().clone(),
+            media_id,
+            start_ms,
+            end_ms,
+            whole_media.unwrap_or(false),
+            operation_id,
+        )
+        .await;
+    }
     crate::application::ai::preparation::prepare_transcription(
         app,
         state.inner().clone(),
@@ -164,6 +177,15 @@ pub async fn prepare_transcription(
 }
 
 #[tauri::command]
-pub fn cancel_preparation(state: State<'_, AppState>) -> std::result::Result<(), String> {
+pub fn cancel_preparation(
+    state: State<'_, AppState>,
+    operation_id: Option<String>,
+) -> std::result::Result<(), String> {
+    if operation_id.is_some() {
+        return crate::application::ai::preparation::cancel_preparation_with_operation(
+            state.inner().clone(),
+            operation_id,
+        );
+    }
     crate::application::ai::preparation::cancel_preparation(state.inner().clone())
 }

@@ -32,6 +32,7 @@ import { shouldIgnoreShortcut } from '../../shared/keyboard';
 import { activeSegment, languageName, timestamp } from '../../shared/format';
 import { nativeAvailable } from '../../shared/native/transport';
 import { Button, EmptyState, IconButton, Modal } from '../../shared/ui/index';
+import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { libraryApi } from '../library/api';
 import { RemoveMediaDialog, SubtitleSourceDialog } from '../library/MediaManagement';
 import { AiDialog } from '../ai/AiDialog';
@@ -711,12 +712,8 @@ function StudySession({ mediaId }: { mediaId: string }) {
             className={`job-status ${job.status === 'failed' || job.status === 'unknown' ? 'warning' : ''}`}
             key={job.id}
           >
-            <span>{job.message || job.kind}</span>
+            <ProgressStatus label={job.kind} phase={job.message} status={job.status === 'queued' ? 'waiting' : job.status} completed={job.progress} total={1} />
             {job.resultState === 'applied_with_warnings' && <span>{t('完了・注意箇所あり', 'Complete · marked passages')}</span>}
-            {job.status === 'running' && <progress
-              value={job.progress}
-              max={1}
-            />}
             <JobActions
               job={job}
               onReviewTranscript={setDraftReview}

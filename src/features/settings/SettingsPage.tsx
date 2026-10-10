@@ -40,6 +40,8 @@ import {
 } from '../../app/runtime';
 import { money } from '../../shared/format';
 import { Button, Field, Modal, PageTitle } from '../../shared/ui/index';
+import { ProgressStatus } from '../../shared/ui/ProgressStatus';
+import { useActivities } from '../../app/providers/Activities';
 import { LanguageInput } from '../../shared/ui/LanguageInput';
 import { TransferDialog } from '../transfer/TransferDialog';
 
@@ -75,6 +77,7 @@ export function SettingsPage() {
   const savedSettings = useRef<AppSettings | undefined>(undefined);
   const lastMonthlyBudget = useRef(0);
   const [busy, setBusy] = useState(false);
+  const { runTracked } = useActivities();
   const savePending = useRef(false);
   const priceRequests = useRef(new Set<AiPurpose>());
   const [pricing, setPricing] = useState(false);
@@ -187,7 +190,7 @@ export function SettingsPage() {
     setModelsBusy(true);
     setModelNotice('');
     try {
-      const result = await aiApi.vertexModels(draft?.vertexLocation || 'global');
+      const result = await runTracked({ kind: 'models', label: t('AIモデルの候補', 'AI model candidates'), phase: 'discovering_models' }, () => aiApi.vertexModels(draft?.vertexLocation || 'global'));
       if (!catalogue.current.mounted || catalogue.current.revision !== requestedRevision) return;
       setModelCatalogue({ key: requestedKey, models: result });
       setModelNotice(t(
@@ -204,7 +207,7 @@ export function SettingsPage() {
   }
   async function scan() {
     setScanning(true);
-    const result = await report(() => settingsApi.scanExternalTools(true));
+    const result = await report(() => runTracked({ kind: 'tool_scan', label: t('外部ツールの検索', 'Find external tools'), phase: 'checking_tools' }, () => settingsApi.scanExternalTools(true)));
     if (result) setCandidates(result);
     setScanning(false);
   }
@@ -212,7 +215,7 @@ export function SettingsPage() {
     setCheckingUpdates(true);
     try {
       await report(
-        () => mutate(settingsApi.checkToolUpdates, { kind: 'snapshot' }),
+        () => runTracked({ kind: 'tool_updates', label: t('ツールの更新確認', 'Check tool updates'), phase: 'checking_updates' }, () => mutate(settingsApi.checkToolUpdates, { kind: 'snapshot' })),
         t('更新情報を確認しました。', 'Update information checked.'),
       );
     } finally {
@@ -525,6 +528,7 @@ export function SettingsPage() {
               <p>{t('一度取得すると、以下のすべての用途で選べます。モデルIDを直接入力することもできます。', 'Fetch once to use the candidates for every purpose below. You can also enter a model ID directly.')}</p>
               {!data?.settings.credentialConfigured && <p>{t('先にサービスアカウントのJSONを読み込んでください。', 'Import a service-account JSON key first.')}</p>}
               {modelNotice && <p role="status">{modelNotice}</p>}
+              {modelsBusy && <ProgressStatus label={t('AIモデルの候補', 'AI model candidates')} phase="discovering_models" />}
             </div>
             <ModelSetup models={draft?.aiModels || {}} location={draft?.vertexLocation || 'global'} candidates={modelCatalogue.key === catalogueKey ? modelCatalogue.models : []} disabled={!draft || busy || credentialBusy} onChange={aiModels => change('aiModels', aiModels)} />
             <details><summary>{t('用途ごとの詳細設定', 'Detailed settings by purpose')}</summary>
@@ -698,6 +702,8 @@ export function SettingsPage() {
                 </Button>
               </div>
             </div>
+            {checkingUpdates && <ProgressStatus label={t('ツールの更新確認', 'Check tool updates')} phase="checking_updates" />}
+            {scanning && <ProgressStatus label={t('外部ツールの検索', 'Find external tools')} phase="checking_tools" />}
             <Field
               label={t('yt-dlp の更新チャンネル', 'yt-dlp update channel')}
               hint={t(

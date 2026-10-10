@@ -37,8 +37,8 @@
   margin: 6px 0;
   overflow-wrap: anywhere;
 }
-.download-job progress {
-  width: 90px;
+.download-job .progress-status progress {
+  width: 100%;
   accent-color: var(--accent);
 }
 .card-management {

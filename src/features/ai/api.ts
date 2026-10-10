@@ -32,12 +32,13 @@ export const aiApi = {
     focusTerm?: string;
     model?: AiModelPreference;
   }) => call<AiQuote>('create_quote', { request }),
-  prepareTranscription: (mediaId: string, startMs: number, endMs: number, wholeMedia = false) =>
+  prepareTranscription: (mediaId: string, startMs: number, endMs: number, wholeMedia = false, operationId?: string) =>
     call<TranscriptionPreparation>('prepare_transcription', {
       mediaId,
       startMs,
       endMs,
       wholeMedia,
+      operationId,
     }),
   transcriptionPreparations: (mediaId: string) =>
     call<TranscriptionPreparation[]>('list_transcription_preparations', {
@@ -57,7 +58,7 @@ export const aiApi = {
       draftDigest,
       boundaryId,
     }),
-  cancelPreparation: () => call<void>('cancel_preparation'),
+  cancelPreparation: (operationId?: string) => call<void>('cancel_preparation', { operationId }),
   approveQuote: (quote: AiQuote) =>
     call<void>('approve_quote', {
       quoteId: quote.id,

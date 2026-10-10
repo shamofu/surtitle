@@ -15,6 +15,10 @@ import { QuoteApproval } from '../../ai/QuoteApproval';
 import { JobActions } from '../../ai/JobActions';
 import { studyApi } from '../api';
 import { libraryApi } from '../../library/api';
+import { useActivities } from '../../../app/providers/Activities';
+import { ProgressStatus } from '../../../shared/ui/ProgressStatus';
+import { preparedSourceMatches, usePreparationSession } from '../../ai/PreparationSessions';
+import { PreparationProgress } from '../../ai/PreparationProgress';
 import './transcription-workspace.css';
 
 export type TranscriptionRequest = { id: string; range?: { startMs: number; endMs: number }; continuation?: AiContinuation };
@@ -24,6 +28,7 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
   const { data } = useSnapshot();
   const { report } = useNotifications();
   const { mutate } = useDataActions();
+  const { runTracked } = useActivities();
   const navigate = useNavigate();
   const continuation = request.continuation;
   const [modelOverride, setModel] = useState<AiModelPreference | undefined>(continuation?.models.transcription);
@@ -42,12 +47,6 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
   const pending = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const signature = JSON.stringify([media.path, media.audioStreamIndex, media.learningLanguage, media.explanationLanguage]);
-  useEffect(() => {
-    let active = true;
-    setAudioStreams([]);
-    void libraryApi.mediaStreams(media.id).then(streams => { if (active) setAudioStreams(streams.filter(stream => stream.kind === 'audio')); }).catch(() => {});
-    return () => { active = false; };
-  }, [media.id, signature]);
   const selectedAudioIndex = audioStreams.findIndex(stream => stream.index === media.audioStreamIndex);
   const selectedAudio = audioStreams[selectedAudioIndex];
   const audioLabel = selectedAudio
@@ -59,50 +58,76 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
   const from = whole ? 0 : parseTimestamp(start);
   const to = whole ? media.durationMs : parseTimestamp(end);
   const valid = from !== null && to !== null && from >= 0 && to > from && to <= media.durationMs;
+  const preparationSession = usePreparationSession({ mediaId: media.id, sourceSignature: signature, startMs: from ?? 0, endMs: to ?? 0, wholeMedia: whole });
+  const preparedAudio = preparationSession.session?.result ?? preparation;
+  const preparationOperationId = preparationSession.session?.operationId;
+  useEffect(() => {
+    let active = true;
+    setAudioStreams([]);
+    // Preparation already owns any required tool installation. Loading labels here
+    // avoids racing a second standalone install when the workspace first opens.
+    if (preparedAudio) void libraryApi.mediaStreams(media.id, preparationOperationId).then(streams => { if (active) setAudioStreams(streams.filter(stream => stream.kind === 'audio')); }).catch(() => {});
+    return () => { active = false; };
+  }, [media.id, signature, preparedAudio?.id, preparationOperationId]);
+  const revision = preparationSession.revision;
+  const currentRevision = useRef(revision);
+  currentRevision.current = revision;
+  const [boundRevision, setBoundRevision] = useState(revision);
   const configured = !!data?.settings.credentialConfigured && !!data.settings.vertexProject && !!model.modelId.trim() && model.maxOutputTokens > 0;
   const busy = !!phase;
+  useEffect(() => {
+    if (revision === boundRevision) return;
+    setBoundRevision(revision); setQuote(undefined); setPreparation(undefined); setPhase(undefined);
+    pending.current = false; setAutomaticAttempted(true);
+    setProblem(t('データを復元しました。対象を確認してから見積もりを準備してください。', 'Data was restored. Check the source and prepare a new estimate.'));
+  }, [revision, boundRevision, t]);
   useEffect(() => {
     if (signature !== boundSignature) {
       setQuote(undefined); setPreparation(undefined); setAutomaticAttempted(false); setBoundSignature(signature);
     }
   }, [signature, boundSignature]);
-  function savedRequest(quoteId = quote?.id, preparationId = preparation?.id): AiContinuation {
+  function savedRequest(quoteId = quote?.id, preparationId = preparation?.id, sourceSignature = signature): AiContinuation {
     return { id: continuation?.id ?? request.id, mediaId: media.id, kind: 'transcribe', start, end, wholeMedia: whole,
-      focusTerm: '', models: { transcription: model }, quoteId, preparationId, sourceMediaSignature: signature };
+      focusTerm: '', models: { transcription: model }, quoteId, preparationId, sourceMediaSignature: sourceSignature };
   }
-  async function estimate() {
+  async function estimate(fresh = false) {
     if (pending.current || !configured || !valid) return;
     pending.current = true; setPhase('preparing'); setProblem(''); setQuote(undefined);
     try {
+      await report(() => continuationApi.save({ ...savedRequest(), quoteId: undefined, preparationId: undefined }));
+      if (currentRevision.current !== revision) return;
       const prepared = preparation?.startMs === from && preparation.endMs === to && preparation.wholeMedia === whole
-        ? preparation : await mutate(() => aiApi.prepareTranscription(media.id, from, to, whole), { kind: 'snapshot' });
-      if (!mounted.current || currentSignature.current !== signature) return;
-      setPreparation(prepared); setPhase('estimating');
-      const result = await mutate(() => aiApi.createTranscriptionQuote(prepared.id, model), { kind: 'snapshot' });
-      if (!mounted.current || currentSignature.current !== signature) return;
-      setQuote(result);
-      await continuationApi.save(savedRequest(result.id, prepared.id));
-    } catch (error) { if (mounted.current) setProblem(error instanceof Error ? error.message : String(error)); }
-    finally { pending.current = false; if (mounted.current) setPhase(undefined); }
+        ? preparation : await preparationSession.prepare(operationId => mutate(() => aiApi.prepareTranscription(media.id, from, to, whole, operationId), { kind: 'snapshot' }));
+      const preparedSignature = currentSignature.current;
+      if (!mounted.current || !preparedSourceMatches(signature, preparedSignature, prepared) || currentRevision.current !== revision) return;
+      setBoundSignature(preparedSignature); setAutomaticAttempted(true); setPreparation(prepared); setPhase('estimating');
+      const result = await preparationSession.estimate(model, () => runTracked({ kind: 'estimate', label: media.title, phase: 'estimating', mediaId: media.id },
+        () => mutate(() => aiApi.createTranscriptionQuote(prepared.id, model), { kind: 'snapshot' })), fresh);
+      if (currentSignature.current !== preparedSignature || currentRevision.current !== revision) return;
+      await continuationApi.save(savedRequest(result.id, prepared.id, preparedSignature));
+      if (mounted.current && currentRevision.current === revision) setQuote(result);
+    } catch (error) { if (mounted.current && currentRevision.current === revision) setProblem(error instanceof Error ? error.message : String(error)); }
+    finally { if (currentRevision.current === revision) { pending.current = false; if (mounted.current) setPhase(undefined); } }
   }
   useEffect(() => {
-    if (automaticAttempted || !configured || !valid || busy || pending.current) return;
+    if (revision !== boundRevision || automaticAttempted || !configured || !valid || busy || pending.current) return;
     setAutomaticAttempted(true);
     if (continuation?.quoteId && continuation.sourceMediaSignature === signature) {
       setPhase('estimating'); pending.current = true;
-      void aiApi.reviewAiJob(continuation.quoteId).then(result => { if (mounted.current && currentSignature.current === signature) setQuote(result); })
-        .catch(error => { if (mounted.current) setProblem(String(error)); })
-        .finally(() => { pending.current = false; if (mounted.current) setPhase(undefined); });
+      void runTracked({ kind: 'estimate', label: media.title, phase: 'estimating', mediaId: media.id }, () => aiApi.reviewAiJob(continuation.quoteId!)).then(result => { if (mounted.current && currentSignature.current === signature && currentRevision.current === revision) setQuote(result); })
+        .catch(error => { if (mounted.current && currentRevision.current === revision) setProblem(String(error)); })
+        .finally(() => { if (currentRevision.current === revision) { pending.current = false; if (mounted.current) setPhase(undefined); } });
     } else void estimate();
-  }, [automaticAttempted, configured, valid, busy, signature]);
+  }, [automaticAttempted, configured, valid, busy, signature, revision, boundRevision]);
   async function startJob() {
-    if (!quote || pending.current) return;
+    if (!quote || pending.current || revision !== boundRevision) return;
     pending.current = true; setPhase('starting'); setProblem('');
     const result = await report(async () => {
       await mutate(() => quote.isRetry ? aiApi.reapproveQuote(quote) : aiApi.approveQuote(quote), { kind: 'snapshot' });
       return true;
     });
     if (result) {
+      preparationSession.forgetEstimate();
       await report(() => continuationApi.discard(continuation?.id ?? request.id));
       if (mounted.current) (onStarted ?? onDone)();
     }
@@ -126,14 +151,14 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
       <label className="check-field"><input type="checkbox" checked={whole} disabled={busy} onChange={event => changeScope(() => setWhole(event.target.checked))} />{t('全編を文字起こし', 'Transcribe the whole media')}</label>
       {!whole && <div className="field-row"><Field label={t('開始', 'From')}><input value={start} disabled={busy} onChange={event => changeScope(() => setStart(event.target.value))} /></Field><Field label={t('終了', 'To')}><input value={end} disabled={busy} onChange={event => changeScope(() => setEnd(event.target.value))} /></Field></div>}
       <ModelEditor purpose="transcription" value={model} location={data?.settings.vertexLocation || 'global'} disabled={busy} onChange={value => { setModel(value); setQuote(undefined); }} />
-      <Button disabled={busy || !configured || !valid} onClick={() => void estimate()}>{t('見積もりを更新', 'Update estimate')}</Button>
+      <Button disabled={busy || !configured || !valid} onClick={() => void estimate(true)}>{t('見積もりを更新', 'Update estimate')}</Button>
     </details>
     {!valid && <p role="status">{media.durationMs ? t('作品内の開始・終了時刻を指定してください。', 'Choose a valid range within the media.') : t('作品の長さを確認しています…', 'Checking media duration…')}</p>}
-    {busy && <p role="status" aria-live="polite">{phase === 'preparing' ? t('音声を準備しています…', 'Preparing audio…') : phase === 'estimating' ? t('料金を確認しています…', 'Preparing your estimate…') : phase === 'starting' ? t('文字起こしを開始しています…', 'Starting transcription…') : t('設定へ移動しています…', 'Opening settings…')}</p>}
+    {phase === 'preparing' ? <PreparationProgress operationId={preparationSession.session?.operationId} label={media.title} /> : busy && <ProgressStatus label={media.title} phase={phase} status="running" />}
     {problem && <p className="notice warning" role="alert">{problem}</p>}
     {quote && <QuoteApproval quote={quote} busy={busy} transcription onApprove={() => void startJob()} />}
     {!quote && !busy && configured && valid && automaticAttempted && <Button onClick={() => void estimate()}><RefreshCw size={14} />{t('見積もりを準備', 'Prepare estimate')}</Button>}
-    {phase === 'preparing' ? <Button variant="ghost" onClick={() => void report(aiApi.cancelPreparation)}>{t('準備を中止', 'Cancel preparation')}</Button> : <Button variant="ghost" disabled={busy} onClick={onDone}>{t('閉じる', 'Close')}</Button>}
+    {phase === 'preparing' ? <Button variant="ghost" disabled={!preparationSession.session?.operationId} onClick={() => void report(() => aiApi.cancelPreparation(preparationSession.session?.operationId))}>{t('準備を中止', 'Cancel preparation')}</Button> : <Button variant="ghost" disabled={busy} onClick={onDone}>{t('閉じる', 'Close')}</Button>}
   </section>;
 }
 
@@ -191,8 +216,7 @@ export function TranscriptionWorkspace({ media, request, onRequest, onDone, onSt
   const current = jobs.filter(job => !['completed', 'cancelled'].includes(job.status));
   const completed = jobs.filter(job => ['completed', 'cancelled'].includes(job.status));
   const showJob = (job: JobSummary) => <div className="transcription-job" key={job.id}>
-    <p role="status">{job.message || (job.status === 'completed' ? t('字幕を表示しました', 'Subtitles are ready') : t('文字起こし中', 'Transcribing'))}</p>
-    {job.status === 'running' && <progress aria-label={t('文字起こしの進捗', 'Transcription progress')} value={job.progress} max={1} />}
+    <ProgressStatus label={t('文字起こしの進捗', 'Transcription progress')} phase={job.message || (job.status === 'completed' ? t('字幕を表示しました', 'Subtitles are ready') : t('文字起こし中', 'Transcribing'))} status={job.status === 'queued' ? 'waiting' : job.status} completed={job.progress} total={1} />
     {!!job.transcriptionRanges?.length && <div className="transcription-ranges" aria-label={t('区間ごとの状態', 'Transcription ranges')}>{job.transcriptionRanges.map((range, index) => <span key={index} className={`range-${range.state}`} title={`${timestamp(range.startMs)}–${timestamp(range.endMs)} · ${range.state}`} />)}</div>}
     <JobActions job={job} inlineTranscription onReviewTranscript={id => setHistory(value => value === id ? undefined : id)} />
     {job.transcriptionRanges?.filter(range => range.state === 'failed').map((range, index) => <Button key={index} onClick={() => onRequest(range)}>{t('この区間を再文字起こし', 'Transcribe this range again')} · {timestamp(range.startMs)}–{timestamp(range.endMs)}</Button>)}
@@ -218,7 +242,7 @@ export function TranscriptionStatus({ mediaId, hasRequest, onOpen }: { mediaId: 
   if (!current && !hasRequest) return null;
   return <button type="button" className="transcription-status" onClick={onOpen}>
     <span>{current?.message || (hasRequest ? t('文字起こしの設定を続ける', 'Continue transcription setup') : t('文字起こし中', 'Transcribing'))}</span>
-    {current?.status === 'running' && <progress aria-label={t('文字起こしの進捗', 'Transcription progress')} value={current.progress} max={1} />}
+    {current?.status === 'running' && <ProgressStatus label={t('文字起こしの進捗', 'Transcription progress')} completed={current.progress} total={1} status="running" compact />}
     <span className="transcription-status-action">{t('詳細を開く', 'View details')}</span>
   </button>;
 }

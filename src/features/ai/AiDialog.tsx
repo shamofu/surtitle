@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { subscribeNative } from '../../shared/native/events';
 import { QuoteApproval } from './QuoteApproval';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { continuationApi, type AiContinuation } from './continuations';
 
@@ -29,6 +28,10 @@ import {
 import { parseTimestamp, timestamp } from '../../shared/format';
 import { Button, Field, Modal } from '../../shared/ui/index';
 import { ModelEditor, emptyModel } from './ModelEditor';
+import { useActivities } from '../../app/providers/Activities';
+import { ProgressStatus } from '../../shared/ui/ProgressStatus';
+import { preparedSourceMatches, usePreparationSession } from './PreparationSessions';
+import { PreparationProgress } from './PreparationProgress';
 
 export function AiDialog({
   media,
@@ -57,6 +60,7 @@ export function AiDialog({
   const { t } = useAppearance();
   const { data } = useSnapshot();
   const { report } = useNotifications();
+  const { runTracked } = useActivities();
   const navigate = useNavigate();
   const [continuationId] = useState(() => continuation?.id || crypto.randomUUID());
   const [kind, setKind] = useState<AiQuote['kind']>(continuation?.kind || initialKind);
@@ -66,6 +70,11 @@ export function AiDialog({
     Partial<Record<AiPurpose, AiModelPreference>>
   >(continuation?.models || {});
   const mediaSignature = JSON.stringify([media.path, media.audioStreamIndex, media.learningLanguage, media.explanationLanguage]);
+  const currentSignature = useRef(mediaSignature);
+  currentSignature.current = mediaSignature;
+  const mounted = useRef(true);
+  const pending = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [boundMediaSignature, setBoundMediaSignature] = useState(continuation ? continuation.sourceMediaSignature : mediaSignature);
   const mediaChanged = boundMediaSignature !== mediaSignature;
   const continuationMediaChanged = !!continuation && continuation.sourceMediaSignature !== mediaSignature;
@@ -95,7 +104,9 @@ export function AiDialog({
   );
   const [quote, setQuote] = useState<AiQuote | null>(null);
   const [busy, setBusy] = useState(false);
-  const [preparing, setPreparing] = useState(false);
+  const [preparePending, setPreparing] = useState(false);
+  const [busyPhase, setBusyPhase] = useState('estimating');
+  const [restored, setRestored] = useState(false);
   const [preparation, setPreparation] =
     useState<Awaited<ReturnType<typeof aiApi.prepareTranscription>>>();
   const [preparations, setPreparations] = useState<TranscriptionPreparation[]>(
@@ -104,30 +115,31 @@ export function AiDialog({
   useEffect(() => {
     if (mediaChanged) { setQuote(null); setPreparation(undefined); setPreparations([]); }
   }, [mediaSignature, mediaChanged]);
+  const startMs = kind === 'transcribe' && wholeMedia ? 0 : parseTimestamp(start),
+    endMs = kind === 'transcribe' && wholeMedia ? media.durationMs : parseTimestamp(end);
+  const preparationSession = usePreparationSession({ mediaId: media.id, sourceSignature: mediaSignature, startMs: startMs ?? 0, endMs: endMs ?? 0, wholeMedia });
+  const revision = preparationSession.revision;
+  const currentRevision = useRef(revision);
+  currentRevision.current = revision;
+  const initialRevision = useRef(revision);
+  const [boundRevision, setBoundRevision] = useState(revision);
+  useEffect(() => {
+    if (revision === boundRevision) return;
+    setBoundRevision(revision); setQuote(null); setPreparation(undefined); setPreparations([]);
+    setPreparing(false); setBusy(false); pending.current = false; setRestored(true);
+  }, [revision, boundRevision]);
   useEffect(() => {
     if (kind !== 'transcribe' || mediaChanged || !nativeAvailable()) return;
     let active = true;
-    void report(() => aiApi.transcriptionPreparations(media.id)).then(
-      (items) => {
-        if (active && items) {
-          setPreparations(continuationMediaChanged ? [] : items);
-          if (!continuationMediaChanged && continuation?.preparationId) setPreparation(items.find(item => item.id === continuation.preparationId));
-        }
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [kind, media.id, mediaSignature, mediaChanged, continuationMediaChanged, report]);
-  const [progress, setProgress] = useState<{
-    phase: string;
-    processed_ms: number;
-    total_ms: number;
-    completed_chunks: number;
-    total_chunks: number;
-  }>();
-  const startMs = kind === 'transcribe' && wholeMedia ? 0 : parseTimestamp(start),
-    endMs = kind === 'transcribe' && wholeMedia ? media.durationMs : parseTimestamp(end);
+    void report(() => aiApi.transcriptionPreparations(media.id)).then(items => {
+      if (active && items) {
+        setPreparations(continuationMediaChanged ? [] : items);
+        if (revision === initialRevision.current && !continuationMediaChanged && continuation?.preparationId) setPreparation(items.find(item => item.id === continuation.preparationId));
+      }
+    });
+    return () => { active = false; };
+  }, [kind, media.id, mediaSignature, mediaChanged, continuationMediaChanged, report, revision]);
+  const preparing = preparePending || (kind === 'transcribe' && preparationSession.session?.status === 'running');
   const valid =
     startMs !== null &&
     endMs !== null &&
@@ -135,72 +147,61 @@ export function AiDialog({
     (kind !== 'transcribe' || media.durationMs > 0) &&
     (!media.durationMs || endMs <= media.durationMs);
   useEffect(() => {
-    if (!preparing || !nativeAvailable()) return;
-    return subscribeNative<NonNullable<typeof progress>>(
-      'preparation-progress',
-      (event) => setProgress(event.payload),
-    );
-  }, [preparing]);
+    if (preparationSession.session?.result && kind === 'transcribe') setPreparation(preparationSession.session.result);
+  }, [preparationSession.session?.result, kind]);
   async function prepare() {
-    if (!valid || preparing) return;
+    if (!valid) return;
     setPreparing(true);
     setPreparation(undefined);
-    setProgress(undefined);
-    const result = await report(() =>
-      mutate(() => aiApi.prepareTranscription(media.id, startMs, endMs, wholeMedia), {
+    const result = await report(() => preparationSession.prepare(operationId =>
+      mutate(() => aiApi.prepareTranscription(media.id, startMs, endMs, wholeMedia, operationId), {
         kind: 'snapshot',
-      }),
+      })),
     );
-    if (result) {
+    if (result && mounted.current && preparedSourceMatches(mediaSignature, currentSignature.current, result) && currentRevision.current === revision) {
+      setBoundMediaSignature(currentSignature.current);
       setPreparation(result);
       setPreparations((items) => [
         result,
         ...items.filter((item) => item.id !== result.id),
       ]);
     }
-    setPreparing(false);
+    if (mounted.current && currentRevision.current === revision) setPreparing(false);
     return result;
   }
   async function estimate() {
-    if (!valid || !modelValid || invalidSource || busy || preparing || !data?.settings.credentialConfigured)
+    if (!valid || !modelValid || invalidSource || pending.current || busy || preparing || !data?.settings.credentialConfigured)
       return;
-    setBusy(true);
-    if (kind === 'transcribe') setBoundMediaSignature(mediaSignature);
-    const prepared = kind === 'transcribe'
-      ? (!mediaChanged && preparation && preparation.startMs === startMs && preparation.endMs === endMs && (!wholeMedia || preparation.wholeMedia) ? preparation : await prepare())
-      : undefined;
-    if (kind === 'transcribe' && !prepared) { setBusy(false); return; }
-    const result = await report(() =>
-      kind === 'transcribe' && prepared
-        ? mutate(
-            () => aiApi.createTranscriptionQuote(prepared.id, selectedModel),
-            { kind: 'snapshot' },
-          )
-        : mutate(
-            () =>
-              aiApi.createQuote({
-                mediaId: media.id,
-                kind,
-                startMs,
-                endMs,
-                focusTerm:
-                  kind === 'vocabulary'
-                    ? focusTerm.trim() || undefined
-                    : undefined,
-                model: selectedModel,
-              }),
-            { kind: 'snapshot' },
-          ),
-    );
-    if (result) {
-      setQuote(result);
-      await report(() => saveContinuation(result.id, prepared?.id));
+    pending.current = true; setBusy(true); setBusyPhase('estimating'); setRestored(false);
+    try {
+      if (kind === 'transcribe') setBoundMediaSignature(mediaSignature);
+      await report(() => saveContinuation());
+      if (currentRevision.current !== revision) return;
+      const prepared = kind === 'transcribe'
+        ? (!mediaChanged && preparation && preparation.startMs === startMs && preparation.endMs === endMs && !!preparation.wholeMedia === wholeMedia ? preparation : await prepare())
+        : undefined;
+      const preparedSignature = currentSignature.current;
+      const sourceMatches = prepared ? preparedSourceMatches(mediaSignature, preparedSignature, prepared) : preparedSignature === mediaSignature;
+      if (!mounted.current || !sourceMatches || currentRevision.current !== revision || (kind === 'transcribe' && !prepared)) return;
+      const result = await report(() => {
+        const action = () => runTracked({ kind: 'estimate', label: media.title, phase: 'estimating', mediaId: media.id },
+          () => kind === 'transcribe' && prepared
+            ? mutate(() => aiApi.createTranscriptionQuote(prepared.id, selectedModel), { kind: 'snapshot' })
+            : mutate(() => aiApi.createQuote({ mediaId: media.id, kind, startMs, endMs,
+              focusTerm: kind === 'vocabulary' ? focusTerm.trim() || undefined : undefined, model: selectedModel }), { kind: 'snapshot' }));
+        return kind === 'transcribe' ? preparationSession.estimate(selectedModel, action, true) : action();
+      });
+      if (result && currentSignature.current === preparedSignature && currentRevision.current === revision) {
+        await report(() => saveContinuation(result.id, prepared?.id, preparedSignature));
+        if (mounted.current && currentRevision.current === revision) setQuote(result);
+      }
+    } finally {
+      if (currentRevision.current === revision) { pending.current = false; if (mounted.current) setBusy(false); }
     }
-    setBusy(false);
   }
   async function approve() {
-    if (!quote || invalidSource) return;
-    setBusy(true);
+    if (!quote || invalidSource || revision !== boundRevision) return;
+    setBusy(true); setBusyPhase('starting');
     const result = await report(
       async () => {
         await mutate(() => quote.isRetry ? aiApi.reapproveQuote(quote) : aiApi.approveQuote(quote), { kind: 'snapshot' });
@@ -208,31 +209,31 @@ export function AiDialog({
       },
       t('承認した処理を開始しました。', 'Your approved job has started.'),
     );
-    if (result) { onApproved?.(kind, focusTerm.trim()); await report(() => continuationApi.discard(continuationId)); onClose(); }
+    if (result) { preparationSession.forgetEstimate(); onApproved?.(kind, focusTerm.trim()); await report(() => continuationApi.discard(continuationId)); onClose(); }
     setBusy(false);
   }
-  function saveContinuation(quoteId = quote?.id, preparationId = preparation?.id) {
+  function saveContinuation(quoteId = quote?.id, preparationId = preparation?.id, sourceSignature = mediaSignature) {
     return continuationApi.save({ id: continuationId, mediaId: media.id, kind, start, end, wholeMedia, focusTerm, models, preparationId, quoteId,
       sourceCueIds: sourceContext?.sourceCueIds ?? continuation?.sourceCueIds,
       sourceRevision: sourceContext?.sourceRevision ?? continuation?.sourceRevision,
-      sourceMediaSignature: kind === 'transcribe' ? mediaSignature : boundMediaSignature });
+      sourceMediaSignature: kind === 'transcribe' ? sourceSignature : boundMediaSignature });
   }
   async function openSettings() {
     if (busy || preparing) return;
-    setBusy(true);
+    setBusy(true); setBusyPhase('setup');
     const saved = await report(() => saveContinuation());
     setBusy(false);
     if (saved) { onClose(); void navigate({ to: '/settings', search: { resume: saved.id } }); }
   }
   useEffect(() => {
-    if (!continuation?.quoteId || continuationMediaChanged || !nativeAvailable()) return;
+    if (!continuation?.quoteId || continuationMediaChanged || !nativeAvailable() || revision !== initialRevision.current) return;
     let active = true;
-    void report(() => aiApi.reviewAiJob(continuation.quoteId!)).then(result => { if (active && result) setQuote(result); });
+    void report(() => runTracked({ kind: 'estimate', label: media.title, phase: 'estimating', mediaId: media.id }, () => aiApi.reviewAiJob(continuation.quoteId!))).then(result => { if (active && result) setQuote(result); });
     return () => { active = false; };
-  }, [continuation?.quoteId, continuationMediaChanged, report]);
+  }, [continuation?.quoteId, continuationMediaChanged, report, runTracked, revision]);
   async function reselectSource() {
     if (busy || preparing || !onReselectSource) return;
-    setBusy(true);
+    setBusy(true); setBusyPhase('setup');
     const saved = await report(() => saveContinuation());
     setBusy(false);
     if (saved) onReselectSource(saved);
@@ -245,6 +246,7 @@ export function AiDialog({
         if (!busy && !preparing) onClose();
       }}
     >
+      {restored && <p className="notice" role="status">{t('データを復元しました。対象を確認してから見積もりを準備してください。', 'Data was restored. Check the source and prepare a new estimate.')}</p>}
       {kind === 'transcribe' && mediaChanged && <div className="notice warning" role="alert">
         <p>{t('教材か言語設定が変わったため、以前の音声準備と見積もりを使わず、現在の対象で準備し直します。', 'The material or language settings changed. A new estimate will use the current source shown below.')}</p>
         <p>{media.title} · {media.path} · {t('音声トラック', 'Audio track')}: {media.audioStreamIndex ?? t('既定', 'Default')} · {media.learningLanguage} → {media.explanationLanguage}</p>
@@ -436,22 +438,12 @@ export function AiDialog({
               )}
               {preparing ? (
                 <div className="job-status">
-                  <span>
-                    {t('ローカルで音声を準備中', 'Preparing audio locally')}
-                    {progress
-                      ? ` · ${progress.completed_chunks} / ${progress.total_chunks || '—'}`
-                      : ''}
-                  </span>
-                  {progress && (
-                    <progress
-                      value={progress.processed_ms}
-                      max={progress.total_ms || 1}
-                    />
-                  )}
+                  <PreparationProgress operationId={preparationSession.session?.operationId} label={media.title} />
                   <Button
+                    disabled={!preparationSession.session?.operationId}
                     onClick={() =>
                       void report(() =>
-                        mutate(aiApi.cancelPreparation, { kind: 'snapshot' }),
+                        mutate(() => aiApi.cancelPreparation(preparationSession.session?.operationId), { kind: 'snapshot' }),
                       )
                     }
                   >
@@ -530,6 +522,7 @@ export function AiDialog({
           />
         </>
       )}
+      {busy && !preparing && <ProgressStatus label={media.title} phase={busyPhase} status="running" />}
     </Modal>
   );
 }

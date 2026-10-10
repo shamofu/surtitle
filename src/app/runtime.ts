@@ -5,3 +5,4 @@ export { useNotifications } from './providers/Notifications';
 export { useSurface } from './providers/Surface';
 export { useSnapshot } from './providers/Snapshot';
 export { useDataActions } from '../shared/query/actions';
+export { useActivities } from './providers/Activities';

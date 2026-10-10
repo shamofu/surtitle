@@ -18,6 +18,8 @@ import { draftStudyApi } from './api';
 import type { DraftSelection } from './api';
 import { parseTimestamp, timestamp } from '../../../shared/format';
 import { Badge, Button, Field } from '../../../shared/ui/index';
+import { useActivities } from '../../../app/providers/Activities';
+import { ProgressStatus } from '../../../shared/ui/ProgressStatus';
 import './draft-study.css';
 
 export function DraftSelectionEditor({
@@ -39,6 +41,7 @@ export function DraftSelectionEditor({
 }) {
   const { t } = useAppearance();
   const { report } = useNotifications();
+  const { runTracked } = useActivities();
   const mounted = useMounted();
   const [text, setText] = useState(selection.text);
   const [start, setStart] = useState(timestamp(selection.startMs, true));
@@ -46,6 +49,7 @@ export function DraftSelectionEditor({
   const [acknowledged, setAcknowledged] = useState(selection.confirmed);
   const [listened, setListened] = useState(selection.confirmed);
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const locked = useRef(false);
   const editRevision = useRef(0);
   const [dialog, setDialog] = useState<'card' | 'ai'>();
@@ -380,6 +384,7 @@ export function DraftSelectionEditor({
         <summary>
           {t('この下書きの書き出し・削除', 'Export or remove this draft')}
         </summary>
+        {exporting && <ProgressStatus label={selection.text} phase="exporting" />}
         <p className="helper-text">
           {t(
             '未確認の下書きは状態付きJSONとして書き出せます。SRT・VTTは本文と区間を確認してから使えます。',
@@ -406,12 +411,12 @@ export function DraftSelectionEditor({
             onClick={() =>
               void operate(
                 async () => {
-                  await draftStudyApi.export({
-                    id: selection.id,
-                    version: selection.version,
-                    format,
-                  });
-                  return true;
+                  setExporting(true);
+                  try {
+                    return await runTracked({ kind: 'export', label: selection.text, mediaId: selection.mediaId, phase: 'exporting' },
+                      () => draftStudyApi.export({ id: selection.id, version: selection.version, format }),
+                      { classifyResult: result => ({ status: result ? 'completed' : 'cancelled' }) });
+                  } finally { if (mounted.current) setExporting(false); }
                 },
                 undefined,
                 format === 'json',

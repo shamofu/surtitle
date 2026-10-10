@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   cleanup,

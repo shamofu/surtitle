@@ -5,6 +5,8 @@ import { ArrowDownToLine, Check, FileVideo2, FolderOpen, Link2, Plus, RefreshCw,
 import { libraryApi } from './api';
 import { useDataActions, useAppearance, useSnapshot, useNotifications } from '../../app/runtime';
 import { Button, Field, IconButton, Modal } from '../../shared/ui/index';
+import { ProgressStatus } from '../../shared/ui/ProgressStatus';
+import { useActivities } from '../../app/providers/Activities';
 import { LanguageInput } from '../../shared/ui/LanguageInput';
 import { languagePair, mergeQueue, queueStatus, validatedItem } from './import-queue';
 import type { ImportQueueItem } from './import-queue';
@@ -25,6 +27,8 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
   const { t } = useAppearance();
   const { data } = useSnapshot();
   const { report } = useNotifications();
+  const { runTracked } = useActivities();
+  const [fileProgress, setFileProgress] = useState<{ completed: number; total: number }>();
   const [mode, setMode] = useState<'local' | 'url'>('local');
   const [rows, setRows] = useState<ImportQueueItem[]>([]);
   const rowsRef = useRef(rows);
@@ -130,7 +134,7 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
     const validationPair = languagePair(learning, explanation);
     let incoming: ImportQueueItem[];
     try {
-      const results = await libraryApi.validateMediaFiles(paths, learning, explanation);
+      const results = await runTracked({ kind: 'import_check', label: t('追加するファイルの確認', 'Check selected files'), phase: 'checking_files' }, () => libraryApi.validateMediaFiles(paths, learning, explanation));
       incoming = results.map(result => validatedItem(++nextId.current, result, validationPair));
     } catch (error) {
       incoming = paths.map(inputPath => ({ id: ++nextId.current, inputPath, status: 'failed', languagePair: validationPair, error: errorText(error) }));
@@ -165,29 +169,43 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
     const targets = rowsRef.current.filter(row => retryFailed ? row.status === 'failed' : queueStatus(row, pair) === 'ready');
     const targetIds = new Set(targets.map(row => row.id));
     setAttempted(true);
+    setFileProgress(undefined);
     try {
-      const results = await libraryApi.validateMediaFiles(targets.map(row => row.inputPath), learningLanguage.trim(), explanationLanguage.trim());
-      if (!alive.current) return;
-      const byPath = new Map(results.map(result => [result.inputPath, result]));
-      updateRows(current => mergeQueue([], current.map(row => {
-        if (!targetIds.has(row.id)) return row;
-        const result = byPath.get(row.inputPath);
-        return result ? validatedItem(row.id, result, pair) : { ...row, status: 'failed', error: t('ファイルを確認できませんでした。再試行してください。', 'Could not check this file. Try again.') };
-      })));
-      const ready = rowsRef.current.filter(row => targetIds.has(row.id) && row.status === 'ready');
-      for (const row of ready) {
-        if (!alive.current) break;
-        updateRows(current => current.map(item => item.id === row.id ? { ...item, status: 'importing' } : item));
-        try {
-          const result = await mutate(() => libraryApi.importLocalMedia({
-            kind: 'local', pathOrUrl: row.canonicalPath || row.inputPath,
-            learningLanguage: learningLanguage.trim(), explanationLanguage: explanationLanguage.trim(),
-          }), { kind: 'snapshot' });
-          updateRows(current => current.map(item => item.id === row.id ? { ...item, status: result.created ? 'imported' : 'existing', mediaId: result.mediaId } : item));
-        } catch (error) {
-          updateRows(current => current.map(item => item.id === row.id ? { ...item, status: 'failed', error: errorText(error) } : item));
+      await runTracked({ kind: 'import', label: t('ファイルをライブラリに追加', 'Add files to library'), phase: 'checking_files' }, async update => {
+        const results = await libraryApi.validateMediaFiles(targets.map(row => row.inputPath), learningLanguage.trim(), explanationLanguage.trim());
+        if (!alive.current) return { failed: 0, cancelled: true };
+        const byPath = new Map(results.map(result => [result.inputPath, result]));
+        updateRows(current => mergeQueue([], current.map(row => {
+          if (!targetIds.has(row.id)) return row;
+          const result = byPath.get(row.inputPath);
+          return result ? validatedItem(row.id, result, pair) : { ...row, status: 'failed', error: t('ファイルを確認できませんでした。再試行してください。', 'Could not check this file. Try again.') };
+        })));
+        const ready = rowsRef.current.filter(row => targetIds.has(row.id) && row.status === 'ready');
+        let failed = rowsRef.current.filter(row => targetIds.has(row.id) && ['invalid', 'failed'].includes(row.status)).length;
+        let completed = targets.length - ready.length;
+        const progress = () => {
+          update({ phase: 'importing', completed, total: targets.length, unit: 'items' });
+          if (alive.current) setFileProgress({ completed, total: targets.length });
+        };
+        progress();
+        for (const row of ready) {
+          if (!alive.current) return { failed, cancelled: true };
+          updateRows(current => current.map(item => item.id === row.id ? { ...item, status: 'importing' } : item));
+          try {
+            const result = await mutate(() => libraryApi.importLocalMedia({
+              kind: 'local', pathOrUrl: row.canonicalPath || row.inputPath,
+              learningLanguage: learningLanguage.trim(), explanationLanguage: explanationLanguage.trim(),
+            }), { kind: 'snapshot' });
+            updateRows(current => current.map(item => item.id === row.id ? { ...item, status: result.created ? 'imported' : 'existing', mediaId: result.mediaId } : item));
+          } catch (error) {
+            failed++;
+            updateRows(current => current.map(item => item.id === row.id ? { ...item, status: 'failed', error: errorText(error) } : item));
+          }
+          completed++;
+          progress();
         }
-      }
+        return { failed, cancelled: false };
+      }, { classifyResult: result => ({ status: result.cancelled ? 'cancelled' : result.failed ? 'failed' : 'completed', error: result.failed ? t(`${result.failed} 件を追加できませんでした。`, `${result.failed} files could not be added.`) : undefined }) });
     } catch (error) {
       updateRows(current => current.map(row => targetIds.has(row.id) ? { ...row, status: 'failed', error: errorText(error) } : row));
     } finally { finish(); }
@@ -259,7 +277,7 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
       </div>}
       {!languagesValid && <p className="helper-text">{t('追加する前に、学習言語と説明・翻訳の言語を指定してください。', 'Choose both languages before adding files.')}</p>}
       {problem && <p className="notice warning" role="alert">{problem}</p>}
-      {phase && <p className="helper-text" role="status">{phase === 'picking' ? t('ファイルを選択してください…', 'Choose your files…') : phase === 'validating' || phase === 'languages' ? t('ファイルを確認中…', 'Checking files…') : phase === 'url' ? t('ダウンロードを準備中…', 'Preparing the download…') : t('ファイルを順に追加しています…', 'Adding files one at a time…')}</p>}
+      {phase === 'picking' ? <p className="helper-text" role="status">{t('ファイルを選択してください…', 'Choose your files…')}</p> : phase && <ProgressStatus label={phase === 'url' ? t('ダウンロードの準備', 'Prepare download') : t('ファイルをライブラリに追加', 'Add files to library')} phase={phase === 'validating' || phase === 'languages' || (phase === 'importing' && !fileProgress) ? 'checking_files' : phase === 'url' ? 'preparing' : 'importing'} completed={phase === 'importing' ? fileProgress?.completed : undefined} total={phase === 'importing' ? fileProgress?.total : undefined} unit="items" />}
       <p className="helper-text"><Sparkles size={13} />{t('追加だけでは AI を実行しません。使う範囲と金額を後から選べます。', 'Importing does not run AI. Choose its scope and cost when you need it.')}</p>
       </div>
       <footer className="modal-footer import-footer">
