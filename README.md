@@ -50,7 +50,7 @@ The optional [Dev Container](.devcontainer/README.md) supports Linux development
 | `pnpm test:rust:required <suite>` | Explicit FFmpeg/native integration tests |
 | `pnpm lint:rust` / `pnpm fmt:rust:check` | Rust lint and formatting checks |
 | `pnpm test:browser` / `pnpm test:e2e` | Browser preview / real Tauri tests |
-| `pnpm test:visual` | Six screenshot comparisons in the pinned Linux container; see [E2E setup](e2e/README.md) |
+| `pnpm test:structure` | UI structure, state and layout contracts; also included in `pnpm test:browser` |
 | `pnpm package:app` | Standard Tauri NSIS build |
 
 `pnpm install --frozen-lockfile` acquires JavaScript and Rust dependencies using both lockfiles. Use `pnpm rust <subcommand> ...` for other Cargo operations. In PowerShell quote a forwarded separator as `'--'`.
@@ -79,7 +79,7 @@ For the optional Dev Container, export any needed logs first, then use `docker s
 
 Direct pushes to `main` are allowed. PRs are optional; Squash merge is recommended when using a PR, and merged branches are deleted automatically. PR approval, resolved review conversations and a successful `ci` check are not required before updating `main`. CI continues to run after pushes and for PRs. Linear history is required, force pushes and deletion are blocked, and there are no bypass actors. There is no release branch.
 
-The **Test and release** workflow runs for pushes and PRs to `main`, and pushes of `v*` tags. The initial `validate` job checks version consistency before builds. The aggregate `ci` check succeeds only when `validate`, browser, native build, Linux, Windows and package verification all succeed; failures, cancellations and skipped jobs do not pass. The browser job runs functional checks and six visual comparisons in a pinned Linux container. Native dependency builds use Docker caching. Application tests and installer lifecycle checks run for each source revision.
+The **Test and release** workflow runs for pushes and PRs to `main`, and pushes of `v*` tags. The initial `validate` job checks version consistency before builds. The aggregate `ci` check succeeds only when `validate`, browser, native build, Linux, Windows and package verification all succeed; failures, cancellations and skipped jobs do not pass. The browser job checks behavior, UI structure, state and layout in a pinned Linux container. Screenshots and traces help diagnose failures; pixel equality is not a CI requirement. Native dependency builds use Docker caching. Application tests and installer lifecycle checks run for each source revision.
 
 Only a stable `vX.Y.Z` tag push can publish a release, after that tag's CI succeeds. The tag must match the application's version, have no leading zeroes and point to a commit in `main` history. The release uses artifacts from the same workflow run. Only repository owner `shamofu` can create `v*` tags; updates and deletion are blocked even for the owner. Published versions and assets are never replaced. Windows installers are unsigned. See [native packaging](docs/native-runtime.md) for source/notices, dependency audits and disposable installer checks.
 

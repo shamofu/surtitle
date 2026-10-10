@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - name: Build the pinned browser test environment
         run: docker build --platform linux/amd64 -f e2e/browser/Dockerfile -t surtitle-browser-tests .
-      - name: Browser behavior and six visual comparisons
+      - name: Browser behavior, UI structure and layout
         run: |
           mkdir -p test-results playwright-report
           docker run --rm --init --ipc=host \
@@ -50,9 +50,7 @@ jobs:
           name: browser-evidence-${{ github.sha }}
           path: |
             test-results/browser/
-            test-results/visual/
             playwright-report/browser/
-            playwright-report/visual/
   linux:
     needs: [validate]
     runs-on: ubuntu-24.04

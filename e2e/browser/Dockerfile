@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# One rendering environment for CI and baseline updates on any host OS.
+# A reproducible browser environment for functional and UI structure checks.
 FROM mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
 WORKDIR /app
 
@@ -26,5 +26,5 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 COPY . .
 RUN pnpm install --frozen-lockfile \
     && test "$(node -p 'require("@playwright/test/package.json").version')" = 1.63.0
-ENV SURTITLE_VISUAL_ENV=playwright-1.63.0-noble CI=1
-CMD ["sh", "-c", "pnpm test:browser && pnpm test:visual"]
+ENV CI=1
+CMD ["pnpm", "test:browser"]

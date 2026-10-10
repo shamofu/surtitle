@@ -6,9 +6,9 @@
 
 Browser interaction tests use explicit test-only native transport fixtures for study and import flows. They exercise the real router, query providers and virtualized transcript; persistence and playback integration remain the responsibility of native tests. The ordinary browser preview still has no fabricated native state.
 
-## Browser CI and visual baselines
+## Browser CI and UI contracts
 
-The required browser CI job runs the functional suite and `pnpm test:visual` in the image defined by `e2e/browser/Dockerfile`. Its Playwright image is pinned by version and digest; Node, pnpm and Rust follow the repository pins. The source-only build context excludes host dependencies, build output and credentials. No desktop build is needed.
+The required browser CI job runs `pnpm test:browser`, including the UI structure and layout contracts, in the image defined by `e2e/browser/Dockerfile`. Its Playwright image is pinned by version and digest; Node, pnpm and Rust follow the repository pins. The source-only build context excludes host dependencies, build output and credentials. No desktop build is needed.
 
 With a Linux Docker engine available, run the same environment locally:
 
@@ -17,24 +17,25 @@ docker build --platform linux/amd64 -f e2e/browser/Dockerfile -t surtitle-browse
 docker run --rm --init --ipc=host surtitle-browser-tests
 ```
 
-The ten visual checks cover the study screen, phrase save form, partial import failure, transcription tab with its history entry, and the nested unsaved-phrase confirmation, each in Japanese/light and English/dark at 1024×700. Browser locale, time zone, clock, scale and fonts are fixed; animations and the caret are disabled. Baselines live under `e2e/visual/snapshots`. Ordinary runs reject missing or changed images and never update them. The broader language/theme/viewport coverage remains in the functional suite.
+The ten UI contracts in `e2e/browser/learning-structure.spec.ts` cover the study screen, phrase save form, partial import failure, transcription tab with its history entry, and the nested unsaved-phrase confirmation, each in Japanese/light and English/dark at 1024×700. They check accessible roles, names and states, form values, visible controls, overflow and element placement. Small inline accessibility snapshots describe meaningful UI structure; they do not serialize the whole DOM or CSS. Run this subset with `pnpm test:structure`, on Windows or Linux. The broader language/theme/viewport coverage remains in the functional suite.
 
-Generate or deliberately update the ten baselines in this same container, then inspect every PNG before including it in a change. The following PowerShell commands bind only the snapshots and diagnostic output; dependencies remain inside the container:
+There are no screenshot baselines to regenerate when spacing, colors or controls intentionally change. Update an assertion only when the intended UI contract changes, and inspect the failure first. These checks do not guarantee exact colors, typography or animation quality; review those visually when changing them.
+
+To retain diagnostic output from a local container run, bind the report directories; dependencies remain inside the container:
 
 ```powershell
-New-Item -ItemType Directory -Force e2e/visual/snapshots, test-results, playwright-report | Out-Null
+New-Item -ItemType Directory -Force test-results, playwright-report | Out-Null
 docker run --rm --init --ipc=host `
-  --mount "type=bind,source=$($PWD.Path)/e2e/visual/snapshots,target=/app/e2e/visual/snapshots" `
   --mount "type=bind,source=$($PWD.Path)/test-results,target=/app/test-results" `
   --mount "type=bind,source=$($PWD.Path)/playwright-report,target=/app/playwright-report" `
-  surtitle-browser-tests pnpm test:visual --update-snapshots
+  surtitle-browser-tests
 ```
 
-Repeat that command without `--update-snapshots` to check the new baselines. Rebuild the image after source or baseline changes to verify the default CI command against the complete current checkout. Windows runs of `pnpm test:browser` remain supported; direct Windows visual runs stop with instructions to use the fixed Linux environment.
+Rebuild the image after source or test changes to verify the default CI command against the complete current checkout. Windows runs of `pnpm test:browser` exercise the same contracts without a platform-specific baseline.
 
 If Docker runs inside the existing WSL Ubuntu distribution, invoke these Docker commands through `wsl -d Ubuntu -u root -- docker` and use absolute WSL paths for the build context and bind sources (for example `/mnt/c/path/to/surtitle`). The host's Windows `node_modules` must not be mounted into the container.
 
-CI retains `test-results/browser`, `test-results/visual`, `playwright-report/browser` and `playwright-report/visual`, including actual/expected/diff images and failure traces. For a local run, use the output mounts shown above to retain these reports after the container exits. Update the Docker image and visual environment identifier together when changing Playwright; review regenerated baselines in the new rendering environment.
+CI retains `test-results/browser` and `playwright-report/browser`, including assertion differences, failure screenshots and traces. Screenshots are diagnostic evidence, not a pixel-equality gate. For a local run, use the output mounts shown above to retain these reports after the container exits. Update the pinned Docker image and its version assertion together when changing Playwright.
 
 ## Native setup
 

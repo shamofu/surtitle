@@ -14,7 +14,7 @@
     "test:ui": "vitest run --project ui",
     "test:scripts": "vitest run --project scripts",
     "test:browser": "playwright test",
-    "test:visual": "playwright test --config playwright.visual.config.ts",
+    "test:structure": "playwright test e2e/browser/learning-structure.spec.ts",
     "test:e2e": "node e2e/support/run-native-e2e.mjs",
     "test:fixtures": "node e2e/support/generate-fixtures.mjs",
     "typecheck": "tsc --noEmit",

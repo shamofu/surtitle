@@ -19,7 +19,7 @@ node scripts/check-production-features.mjs
 
 `pnpm test` runs React/jsdom and Node script tests. `pnpm test:ui` and `pnpm test:scripts` select one project; `pnpm test:watch` watches both.
 
-The required `browser` CI job runs the browser suite and six visual comparisons in the same pinned Linux container. The aggregate `ci` check requires this job as well as version validation, native dependencies, Linux, Windows and package verification. See the [E2E guide](../e2e/README.md) for the visual baseline workflow; Windows browser runs do not generate the Linux reference images.
+The required `browser` CI job runs behavior, UI structure, state and layout checks in a pinned Linux container. `pnpm test:structure` runs the focused UI contracts, which are also included in `pnpm test:browser`. They assert accessible roles, names and states, form values, viewport bounds and element placement instead of comparing screenshot pixels. The aggregate `ci` check requires this job as well as version validation, native dependencies, Linux, Windows and package verification. See the [E2E guide](../e2e/README.md) for local commands and failure evidence. The same browser checks can also run directly on Windows.
 
 The maintained regressions cover:
 

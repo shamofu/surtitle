@@ -149,17 +149,19 @@ async function closeReview() {
     await clickVisible(history().$('summary=Saved boundary alternatives'));
     const alternatives = await history().$$('blockquote');
     assert.equal(alternatives.length, 2);
-    assert((await alternatives[0].getText()).includes('No, no.'));
-    assert((await alternatives[1].getText()).includes('No.'));
+    await expect(alternatives[0]).toHaveText(expect.stringContaining('No, no.'));
+    await expect(alternatives[1]).toHaveText(expect.stringContaining('No.'));
     const originals = [];
     for (const detail of await history().$$(':scope > details')) {
       if ((await detail.$('summary').getText()).includes('Received')) originals.push(detail);
     }
     assert.equal(originals.length, 2);
-    for (const original of originals) await clickVisible(original.$('summary'));
-    const originalTexts = await Promise.all(originals.map(original => original.getText()));
-    assert(originalTexts[0].includes('Hello.'));
-    assert(originalTexts[1].includes('Goodbye.'));
+    // WebDriver may return no visible text while the disclosure fades in.
+    // Wait for each expected result, so missing content still fails the check.
+    for (const [index, expectedText] of ['Hello.', 'Goodbye.'].entries()) {
+      await clickVisible(originals[index].$('summary'));
+      await expect(originals[index]).toHaveText(expect.stringContaining(expectedText));
+    }
     await expect(history().$('button=Use saved results')).toBeEnabled();
     await expect(history().$('input[type="checkbox"]')).not.toExist();
     await browser.saveScreenshot(resolve('test-results/native/transcript-raw-alternatives.png'));
