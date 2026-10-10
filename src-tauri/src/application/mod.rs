@@ -139,12 +139,22 @@ impl Services {
         on_surface_click: impl Fn() + Send + Sync + 'static,
     ) -> Result<()> {
         *lock(&self.runtime_dir)? = resources.join("native");
-        self.playback.install(
-            crate::player::Player::new(resources, parent).and_then(|player| {
-                player.on_surface_click(on_surface_click)?;
-                Ok(player)
-            }),
-        )
+        let volume = self.preferences.read()?.playback.volume;
+        self.playback
+            .install(
+                crate::player::Player::new(resources, parent).and_then(|mut player| {
+                    player.control(&crate::player::Control {
+                        action: "volume".into(),
+                        value: Some(volume),
+                        start_ms: None,
+                        end_ms: None,
+                        bounds: None,
+                        track_kind: None,
+                    })?;
+                    player.on_surface_click(on_surface_click)?;
+                    Ok(player)
+                }),
+            )
     }
     pub fn shutdown(&self) {
         self.tools.shutdown.cancel();

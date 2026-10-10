@@ -144,7 +144,7 @@ impl PlaybackOperation<'_> {
     }
 }
 
-use super::{AppState, err, on_main};
+use super::{AppState, PreferencesStore, err, on_main, preferences::validate_playback_volume};
 use crate::player::Control;
 use anyhow::ensure;
 use std::path::Path;
@@ -215,7 +215,8 @@ pub(super) fn refresh_current_subtitles_locked(
         surtitle_core::subtitles::format(&segments, false, false),
     )?;
     let result = { playback.player()?.subtitle(&path) };
-    // sub-add reads the complete text synchronously; no original user file is removed.
+    // Player reads the SRT now or owns a copy until loading completes.
+    // Only this generated file is removed, never an original user file.
     let _ = std::fs::remove_file(&path);
     result
 }
@@ -246,6 +247,33 @@ fn source_playback_range(segments: &[SubtitleSegment], ids: &[String]) -> Result
         .unwrap_or("");
     let range = surtitle_core::confirmed_cue_range(segments, media_id, ids)?;
     Ok((range.start_ms, range.end_ms))
+}
+
+/// The caller holds the playback session lock throughout native apply and save.
+fn persist_volume(
+    preferences: &PreferencesStore,
+    previous: f64,
+    requested: f64,
+    mut apply: impl FnMut(f64) -> Result<()>,
+) -> Result<()> {
+    validate_playback_volume(requested)?;
+    apply(requested)?;
+    // Patch the current preferences so changes from another window are retained.
+    if let Err(save_error) = preferences.update_if(|preferences| {
+        if preferences.playback.volume == requested {
+            return Ok(false);
+        }
+        preferences.playback.volume = requested;
+        Ok(true)
+    }) {
+        if let Err(restore_error) = apply(previous) {
+            anyhow::bail!(
+                "Could not save volume: {save_error}; restoring the previous volume also failed: {restore_error}"
+            );
+        }
+        return Err(save_error.context("Could not save volume; the previous volume was restored"));
+    }
+    Ok(())
 }
 
 pub async fn play_source_range(
@@ -309,6 +337,14 @@ pub async fn player_control(
     let handle = app.clone();
     on_main(app, move || {
         let mut playback = state.playback.operation()?;
+        if request.action == "volume" {
+            let requested = request.value.context("missing volume")?;
+            let previous = playback.poll().volume;
+            return persist_volume(&state.preferences, previous, requested, |volume| {
+                request.value = Some(volume);
+                playback.control(&request)
+            });
+        }
         if request.action == "sentence-pause" {
             ensure!(
                 matches!(request.value, Some(v) if v == 0. || v == 1.),
@@ -475,6 +511,121 @@ pub(super) fn restore_learning_archive(
         player.hide();
     }
     restored
+}
+
+#[cfg(test)]
+mod volume_tests {
+    use super::*;
+
+    #[test]
+    fn volume_success_preserves_other_preferences_and_survives_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preferences.json");
+        let store = PreferencesStore::open(path.clone()).unwrap();
+        let mut native_volume = 80.;
+        for requested in [37.5, 0.] {
+            let previous = native_volume;
+            persist_volume(&store, previous, requested, |volume| {
+                native_volume = volume;
+                // A settings save between native apply and volume persistence
+                // must not be overwritten by an older preference snapshot.
+                store.update(|preferences| {
+                    preferences.settings.locale = "en".into();
+                    preferences.settings.sentence_pause = true;
+                    Ok(())
+                })
+            })
+            .unwrap();
+            assert_eq!(native_volume, requested);
+            let reopened = PreferencesStore::open(path.clone()).unwrap();
+            let preferences = reopened.read().unwrap();
+            assert_eq!(preferences.playback.volume, requested);
+            assert_eq!(preferences.settings.locale, "en");
+            assert!(preferences.settings.sentence_pause);
+        }
+    }
+
+    #[test]
+    fn rejected_volume_or_native_failure_does_not_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preferences.json");
+        let store = PreferencesStore::open(path.clone()).unwrap();
+        store.update(|_| Ok(())).unwrap();
+        let saved = std::fs::read(&path).unwrap();
+        for requested in [-1., 101., f64::NAN, f64::INFINITY] {
+            assert!(
+                persist_volume(&store, 80., requested, |_| panic!(
+                    "invalid volume reached player"
+                ))
+                .is_err()
+            );
+        }
+        let mut attempted = vec![];
+        let error = persist_volume(&store, 80., 35., |volume| {
+            attempted.push(volume);
+            anyhow::bail!("native set failed")
+        })
+        .unwrap_err();
+        assert_eq!(error.to_string(), "native set failed");
+        assert_eq!(attempted, [35.]);
+        assert_eq!(store.read().unwrap().playback.volume, 80.);
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+    }
+
+    #[test]
+    fn failed_volume_save_restores_player_and_keeps_saved_preferences() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preferences.json");
+        let store = PreferencesStore::open(path.clone()).unwrap();
+        store
+            .update(|preferences| {
+                preferences.playback.volume = 47.;
+                Ok(())
+            })
+            .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let mut attempted = vec![];
+        let mut native_volume = 47.;
+        let error = persist_volume(&store, native_volume, 35., |volume| {
+            attempted.push(volume);
+            native_volume = volume;
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Could not save volume; the previous volume was restored")
+        );
+        assert_eq!(attempted, [35., 47.]);
+        assert_eq!(native_volume, 47.);
+        assert_eq!(store.read().unwrap().playback.volume, 47.);
+    }
+
+    #[test]
+    fn volume_save_and_restore_failures_are_both_reported() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preferences.json");
+        let store = PreferencesStore::open(path.clone()).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let mut attempted = vec![];
+        let error = persist_volume(&store, 80., 35., |volume| {
+            attempted.push(volume);
+            if volume == 80. {
+                anyhow::bail!("native restore failed");
+            }
+            Ok(())
+        })
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("Could not save volume:"));
+        assert!(
+            message.contains("restoring the previous volume also failed: native restore failed")
+        );
+        assert_eq!(attempted, [35., 80.]);
+        assert_eq!(store.read().unwrap().playback.volume, 80.);
+    }
 }
 
 #[cfg(test)]

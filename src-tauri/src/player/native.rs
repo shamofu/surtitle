@@ -15,6 +15,7 @@ type Create = unsafe extern "C" fn() -> Handle;
 type Init = unsafe extern "C" fn(Handle) -> i32;
 type Set = unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> i32;
 type Command = unsafe extern "C" fn(Handle, *const *const c_char) -> i32;
+type ErrorString = unsafe extern "C" fn(i32) -> *const c_char;
 type GetString = unsafe extern "C" fn(Handle, *const c_char) -> *mut c_char;
 type Free = unsafe extern "C" fn(*mut c_void);
 type Destroy = unsafe extern "C" fn(Handle);
@@ -61,6 +62,7 @@ pub struct Mpv {
     child: windows_sys::Win32::Foundation::HWND,
     set: Set,
     command: Command,
+    error_string: ErrorString,
     get_string: GetString,
     free: Free,
     destroy: Destroy,
@@ -94,6 +96,7 @@ impl Mpv {
             let option: Set = *lib.get(b"mpv_set_option_string\0")?;
             let set: Set = *lib.get(b"mpv_set_property_string\0")?;
             let command: Command = *lib.get(b"mpv_command\0")?;
+            let error_string: ErrorString = *lib.get(b"mpv_error_string\0")?;
             let get_string: GetString = *lib.get(b"mpv_get_property_string\0")?;
             let free: Free = *lib.get(b"mpv_free\0")?;
             let destroy: Destroy = *lib.get(b"mpv_terminate_destroy\0")?;
@@ -146,7 +149,10 @@ impl Mpv {
                 if !accepts_mpv_option_result(key, &value, result) {
                     destroy(handle);
                     DestroyWindow(child);
-                    bail!("libmpv rejected required option {key} ({result})");
+                    bail!(
+                        "libmpv rejected required option {key}: {}",
+                        describe_error(error_string, result)
+                    );
                 }
             }
             #[cfg(feature = "e2e-test")]
@@ -159,13 +165,20 @@ impl Mpv {
                 if result < 0 {
                     destroy(handle);
                     DestroyWindow(child);
-                    bail!("libmpv rejected required E2E option {key} ({result})");
+                    bail!(
+                        "libmpv rejected required E2E option {key}: {}",
+                        describe_error(error_string, result)
+                    );
                 }
             }
-            if init(handle) < 0 {
+            let result = init(handle);
+            if result < 0 {
                 destroy(handle);
                 DestroyWindow(child);
-                bail!("libmpv initialization failed");
+                bail!(
+                    "libmpv initialization failed: {}",
+                    describe_error(error_string, result)
+                );
             }
             Ok(Self {
                 _library: lib,
@@ -173,6 +186,7 @@ impl Mpv {
                 child,
                 set,
                 command,
+                error_string,
                 get_string,
                 free,
                 destroy,
@@ -184,9 +198,11 @@ impl Mpv {
     }
     pub fn set(&self, key: &str, value: &str) -> Result<()> {
         let (k, v) = (CString::new(key)?, CString::new(value)?);
+        let result = unsafe { (self.set)(self.handle, k.as_ptr(), v.as_ptr()) };
         ensure!(
-            unsafe { (self.set)(self.handle, k.as_ptr(), v.as_ptr()) } >= 0,
-            "mpv property {key} rejected"
+            result >= 0,
+            "mpv property {key} rejected: {}",
+            describe_error(self.error_string, result)
         );
         Ok(())
     }
@@ -197,9 +213,12 @@ impl Mpv {
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let mut ptrs: Vec<_> = strings.iter().map(|s| s.as_ptr()).collect();
         ptrs.push(ptr::null());
+        let result = unsafe { (self.command)(self.handle, ptrs.as_ptr()) };
         ensure!(
-            unsafe { (self.command)(self.handle, ptrs.as_ptr()) } >= 0,
-            "mpv command failed"
+            result >= 0,
+            "mpv command {} failed: {}",
+            args.first().copied().unwrap_or("<empty>"),
+            describe_error(self.error_string, result)
         );
         Ok(())
     }
@@ -224,6 +243,47 @@ impl Mpv {
     }
     pub fn on_surface_click(&self, callback: impl Fn() + Send + Sync + 'static) -> Result<()> {
         input::install(self.child, std::sync::Arc::new(callback))
+    }
+    #[cfg(all(test, feature = "e2e-test"))]
+    pub(super) fn hold_file_load_for_test(&self, name: &str) -> Result<()> {
+        // A dedicated test player keeps this hook for its entire lifetime.
+        type AddHook = unsafe extern "C" fn(Handle, u64, *const c_char, i32) -> i32;
+        let add: AddHook = unsafe { *self._library.get(b"mpv_hook_add\0")? };
+        let name = CString::new(name)?;
+        ensure!(
+            unsafe { add(self.handle, 1, name.as_ptr(), 0) } >= 0,
+            "could not install test load hook"
+        );
+        Ok(())
+    }
+    #[cfg(all(test, feature = "e2e-test"))]
+    pub(super) fn wait_file_load_hook_for_test(&self) -> Result<u64> {
+        #[repr(C)]
+        struct Hook {
+            name: *const c_char,
+            id: u64,
+        }
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            unsafe {
+                let event = (self.wait)(self.handle, 0.01);
+                if !event.is_null() && (*event).event_id == 25 && !(*event).data.is_null() {
+                    let hook = &*(*event).data.cast::<Hook>();
+                    return Ok(hook.id);
+                }
+            }
+            ensure!(Instant::now() < deadline, "test load hook was not reached");
+        }
+    }
+    #[cfg(all(test, feature = "e2e-test"))]
+    pub(super) fn resume_file_load_for_test(&self, id: u64) -> Result<()> {
+        type ContinueHook = unsafe extern "C" fn(Handle, u64) -> i32;
+        let resume: ContinueHook = unsafe { *self._library.get(b"mpv_hook_continue\0")? };
+        ensure!(
+            unsafe { resume(self.handle, id) } >= 0,
+            "could not resume test load"
+        );
+        Ok(())
     }
     #[cfg(all(test, feature = "e2e-test"))]
     pub(super) fn surface_window(&self) -> windows_sys::Win32::Foundation::HWND {
@@ -344,6 +404,18 @@ impl Mpv {
             (self.free_node)(&mut node);
             result
         }
+    }
+}
+fn describe_error(error_string: ErrorString, code: i32) -> String {
+    // libmpv owns this static string; the loaded library outlives the call.
+    let message = unsafe { error_string(code) };
+    if message.is_null() {
+        format!("unknown mpv error ({code})")
+    } else {
+        format!(
+            "{} ({code})",
+            unsafe { CStr::from_ptr(message) }.to_string_lossy()
+        )
     }
 }
 fn place_video_window(child: windows_sys::Win32::Foundation::HWND, b: &Bounds) -> Result<()> {

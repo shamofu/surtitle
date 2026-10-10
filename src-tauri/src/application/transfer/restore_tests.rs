@@ -481,21 +481,23 @@ fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
     assert!(!parent.0.is_null());
     let state = Services::open(temporary.path().join("data")).unwrap();
     let archive = seed(&state, &source.canonicalize().unwrap());
-    {
-        let mut preferences = state.preferences.test_value().unwrap();
-        preferences.settings.sentence_pause = true;
-        state.preferences.save_test_value(&preferences).unwrap();
-    }
+    state
+        .preferences
+        .update(|preferences| {
+            preferences.settings.sentence_pause = true;
+            preferences.playback.volume = 37.5;
+            Ok(())
+        })
+        .unwrap();
     let preferences_before = std::fs::read(state.root.join("preferences.json")).unwrap();
     let costs_before = serde_json::to_value(state.ai.summary().unwrap()).unwrap();
+    let resources = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
     state
-        .playback
-        .install(Ok(crate::player::Player::new(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("resources"),
-            parent.0 as isize,
-        )
-        .unwrap()))
+        .initialize_player(&resources, parent.0 as isize, || {})
         .unwrap();
+    wait(&state, "apply saved volume before first media", |current| {
+        current.volume == 37.5
+    });
     {
         let mut playback = state.playback.operation().unwrap();
         let db = lock(&state.db).unwrap();
@@ -513,6 +515,7 @@ fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
     let old = wait(&state, "load pre-restore media", |current| {
         current.ready && current.position_ms >= 2100
     });
+    assert_eq!(old.volume, 37.5);
     assert_eq!(
         old.tracks
             .iter()
@@ -631,6 +634,7 @@ fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
         current.ready && (500..=800).contains(&current.position_ms)
     });
     assert!(restored.paused);
+    assert_eq!(restored.volume, 37.5);
     assert_eq!(
         restored
             .tracks
@@ -732,5 +736,21 @@ fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
     );
     assert!(!state.playback_tick(true).unwrap().ready);
     assert!(lock(&state.db).unwrap().list_media().unwrap().is_empty());
-    state.playback.shutdown().unwrap();
+    let data_directory = state.root.clone();
+    state.shutdown();
+    drop(state);
+    // Open a new services instance to prove this comes from preferences on disk,
+    // rather than the previous player's retained in-memory state.
+    let reopened = Services::open(data_directory).unwrap();
+    reopened
+        .initialize_player(&resources, parent.0 as isize, || {})
+        .unwrap();
+    wait(&reopened, "restore volume after app restart", |current| {
+        current.volume == 37.5
+    });
+    assert_eq!(
+        std::fs::read(reopened.root.join("preferences.json")).unwrap(),
+        preferences_before
+    );
+    reopened.shutdown();
 }

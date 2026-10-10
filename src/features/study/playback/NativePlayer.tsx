@@ -515,7 +515,7 @@ export function NativePlayer({
                 </select>
                 <ChevronDown size={12} />
               </label>
-              <VolumeControl key={media.id} value={state?.volume ?? 100} disabled={controlsDisabled}
+              <VolumeControl key={media.id} value={state?.volume ?? 80} disabled={controlsDisabled}
                 label={t('音量', 'Volume')} onChange={changeVolume} />
               <IconButton label={t('全画面表示を切り替える', 'Toggle fullscreen')} aria-pressed={fullscreen} disabled={!loaded} onClick={() => {
                 const next = !fullscreen;

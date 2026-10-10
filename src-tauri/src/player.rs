@@ -98,6 +98,8 @@ pub struct Player {
     loading_seek: Option<SeekRequest>,
     #[cfg(windows)]
     subtitle_track: Option<i64>,
+    #[cfg(windows)]
+    pending_subtitle: Option<tempfile::TempPath>,
     #[allow(dead_code)]
     tick: Instant,
 }
@@ -114,10 +116,13 @@ impl Player {
         }
         #[cfg(any(windows, feature = "e2e-test"))]
         {
+            let state = PlayerState::default();
+            #[cfg(windows)]
+            native.set("volume", &state.volume.to_string())?;
             Ok(Self {
                 #[cfg(windows)]
                 native,
-                state: PlayerState::default(),
+                state,
                 stops: PlaybackStops::default(),
                 pending_load: None,
                 #[cfg(windows)]
@@ -126,6 +131,8 @@ impl Player {
                 loading_seek: None,
                 #[cfg(windows)]
                 subtitle_track: None,
+                #[cfg(windows)]
+                pending_subtitle: None,
                 tick: Instant::now(),
             })
         }
@@ -161,6 +168,7 @@ impl Player {
             self.pending_seek = None;
             self.loading_seek = None;
             self.subtitle_track = None;
+            self.pending_subtitle = None;
         }
         Ok(())
     }
@@ -190,6 +198,7 @@ impl Player {
         {
             self.pending_seek = None;
             self.loading_seek = None;
+            self.pending_subtitle = None;
             self.native.drain_events();
             self.native.command(&[
                 "loadfile",
@@ -235,6 +244,19 @@ impl Player {
     pub fn subtitle(&mut self, path: &Path) -> Result<()> {
         #[cfg(windows)]
         {
+            if self.pending_load.is_some() {
+                // loadfile is asynchronous; sub-add can fail while a previous
+                // file is being unloaded. Own a copy because the caller removes
+                // its generated SRT as soon as this method returns.
+                let pending = tempfile::Builder::new()
+                    .prefix("surtitle-caption-")
+                    .suffix(".srt")
+                    .tempfile()?
+                    .into_temp_path();
+                std::fs::copy(path, &pending).context("Could not prepare playback subtitles")?;
+                self.pending_subtitle = Some(pending);
+                return Ok(());
+            }
             self.native.command(&[
                 "sub-add",
                 path.to_str().context("invalid Unicode path")?,
@@ -255,6 +277,7 @@ impl Player {
     pub fn clear_subtitle(&mut self) -> Result<()> {
         #[cfg(windows)]
         {
+            self.pending_subtitle = None;
             let selected = self.native.number("sid").map(|v| v as i64);
             clear_managed_subtitle(&mut self.subtitle_track, selected, |args| {
                 self.native.command(args)
@@ -479,6 +502,7 @@ impl Player {
                 self.pending_load = None;
                 self.pending_seek = None;
                 self.loading_seek = None;
+                self.pending_subtitle = None;
             }
             let mut restored_now = false;
             if loaded
@@ -491,6 +515,9 @@ impl Player {
                 let (_, position, audio) = self.pending_load.take().unwrap();
                 let tracks = self.native.tracks();
                 let restore = (|| -> Result<()> {
+                    if let Some(path) = self.pending_subtitle.take() {
+                        self.subtitle(&path)?;
+                    }
                     if let Some(index) = audio {
                         let track = tracks
                             .iter()
@@ -1007,6 +1034,99 @@ mod subtitle_tests {
         assert!(!parent.is_null());
         {
             let resources = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
+            let mut reopening = Player::new(&resources, parent as isize).unwrap();
+            assert_eq!(reopening.native.number("volume"), Some(80.));
+            let invalid = reopening
+                .native
+                .command(&["surtitle-invalid-command"])
+                .unwrap_err()
+                .to_string();
+            assert!(
+                invalid.contains("mpv command surtitle-invalid-command failed:"),
+                "{invalid}"
+            );
+            assert!(invalid.contains("invalid parameter (-4)"), "{invalid}");
+            // Development StrictMode and quick navigation can reopen media
+            // before an earlier native load has finished.
+            for attempt in 0..20 {
+                let previous = reopening
+                    .pending_subtitle
+                    .as_ref()
+                    .map(|path| path.to_path_buf());
+                reopening.load(&source).unwrap();
+                assert!(previous.is_none_or(|path| !path.exists()));
+                let caption = temp.path().join("reopening.srt");
+                std::fs::write(
+                    &caption,
+                    format!("1\n00:00:00,000 --> 00:00:03,000\nReopened caption {attempt}\n"),
+                )
+                .unwrap();
+                reopening
+                    .subtitle(&caption)
+                    .unwrap_or_else(|error| panic!("rapid load {attempt}: {error}"));
+                std::fs::remove_file(caption).unwrap();
+            }
+            let pending = reopening.pending_subtitle.as_ref().unwrap().to_path_buf();
+            wait_for_hidden_subtitle(&mut reopening, "Reopened caption 19");
+            assert!(!pending.exists());
+            assert_eq!(
+                reopening
+                    .poll()
+                    .tracks
+                    .iter()
+                    .filter(|track| track.title == "Surtitle")
+                    .count(),
+                1
+            );
+
+            // Clearing captions or stopping before FILE_LOADED must discard
+            // both the deferred update and its private temporary file.
+            reopening.load(&source).unwrap();
+            reopening.subtitle(&embedded).unwrap();
+            let pending = reopening.pending_subtitle.as_ref().unwrap().to_path_buf();
+            reopening.clear_subtitle().unwrap();
+            assert!(reopening.pending_subtitle.is_none());
+            assert!(!pending.exists());
+            reopening.subtitle(&embedded).unwrap();
+            let pending = reopening.pending_subtitle.as_ref().unwrap().to_path_buf();
+            reopening.stop().unwrap();
+            assert!(reopening.pending_subtitle.is_none());
+            assert!(!pending.exists());
+        }
+        for hook in ["on_load", "on_preloaded"] {
+            // Hold mpv while it opens the file, so the first subtitle refresh
+            // is guaranteed to happen during loading regardless of disk speed.
+            let resources = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
+            let mut delayed = Player::new(&resources, parent as isize).unwrap();
+            let opening_subtitle = temp.path().join("delayed-opening.srt");
+            std::fs::write(
+                &opening_subtitle,
+                "1\n00:00:00,000 --> 00:00:03,000\nQueued study caption\n",
+            )
+            .unwrap();
+            delayed.native.hold_file_load_for_test(hook).unwrap();
+            delayed.load(&source).unwrap();
+            let hook_id = delayed.native.wait_file_load_hook_for_test().unwrap();
+            delayed.subtitle(&embedded).unwrap();
+            let replaced = delayed.pending_subtitle.as_ref().unwrap().to_path_buf();
+            let subtitle_result = delayed.subtitle(&opening_subtitle);
+            assert!(!replaced.exists());
+            std::fs::remove_file(&opening_subtitle).unwrap();
+            delayed.native.resume_file_load_for_test(hook_id).unwrap();
+            subtitle_result.unwrap_or_else(|error| panic!("{hook}: {error}"));
+            wait_for_hidden_subtitle(&mut delayed, "Queued study caption");
+            let managed = delayed
+                .poll()
+                .tracks
+                .into_iter()
+                .find(|track| track.title == "Surtitle")
+                .unwrap();
+            assert_eq!(delayed.subtitle_track, Some(managed.id));
+            delayed.subtitle(&embedded).unwrap();
+            wait_for_hidden_subtitle(&mut delayed, "Embedded caption");
+        }
+        {
+            let resources = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
             let mut player = Player::new(&resources, parent as isize).unwrap();
             assert_subtitles_hidden(&player);
             assert!(
@@ -1018,6 +1138,16 @@ mod subtitle_tests {
             player
                 .load_selected(&source.canonicalize().unwrap(), 1500, Some(2))
                 .unwrap();
+            // The app refreshes its study subtitles immediately after loadfile,
+            // before the first FILE_LOADED event, and removes the source file.
+            let opening_subtitle = temp.path().join("opening.srt");
+            std::fs::write(
+                &opening_subtitle,
+                "1\n00:00:00,000 --> 00:00:03,000\nFirst load study caption\n",
+            )
+            .unwrap();
+            player.subtitle(&opening_subtitle).unwrap();
+            std::fs::remove_file(&opening_subtitle).unwrap();
             assert!(!player.state.ready);
             assert_eq!(player.state.position_ms, 1500);
             assert_eq!(player.poll().revision, initial_revision + 1);
@@ -1050,6 +1180,7 @@ mod subtitle_tests {
                 "resume position was {}",
                 state.position_ms
             );
+            wait_for_hidden_subtitle(&mut player, "First load study caption");
             let embedded_track = state
                 .tracks
                 .iter()
