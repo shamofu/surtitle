@@ -8,6 +8,7 @@ import {
   useNotifications,
 } from '../../app/runtime';
 import { Button, Field, Modal, useModalExit } from '../../shared/ui/index';
+import { MotionRegion, MotionSwap } from '../../shared/motion';
 
 export function EditCardDialog({
   card,
@@ -132,7 +133,7 @@ export function EditCardDialog({
             'Saved audio and your review schedule stay unchanged.',
           )}
         </p>
-        {saveError && <p className="notice warning" role="alert">{saveError}</p>}
+        <MotionRegion open={!!saveError}><p className="notice warning" role="alert"><MotionSwap as="span" stateKey={saveError}>{saveError}</MotionSwap></p></MotionRegion>
         <footer className="modal-footer">
           <Button onClick={close}>
             {t('キャンセル', 'Cancel')}
@@ -154,7 +155,7 @@ export function EditCardDialog({
         closeDisabled={busy || confirmationExit.exiting}
       >
         <p>{t('このフレーズには未保存の変更があります。', 'This phrase has unsaved changes.')}</p>
-        {saveError && <p className="notice warning" role="alert">{saveError}</p>}
+        <MotionRegion open={!!saveError}><p className="notice warning" role="alert"><MotionSwap as="span" stateKey={saveError}>{saveError}</MotionSwap></p></MotionRegion>
         <footer className="modal-footer">
           <Button disabled={busy} onClick={keepEditing}>{t('編集を続ける', 'Keep editing')}</Button>
           <Button variant="danger" disabled={busy} onClick={() => void closeEditor()}>{t('保存せずに閉じる', 'Discard changes')}</Button>

@@ -32,6 +32,7 @@ import {
 import { TransferDialog } from '../transfer/TransferDialog';
 import { EditCardDialog, DeleteCardDialog } from './CardManagement';
 import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
 
 function closePhraseMenu(element: HTMLElement, restoreFocus = true) {
   const menu = element.closest('details');
@@ -102,13 +103,13 @@ export function CardsPage() {
         <Link to="/review" className="button primary">
           <BookOpen size={17} />
           {t('復習する', 'Start review')}
-          {due.length > 0 && <span className="button-count">{due.length}</span>}
+          <MotionRegion open={due.length > 0} as="span"><span className="button-count"><AnimatedValue value={due.length} /></span></MotionRegion>
         </Link>
       </PageTitle>
       <div className="library-toolbar">
         <div className="section-heading">
           <h2>{t('保存した表現', 'Saved phrases')}</h2>
-          <span className="count-pill">{filtered.length}</span>
+          <span className="count-pill"><AnimatedValue value={filtered.length} /></span>
         </div>
         <div className="library-tools">
           <select
@@ -133,12 +134,13 @@ export function CardsPage() {
               placeholder={t('フレーズを検索', 'Search your phrases')}
               aria-label={t('フレーズを検索', 'Search your phrases')}
             />
-            {search && <IconButton label={t('検索をクリア', 'Clear search')} onClick={() => {
+            <MotionRegion open={!!search} as="span"><IconButton label={t('検索をクリア', 'Clear search')} onClick={() => {
               setSearch(''); searchInput.current?.focus();
-            }}><X size={15} /></IconButton>}
+            }}><X size={15} /></IconButton></MotionRegion>
           </div>
         </div>
       </div>
+      <MotionSwap stateKey={!data && loading ? 'loading' : !data && error ? 'error' : `${language}:${filtered.map(card => card.id).join('|')}`}>
       {!data && loading ? <p role="status">{t('フレーズを読み込み中…', 'Loading your phrases…')}</p>
       : !data && error ? <div className="notice warning" role="alert">
         <span>{t('フレーズを読み込めませんでした。', 'Could not load your phrases.')} {error.message}</span>
@@ -179,7 +181,7 @@ export function CardsPage() {
             return (
               <article className="phrase-card" key={card.id}>
                 <header>
-                  <h3>{card.term}</h3>
+                  <h3><MotionSwap as="span" stateKey={card.term}>{card.term}</MotionSwap></h3>
                   <div className="phrase-controls">
                     <Button
                       variant="ghost"
@@ -237,8 +239,8 @@ export function CardsPage() {
                     </AnimatedDetails>
                   </div>
                 </header>
-                <p className="phrase-meaning">{card.meaning}</p>
-                <blockquote>{card.example}</blockquote>
+                <p className="phrase-meaning"><MotionSwap as="span" stateKey={card.meaning}>{card.meaning}</MotionSwap></p>
+                <blockquote><MotionSwap as="span" stateKey={card.example}>{card.example}</MotionSwap></blockquote>
                 <footer>
                   {media ? (
                     <Link
@@ -255,19 +257,20 @@ export function CardsPage() {
                         t('除外した教材の文脈', 'Context from removed media')}
                     </span>
                   )}
-                  <Badge tone={isDue ? 'accent' : 'neutral'}>
+                  <MotionSwap as="span" stateKey={`${card.suspended}:${isDue}:${card.language}`}><Badge tone={isDue ? 'accent' : 'neutral'}>
                     {card.suspended
                       ? t('復習を停止中', 'Reviews suspended')
                       : isDue
                         ? t('復習の時間', 'Ready to review')
                         : languageName(card.language, locale)}
-                  </Badge>
+                  </Badge></MotionSwap>
                 </footer>
               </article>
             );
           })}
         </div>
       )}
+      </MotionSwap>
       {transfer && <TransferDialog onClose={() => setTransfer(false)} />}
       {edit && (
         <EditCardDialog card={edit} onClose={() => setEdit(undefined)} />

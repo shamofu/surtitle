@@ -14,6 +14,7 @@ import type { Media } from '../../../shared/contracts/media';
 import { useAppearance, useNotifications } from '../../../app/runtime';
 
 import { timestamp } from '../../../shared/format';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../../../shared/motion';
 
 import { Badge, Button, EmptyState, Field } from '../../../shared/ui/index';
 import './draft-study.css';
@@ -115,7 +116,7 @@ function DraftStudyContent({
         </div>
         <Badge tone="warning">{t('下書き', 'Draft')}</Badge>
       </header>
-      {error && (
+      <MotionRegion open={!!error}>{error && (
         <p className="notice warning" role="status">
           {t('下書きの更新に失敗しました。', 'Could not refresh drafts.')}{' '}
           {error}{' '}
@@ -123,7 +124,7 @@ function DraftStudyContent({
             {t('再読込', 'Reload')}
           </Button>
         </p>
-      )}
+      )}</MotionRegion>
       {jobs.length > 0 && (
         <Field label={t('文字起こしの下書き', 'Transcription draft')}>
           <select
@@ -142,15 +143,15 @@ function DraftStudyContent({
           </select>
         </Field>
       )}
-      {loading && !view && (
+      <MotionRegion open={loading && !view}>
         <p role="status">{t('下書きを読み込み中…', 'Loading drafts…')}</p>
-      )}
+      </MotionRegion>
       {view && (
         <>
           <div className="scope-heading">
             <span>
               {timestamp(view.draft.startMs)}–{timestamp(view.draft.endMs)} ·{' '}
-              {cues.length} {t('字幕', 'subtitles')}
+              <AnimatedValue value={`${cues.length} ${t('字幕', 'subtitles')}`} />
             </span>
             <Button onClick={() => onReview(view.jobId)}>
               {t('全体を確認・採用', 'Review or adopt the full result')}
@@ -165,7 +166,7 @@ function DraftStudyContent({
               )}
             </p>
           )}
-          <div
+          <MotionSwap stateKey={`${effectivePage}:${cues.map(cue => cue.id).join(',')}`}
             className="draft-study-cues"
             role="list"
             aria-label={t('利用できる下書き字幕', 'Available draft subtitles')}
@@ -238,7 +239,7 @@ function DraftStudyContent({
                 )}
               </p>
             )}
-          </div>
+          </MotionSwap>
           {cues.length > PAGE_SIZE && (
             <div className="draft-study-pagination">
               <Button
@@ -247,9 +248,7 @@ function DraftStudyContent({
               >
                 {t('前へ', 'Previous')}
               </Button>
-              <span>
-                {effectivePage + 1} / {Math.ceil(cues.length / PAGE_SIZE)}
-              </span>
+              <AnimatedValue value={`${effectivePage + 1} / ${Math.ceil(cues.length / PAGE_SIZE)}`} />
               <Button
                 disabled={(effectivePage + 1) * PAGE_SIZE >= cues.length}
                 onClick={() => setPage(effectivePage + 1)}
@@ -390,10 +389,7 @@ function DraftStudyContent({
                 >
                   {t('前の音声区間', 'Previous source blocks')}
                 </Button>
-                <span>
-                  {effectiveBlockPage + 1} /{' '}
-                  {Math.ceil(chunks.length / BLOCK_PAGE_SIZE)}
-                </span>
+                <AnimatedValue value={`${effectiveBlockPage + 1} / ${Math.ceil(chunks.length / BLOCK_PAGE_SIZE)}`} />
                 <Button
                   disabled={
                     (effectiveBlockPage + 1) * BLOCK_PAGE_SIZE >= chunks.length
@@ -433,7 +429,7 @@ function DraftStudyContent({
           </div>
         </div>
       )}
-      {active && (
+      <MotionRegion open={!!active}>{active && (
         <DraftSelectionEditor
           key={`${active.id}:${active.version}`}
           selection={{
@@ -460,7 +456,7 @@ function DraftStudyContent({
           onClose={() => setActive(undefined)}
           onRemoved={removeActive}
         />
-      )}
+      )}</MotionRegion>
     </section>
   );
 }

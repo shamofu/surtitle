@@ -40,7 +40,7 @@
 .media-row-position { font-variant-numeric: tabular-nums; }
 .media-row-position .muted { color: var(--muted); }
 .media-progress { display: block; height: 3px; background: var(--border); border-radius: 2px; margin-top: 9px; overflow: hidden; }
-.media-progress > span { display: block; background: var(--accent); height: 100%; }
+.media-progress > span { display: block; background: var(--accent); height: 100%; transition: width var(--motion-fast) var(--motion-ease); }
 .media-mobile-label { display: none; }
 .library-empty { border-top: 1px solid var(--border); min-height: 330px; display: grid; place-items: center; }
 .empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 38px 24px; max-width: 510px; margin: auto; }

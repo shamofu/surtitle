@@ -134,7 +134,7 @@
   font-size: 14px;
   font-weight: 500;
 }
-.import-drop span {
+.import-drop > span {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.8;

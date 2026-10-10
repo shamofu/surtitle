@@ -16,6 +16,7 @@ import { Button, Field, Modal, useModalExit } from '../../shared/ui/index';
 import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { useActivities } from '../../app/providers/Activities';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
 
 export function DownloadJobs() {
   const { activities } = useActivities();
@@ -33,7 +34,6 @@ export function DownloadJobs() {
     await report(action);
     setBusyId(undefined);
   }
-  if (!query.data?.length && !query.error) return null;
   const phases: Record<string, string> = {
     preparing: t('準備中', 'Preparing'),
     preparing_tools: t('メディアツールを準備中', 'Preparing media tools'),
@@ -49,12 +49,14 @@ export function DownloadJobs() {
     interrupted: t('中断', 'Interrupted'),
   };
   return (
+    <MotionRegion open={!!query.data?.length || !!query.error}>
     <section
       className="download-jobs"
       aria-label={t('ダウンロード', 'Downloads')}
     >
       <h2>{t('ダウンロード', 'Downloads')}</h2>
-      {query.error && <p role="alert">{query.error.message}</p>}
+      <MotionRegion open={!!query.error}><p role="alert">{query.error?.message}</p></MotionRegion>
+      <MotionSwap stateKey={query.data?.slice(0, 10).map(job => job.id).join('|') || ''}>
       {query.data?.slice(0, 10).map((job) => (
         <article
           key={job.id}
@@ -63,6 +65,7 @@ export function DownloadJobs() {
         >
           <div>
             <strong>{job.request.title || job.request.pathOrUrl}</strong>
+            <MotionSwap stateKey={job.status === 'running' ? 'running' : job.status}>
             {job.status === 'running' ? <ProgressStatus
               label={t('ダウンロード中', 'Downloading')}
               phase={job.phase}
@@ -81,20 +84,24 @@ export function DownloadJobs() {
                   {job.status === 'completed'
                     ? t('保存中の容量', 'Stored size')
                     : t('削除前の保存容量', 'Size before cleanup')}{' '}
-                  {(job.storedBytes / 1024 / 1024).toFixed(1)} MiB
+                  <AnimatedValue value={`${(job.storedBytes / 1024 / 1024).toFixed(1)} MiB`} />
                 </>
               )}
             </p>}
+            </MotionSwap>
+            <MotionSwap stateKey={activities.filter(activity => activity.parentId === `download:${job.id}` && activity.status === 'running').map(activity => activity.id).join('|')}>
             {activities.filter(activity => activity.parentId === `download:${job.id}` && activity.status === 'running').map(activity =>
               <ProgressStatus key={activity.id} {...activity} compact />,
             )}
-            {job.error && (
+            </MotionSwap>
+            <MotionRegion open={!!job.error}>
               <AnimatedDetails>
                 <summary>{t('詳細', 'Details')}</summary>
                 <p>{job.error}</p>
               </AnimatedDetails>
-            )}
+            </MotionRegion>
           </div>
+          <MotionSwap as="span" stateKey={job.status === 'running' ? 'cancel' : job.mediaId ? 'open' : 'retry'}>
           {job.status === 'running' ? (
             <>
               <Button
@@ -132,9 +139,12 @@ export function DownloadJobs() {
               {t('最初から再試行', 'Retry from start')}
             </Button>
           )}
+          </MotionSwap>
         </article>
       ))}
+      </MotionSwap>
     </section>
+    </MotionRegion>
   );
 }
 
@@ -262,18 +272,19 @@ export function SubtitleSourceDialog({
           </button>
         ))}
       </div>
+      <MotionSwap stateKey={mode}>
       {mode === 'embedded' && (
         <>
-          {streams.isLoading && (
+          <MotionRegion open={streams.isLoading}>
             <ProgressStatus label={t(
                 'メディアツールで字幕一覧を確認しています。初回はツールの取得が必要です。',
                 'Inspecting subtitles with media tools. Tools may download on first use.',
               )} phase="inspecting" />
-          )}
-          {streams.error && <p role="alert">{streams.error.message}</p>}
-          {streams.data && initialStreamIndex !== undefined && !streams.data.some(item => item.index === initialStreamIndex && item.kind === 'subtitle' && item.supportedText) && <p className="notice warning">
+          </MotionRegion>
+          <MotionRegion open={!!streams.error}><p role="alert">{streams.error?.message}</p></MotionRegion>
+          <MotionRegion open={!!streams.data && initialStreamIndex !== undefined && !streams.data.some(item => item.index === initialStreamIndex && item.kind === 'subtitle' && item.supportedText)}><p className="notice warning">
             {t('再生中の字幕は学習用に読み込めません。別の字幕か全編の文字起こしを選んでください。', 'The playback captions cannot be imported for study. Choose another subtitle track or transcribe the full media.')}
-          </p>}
+          </p></MotionRegion>
           <Field label={t('抽出する字幕', 'Subtitle to extract')}>
             <select
               value={stream}
@@ -303,19 +314,18 @@ export function SubtitleSourceDialog({
                 ))}
             </select>
           </Field>
-          {streams.data &&
-            !streams.data.some((item) => item.kind === 'subtitle') && (
+          <MotionRegion open={!!streams.data && !streams.data.some((item) => item.kind === 'subtitle')}>
               <p>
                 {t(
                   'この作品に字幕はありません。全編の文字起こしか、字幕ファイルを利用できます。',
                   'No embedded subtitles were found. Transcribe the full media or choose a subtitle file.',
                 )}
               </p>
-            )}
-          {streams.data?.some(item => item.kind === 'subtitle') && !streams.data.some(item => item.kind === 'subtitle' && item.supportedText) && <p className="notice">
+          </MotionRegion>
+          <MotionRegion open={!!streams.data?.some(item => item.kind === 'subtitle') && !streams.data?.some(item => item.kind === 'subtitle' && item.supportedText)}><p className="notice">
             {t('画像の字幕は学習用に読み込めません。全編の文字起こしか字幕ファイルを利用してください。', 'Image captions cannot be used for study. Transcribe the full media or choose a subtitle file.')}
-          </p>}
-          {streams.data && <AnimatedDetails><summary>{t('字幕の詳細', 'Subtitle details')}</summary><ul>{streams.data.filter(item => item.kind === 'subtitle').map(item => <li key={item.index}>{item.title || item.language || t('字幕', 'Subtitle')} · {item.codec} · #{item.index}</li>)}</ul></AnimatedDetails>}
+          </p></MotionRegion>
+          <MotionRegion open={!!streams.data}><AnimatedDetails><summary>{t('字幕の詳細', 'Subtitle details')}</summary><ul>{streams.data?.filter(item => item.kind === 'subtitle').map(item => <li key={item.index}>{item.title || item.language || t('字幕', 'Subtitle')} · {item.codec} · #{item.index}</li>)}</ul></AnimatedDetails></MotionRegion>
         </>
       )}
       {mode === 'transcribe' && <p>{t('動画・音声の全編から字幕を作成します。全体の見積もりを一度承認すると、最後まで自動で処理します。', 'Create subtitles for the entire video or recording. Review one estimate, then processing continues to the end automatically.')}</p>}
@@ -329,7 +339,7 @@ export function SubtitleSourceDialog({
       )}
       {mode === 'versions' && (
         <>
-          {versions.error && <p role="alert">{versions.error.message}</p>}
+          <MotionRegion open={!!versions.error}><p role="alert">{versions.error?.message}</p></MotionRegion>
           <Field label={t('復帰する旧版', 'Version to restore')}>
             <select
               value={version}
@@ -347,12 +357,13 @@ export function SubtitleSourceDialog({
               ))}
             </select>
           </Field>
-          {versions.data?.length === 0 && (
+          <MotionRegion open={versions.data?.length === 0}>
             <p>{t('保存した旧版はありません。', 'No saved versions yet.')}</p>
-          )}
+          </MotionRegion>
         </>
       )}
-      {hasExisting && mode !== 'transcribe' && (
+      </MotionSwap>
+      <MotionRegion open={hasExisting && mode !== 'transcribe'}>
         <label className="check-field">
           <input
             type="checkbox"
@@ -367,14 +378,14 @@ export function SubtitleSourceDialog({
             )}
           </span>
         </label>
-      )}
+      </MotionRegion>
       <p className="helper-text">
         {t(
           '保存済みフレーズの文脈・音声・復習履歴は保持します。',
           'Saved phrases keep their context, audio, and review history.',
         )}
       </p>
-      {busy && <ProgressStatus label={media.title} phase={mode === 'embedded' ? 'extracting_subtitles' : mode === 'file' ? 'importing' : 'restoring'} />}
+      <MotionRegion open={busy}><ProgressStatus label={media.title} phase={mode === 'embedded' ? 'extracting_subtitles' : mode === 'file' ? 'importing' : 'restoring'} /></MotionRegion>
       <footer className="modal-footer">
         <Button disabled={busy} onClick={close}>
           {t('キャンセル', 'Cancel')}
@@ -385,9 +396,9 @@ export function SubtitleSourceDialog({
           disabled={!canSubmit}
           onClick={() => void submit()}
         >
-          {mode === 'transcribe' ? t('全編の見積もりへ', 'Estimate full transcription') : mode === 'file'
+          <MotionSwap as="span" stateKey={mode}>{mode === 'transcribe' ? t('全編の見積もりへ', 'Estimate full transcription') : mode === 'file'
             ? t('ファイルを選ぶ', 'Choose file')
-            : t('この字幕へ切り替える', 'Use these subtitles')}
+            : t('この字幕へ切り替える', 'Use these subtitles')}</MotionSwap>
         </Button>
       </footer>
     </Modal>

@@ -15,7 +15,7 @@ import {
 } from '../../../app/runtime';
 import { timestamp } from '../../../shared/format';
 import { Badge, Button } from '../../../shared/ui/index';
-import { SubtitleRows, toEditRows, validatedRows } from './SubtitleRows';
+import { createEditRow, SubtitleRows, toEditRows, validatedRows } from './SubtitleRows';
 
 function originalText(response: unknown): string | undefined {
   // Copy only an unambiguous structured transcript, never its invalid timings.
@@ -92,7 +92,7 @@ export function TranscriptRangeEditor({
     );
     const text = originalText(detail?.evidence?.response);
     if (text) {
-      setRows((items) => [...items, { start: '', end: '', text }]);
+      setRows((items) => [...items, createEditRow({ start: '', end: '', text })]);
       setConfirmedSilence(false);
     } else setCopyFailed(true);
     setLoading(false);

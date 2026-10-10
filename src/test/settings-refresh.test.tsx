@@ -107,6 +107,32 @@ function snapshot(value: AppSettings): AppSnapshot {
 }
 
 describe('settings refresh preserves unrelated unsaved edits', () => {
+  it('preserves the external path input, focus and selection through committed tool refreshes', async () => {
+    context.data = {
+      ...snapshot(settings()),
+      tools: [{ id: 'deno', name: 'Deno', provider: 'managed', status: 'ready', version: '2.0', canRollback: false }],
+    };
+    const view = render(<SettingsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'External' }));
+    const path = screen.getByRole('textbox', { name: 'Absolute executable path' }) as HTMLInputElement;
+    path.focus();
+    fireEvent.compositionStart(path);
+    fireEvent.change(path, { target: { value: 'C:/作業中/deno.exe' } });
+    path.setSelectionRange(3, 6);
+    context.data = {
+      ...context.data,
+      tools: [{ ...context.data.tools[0], provider: 'external', path: 'C:/committed/deno.exe', version: '2.1' }],
+    };
+    view.rerender(<SettingsPage />);
+    expect(screen.getByRole('textbox', { name: 'Absolute executable path' })).toBe(path);
+    expect(path).toHaveValue('C:/作業中/deno.exe');
+    expect(path).toHaveFocus();
+    expect([path.selectionStart, path.selectionEnd]).toEqual([3, 6]);
+    fireEvent.compositionEnd(path);
+    expect(settingsApi.setToolProvider).not.toHaveBeenCalled();
+    await act(async () => {});
+  });
+
   it('normalizes legacy motion settings and only saves a changed preference on request', async () => {
     context.data = snapshot(settings());
     render(<SettingsPage />);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useRef, useState } from 'react';
 import { Volume2 } from 'lucide-react';
+import { AnimatedValue } from '../../../shared/motion';
 
 const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
 
@@ -12,6 +13,7 @@ export function VolumeControl({ value, disabled, label, onChange }: {
 }) {
   const container = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<number | null>(null);
+  const [interacting, setInteracting] = useState(false);
   const current = useRef(clamp(value));
   const pending = useRef<number | null>(null);
   const sending = useRef(false);
@@ -25,7 +27,7 @@ export function VolumeControl({ value, disabled, label, onChange }: {
     return () => { mounted.current = false; pending.current = null; };
   }, []);
   useEffect(() => {
-    if (disabled) { pending.current = null; setPreview(null); }
+    if (disabled) { pending.current = null; setPreview(null); setInteracting(false); }
   }, [disabled]);
 
   async function drain() {
@@ -76,8 +78,11 @@ export function VolumeControl({ value, disabled, label, onChange }: {
       <Volume2 size={16} aria-hidden="true" />
       <input className="volume-slider" type="range" min="0" max="100" step="1"
         value={displayed} disabled={disabled} aria-label={label} aria-valuetext={`${displayed}%`}
+        onPointerDown={() => setInteracting(true)} onPointerUp={() => setInteracting(false)}
+        onPointerCancel={() => setInteracting(false)} onBlur={() => setInteracting(false)}
+        onKeyDown={() => setInteracting(true)} onKeyUp={() => setInteracting(false)}
         onChange={event => update(event.currentTarget.valueAsNumber)} />
-      <span className="volume-value" aria-hidden="true">{displayed}%</span>
+      <span className="volume-value" aria-hidden="true"><AnimatedValue value={`${displayed}%`} immediate={interacting || preview !== null} /></span>
     </div>
   );
 }

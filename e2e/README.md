@@ -59,6 +59,8 @@ The AI recovery/transcript presets are authored saved results with explicit offl
 
 Windows test processes run at restricted medium integrity to support WebView2's driver environment and keep SQLite/WAL readers at the same integrity as the app. The launcher owns its process tree. WebDriver transport retries are disabled so timed-out mutations are not repeated. Script requests have bounded timeouts; failures retain screenshots and player/layout diagnostics under `test-results/native`.
 
+Resize Windows test windows with `resizeNativeWindow` from `support/native-window.mjs`. EdgeDriver's `setWindowSize` moves and resizes the nested Chromium window instead of the Tauri window, separating HTML from the native video surface. The helper targets only the configured test executable, resizes the top-level client area and verifies that the WebView fills it. Native motion and layout checks also compare the actual video HWND rectangle with the DOM viewport in physical pixels. `saveNativeScreenshot` captures the application window including its native children; WebDriver screenshots capture only the WebView.
+
 Focus a run with `pnpm test:e2e --spec ./e2e/native/draft-study.e2e.js` using the same prepared environment. Real FFmpeg/libmpv Rust integrations are selected through the [required suites](../docs/testing.md#explicit-rust-integration-suites).
 
 ## Saved-response local checks

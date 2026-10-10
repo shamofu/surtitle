@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+.job-actions-motion { margin-left: auto; }
 .job-actions {
   margin-left: auto;
   display: flex;
@@ -12,6 +13,7 @@
 .local-preparation {
   margin-bottom: 24px;
 }
+.local-preparation .animated-value { white-space: normal; }
 .ai-model-settings {
   margin: 24px 0;
   padding-top: 22px;

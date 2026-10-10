@@ -23,7 +23,7 @@ import {
 import { shouldIgnoreShortcut } from '../../shared/keyboard';
 import { dueCards, languageName } from '../../shared/format';
 import { Badge, Button } from '../../shared/ui/index';
-import { motionDurations, motionEase, useAppMotion } from '../../shared/motion';
+import { AnimatedValue, MotionSwap, motionDurations, motionEase, useAppMotion } from '../../shared/motion';
 
 export type Rating = 'again' | 'hard' | 'good' | 'easy';
 
@@ -175,6 +175,7 @@ export function ReviewCard({
             </Button>
           )}
         </div>
+        <MotionSwap stateKey={revealed ? 'revealed' : 'concealed'}>
         {revealed ? (
           <div className="review-answer">
             <span className="review-answer-label">{t('意味', 'Meaning')}</span>
@@ -195,6 +196,7 @@ export function ReviewCard({
             </Button>
           </div>
         )}
+        </MotionSwap>
         <footer>
           <BookOpen size={14} />
           {media ? (
@@ -205,18 +207,18 @@ export function ReviewCard({
             <span>{card.sourceTitle || t('保存した文脈', 'Saved context')}</span>
           )}
           <span className="review-card-reps">
-            {t(`${card.reviewCount} 回の復習`, `${card.reviewCount} reviews`)}
+            <AnimatedValue value={t(`${card.reviewCount} 回の復習`, `${card.reviewCount} reviews`)} />
           </span>
         </footer>
       </article>
       <div className={`rating-area ${revealed ? '' : 'waiting'}`}>
         <p>
-          {revealed
+          <MotionSwap as="span" stateKey={revealed ? 'revealed' : 'concealed'}>{revealed
             ? t('どれくらい思い出せましたか？', 'How well did you remember?')
             : t(
                 'まずは自分の言葉で意味を思い浮かべて。',
                 'Take a moment to recall the meaning in your own words.',
-              )}
+              )}</MotionSwap>
         </p>
         <div className="rating-buttons">
           {choices.map((choice, index) => (
@@ -277,7 +279,7 @@ export function ReviewPage() {
           {t('作品に戻る', 'Back to watching')}
         </Link>
         <span className="review-counter" aria-live="polite">
-          {t(`${reviewed.length} / ${total} 件`, `${reviewed.length} of ${total} reviewed`)}
+          <AnimatedValue value={t(`${reviewed.length} / ${total} 件`, `${reviewed.length} of ${total} reviewed`)} />
         </span>
       </div>
       <header className="review-title">

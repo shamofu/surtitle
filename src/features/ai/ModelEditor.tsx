@@ -9,6 +9,7 @@ import type { AiPurpose } from '../../shared/contracts/ai';
 import type { DiscoveredModel } from '../../shared/contracts/ai';
 import { useAppearance } from '../../app/runtime';
 import { Button, Field } from '../../shared/ui/index';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
 import './model-editor.css';
 
 export const emptyModel = (purpose: AiPurpose): AiModelPreference => ({
@@ -233,7 +234,7 @@ export function ModelEditor({
           ))}
         </datalist>
       </Field>
-      {candidates === undefined && (
+      <MotionRegion open={candidates === undefined}>
         <div className="inline-actions model-discovery-actions">
           <Button
             disabled={frozen || !nativeAvailable()}
@@ -244,8 +245,8 @@ export function ModelEditor({
             {t('Vertexから候補を取得', 'Fetch Vertex candidates')}
           </Button>
         </div>
-      )}
-      {purpose === 'transcription' && (
+      </MotionRegion>
+      <MotionRegion open={purpose === 'transcription'} keepMounted>
         <Field
           label={t('字幕の作り方', 'How to create subtitles')}
           hint={
@@ -285,7 +286,7 @@ export function ModelEditor({
             </option>
           </select>
         </Field>
-      )}
+      </MotionRegion>
       <Field
         label={t('回答の長さの上限', 'Output limit')}
         hint={
@@ -324,7 +325,7 @@ export function ModelEditor({
           {t('出力・思考・料金の設定', 'Output, thinking, and pricing')}
         </summary>
         <div className="model-editor-detail-content">
-          {customOutput && (
+          <MotionRegion open={customOutput} keepMounted>
             <Field
               error={!validOutputTokens(value.maxOutputTokens) ? t('1〜1,048,576 の整数を入力してください。', 'Enter a whole number between 1 and 1,048,576.') : undefined}
               label={t(
@@ -351,7 +352,7 @@ export function ModelEditor({
                 }
               />
             </Field>
-          )}
+          </MotionRegion>
           <Field label={t('思考設定', 'Thinking setting')}>
             <select
               value={thinking}
@@ -373,7 +374,7 @@ export function ModelEditor({
               </option>
             </select>
           </Field>
-          {thinking === 'level' && (
+          <MotionRegion open={thinking === 'level'} keepMounted>
             <Field label={t('思考レベル', 'Thinking level')}>
               <select
                 value={value.thinkingLevel || 'LOW'}
@@ -387,8 +388,8 @@ export function ModelEditor({
                 ))}
               </select>
             </Field>
-          )}
-          {thinking === 'budget' && (
+          </MotionRegion>
+          <MotionRegion open={thinking === 'budget'} keepMounted>
             <Field label={t('思考トークン予算', 'Thinking token budget')}>
               <input
                 type="number"
@@ -404,7 +405,7 @@ export function ModelEditor({
                 }
               />
             </Field>
-          )}
+          </MotionRegion>
           <p className="helper-text">
             {t(
               '対応しない設定はAPIエラーになります。自動で設定を変更して再送しません。',
@@ -421,7 +422,7 @@ export function ModelEditor({
             <Button disabled={frozen} onClick={() => setManual(!manual)}>
               {t('単価を手動設定', 'Set rates manually')}
             </Button>
-            {value.price && (
+            <MotionRegion as="span" open={!!value.price}>
               <Button
                 disabled={frozen}
                 onClick={() => {
@@ -431,10 +432,9 @@ export function ModelEditor({
               >
                 {t('料金未設定に戻す', 'Clear pricing')}
               </Button>
-            )}
+            </MotionRegion>
           </div>
-          {manual && (
-            <>
+          <MotionRegion open={manual} keepMounted>
               <div className="field-row">
                 <Field
                   label={t(
@@ -469,12 +469,11 @@ export function ModelEditor({
               >
                 {t('この単価を適用', 'Apply these rates')}
               </Button>
-            </>
-          )}
+          </MotionRegion>
         </div>
       </AnimatedDetails>
       <p className="helper-text">
-        {value.price
+        <AnimatedValue value={value.price
           ? t(
               `${value.price.source === 'user' ? '利用者設定' : '公式SKU'} · 入力 $${value.price.inputMicrousdPerMillion / 1_000_000} / 出力 $${value.price.outputMicrousdPerMillion / 1_000_000}（100万トークンあたり）`,
               `${value.price.source === 'user' ? 'User rates' : 'Public SKU rates'} · Input $${value.price.inputMicrousdPerMillion / 1_000_000} / output $${value.price.outputMicrousdPerMillion / 1_000_000} per million tokens`,
@@ -482,13 +481,13 @@ export function ModelEditor({
           : t(
               '料金未設定：送信範囲を承認して使えます。ドル上限は計算できません。',
               'Pricing is unset: approve the request scope to use this model. A dollar limit cannot be calculated.',
-            )}
+            )} />
       </p>
-      {notice && (
+      <MotionRegion open={!!notice}><MotionSwap stateKey={notice}>
         <p className="notice" role="status">
           {notice}
         </p>
-      )}
+      </MotionSwap></MotionRegion>
     </div>
   );
 }

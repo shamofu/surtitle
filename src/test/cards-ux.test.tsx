@@ -7,6 +7,7 @@ import { CardsPage } from '../features/cards/CardsPage';
 import { EditCardDialog } from '../features/cards/CardManagement';
 import { cardsApi } from '../features/cards/api';
 import type { StudyCard } from '../shared/contracts/cards';
+import { MotionProvider } from '../shared/motion';
 
 const fixture = vi.hoisted(() => ({
   data: undefined as { cards: StudyCard[]; media: [] } | undefined,
@@ -113,6 +114,43 @@ it('clears just the query and resets both filters from the empty results state',
   expect(search).toHaveValue('');
   expect(language).toHaveValue('all');
   expect(screen.getByRole('heading', { name: 'look into' })).toBeInTheDocument();
+});
+
+it('keeps IME input and retained rows in place while rapid animated filters hide stale actions', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }));
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'animate');
+  Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, value: () => ({ cancel: () => {}, finished: new Promise<void>(() => {}) }) });
+  try {
+    render(<MotionProvider><CardsPage /></MotionProvider>);
+    const search = screen.getByRole('textbox', { name: 'Search your phrases' });
+    const japaneseRow = screen.getByRole('heading', { name: '調べる' }).closest('article');
+    fireEvent.click(screen.getByLabelText('Actions for look into'));
+    search.focus();
+    fireEvent.compositionStart(search);
+    fireEvent.change(search, { target: { value: '調' } });
+    expect(screen.getByRole('textbox', { name: 'Search your phrases' })).toBe(search);
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue('調');
+    expect(screen.getByRole('heading', { name: '調べる' }).closest('article')).toBe(japaneseRow);
+    expect(screen.queryByRole('heading', { name: 'look into' })).not.toBeInTheDocument();
+    const outgoing = document.querySelector('[data-motion-snapshot] .phrase-options-panel button');
+    expect(outgoing).not.toBeNull();
+    fireEvent.click(outgoing!);
+    expect(screen.queryByRole('dialog', { name: 'Edit phrase' })).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: '調べる' } });
+    fireEvent.compositionEnd(search);
+    expect(search).toHaveValue('調べる');
+    fireEvent.change(search, { target: { value: '' } });
+    expect(screen.getAllByRole('article')).toHaveLength(2);
+    expect(search).toHaveFocus();
+  } finally {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    if (originalAnimate) Object.defineProperty(HTMLElement.prototype, 'animate', originalAnimate);
+    else delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
+  }
 });
 
 it.each(['Cancel', 'Close', 'Escape', 'backdrop'])('protects dirty phrase edits when dismissed with %s', async (method) => {

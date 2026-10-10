@@ -67,6 +67,7 @@
 .context-ai-actions { display: flex; flex-wrap: wrap; gap: 0 4px; margin-bottom: 20px; }
 .context-ai-actions .button { font-size: 12px; padding-inline: 6px; }
 .phrase-inspector > .button.primary, .return-to-watching { width: 100%; }
+.phrase-save-surface > .motion-swap-live > .button.primary { width: 100%; }
 .phrase-inspector .return-to-watching { margin-top: 24px; }
 .phrase-saved { display: flex; gap: 8px; align-items: center; color: var(--accent); font-size: 13px; margin-top: 12px; }
 .save-phrase-form { padding-top: 16px; margin-top: 12px; border-top: 1px solid var(--border); }

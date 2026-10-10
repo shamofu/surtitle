@@ -21,6 +21,7 @@ import {
   useNotifications,
 } from '../../../app/runtime';
 import { timestamp } from '../../../shared/format';
+import { MotionSwap } from '../../../shared/motion';
 import { Badge, Button, Field, Modal, useModalExit } from '../../../shared/ui/index';
 import { AnimatedDetails } from '../../../shared/ui/AnimatedDetails';
 import { QuoteApproval } from '../../ai/QuoteApproval';
@@ -130,7 +131,7 @@ export function TranscriptReviewDialog({
       wide
       onClose={close}
     >
-      {!view || !draft ? (
+      <MotionSwap stateKey={!view || !draft ? loadFailed ? 'error' : 'loading' : 'ready'}>{!view || !draft ? (
         loadFailed ? (
           <div>
             <p className="notice warning" role="status">
@@ -495,6 +496,7 @@ export function TranscriptReviewDialog({
           </footer>
         </>
       )}
+      </MotionSwap>
       {repairQuote && (
         <Modal
           {...repairExit.modalProps}

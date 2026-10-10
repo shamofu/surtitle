@@ -4,6 +4,7 @@ import type { AiModelPreference, AiPurpose, DiscoveredModel } from '../../shared
 import { Button, Field } from '../../shared/ui/index';
 import { aiApi } from './api';
 import { emptyModel } from './ModelEditor';
+import { MotionRegion, MotionSwap } from '../../shared/motion';
 
 const purposes: AiPurpose[] = ['transcription', 'vocabulary', 'explanation', 'translation'];
 export function applyModelSetup(existing: Partial<Record<AiPurpose, AiModelPreference>>, flash: string, transcribe: string, selected: AiPurpose[]) {
@@ -42,9 +43,9 @@ export function ModelSetup({ models, location, disabled, onChange, candidates }:
         <datalist id={`${id}-transcribe`}>{availableModels.filter(model => /transcribe/i.test(`${model.id} ${model.displayName}`)).map(model => <option key={model.id} value={model.id}>{model.displayName}</option>)}</datalist>
       </Field>
     </div>
-    {candidates === undefined && <Button disabled={disabled} busy={busy} onClick={async () => { setBusy(true); const items = await report(() => aiApi.vertexModels(location)); if (items) setDiscoveredModels(items); setBusy(false); }}>{t('モデルの候補を取得', 'Fetch model choices')}</Button>}
+    <MotionRegion open={candidates === undefined}><Button disabled={disabled} busy={busy} onClick={async () => { setBusy(true); const items = await report(() => aiApi.vertexModels(location)); if (items) setDiscoveredModels(items); setBusy(false); }}>{t('モデルの候補を取得', 'Fetch model choices')}</Button></MotionRegion>
     <p className="helper-text">{t('候補から選ぶかIDを入力できます。既存設定を変更する場合は用途を選んでください。', 'Select a candidate or enter an ID. Select a purpose explicitly to replace its existing settings.')}</p>
-    <div>{purposes.map(purpose => <label className="check-field" key={purpose}><input type="checkbox" checked={selected.includes(purpose)} disabled={disabled || busy} onChange={event => setSelected(current => event.target.checked ? [...current, purpose] : current.filter(item => item !== purpose))} /><span>{label(purpose)}{models[purpose]?.modelId && ` · ${models[purpose]?.modelId}`}</span></label>)}</div>
+    <div>{purposes.map(purpose => <label className="check-field" key={purpose}><input type="checkbox" checked={selected.includes(purpose)} disabled={disabled || busy} onChange={event => setSelected(current => event.target.checked ? [...current, purpose] : current.filter(item => item !== purpose))} /><span>{label(purpose)}<MotionSwap as="span" stateKey={models[purpose]?.modelId ?? ''}>{models[purpose]?.modelId && ` · ${models[purpose]?.modelId}`}</MotionSwap></span></label>)}</div>
     <Button disabled={disabled || busy || !selected.length || selected.some(p => p === 'transcription' ? !transcribe.trim() : !flash.trim())} onClick={() => onChange(applyModelSetup(models, flash, transcribe, selected))}>{t('選んだ用途に適用', 'Apply to selected purposes')}</Button>
   </div>;
 }

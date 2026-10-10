@@ -267,6 +267,7 @@ it('holds the chosen seek position through playback ticks until the control and 
   emitPosition(1200, 11);
   expect(seek).toHaveValue('1000');
   fireEvent.change(seek, { target: { value: '7600' } });
+  expect(seek).toHaveAttribute('data-motion-immediate');
   emitPosition(1400, 12);
   expect(seek).toHaveValue('7600');
   act(() => {
@@ -282,8 +283,10 @@ it('holds the chosen seek position through playback ticks until the control and 
   await waitFor(() => expect(playerApi.playerState).toHaveBeenCalledTimes(2));
   emitPosition(1800, 14);
   expect(seek).toHaveValue('7600');
+  expect(seek).toHaveAttribute('data-motion-immediate');
   await act(async () => snapshot.resolve({ ...playerState, paused: false, positionMs: 7800, revision: 20 }));
   expect(seek).toHaveValue('7800');
+  expect(seek).not.toHaveAttribute('data-motion-immediate');
   expect(fixture.position).toHaveBeenLastCalledWith(7800);
   emitPosition(1900, 19);
   expect(seek).toHaveValue('7800');

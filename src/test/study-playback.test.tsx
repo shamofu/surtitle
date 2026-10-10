@@ -467,6 +467,7 @@ describe('watching and inspecting phrases', () => {
     await screen.findByRole('button', { name: 'Return to watching' });
     expect(document.querySelector('.phrase-panel .context-sentence')).toHaveTextContent(cues[0].text);
     expect(document.querySelector('.current-caption-text')).toHaveTextContent(cues[2].text);
+      expect(document.querySelector('.current-caption-text')).toBe(caption);
     fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
     expect(screen.getByLabelText('Word or phrase')).toHaveValue('would like');
   });

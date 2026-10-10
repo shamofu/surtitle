@@ -18,6 +18,7 @@ import {
   useNotifications,
 } from '../../app/runtime';
 import { parseTimestamp, timestamp } from '../../shared/format';
+import { MotionRegion, MotionSwap } from '../../shared/motion';
 import { Button, Field, Modal, useModalExit } from '../../shared/ui/index';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { useActivities } from '../../app/providers/Activities';
@@ -324,7 +325,7 @@ export function SaveCardForm({
   }
   return (
     <fieldset className="save-phrase-form" disabled={busy}>
-      {busy && pending.current && <ProgressStatus label={term.trim()} phase="saving_audio" />}
+      <MotionRegion open={busy && pending.current}><ProgressStatus label={term.trim()} phase="saving_audio" /></MotionRegion>
       <Field label={t('語彙・フレーズ', 'Word or phrase')}>
         <input
           autoFocus
@@ -382,7 +383,7 @@ export function SaveCardForm({
       <EditorDraftStatus status={draft.status} error={draft.error} retry={() => void report(() => draft.retry())} />
       {invalidSource && <SourceRebindPicker mediaId={segment.mediaId}
         sourceIds={candidate?.sourceCueIds ?? segment.sourceCueIds ?? [segment.id]} multiple onRebind={rebind} />}
-      {saveError && <p className="notice warning" role="alert">{saveError}</p>}
+      <MotionRegion open={!!saveError}>{saveError && <p className="notice warning" role="alert">{saveError}</p>}</MotionRegion>
       {(!term.trim() || !meaning.trim() || !example.trim()) && <p className="helper-text">{t(
         '語彙・フレーズ、意味、元の文脈を入力すると保存できます。',
         'Enter a phrase, meaning, and original context to save.',
@@ -408,13 +409,13 @@ export function SaveCardForm({
 
 function EditorDraftStatus({ status, error, retry }: { status: DraftSaveStatus; error: string; retry: () => void }) {
   const { t } = useAppearance();
-  return <div className={error ? 'notice warning' : 'helper-text'} role={error ? 'alert' : 'status'}>
+  return <MotionSwap stateKey={`${status}:${error}`} className={error ? 'notice warning' : 'helper-text'} role={error ? 'alert' : 'status'}>
     {status === 'loading' ? t('下書きを読み込み中…', 'Loading draft…')
       : status === 'saving' ? t('下書きを保存中…', 'Saving draft…')
       : status === 'error' ? t('下書きを保存できませんでした。画面を閉じる前に再試行してください。', 'Could not save your draft. Retry before leaving.')
       : t('入力は自動保存されます。', 'Your input is saved automatically.')}
     {error && <> {error} <Button onClick={retry}>{t('再試行', 'Retry')}</Button></>}
-  </div>;
+  </MotionSwap>;
 }
 
 function SourceRebindPicker({ mediaId, sourceIds, multiple, onRebind }: {
@@ -445,7 +446,7 @@ function SourceRebindPicker({ mediaId, sourceIds, multiple, onRebind }: {
       </select>
     </Field>
     {multiple && <p className="helper-text">{t('複数の場合は連続する字幕を選んでください。', 'Choose consecutive subtitles when selecting more than one.')}</p>}
-    {error && <p role="alert">{error}</p>}
+    <MotionRegion open={!!error}>{error && <p role="alert">{error}</p>}</MotionRegion>
     <Button disabled={!ids.length} busy={busy} onClick={() => {
       setBusy(true);
       void report(async () => { await onRebind(cues.filter(cue => ids.includes(cue.id))); })

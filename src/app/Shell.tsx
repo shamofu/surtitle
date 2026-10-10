@@ -7,6 +7,7 @@ import { dueCards } from '../shared/format';
 import { IconButton } from '../shared/ui/index';
 import { NotificationRegion } from './providers/Notifications';
 import { ActivityButton } from './ActivityModal';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../shared/motion';
 
 export function AppShell() {
   const { data, error } = useSnapshot();
@@ -33,7 +34,7 @@ export function AppShell() {
             <Link to="/review" activeProps={{ className: 'active', 'aria-current': 'page' }}>
               <BookOpen size={18} aria-hidden="true" />
               <span>{t('復習', 'Review')}</span>
-              {due !== null && due > 0 && <span className="nav-count">{due}</span>}
+              <MotionRegion as="span" open={due !== null && due > 0}><span className="nav-count"><AnimatedValue value={due ?? 0} /></span></MotionRegion>
             </Link>
             <Link to="/settings" activeProps={{ className: 'active', 'aria-current': 'page' }}>
               <Settings2 size={18} aria-hidden="true" />
@@ -43,10 +44,10 @@ export function AppShell() {
           <div className="topbar-actions">
             <ActivityButton />
             <button className="locale-button" onClick={() => setLocale(locale === 'ja' ? 'en' : 'ja')} aria-label={t('Switch to English', '日本語に切り替える')}>
-              {locale === 'ja' ? 'EN' : '日本語'}
+              <AnimatedValue value={locale === 'ja' ? 'EN' : '日本語'} />
             </button>
             <IconButton label={t('テーマを切り替える', 'Toggle theme')} onClick={toggleTheme}>
-              {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
+              <MotionSwap as="span" stateKey={theme}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</MotionSwap>
             </IconButton>
           </div>
         </header>
@@ -56,12 +57,12 @@ export function AppShell() {
             <span>{t('ブラウザーで UI をプレビュー中です。動画の読み込み・AI・保存はデスクトップアプリで利用できます。', 'Browser UI preview. Import, AI, and persistence are available in the desktop app.')}</span>
           </div>
         )}
-        {error && (
+        <MotionRegion open={!!error}>
           <div className="error-banner" role="alert">
-            <span>{error.message}</span>
+            <MotionSwap as="span" stateKey={error?.message ?? ''}>{error?.message}</MotionSwap>
             <button onClick={() => void refresh()}>{t('再試行', 'Retry')}<RefreshCw size={14} aria-hidden="true" /></button>
           </div>
-        )}
+        </MotionRegion>
         <NotificationRegion />
         <main className="page-content"><Outlet /></main>
       </div>

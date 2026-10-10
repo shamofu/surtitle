@@ -374,6 +374,28 @@ describe('arbitrary model and price selection', () => {
     expect(state().price?.outputMicrousdPerMillion).toBe(3750000);
     expect(state().price?.source).toBe('user');
   });
+  it('keeps manual rate inputs, draft text and selection when their region is closed and reopened', () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByText('Output, thinking, and pricing'));
+    const toggle = screen.getByRole('button', { name: 'Set rates manually' });
+    fireEvent.click(toggle);
+    const input = screen.getByRole('textbox', { name: 'Input USD / million tokens' }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '1.234' } });
+    input.focus();
+    input.setSelectionRange(2, 4);
+    fireEvent.compositionStart(input);
+    fireEvent.compositionEnd(input, { data: '34' });
+    expect(document.activeElement).toBe(input);
+    expect(input.selectionStart).toBe(2);
+    fireEvent.click(toggle);
+    expect(screen.queryByRole('textbox', { name: 'Input USD / million tokens' })).not.toBeInTheDocument();
+    expect(input).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(screen.getByRole('textbox', { name: 'Input USD / million tokens' })).toBe(input);
+    expect(input).toHaveValue('1.234');
+    expect(input.selectionStart).toBe(2);
+    expect(input.selectionEnd).toBe(4);
+  });
   it('never fabricates a price after an unsuccessful public lookup', async () => {
     vi.mocked(aiApi.vertexPrice).mockResolvedValue({
       price: null,

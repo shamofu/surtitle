@@ -4,7 +4,7 @@ import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode } f
 import { createPortal } from 'react-dom';
 import { ArrowUpRight, LoaderCircle, X } from 'lucide-react';
 import { useSurface, useAppearance } from '../../app/runtime';
-import { motionCssEase, motionDurations, useAppMotion } from '../motion';
+import { MotionRegion, MotionSwap, motionCssEase, motionDurations, useAppMotion } from '../motion';
 import './modal-motion.css';
 export { useModalExit } from './useModalExit';
 
@@ -25,7 +25,7 @@ export function Button({
       {...props}
       disabled={props.disabled || busy}
     >
-      {busy && <LoaderCircle size={16} className="spin" aria-hidden="true" />}
+      <MotionRegion as="span" open={!!busy}><LoaderCircle size={16} className="spin" aria-hidden="true" /></MotionRegion>
       {children}
     </button>
   );
@@ -246,8 +246,8 @@ export function Field({
     <label className="field">
       <span id={`${id}-label`}>{label}</span>
       {associate(children)}
-      {hint && <small id={`${id}-hint`}>{hint}</small>}
-      {error && <small id={`${id}-error`} className="field-error">{error}</small>}
+      <MotionRegion as="span" open={!!hint}><small id={`${id}-hint`}>{hint}</small></MotionRegion>
+      <MotionRegion as="span" open={!!error}><small id={`${id}-error`} className="field-error"><MotionSwap as="span" stateKey={error ?? ''}>{error}</MotionSwap></small></MotionRegion>
     </label>
   );
 }
@@ -258,7 +258,7 @@ export function Badge({
   children: ReactNode;
   tone?: 'neutral' | 'accent' | 'warning' | 'danger';
 }) {
-  return <span className={`badge ${tone}`}>{children}</span>;
+  return <span className={`badge ${tone}`}><MotionSwap as="span" stateKey={typeof children === 'string' || typeof children === 'number' ? children : tone}>{children}</MotionSwap></span>;
 }
 export function ExternalLabel({ children }: { children: ReactNode }) {
   return (

@@ -23,7 +23,7 @@ import { resolveSourceSelection } from './source-selection';
 import { useAppearance } from '../../app/runtime';
 import { timestamp } from '../../shared/format';
 import { Badge, Button, EmptyState, IconButton } from '../../shared/ui/index';
-import { useAppMotion } from '../../shared/motion';
+import { AnimatedValue, MotionRegion, MotionSwap, useAppMotion, useMotionChange } from '../../shared/motion';
 import { DraftStudyPanel } from './drafts/DraftStudyPanel';
 import type { PlayRange } from './drafts/lifecycle';
 import { StudyRegion } from './StudyPresence';
@@ -115,8 +115,13 @@ export function StudyTranscript({
     onViewStateChange(next);
   }, [onViewStateChange]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const suggestions = useRef<HTMLDivElement>(null);
   const followedSubtitle = useRef<string | undefined>(undefined);
   const filtered = segments.filter(item => (!markedOnly || item.status === 'generated_review' || item.timingPrecision === 'source_block' || !!item.reviewIssues?.length) && `${item.text} ${item.translation || ''}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+  // Fade semantic filtering/list changes without cloning a virtual viewport or
+  // replaying entrance effects when scrolling recycles rows.
+  useMotionChange(scrollRef, filtered.map(segment => segment.id).join(','));
+  useMotionChange(suggestions, JSON.stringify(candidates.map(candidate => [candidate.id, candidate.term, candidate.meaning, candidate.example])));
   const cached = viewState.measurementCache;
   const initialMeasurements = cached?.search === search && cached.showTranslations === showTranslations ? cached : undefined;
   const previousLayout = useRef({ search, showTranslations, width: initialMeasurements?.width });
@@ -226,14 +231,14 @@ export function StudyTranscript({
           </div>
       </StudyRegion>
       <StudyRegion open={tab === 'vocabulary'}>
-            <div className="suggestions-panel" role="tabpanel" id={`${tabsId}-vocabulary-panel`} aria-labelledby={`${tabsId}-vocabulary-tab`}>
-              {candidatesError &&
+            <div ref={suggestions} className="suggestions-panel" role="tabpanel" id={`${tabsId}-vocabulary-panel`} aria-labelledby={`${tabsId}-vocabulary-tab`}>
+              <MotionRegion open={!!candidatesError}>{candidatesError &&
                 <p
                   className="notice warning"
                   role="alert"
                 >
                   {candidatesError.message}
-                </p>}
+                </p>}</MotionRegion>
               {!candidates.length
                 ? (
                   <EmptyState
@@ -292,13 +297,13 @@ export function StudyTranscript({
                     value={search}
                     onChange={event => updateView({ search: event.target.value, scrollOffset: 0 })}
                   />
-                  {search &&
+                  <MotionRegion as="span" open={!!search}>{search &&
                     <IconButton
                       label={t('検索をクリア', 'Clear search')}
                       onClick={() => updateView({ search: '', scrollOffset: 0 })}
                     >
                       <X size={14} />
-                    </IconButton>}
+                    </IconButton>}</MotionRegion>
                 </div>
                 <IconButton
                   label={t('翻訳を表示・非表示', 'Toggle translations')}
@@ -309,12 +314,12 @@ export function StudyTranscript({
                 </IconButton>
               </div>
               {segments.some(cue => cue.status === 'generated_review' || cue.timingPrecision === 'source_block') && <label className="check-field source-block-note"><input type="checkbox" checked={markedOnly} onChange={event => setMarkedOnly(event.target.checked)} />{t('注意のある箇所だけ表示', 'Show marked passages only')}</label>}
-              {error && <p
+              <MotionRegion open={!!error}>{error && <p
                 className="notice warning"
                 role="alert"
               >
                 {error.message}
-              </p>}
+              </p>}</MotionRegion>
               {!segments.length
                 ? (
                   <EmptyState
@@ -382,10 +387,10 @@ export function StudyTranscript({
                                 aria-label={`${segment.timingPrecision === 'source_block' ? t('取得元の音声範囲を再生', 'Play source audio range') : t('この字幕を再生', 'Play subtitle')} ${timestamp(segment.startMs)}`}
                                 onClick={() => onReplay(segment)}
                               >
-                                {activeId === segment.id ? <AudioLines size={16} /> : <Play size={15} />}
-                                <span>{timestamp(segment.startMs)}</span>
+                                <MotionSwap as="span" stateKey={activeId === segment.id ? 'playing' : 'idle'}>{activeId === segment.id ? <AudioLines size={16} /> : <Play size={15} />}</MotionSwap>
+                                <AnimatedValue value={timestamp(segment.startMs)} />
                               </button>
-                              <div className="segment-content">
+                              <TranscriptContent stateKey={JSON.stringify([segment.text, showTranslations && segment.translation, segment.timingPrecision, segment.status])}>
                                 <button
                                   type="button"
                                   className="segment-text"
@@ -423,7 +428,7 @@ export function StudyTranscript({
                                     <BookmarkPlus size={16} />
                                   </IconButton>
                                 </div>
-                              </div>
+                              </TranscriptContent>
                             </article>
                           );
                         })}
@@ -431,9 +436,9 @@ export function StudyTranscript({
                     </div>
                   )}
               <footer className="transcript-footer">
-                <span>{search
+                <AnimatedValue value={search
                   ? t(`${filtered.length} 件の一致`, `${filtered.length} matches`)
-                  : t('本文で確認、時刻で再生', 'Select text to inspect; time to replay')}</span>
+                  : t('本文で確認、時刻で再生', 'Select text to inspect; time to replay')} />
                 <button
                   type="button"
                   className={following && !search ? 'following' : ''}
@@ -442,9 +447,9 @@ export function StudyTranscript({
                   }}
                 >
                   <Crosshair size={15} />
-                  {following && !search
+                  <MotionSwap as="span" stateKey={following && !search ? 'following' : 'manual'}>{following && !search
                     ? t('再生に追従中', 'Following playback')
-                    : t('再生に戻る', 'Follow playback')}
+                    : t('再生に戻る', 'Follow playback')}</MotionSwap>
                 </button>
               </footer>
             </div>
@@ -452,4 +457,11 @@ export function StudyTranscript({
       </div>
     </>
   );
+}
+
+/** Virtual rows appear without an entrance animation; only their content changes fade. */
+function TranscriptContent({ stateKey, children }: { stateKey: string; children: ReactNode }) {
+  const content = useRef<HTMLDivElement>(null);
+  useMotionChange(content, stateKey);
+  return <div ref={content} className="segment-content">{children}</div>;
 }

@@ -13,7 +13,7 @@ import {
   useSnapshot,
 } from '../../app/runtime';
 import { Button, Modal, useModalExit } from '../../shared/ui/index';
-import { motionDurations, motionEase, useAppMotion } from '../../shared/motion';
+import { AnimatedValue, MotionRegion, MotionSwap, motionDurations, motionEase, useAppMotion } from '../../shared/motion';
 import { QuoteApproval } from './QuoteApproval';
 import { timestamp } from '../../shared/format';
 import { UnknownAttempt } from '../settings/PausedJobs';
@@ -97,7 +97,7 @@ export function JobActions({
   }
   return (
     <>
-      <div className="inline-actions job-actions" inert={exiting}>
+      <MotionSwap className="job-actions-motion" stateKey={`${job.status}:${job.issue?.nextAction ?? ''}:${!!(job.hasTranscriptResult ?? job.transcriptReview)}:${!!job.pendingResults}:${job.progress < 1}:${job.retry?.state ?? ''}:${job.resultState ?? ''}`}><div className="inline-actions job-actions" inert={exiting}>
         {job.issue?.nextAction === 'retry_local' && <Button busy={busy} onClick={() => void perform(() => mutate(() => aiApi.retryAiApplication(job.id), { kind: 'snapshot' }))}>{t('保存結果の反映を再試行', 'Retry applying saved results')}</Button>}
         {job.status === 'queued' && <Button busy={busy} onClick={() => void openQuote()}>{t('見積もりを開く', 'Open estimate')}</Button>}
         {(job.hasTranscriptResult ?? job.transcriptReview) && onReviewTranscript && (
@@ -149,7 +149,7 @@ export function JobActions({
             {inlineTranscription ? t('残りを再開', 'Resume remaining work') : t('残りを再見積もり', 'Estimate remaining work')}
           </Button>
         )}
-      </div>
+      </div></MotionSwap>
       {saved && (
         <Modal
           {...savedExit.modalProps}
@@ -166,41 +166,40 @@ export function JobActions({
               'Apply received results to your subtitles without sending an API request or adding a charge. Applying a result again preserves later manual edits.',
             )}
           </p>
-          {saved.map((result) => (
+          <MotionSwap stateKey={saved.map(result => result.ordinal).join('|') || 'empty'}>{saved.map((result) => (
             <section className="saved-ai-result" key={result.ordinal}>
               <div className="saved-translations">
                 {result.translations.map((translation, index) => (
                   <div className="saved-translation" key={index}>
                     <small>
-                      {timestamp(translation.startMs)} –{' '}
-                      {timestamp(translation.endMs)}
+                      <AnimatedValue value={`${timestamp(translation.startMs)} – ${timestamp(translation.endMs)}`} />
                     </small>
                     <p>{translation.source}</p>
                     <p>{translation.translation}</p>
                   </div>
                 ))}
               </div>
-              {result.blockedReason && (
+              <MotionRegion open={!!result.blockedReason}><MotionSwap stateKey={result.blockedReason ?? ''}>
                 <p className="notice warning" role="status">
                   {result.blockedReason}
                 </p>
-              )}
+              </MotionSwap></MotionRegion>
               <Button
                 variant={result.applied ? 'secondary' : 'primary'}
                 disabled={busy || !result.canApply}
                 onClick={() => void applySaved(result)}
               >
-                {result.applied ? (
+                <MotionSwap as="span" stateKey={result.applied ? 'applied' : 'pending'}>{result.applied ? (
                   <>
                     <Check size={14} />
                     {t('適用済み', 'Applied')}
                   </>
                 ) : (
                   t('この翻訳を適用', 'Apply this translation')
-                )}
+                )}</MotionSwap>
               </Button>
             </section>
-          ))}
+          ))}</MotionSwap>
         </Modal>
       )}
       {quote && (
@@ -213,24 +212,23 @@ export function JobActions({
             if (!busy) closeQuote();
           }}
         >
-          {quote.isRetry && <p className="notice">
+          <MotionRegion open={!!quote.isRetry}><p className="notice">
             {t(
               '未完了の処理だけを新しく承認します。結果不明の送信は、利用額の確認を済ませるまで再実行できません。',
               'This new approval covers unfinished work only. Unknown attempts must be accounted for before retrying.',
             )}
-          </p>}
-          {(data?.budget.unknownAttempts || []).map(attempt => <div key={attempt.id}>
+          </p></MotionRegion>
+          <MotionSwap stateKey={(data?.budget.unknownAttempts || []).map(attempt => attempt.id).join('|')}>{(data?.budget.unknownAttempts || []).map(attempt => <div key={attempt.id}>
             {attempt.jobId !== job.id && <p>{t('別の処理の結果確認が必要です。', 'Another job has an unknown outcome to acknowledge.')}</p>}
             <UnknownAttempt attempt={attempt} onResolved={() => void openQuote()} />
-          </div>)}
+          </div>)}</MotionSwap>
           <Button variant="ghost" busy={busy} disabled={quoteExit.exiting} onClick={() => void openQuote()}>{t('見積もりを更新', 'Refresh estimate')}</Button>
-          <QuoteApproval
-            key={quote.id}
+          <MotionSwap stateKey={quote.id}><QuoteApproval
             quote={quote}
             busy={busy || quoteExit.exiting}
             transcription={inlineTranscription}
             onApprove={() => void approve()}
-          />
+          /></MotionSwap>
         </JobQuoteSurface>
       )}
     </>

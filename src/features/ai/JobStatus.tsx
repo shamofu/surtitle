@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useAppearance } from '../../app/runtime';
 import type { JobSummary } from '../../shared/contracts/ai';
 import { timestamp } from '../../shared/format';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
 
 /** Wait timing is informational. Only the native worker may schedule a request. */
 export function JobStatusMessage({ job }: { job: JobSummary }) {
@@ -41,12 +42,12 @@ export function JobStatusMessage({ job }: { job: JobSummary }) {
   }
   const seconds = Math.max(0, Math.ceil((deadline - now) / 1000));
   return <>
-    <span role="status">{message}</span>
-    {Number.isFinite(deadline) && <span className="retry-countdown">
-      {' '}{waiting
+    <MotionSwap as="span" stateKey={message} role="status">{message}</MotionSwap>
+    <MotionRegion as="span" open={Number.isFinite(deadline)}><span className="retry-countdown">
+      {' '}<AnimatedValue value={waiting
         ? seconds > 0 ? t(`${seconds}秒後に再試行`, `Retrying in ${seconds}s`) : t('再送を準備中', 'Preparing to retry')
-        : seconds > 0 ? t(`${seconds}秒後に次の区間を送信`, `Next request in ${seconds}s`) : t('次の送信を準備中', 'Preparing the next request')}
-    </span>}
+        : seconds > 0 ? t(`${seconds}秒後に次の区間を送信`, `Next request in ${seconds}s`) : t('次の送信を準備中', 'Preparing the next request')} />
+    </span></MotionRegion>
   </>;
 }
 
@@ -57,22 +58,21 @@ export function JobProcessingDetails({ job }: { job: JobSummary }) {
   const ordinal = job.retry?.ordinal ?? pacing?.ordinal ?? issue?.ordinal;
   const range = ordinal == null ? undefined : job.transcriptionRanges?.[ordinal];
   const httpStatus = issue?.httpStatus ?? (job.retry ? 429 : undefined);
-  return <dl className="details-list">
+  return <MotionSwap stateKey={`${httpStatus ?? ''}:${ordinal ?? ''}:${job.retry?.state ?? ''}:${!!pacing}`}><dl className="details-list">
     {httpStatus != null && <div><dt>{t('応答', 'Response')}</dt><dd>HTTP {httpStatus}</dd></div>}
     {ordinal != null && <div><dt>{pacing ? t('次の区間', 'Next range') : t('対象区間', 'Affected range')}</dt><dd>
-      {t(`区間 ${ordinal + 1}`, `Range ${ordinal + 1}`)}
-      {range && <> · {timestamp(range.startMs)}–{timestamp(range.endMs)}</>}
+      <AnimatedValue value={`${t(`区間 ${ordinal + 1}`, `Range ${ordinal + 1}`)}${range ? ` · ${timestamp(range.startMs)}–${timestamp(range.endMs)}` : ''}`} />
     </dd></div>}
-    {job.retry && <div><dt>{t('自動再試行', 'Automatic retry')}</dt><dd>{job.retry.retryNumber}/{job.retry.maxRetries}</dd></div>}
+    {job.retry && <div><dt>{t('自動再試行', 'Automatic retry')}</dt><dd><AnimatedValue value={`${job.retry.retryNumber}/${job.retry.maxRetries}`} /></dd></div>}
     {issue?.occurredAt && <div><dt>{t('発生時刻', 'Occurred at')}</dt><dd><time dateTime={issue.occurredAt}>{issue.occurredAt}</time></dd></div>}
     {job.retry?.nextRetryAt && <div><dt>{job.retry.state === 'deferred' ? t('再開可能時刻', 'May resume after') : t('次の再試行予定', 'Next retry scheduled')}</dt><dd><time dateTime={job.retry.nextRetryAt}>{job.retry.nextRetryAt}</time></dd></div>}
     {pacing && <>
-      <div><dt>{t('送信開始の間隔', 'Interval between request starts')}</dt><dd>{t(`${pacing.intervalMs / 1000}秒以上`, `At least ${pacing.intervalMs / 1000}s`)}</dd></div>
+      <div><dt>{t('送信開始の間隔', 'Interval between request starts')}</dt><dd><AnimatedValue value={t(`${pacing.intervalMs / 1000}秒以上`, `At least ${pacing.intervalMs / 1000}s`)} /></dd></div>
       <div><dt>{t('次の送信予定', 'Next request scheduled')}</dt><dd>{pacing.nextSendAt
         ? <time dateTime={pacing.nextSendAt}>{pacing.nextSendAt}</time>
         : t('再開可能時刻を取得できません', 'The next allowed send time is unavailable')}</dd></div>
     </>}
-  </dl>;
+  </dl></MotionSwap>;
 }
 
 export function currentTranscriptionJob(jobs: JobSummary[]): JobSummary | undefined {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
+import { assertNativeVideoBounds, resizeNativeWindow, saveNativeScreenshot } from '../support/native-window.mjs';
 
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
 const mediaId = fixture.mediaId;
@@ -47,7 +48,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
   });
   it('keeps the full native surface visible when opening panels and resizing at the minimum window size', async () => {
     for (const [width, height] of [[1440, 900], [1024, 700]]) {
-      await browser.setWindowSize(width, height);
+      await resizeNativeWindow(width, height);
       await browser.waitUntil(async () => {
         const state = await player();
         return state.surfaceVisible && state.videoWidth === 640 && state.videoHeight === 360;
@@ -63,7 +64,8 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
       });
       assert(geometry.video.right <= geometry.panel.left + 1 || geometry.video.bottom <= geometry.panel.top + 1, 'The HTML transcript overlaps the native video');
       assert(geometry.controlsBottom <= geometry.height, 'Basic playback controls are below the window edge');
-      await browser.saveScreenshot(resolve(`test-results/native/learning-${width}x${height}.png`));
+      await assertNativeVideoBounds();
+      await saveNativeScreenshot(resolve(`test-results/native/learning-${width}x${height}.png`));
       await $('button=Transcript').click();
     }
   });
@@ -94,7 +96,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
     try {
       await invoke('edit_segment', { segment: { ...original, text: 'Sometimes a longer sentence needs more space to stay readable. We can take a little detour, listen again, and discover how the same words fit into the world around us without losing the picture or the playback controls.' } });
       await browser.refresh();
-      await browser.setWindowSize(1024, 700);
+      await resizeNativeWindow(1024, 700);
       await browser.waitUntil(async () => (await player()).ready);
       await control({ action: 'pause' });
       await control({ action: 'seek', value: original.startMs });
@@ -108,7 +110,8 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
         return video.top >= page.top && video.bottom <= page.bottom && controls.bottom <= Math.min(page.bottom, innerHeight);
       });
       assert(inside, 'A long current subtitle or expanded More toolbar clipped the native video or controls');
-      await browser.saveScreenshot(resolve('test-results/native/learning-long-caption-more.png'));
+      await assertNativeVideoBounds();
+      await saveNativeScreenshot(resolve('test-results/native/learning-long-caption-more.png'));
     } finally {
       await invoke('edit_segment', { segment: original });
       await browser.refresh();
@@ -164,7 +167,8 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
     await expect($('.transcript-panel')).toBeDisplayed();
     await browser.waitUntil(async () => (await player()).surfaceVisible);
     await expect($('button=Playback settings')).toBeFocused();
-    await browser.saveScreenshot(resolve('test-results/native/surface-modal-escape.png'));
+    await assertNativeVideoBounds();
+    await saveNativeScreenshot(resolve('test-results/native/surface-modal-escape.png'));
     await transcript.click();
     await expect($('.transcript-panel')).not.toBeDisplayed();
   });
@@ -186,7 +190,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
         return notice.bottom <= content.top + 1;
       }), 'The global save notification overlays page actions');
       await menu().click();
-      await browser.saveScreenshot(resolve('test-results/native/global-toast-phrase-menu.png'));
+      await saveNativeScreenshot(resolve('test-results/native/global-toast-phrase-menu.png'));
       await $('.phrase-options[open]').$('button=Edit').click();
       await $('dialog .modal-notifications button.toast.success').waitForDisplayed();
       await $('dialog').$('button=Cancel').click();
@@ -207,7 +211,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
     assert(original, 'Expected a seeded phrase in the disposable profile');
     await navigate('/cards');
     await $(`summary[aria-label="Actions for ${original.term}"]`).click();
-    await browser.saveScreenshot(resolve('test-results/native/cards-success-notification-menu.png'));
+    await saveNativeScreenshot(resolve('test-results/native/cards-success-notification-menu.png'));
     await $('.phrase-options[open]').$('button=Edit').click();
     const editor = $('dialog');
     await editor.waitForDisplayed();
@@ -223,7 +227,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
     await expect(editor.$('h2')).toHaveText('Edit phrase');
     await expect(meaning).toHaveValue('Native unsaved phrase edit');
     await expect(editor.$('button=Cancel')).toBeFocused();
-    await browser.saveScreenshot(resolve('test-results/native/nested-edit-confirmation.png'));
+    await saveNativeScreenshot(resolve('test-results/native/nested-edit-confirmation.png'));
     await editor.$('button=Cancel').click();
     await $('button=Discard changes').click();
     await expect($('dialog')).not.toExist();
@@ -231,12 +235,14 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
     await navigate(`/study/${mediaId}`);
     await $('.play-button').waitForEnabled();
     await browser.waitUntil(async () => (await player()).surfaceVisible);
+    await assertNativeVideoBounds();
   });
   it('restores video bounds after fullscreen and page scrolling', async () => {
     const fullscreen = $('[aria-label="Toggle fullscreen"]');
     await fullscreen.click();
     await expect(fullscreen).toHaveAttribute('aria-pressed', 'true');
     await browser.waitUntil(async () => (await player()).surfaceVisible);
+    await assertNativeVideoBounds();
     await fullscreen.click();
     await expect(fullscreen).toHaveAttribute('aria-pressed', 'false');
     await browser.execute(() => {
@@ -247,6 +253,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
       content.dispatchEvent(new Event('scroll'));
     });
     await browser.waitUntil(async () => (await player()).surfaceVisible);
+    await assertNativeVideoBounds();
   });
   it('opens job details with Space without starting playback', async function () {
     const snapshot = await invoke('get_app_snapshot');

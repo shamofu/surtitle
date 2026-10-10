@@ -33,6 +33,7 @@ import { useActivities } from '../../app/providers/Activities';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { preparedSourceMatches, usePreparationSession } from './PreparationSessions';
 import { PreparationProgress } from './PreparationProgress';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
 
 export function AiDialog({
   media,
@@ -249,16 +250,16 @@ export function AiDialog({
         if (!busy && !preparing) void exit.close(onClose);
       }}
     >
-      {restored && <p className="notice" role="status">{t('データを復元しました。対象を確認してから見積もりを準備してください。', 'Data was restored. Check the source and prepare a new estimate.')}</p>}
-      {kind === 'transcribe' && mediaChanged && <div className="notice warning" role="alert">
+      <MotionRegion open={restored}><p className="notice" role="status">{t('データを復元しました。対象を確認してから見積もりを準備してください。', 'Data was restored. Check the source and prepare a new estimate.')}</p></MotionRegion>
+      <MotionRegion open={kind === 'transcribe' && mediaChanged}><div className="notice warning" role="alert">
         <p>{t('教材か言語設定が変わったため、以前の音声準備と見積もりを使わず、現在の対象で準備し直します。', 'The material or language settings changed. A new estimate will use the current source shown below.')}</p>
         <p>{media.title} · {media.path} · {t('音声トラック', 'Audio track')}: {media.audioStreamIndex ?? t('既定', 'Default')} · {media.learningLanguage} → {media.explanationLanguage}</p>
-      </div>}
-      {invalidSource && <div className="notice warning" role="alert">
+      </div></MotionRegion>
+      <MotionRegion open={invalidSource}><div className="notice warning" role="alert">
         <p>{t('出典の字幕が変わったか見つかりません。入力は保持しています。字幕を選び直してから見積もりを確認してください。', 'The source subtitles changed or are missing. Your input is kept. Select the subtitles again before reviewing an estimate.')}</p>
         {onReselectSource && <Button disabled={busy || preparing} onClick={() => void reselectSource()}>{t('字幕を選び直す', 'Select subtitles again')}</Button>}
-      </div>}
-      {!quote ? (
+      </div></MotionRegion>
+      <MotionSwap stateKey={quote ? `quote:${quote.id}` : 'form'}>{!quote ? (
         <>
           <div className="ai-kind-list">
             {[
@@ -297,11 +298,11 @@ export function AiDialog({
               </button>
             ))}
           </div>
-          {(!data?.settings.credentialConfigured || !modelValid || !data?.settings.vertexProject) && <div className="notice warning">
+          <MotionRegion open={!data?.settings.credentialConfigured || !modelValid || !data?.settings.vertexProject}><div className="notice warning">
             <p>{t('AIを使うための設定が必要です。入力と対象範囲を残して設定へ進めます。', 'Finish AI setup. Your input and selected scope will be kept.')}</p>
             <Button disabled={busy || preparing} onClick={() => void openSettings()}>{t('設定してこの操作に戻る', 'Set up and return here')}</Button>
-          </div>}
-          {kind === 'vocabulary' && (
+          </div></MotionRegion>
+          <MotionRegion open={kind === 'vocabulary'} keepMounted>
             <Field
               label={t(
                 '解説してほしい表現（任意）',
@@ -322,33 +323,34 @@ export function AiDialog({
                 )}
               />
             </Field>
-          )}
-          {kind === 'vocabulary' && (
+          </MotionRegion>
+          <MotionRegion open={kind === 'vocabulary'}>
             <p className="notice">
               {t(
                 '語彙・解説は試験機能です。語義や文中の意味を確認してから保存してください。',
                 'Vocabulary and explanations are experimental. Check the meaning in context before saving.',
               )}
             </p>
-          )}
-          {kind === 'transcribe' && (
+          </MotionRegion>
+          <MotionRegion open={kind === 'transcribe'}>
             <p className="helper-text">
               {t(
                 '全編の字幕は完成後に自動表示します。気になる箇所には印を付け、あとから原音を聴いて修正できます。',
                 'Full-video subtitles appear automatically when finished. Marked passages can be corrected later while listening.',
               )}
             </p>
-          )}
+          </MotionRegion>
           <div className="scope-heading">
             <h3>{t('対象', 'Scope')}</h3>
           </div>
-          {kind === 'transcribe' && <div className="segmented-control">
+          <MotionRegion open={kind === 'transcribe'}><div className="segmented-control">
             <button disabled={busy || preparing} className={wholeMedia ? 'selected' : ''} onClick={() => { setWholeMedia(true); setPreparation(undefined); }}>{t('全編を文字起こし', 'Transcribe the whole video')}</button>
             <button disabled={busy || preparing} className={!wholeMedia ? 'selected' : ''} onClick={() => { setWholeMedia(false); setPreparation(undefined); }}>{t('範囲を指定', 'Choose a range')}</button>
-          </div>}
-          {kind === 'transcribe' && wholeMedia ? <p className="notice">{media.durationMs > 0
+          </div></MotionRegion>
+          <MotionRegion open={kind === 'transcribe' && wholeMedia}><p className="notice">{media.durationMs > 0
             ? t(`全編 ${timestamp(media.durationMs, true)} を一括で処理します。`, `Process the entire ${timestamp(media.durationMs, true)} video in one job.`)
-            : t('動画の長さを確認しています。確認後に見積もれます。', 'Waiting for the video duration before estimating.')}</p> : <div className="field-row">
+            : t('動画の長さを確認しています。確認後に見積もれます。', 'Waiting for the video duration before estimating.')}</p></MotionRegion>
+          <MotionRegion open={kind !== 'transcribe' || !wholeMedia} keepMounted><div className="field-row">
             <Field label={t('開始', 'From')} hint="hh:mm:ss">
               <input
                 value={start}
@@ -374,16 +376,16 @@ export function AiDialog({
                 inputMode="decimal"
               />
             </Field>
-          </div>}
-          {!valid && !(kind === 'transcribe' && wholeMedia && !media.durationMs) && (
+          </div></MotionRegion>
+          <MotionRegion open={!valid && !(kind === 'transcribe' && wholeMedia && !media.durationMs)}>
             <p className="field-error">
               {t(
                 '動画内の有効な開始・終了時刻を入力してください。',
                 'Enter a valid start and end time within the media.',
               )}
             </p>
-          )}
-          {kind === 'transcribe' && !wholeMedia && preparations.length > 0 && (
+          </MotionRegion>
+          <MotionRegion open={kind === 'transcribe' && !wholeMedia && preparations.length > 0} keepMounted>
             <Field
               label={t(
                 '保存済みの音声準備を使う',
@@ -422,8 +424,8 @@ export function AiDialog({
                   ))}
               </select>
             </Field>
-          )}
-          {kind === 'transcribe' && (
+          </MotionRegion>
+          <MotionRegion open={kind === 'transcribe'}>
             <div className="local-preparation">
               <p className="notice warning">
                 {t(
@@ -431,15 +433,15 @@ export function AiDialog({
                   'Prepare audio locally first, then review the model and scope before approving cloud requests.',
                 )}
               </p>
-              {preparation && (
+              <MotionRegion open={!!preparation}>{preparation && (
                 <p className="notice">
-                  {t(
+                  <AnimatedValue value={t(
                     `${preparation.chunkCount} 個の音声区間を準備しました（送信予定音声 ${timestamp(preparation.sendDurationMs)}）。クラウドには送信していません。`,
                     `Prepared ${preparation.chunkCount} audio chunks (${timestamp(preparation.sendDurationMs)} of audio). Nothing was sent to the cloud.`,
-                  )}
+                  )} />
                 </p>
-              )}
-              {preparing ? (
+              )}</MotionRegion>
+              <MotionRegion open={preparing}>
                 <div className="job-status">
                   <PreparationProgress operationId={preparationSession.session?.operationId} label={media.title} />
                   <Button
@@ -453,13 +455,12 @@ export function AiDialog({
                     {t('キャンセル', 'Cancel')}
                   </Button>
                 </div>
-              ) : null}
+              </MotionRegion>
             </div>
-          )}
+          </MotionRegion>
           <AnimatedDetails className="ai-model-settings" open={!modelValid}>
             <summary>{modelValid ? `${t('使用するモデル', 'Model')}: ${selectedModel.modelId}` : t('モデルを選ぶ', 'Choose a model')}</summary>
             <ModelEditor
-              key={purpose}
               purpose={purpose}
               value={selectedModel}
               location={data?.settings.vertexLocation || 'global'}
@@ -478,7 +479,7 @@ export function AiDialog({
               )}
             </span>
           </div>
-          {!data?.settings.credentialConfigured && !preparing && (
+          <MotionRegion open={!data?.settings.credentialConfigured && !preparing}>
             <p className="helper-text">
               {t(
                 'AI を使うにはサービスアカウントの設定が必要です。',
@@ -486,7 +487,7 @@ export function AiDialog({
               )}{' '}
               <Button onClick={() => void openSettings()}>{t('設定を開く', 'Open settings')} →</Button>
             </p>
-          )}
+          </MotionRegion>
           <footer className="modal-footer">
             <Button onClick={() => void exit.close(onClose)} disabled={busy || preparing || exit.exiting}>
               {t('キャンセル', 'Cancel')}
@@ -518,14 +519,13 @@ export function AiDialog({
             ← {t('範囲を変更・再見積もり', 'Change range or re-estimate')}
           </button>
           <QuoteApproval
-            key={quote.id}
             quote={invalidSource ? { ...quote, canApprove: false, blockedReason: t('字幕を選び直してください。', 'Select the subtitles again.') } : quote}
             busy={busy}
             onApprove={() => void approve()}
           />
         </>
-      )}
-      {busy && !preparing && <ProgressStatus label={media.title} phase={busyPhase} status="running" />}
+      )}</MotionSwap>
+      <MotionRegion open={busy && !preparing}><ProgressStatus label={media.title} phase={busyPhase} status="running" /></MotionRegion>
     </Modal>
   );
 }

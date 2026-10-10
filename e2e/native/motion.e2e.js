@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
+import { assertNativeVideoBounds, resizeNativeWindow, saveNativeScreenshot } from '../support/native-window.mjs';
 
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
 const invoke = (command, args = {}) => browser.execute(async (name, parameters) => window.__TAURI_INTERNALS__.invoke(name, parameters), command, args);
@@ -35,7 +36,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
       beforeEach(async () => {
         await invoke('update_settings', { settings: { ...originalSettings, locale: 'en', sentencePause: false, motionPreference: preference } });
         await browser.refresh();
-        await browser.setWindowSize(1440, 900);
+        await resizeNativeWindow(1440, 900);
         await navigate(`/study/${fixture.mediaId}`);
         await $('.play-button').waitForEnabled();
         await browser.waitUntil(async () => {
@@ -43,6 +44,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
           return state.ready && state.surfaceVisible && state.videoWidth > 0 && state.videoHeight > 0;
         }, { timeoutMsg: 'The fixture must decode and display on the actual native surface' });
         await control({ action: 'pause' });
+        await assertNativeVideoBounds();
         await browser.waitUntil(async () => browser.execute(expected => document.documentElement.dataset.motion === (expected === 'reduce' || matchMedia('(prefers-reduced-motion: reduce)').matches ? 'reduce' : 'full'), preference));
         reduced = await browser.execute(() => document.documentElement.dataset.motion === 'reduce');
       });
@@ -52,7 +54,8 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
         await $('[aria-label="Subtitle list"]').waitForDisplayed();
         await browser.waitUntil(async () => (await player()).surfaceVisible);
         const initialState = await player();
-        await browser.saveScreenshot(resolve(`test-results/native/motion-${preference}-panel.png`));
+        await assertNativeVideoBounds();
+        await saveNativeScreenshot(resolve(`test-results/native/motion-${preference}-panel.png`));
         const observed = await browser.execute(async () => {
           const panel = document.querySelector('.study-companion');
           const viewport = document.querySelector('[data-testid="native-player-viewport"]');
@@ -103,7 +106,8 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
         assert.equal(finalState.ready, true);
         assert.equal(finalState.videoWidth, initialState.videoWidth);
         assert.equal(finalState.videoHeight, initialState.videoHeight);
-        await browser.saveScreenshot(resolve(`test-results/native/motion-${preference}-panel-closed.png`));
+        await assertNativeVideoBounds();
+        await saveNativeScreenshot(resolve(`test-results/native/motion-${preference}-panel-closed.png`));
       });
 
       it('retains the native modal top layer through exit and restores video visibility and focus', async () => {
@@ -118,7 +122,8 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
         await browser.execute(() => document.querySelector('dialog').focus());
         await browser.keys(Key.Space);
         assert.equal((await player()).paused, true, 'A modal keyboard event started background playback');
-        await browser.saveScreenshot(resolve(`test-results/native/motion-${preference}-modal.png`));
+        await assertNativeVideoBounds(false);
+        await saveNativeScreenshot(resolve(`test-results/native/motion-${preference}-modal.png`));
         const closing = await browser.execute(async () => {
           const dialog = document.querySelector('dialog');
           return new Promise((resolveObservation, reject) => {
@@ -157,7 +162,8 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
         await browser.waitUntil(async () => (await player()).surfaceVisible);
         await expect(opener).toBeFocused();
         assert.equal((await player()).paused, true);
-        await browser.saveScreenshot(resolve(`test-results/native/motion-${preference}-modal-closed.png`));
+        await assertNativeVideoBounds();
+        await saveNativeScreenshot(resolve(`test-results/native/motion-${preference}-modal-closed.png`));
       });
     });
   }

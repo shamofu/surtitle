@@ -7,6 +7,9 @@
 
 .model-editor > .field,
 .model-editor-detail-content > .field,
+.model-editor > .motion-region > .field,
+.model-editor-detail-content > .motion-region > .field,
+.model-editor > .motion-region .notice,
 .model-editor > .helper-text,
 .model-editor > .notice {
   margin: 0;
@@ -49,6 +52,7 @@
   max-width: 72ch;
   overflow-wrap: anywhere;
 }
+.model-editor > .helper-text .animated-value { white-space: normal; }
 
 @media (max-width: 600px) {
   .model-editor .field-row {

@@ -35,6 +35,7 @@ import {
   useDataActions,
 } from '../../../app/runtime';
 import { timestamp } from '../../../shared/format';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../../../shared/motion';
 import { shouldIgnoreShortcut } from '../../../shared/keyboard';
 import { Button, IconButton, Modal, useModalExit } from '../../../shared/ui/index';
 
@@ -456,7 +457,7 @@ export function NativePlayer({
     <>
       <section className="player-card" aria-label={t('メディアプレイヤー', 'Media player')}>
         <div ref={viewport} className="native-player-viewport" data-testid="native-player-viewport">
-          <div className="video-placeholder">
+          <MotionSwap stateKey={`${loadStatus}:${loadError}`} className="video-placeholder">
             {media.kind === 'audio' && <Headphones size={32} aria-hidden="true" />}
             <p role={loadStatus === 'error' ? 'alert' : 'status'}>
               {loadError || (!nativeAvailable()
@@ -470,7 +471,7 @@ export function NativePlayer({
                 <RotateCw size={16} />{t('プレイヤーを再試行', 'Retry player')}
               </Button>
             )}
-          </div>
+          </MotionSwap>
           {loaded && <button ref={surfaceButton} type="button" className="player-surface-toggle"
             disabled={interactionsDisabled || surfaceHidden || settingsOpen}
             aria-label={state?.paused !== false ? t('映像を再生', 'Play video') : t('映像を一時停止', 'Pause video')}
@@ -481,6 +482,7 @@ export function NativePlayer({
             <input
               type="range" min="0" max={Math.max(duration, 1)} step="100"
               value={Math.min(position, duration || 1)}
+              data-motion-immediate={seekDraft !== null ? '' : undefined}
               disabled={!loaded || !duration}
               onPointerDown={(event) => {
                 if (event.button !== 0 || controlsDisabled) return;
@@ -491,7 +493,7 @@ export function NativePlayer({
               onPointerUp={commitSeek} onKeyUp={commitSeek} onBlur={commitSeek}
               onPointerCancel={cancelSeek}
               aria-label={t('再生位置', 'Playback position')}
-              style={{ '--progress': `${duration ? (position / duration) * 100 : 0}%` } as React.CSSProperties}
+              style={{ '--playback-progress': `${duration ? (position / duration) * 100 : 0}%` } as React.CSSProperties}
             />
           </div>
           <div className="player-control-row">
@@ -500,12 +502,12 @@ export function NativePlayer({
                 <RotateCcw size={18} />
               </IconButton>
               <IconButton className="play-button" label={state?.paused !== false ? t('再生', 'Play') : t('一時停止', 'Pause')} disabled={!loaded} onClick={() => void control({ action: state?.paused ? 'play' : 'pause' })}>
-                {state?.paused !== false ? <Play size={19} fill="currentColor" /> : <Pause size={19} fill="currentColor" />}
+                <MotionSwap as="span" stateKey={state?.paused !== false ? 'play' : 'pause'}>{state?.paused !== false ? <Play size={19} fill="currentColor" /> : <Pause size={19} fill="currentColor" />}</MotionSwap>
               </IconButton>
               <IconButton label={t('5 秒進む', 'Forward 5 seconds')} disabled={!loaded} onClick={() => void control({ action: 'seek', value: Math.min(duration, position + 5000) })}>
                 <RotateCw size={18} />
               </IconButton>
-              <span className="player-time">{timestamp(position)} <span>/ {timestamp(duration)}</span></span>
+              <span className="player-time"><AnimatedValue value={timestamp(position)} immediate={seekDraft !== null} /> <span className="player-duration">/ <AnimatedValue value={timestamp(duration)} /></span></span>
             </div>
             <div className="control-cluster">
               <label className="speed-select">
@@ -526,13 +528,13 @@ export function NativePlayer({
               </IconButton>
             </div>
           </div>
-          {!repeatTarget && draftMode && selected && repeatButton}
+          <MotionRegion open={!repeatTarget && draftMode && !!selected}>{repeatButton}</MotionRegion>
         </fieldset>
       </section>
-      {surfaceError && <div className="notice warning" role="alert">
+      <MotionRegion open={!!surfaceError}>{surfaceError && <div className="notice warning" role="alert">
         <span>{t('映像を表示できませんでした。', 'The video could not be displayed.')} {surfaceError}</span>
         <Button onClick={() => setSurfaceAttempt(value => value + 1)}>{t('映像表示を再試行', 'Retry video display')}</Button>
-      </div>}
+      </div>}</MotionRegion>
       {repeatTarget && createPortal(repeatButton, repeatTarget)}
       {settingsOpen && (
         <Modal {...settingsExit.modalProps} title={t('再生設定', 'Playback settings')} onClose={() => void settingsExit.close(onSettingsClose)}>

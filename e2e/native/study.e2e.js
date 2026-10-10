@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { Key } from 'webdriverio';
+import { resizeNativeWindow } from '../support/native-window.mjs';
 
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
 const mediaId = fixture.mediaId || 'fixture-media';
@@ -36,7 +37,7 @@ describe('real native learning workflow (no cloud requests)', () => {
   before(async () => {
     await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__), { timeoutMsg: 'Native IPC was not available' });
     // Exercise the same compact layout as the hosted Windows desktop.
-    if (process.platform === 'win32') await browser.setWindowSize(1028, 750);
+    if (process.platform === 'win32') await resizeNativeWindow(1028, 750);
     const initial = await snapshot();
     await invoke('update_settings', { settings: { ...initial.settings, locale: 'en', dailyBudgetUsd: 0 } });
     await browser.refresh();

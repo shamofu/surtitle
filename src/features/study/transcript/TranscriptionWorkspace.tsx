@@ -8,6 +8,7 @@ import type { AiModelPreference, AiQuote, JobSummary, TranscriptionPreparation }
 import type { Media, MediaStream } from '../../../shared/contracts/media';
 import type { TranscriptReview } from '../../../shared/contracts/transcript';
 import { parseTimestamp, timestamp } from '../../../shared/format';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../../../shared/motion';
 import { Button, Field } from '../../../shared/ui';
 import { aiApi } from '../../ai/api';
 import { continuationApi, type AiContinuation } from '../../ai/continuations';
@@ -145,22 +146,22 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
   function changeScope(action: () => void) { action(); setQuote(undefined); setPreparation(undefined); }
   return <section className="transcription-setup" aria-label={t('文字起こしの設定', 'Transcription setup')}>
     <p className="transcription-source"><strong>{media.title}</strong><br />{media.path.split(/[\\/]/).pop()} · {audioLabel}</p>
-    {!quote && <><p>{t('Transcribeの本文を使い、届いた部分から字幕を表示します。気になる箇所はあとから修正できます。', 'Use Transcribe text as subtitles as each part arrives. You can correct any passage later.')}</p>
-    <p className="transcription-scope"><strong>{whole ? t('全編', 'Full media') : t('選択した区間', 'Selected range')}</strong> · {timestamp(from ?? 0)}–{timestamp(to ?? 0)} · {media.learningLanguage}</p></>}
-    {!configured && <div className="notice"><p>{t('最初に文字起こし用のモデルと認証を設定してください。戻るとこの範囲から続けられます。', 'Set up a transcription model and credentials. This scope will be kept when you return.')}</p><Button onClick={() => void setup()} busy={phase === 'setup'}>{t('設定して戻る', 'Set up and return')}</Button></div>}
+    <MotionRegion open={!quote}><p>{t('Transcribeの本文を使い、届いた部分から字幕を表示します。気になる箇所はあとから修正できます。', 'Use Transcribe text as subtitles as each part arrives. You can correct any passage later.')}</p>
+    <p className="transcription-scope"><strong><MotionSwap as="span" stateKey={String(whole)}>{whole ? t('全編', 'Full media') : t('選択した区間', 'Selected range')}</MotionSwap></strong> · <AnimatedValue value={`${timestamp(from ?? 0)}–${timestamp(to ?? 0)}`} immediate={advanced} /> · {media.learningLanguage}</p></MotionRegion>
+    <MotionRegion open={!configured}><div className="notice"><p>{t('最初に文字起こし用のモデルと認証を設定してください。戻るとこの範囲から続けられます。', 'Set up a transcription model and credentials. This scope will be kept when you return.')}</p><Button onClick={() => void setup()} busy={phase === 'setup'}>{t('設定して戻る', 'Set up and return')}</Button></div></MotionRegion>
     <AnimatedDetails open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)}>
       <summary>{t('範囲・モデルを変更', 'Change range or model')}</summary>
       <label className="check-field"><input type="checkbox" checked={whole} disabled={busy} onChange={event => changeScope(() => setWhole(event.target.checked))} />{t('全編を文字起こし', 'Transcribe the whole media')}</label>
-      {!whole && <div className="field-row"><Field label={t('開始', 'From')}><input value={start} disabled={busy} onChange={event => changeScope(() => setStart(event.target.value))} /></Field><Field label={t('終了', 'To')}><input value={end} disabled={busy} onChange={event => changeScope(() => setEnd(event.target.value))} /></Field></div>}
+      <MotionRegion open={!whole} keepMounted><div className="field-row"><Field label={t('開始', 'From')}><input value={start} disabled={busy} onChange={event => changeScope(() => setStart(event.target.value))} /></Field><Field label={t('終了', 'To')}><input value={end} disabled={busy} onChange={event => changeScope(() => setEnd(event.target.value))} /></Field></div></MotionRegion>
       <ModelEditor purpose="transcription" value={model} location={data?.settings.vertexLocation || 'global'} disabled={busy} onChange={value => { setModel(value); setQuote(undefined); }} />
       <Button disabled={busy || !configured || !valid} onClick={() => void estimate(true)}>{t('見積もりを更新', 'Update estimate')}</Button>
     </AnimatedDetails>
-    {!valid && <p role="status">{media.durationMs ? t('作品内の開始・終了時刻を指定してください。', 'Choose a valid range within the media.') : t('作品の長さを確認しています…', 'Checking media duration…')}</p>}
-    {phase === 'preparing' ? <PreparationProgress operationId={preparationSession.session?.operationId} label={media.title} /> : busy && <ProgressStatus label={media.title} phase={phase} status="running" />}
-    {problem && <p className="notice warning" role="alert">{problem}</p>}
-    {quote && <QuoteApproval quote={quote} busy={busy} transcription onApprove={() => void startJob()} />}
-    {!quote && !busy && configured && valid && automaticAttempted && <Button onClick={() => void estimate()}><RefreshCw size={14} />{t('見積もりを準備', 'Prepare estimate')}</Button>}
-    {phase === 'preparing' ? <Button variant="ghost" disabled={!preparationSession.session?.operationId} onClick={() => void report(() => aiApi.cancelPreparation(preparationSession.session?.operationId))}>{t('準備を中止', 'Cancel preparation')}</Button> : <Button variant="ghost" disabled={busy} onClick={onDone}>{t('閉じる', 'Close')}</Button>}
+    <MotionRegion open={!valid}><p role="status">{media.durationMs ? t('作品内の開始・終了時刻を指定してください。', 'Choose a valid range within the media.') : t('作品の長さを確認しています…', 'Checking media duration…')}</p></MotionRegion>
+    <MotionRegion open={busy}><MotionSwap stateKey={phase ?? 'idle'}>{phase === 'preparing' ? <PreparationProgress operationId={preparationSession.session?.operationId} label={media.title} /> : busy && <ProgressStatus label={media.title} phase={phase} status="running" />}</MotionSwap></MotionRegion>
+    <MotionRegion open={!!problem}>{problem && <p className="notice warning" role="alert">{problem}</p>}</MotionRegion>
+    <MotionRegion open={!!quote}>{quote && <QuoteApproval quote={quote} busy={busy} transcription onApprove={() => void startJob()} />}</MotionRegion>
+    <MotionRegion open={!quote && !busy && configured && valid && automaticAttempted}><Button onClick={() => void estimate()}><RefreshCw size={14} />{t('見積もりを準備', 'Prepare estimate')}</Button></MotionRegion>
+    <MotionSwap stateKey={phase === 'preparing' ? 'cancel' : 'close'}>{phase === 'preparing' ? <Button variant="ghost" disabled={!preparationSession.session?.operationId} onClick={() => void report(() => aiApi.cancelPreparation(preparationSession.session?.operationId))}>{t('準備を中止', 'Cancel preparation')}</Button> : <Button variant="ghost" disabled={busy} onClick={onDone}>{t('閉じる', 'Close')}</Button>}</MotionSwap>
   </section>;
 }
 
@@ -180,8 +181,8 @@ function TranscriptHistory({ jobId }: { jobId: string }) {
     finally { setApplying(false); }
   }
   return <div className="transcription-history-result">
-    {problem && <p role="alert">{problem}</p>}
-    {!view && !problem && <p role="status">{t('保存した結果を読み込み中…', 'Loading saved results…')}</p>}
+    <MotionRegion open={!!problem}>{problem && <p role="alert">{problem}</p>}</MotionRegion>
+    <MotionRegion open={!view && !problem}><p role="status">{t('保存した結果を読み込み中…', 'Loading saved results…')}</p></MotionRegion>
     {view && <><p>{t('文字起こし時の記録です。現在の字幕は一覧から編集できます。', 'This is the original transcription record. Edit current subtitles in the list.')}</p>
       {!view.applied && view.canApply && <Button busy={applying} onClick={() => void useSavedResults()}>{t('保存済みの結果を使う', 'Use saved results')}</Button>}
       {view.draft.conflicts.length > 0 && <AnimatedDetails><summary>{t('保存された境界の候補', 'Saved boundary alternatives')}</summary>
@@ -213,10 +214,10 @@ function TranscriptionProgress({ job, compact = false }: { job: JobSummary; comp
     <span className="progress-status-copy">
       {!compact && <strong>{t('文字起こしの進捗', 'Transcription progress')}</strong>}
       <span><JobStatusMessage job={job} /></span>
-      {compact && <span className="progress-status-count">{Math.floor(progress * 100)}%</span>}
+      {compact && <AnimatedValue className="progress-status-count" value={`${Math.floor(progress * 100)}%`} />}
     </span>
-    {job.status === 'running' && <progress aria-label={t('文字起こしの進捗', 'Transcription progress')} value={progress} max={1} />}
-    {!compact && <span className="progress-status-count">{Math.floor(progress * 100)}%</span>}
+    <MotionRegion as="span" open={job.status === 'running'} className="transcription-progress-bar"><progress aria-label={t('文字起こしの進捗', 'Transcription progress')} value={progress} max={1} /></MotionRegion>
+    {!compact && <AnimatedValue className="progress-status-count" value={`${Math.floor(progress * 100)}%`} />}
   </span>;
 }
 
@@ -242,7 +243,7 @@ function TranscriptionJob({ job, focused, active, history, onReview, onRequest }
     </AnimatedDetails>}
     <JobActions job={job} inlineTranscription onReviewTranscript={onReview} />
     {job.transcriptionRanges?.filter(range => range.state === 'failed').map((range, index) => <Button key={index} onClick={() => onRequest(range)}>{t('この区間を再文字起こし', 'Transcribe this range again')} · {timestamp(range.startMs)}–{timestamp(range.endMs)}</Button>)}
-    {history && <TranscriptHistory jobId={job.id} />}
+    <MotionRegion open={history}>{history && <TranscriptHistory jobId={job.id} />}</MotionRegion>
   </div>;
 }
 
@@ -261,12 +262,12 @@ export function TranscriptionWorkspace({ media, request, onRequest, onDone, onSt
   const showJob = (job: JobSummary) => <TranscriptionJob key={job.id} job={job} focused={focusJobId === job.id} active={active}
     history={history === job.id} onReview={id => setHistory(value => value === id ? undefined : id)} onRequest={onRequest} />;
   return <section className="transcription-workspace" aria-label={t('文字起こし', 'Transcription')}>
-    <div className="transcription-heading"><h3><Mic2 size={17} />{t('文字起こし', 'Transcription')}</h3>{!request && !current.length && <Button variant="ghost" onClick={() => onRequest()}>{media.segmentCount ? t('文字起こしを作り直す', 'Transcribe again') : t('字幕を作成', 'Create subtitles')}</Button>}</div>
-    {!request && !jobs.length && <p className="transcription-intro">{t('音声から字幕を作成できます。範囲と見積もりを確認してから開始します。', 'Create subtitles from the audio. Review the range and estimate before starting.')}</p>}
-    {request && <TranscriptionSetup key={request.id} media={media} request={request} onDone={onDone} onStarted={onStarted} />}
+    <div className="transcription-heading"><h3><Mic2 size={17} />{t('文字起こし', 'Transcription')}</h3><MotionRegion open={!request && !current.length}><Button variant="ghost" onClick={() => onRequest()}><MotionSwap as="span" stateKey={media.segmentCount ? 'again' : 'create'}>{media.segmentCount ? t('文字起こしを作り直す', 'Transcribe again') : t('字幕を作成', 'Create subtitles')}</MotionSwap></Button></MotionRegion></div>
+    <MotionRegion open={!request && !jobs.length}><p className="transcription-intro">{t('音声から字幕を作成できます。範囲と見積もりを確認してから開始します。', 'Create subtitles from the audio. Review the range and estimate before starting.')}</p></MotionRegion>
+    <MotionRegion open={!!request}>{request && <TranscriptionSetup key={request.id} media={media} request={request} onDone={onDone} onStarted={onStarted} />}</MotionRegion>
     {!request && continuations.filter(item => item.kind === 'transcribe' && item.mediaId === media.id && (!item.quoteId || !jobs.some(job => job.id === item.quoteId))).map(item => <Button key={item.id} onClick={() => onResume?.(item)}>{t('途中の文字起こしを続ける', 'Continue transcription setup')}</Button>)}
-    {current.filter(job => !request || job.id === focusJobId).map(showJob)}
-    {(completed.length > 0 || onOpenEarlierDrafts) && <AnimatedDetails><summary>{t('文字起こしの履歴', 'Transcription history')}{completed.length > 0 ? ` (${completed.length})` : ''}</summary>{completed.map(showJob)}
+    <MotionSwap stateKey={current.filter(job => !request || job.id === focusJobId).map(job => job.id).join(',')}>{current.filter(job => !request || job.id === focusJobId).map(showJob)}</MotionSwap>
+    {(completed.length > 0 || onOpenEarlierDrafts) && <AnimatedDetails><summary><AnimatedValue value={`${t('文字起こしの履歴', 'Transcription history')}${completed.length > 0 ? ` (${completed.length})` : ''}`} /></summary><MotionSwap stateKey={completed.map(job => job.id).join(',')}>{completed.map(showJob)}</MotionSwap>
       {onOpenEarlierDrafts && <Button variant="ghost" onClick={onOpenEarlierDrafts}>{t('以前の下書きを開く', 'Open earlier drafts')}</Button>}
     </AnimatedDetails>}
   </section>;
@@ -277,9 +278,8 @@ export function TranscriptionStatus({ mediaId, hasRequest, onOpen }: { mediaId: 
   const { t } = useAppearance();
   const jobs = (data?.jobs ?? []).filter(job => job.mediaId === mediaId && (job.kind === 'transcribe' || job.automaticTranscript));
   const current = currentTranscriptionJob(jobs);
-  if (!current && !hasRequest) return null;
-  return <button type="button" className="transcription-status" onClick={() => onOpen(current?.id)}>
-    {current ? <TranscriptionProgress job={current} compact /> : <span>{t('文字起こしの設定を続ける', 'Continue transcription setup')}</span>}
+  return <MotionRegion open={!!current || hasRequest} className="transcription-status-region"><button type="button" className="transcription-status" onClick={() => onOpen(current?.id)}>
+    <MotionSwap as="span" stateKey={current?.id ?? 'setup'}>{current ? <TranscriptionProgress job={current} compact /> : <span>{t('文字起こしの設定を続ける', 'Continue transcription setup')}</span>}</MotionSwap>
     <span className="transcription-status-action">{t('詳細を開く', 'View details')}</span>
-  </button>;
+  </button></MotionRegion>;
 }

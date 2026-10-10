@@ -92,6 +92,36 @@ it('uses the exact complete video despite a selected cue and prepares then estim
   expect(close).toHaveBeenCalledOnce();
 });
 
+it('keeps the range input DOM and selection when switching whole-video scope repeatedly', () => {
+  render(<AiDialog media={media} onClose={() => {}} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Choose a range' }));
+  const from = screen.getByLabelText(/^From/) as HTMLInputElement;
+  fireEvent.change(from, { target: { value: '00:01:23' } });
+  from.focus();
+  from.setSelectionRange(3, 5);
+  fireEvent.click(screen.getByRole('button', { name: 'Transcribe the whole video' }));
+  expect(screen.queryByRole('textbox', { name: /^From/ })).not.toBeInTheDocument();
+  expect(from).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Choose a range' }));
+  expect(screen.getByLabelText(/^From/)).toBe(from);
+  expect(from).toHaveValue('00:01:23');
+  expect(from.selectionStart).toBe(3);
+  expect(from.selectionEnd).toBe(5);
+});
+
+it('keeps the model input DOM when a typed phrase changes the AI purpose', () => {
+  render(<AiDialog media={media} initialKind="vocabulary" onClose={() => {}} />);
+  const modelInput = screen.getByLabelText(/^Gemini model ID/);
+  const phrase = screen.getByRole('textbox', { name: /^A specific phrase/ });
+  phrase.focus();
+  fireEvent.compositionStart(phrase);
+  fireEvent.change(phrase, { target: { value: 'hold on' } });
+  fireEvent.compositionEnd(phrase, { data: 'hold on' });
+  expect(screen.getByLabelText(/^Gemini model ID/)).toBe(modelInput);
+  expect(document.activeElement).toBe(phrase);
+  expect(phrase).toHaveValue('hold on');
+});
+
 it('waits for a real duration and then uses its exact milliseconds without a guessed first minute', async () => {
   const view = render(<AiDialog media={{ ...media, durationMs: 0 }} initialRange={{ startMs: 1234, endMs: 3456 }} onClose={() => {}} />);
   expect(screen.getByText('Waiting for the video duration before estimating.')).toBeVisible();

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Check, Download, RefreshCw, RotateCcw, Terminal } from 'lucide-react';
 
 import { settingsApi } from './api';
@@ -15,6 +15,7 @@ import {
 import { Badge, Button, Field } from '../../shared/ui/index';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { useActivities } from '../../app/providers/Activities';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
 
 export function ToolRow({
   tool,
@@ -34,6 +35,10 @@ export function ToolRow({
     tool.provider === 'external' ? tool.path || '' : '',
   );
   const [chooseExternal, setChooseExternal] = useState(false);
+  useEffect(() => {
+    // Committed tool changes should not replace an in-progress path edit.
+    if (!chooseExternal) setExternalPath(tool.provider === 'external' ? tool.path || '' : '');
+  }, [tool.provider, tool.path, chooseExternal]);
   const available = candidates.filter(
     (candidate) => candidate.toolId === tool.id,
   );
@@ -64,39 +69,39 @@ export function ToolRow({
                     : 'neutral'
               }
             >
-              {ready
+              <MotionSwap as="span" stateKey={tool.status}>{ready
                 ? t('利用可能', 'Ready')
                 : tool.status === 'installing'
                   ? t('準備中', 'Installing')
-                  : t('要セットアップ', 'Setup needed')}
+                  : t('要セットアップ', 'Setup needed')}</MotionSwap>
             </Badge>
           </h3>
           <p>
-            {tool.version || t('未インストール', 'Not installed')}
+            <AnimatedValue value={tool.version || t('未インストール', 'Not installed')} />
             <span>·</span>
-            {tool.provider === 'managed'
+            <MotionSwap as="span" stateKey={tool.provider}>{tool.provider === 'managed'
               ? t('Surtitle が管理', 'Managed by Surtitle')
-              : t('外部ツール', 'External tool')}
+              : t('外部ツール', 'External tool')}</MotionSwap>
           </p>
         </div>
       </div>
-      {tool.updateAvailable && (
+      <MotionRegion open={!!tool.updateAvailable}>
         <p className="notice">
           <Download size={15} />
-          {t(
+          <AnimatedValue value={t(
             `新しい版 ${tool.latestVersion || ''} を利用できます。`,
             `Update available: ${tool.latestVersion || ''}`,
-          )}
+          )} />
         </p>
-      )}
-      {tool.path && (
+      </MotionRegion>
+      <MotionRegion open={!!tool.path}>
         <div className="tool-current-path">
           <span>{t('現在使用中のパス', 'Currently used path')}</span>
-          <code className="tool-path" title={tool.path}>{tool.path}</code>
+          <code className="tool-path" title={tool.path}><MotionSwap as="span" stateKey={tool.path || ''}>{tool.path}</MotionSwap></code>
         </div>
-      )}
-      {tool.error && <p className="field-error">{tool.error}</p>}
-      {busy && <ProgressStatus label={tool.name} phase={operation?.phase || 'preparing'} completed={operation?.completed} total={operation?.total} unit={operation?.unit} />}
+      </MotionRegion>
+      <MotionRegion open={!!tool.error}><p className="field-error"><MotionSwap as="span" stateKey={tool.error || ''}>{tool.error}</MotionSwap></p></MotionRegion>
+      <MotionRegion open={busy}><ProgressStatus label={tool.name} phase={operation?.phase || 'preparing'} completed={operation?.completed} total={operation?.total} unit={operation?.unit} /></MotionRegion>
       <div className="tool-actions">
         <div className="segmented-control compact" role="group" aria-label={t(`${tool.name}の取得方法`, `${tool.name} source`)}>
           <button
@@ -137,8 +142,7 @@ export function ToolRow({
             </button>
           )}
         </div>
-        <div className="inline-actions">
-          {tool.provider === 'managed' && (
+        <MotionRegion className="inline-actions" open={tool.provider === 'managed'}>
             <>
               <Button
                 busy={busy}
@@ -156,12 +160,12 @@ export function ToolRow({
                   )
                 }
               >
-                {ready ? <RefreshCw size={14} /> : <Download size={14} />}
-                {ready
+                <MotionSwap as="span" stateKey={ready ? 'update' : 'download'}>{ready ? <RefreshCw size={14} /> : <Download size={14} />}</MotionSwap>
+                <MotionSwap as="span" stateKey={ready ? 'update' : 'download'}>{ready
                   ? t('更新する', 'Update tool')
-                  : t('ダウンロード', 'Download')}
+                  : t('ダウンロード', 'Download')}</MotionSwap>
               </Button>
-              {tool.canRollback && (
+              <MotionRegion as="span" open={!!tool.canRollback}>
                 <Button
                   disabled={busy}
                   onClick={() =>
@@ -175,15 +179,15 @@ export function ToolRow({
                   <RotateCcw size={14} />
                   {t('前の版へ', 'Roll back')}
                 </Button>
-              )}
+              </MotionRegion>
             </>
-          )}
-        </div>
+        </MotionRegion>
       </div>
-      {chooseExternal && (
+      <MotionRegion open={chooseExternal}>
         <div className="external-picker">
           <h4>{t('PATHで見つかった候補', 'Candidates found on PATH')}</h4>
           <p className="helper-text">{t('候補を選ぶと下の入力欄にパスが入ります。「検証してこのパスを使用」で確認・適用します。', 'Select a candidate to fill the path below, then verify and use it.')}</p>
+          <MotionSwap stateKey={available.map(candidate => candidate.path).join('|')}>
           {available.length > 0 ? (
             <div className="candidate-list">
               {available.map((candidate) => (
@@ -193,13 +197,14 @@ export function ToolRow({
                     <small>{t('未検証・選択後に機能互換性を確認します。', 'Unverified; capabilities are checked when selected.')}{candidate.reason ? ` ${candidate.reason}` : ''}</small>
                   </div>
                   <Button disabled={busy || !candidate.selectable} aria-label={t(`候補を選択 ${candidate.path}`, `Select candidate ${candidate.path}`)} aria-pressed={externalPath === candidate.path} onClick={() => setExternalPath(candidate.path)}>
-                    {externalPath === candidate.path && <Check size={14} />}
-                    {externalPath === candidate.path ? t('選択中', 'Selected') : t('選択', 'Select')}
+                    <MotionRegion as="span" open={externalPath === candidate.path}><Check size={14} /></MotionRegion>
+                    <MotionSwap as="span" stateKey={externalPath === candidate.path ? 'selected' : 'select'}>{externalPath === candidate.path ? t('選択中', 'Selected') : t('選択', 'Select')}</MotionSwap>
                   </Button>
                 </div>
               ))}
             </div>
           ) : <p className="helper-text">{t('候補がありません。PATHを再検索するか、実行ファイルのパスを入力してください。', 'No candidates found. Rescan PATH or enter an executable path.')}</p>}
+          </MotionSwap>
           <Field
             label={t(
               '使用する実行ファイルの絶対パス',
@@ -244,7 +249,7 @@ export function ToolRow({
           </Button>
           <p className="helper-text">{t('検証に成功するとすぐに反映します。設定画面の「変更を保存」は不要です。', 'A successful verification takes effect immediately. You do not need to save settings separately.')}</p>
         </div>
-      )}
+      </MotionRegion>
     </article>
   );
 }

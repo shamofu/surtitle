@@ -32,6 +32,7 @@ import {
 } from '../../app/runtime';
 import { shouldIgnoreShortcut } from '../../shared/keyboard';
 import { activeSegment, languageName, timestamp } from '../../shared/format';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
 import { nativeAvailable } from '../../shared/native/transport';
 import { Button, EmptyState, IconButton, Modal, useModalExit } from '../../shared/ui/index';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
@@ -631,17 +632,17 @@ function StudySession({ mediaId }: { mediaId: string }) {
         </Link>
         <div className="study-heading">
           <h1>{media.title}</h1>
-          <span>{languageName(media.learningLanguage, locale)} / {timestamp(media.durationMs)}</span>
+          <span>{languageName(media.learningLanguage, locale)} / <AnimatedValue value={timestamp(media.durationMs)} /></span>
         </div>
         <div className="study-top-actions">
-          {dirtyDrafts.length > 0 && <Button
+          <MotionRegion open={dirtyDrafts.length > 0}>{dirtyDrafts.length > 0 && <Button
             aria-expanded={showDrafts}
             disabled={busy || saveBusy}
             onClick={() => setShowDrafts(value => !value)}
           >
             <BookmarkPlus size={17} />
-            {t(`入力途中のフレーズ (${dirtyDrafts.length})`, `Unfinished phrases (${dirtyDrafts.length})`)}
-          </Button>}
+            <AnimatedValue value={t(`入力途中のフレーズ (${dirtyDrafts.length})`, `Unfinished phrases (${dirtyDrafts.length})`)} />
+          </Button>}</MotionRegion>
           <Button
             aria-expanded={panel === 'transcript'}
             disabled={busy || saveBusy}
@@ -666,7 +667,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
       </header>
       <div className="study-auxiliary">
       {emptyRangeIssues.length > 0 && <AnimatedDetails className="notice warning">
-        <summary>{t(`字幕がない要確認区間 (${emptyRangeIssues.length})`, `Passages without subtitles to check (${emptyRangeIssues.length})`)}</summary>
+        <summary><AnimatedValue value={t(`字幕がない要確認区間 (${emptyRangeIssues.length})`, `Passages without subtitles to check (${emptyRangeIssues.length})`)} /></summary>
         <p>{t('発話なしと判定された区間などです。再生して確認できます。学習はそのまま続けられます。', 'These include passages detected as having no speech. Play them to check; you can continue studying.')}</p>
         {emptyRangeIssues.map(issue => <div key={issue.id}>
           <Button variant="ghost" disabled={!playerReady || busy || saveBusy} onClick={() => void run(async () => { await playerApi.player({ action: 'seek', value: issue.startMs }); await playerApi.player({ action: 'play' }); })}>
@@ -681,7 +682,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
         <Button disabled={busy || saveBusy || !segmentsQuery.isSuccess} onClick={() => resumeAi(item)}>{t('続きから再開', 'Continue your request')}</Button>
         <Button variant="ghost" disabled={busy || saveBusy} onClick={() => void report(async () => { await continuationApi.discard(item.id); await continuationsQuery.refetch(); })}>{t('依頼の入力を破棄', 'Discard request input')}</Button>
       </div>)}
-      {aiRebind && <p className="notice" role="status">{t('字幕を選ぶと、入力した依頼とモデルを保持して再開します。', 'Select a subtitle to continue with your saved request and model choices.')}</p>}
+      <MotionRegion open={!!aiRebind}><p className="notice" role="status">{t('字幕を選ぶと、入力した依頼とモデルを保持して再開します。', 'Select a subtitle to continue with your saved request and model choices.')}</p></MotionRegion>
       <StudyRegion open={showDrafts && dirtyDrafts.length > 0} className="study-motion-inline"><section className="study-phrase-drafts" aria-label={t('入力途中のフレーズ', 'Unfinished phrases')}>
         {dirtyDrafts.map(([key, draft]) => <div className="study-phrase-draft" key={key}>
           <Button variant="ghost" disabled={busy || saveBusy} onClick={() => void resumeDraft(draft)}>
@@ -717,9 +718,9 @@ function StudySession({ mediaId }: { mediaId: string }) {
       {jobs.length > 0 &&
         <AnimatedDetails open={jobs.some(job => job.status === 'running') || needsAttention} className={`study-jobs ${needsAttention ? 'needs-attention' : ''}`}>
           <summary>
-            {needsAttention
+            <AnimatedValue value={needsAttention
               ? t('確認が必要な処理があります', 'Some tasks need attention')
-              : t(`${jobs.length} 件の処理`, `${jobs.length} tasks`)}
+              : t(`${jobs.length} 件の処理`, `${jobs.length} tasks`)} />
             <ChevronDown size={15} />
           </summary>
           <div>{jobs.map(job => <div
@@ -734,8 +735,8 @@ function StudySession({ mediaId }: { mediaId: string }) {
             />
           </div>)}</div>
         </AnimatedDetails>}
-      {completedJobs.length > 0 && <AnimatedDetails className="study-jobs"><summary>{t('処理履歴', 'Job history')} ({completedJobs.length})</summary><div>{completedJobs.map(job => <div className="job-status" key={job.id}><span>{job.resultState === 'applied_with_warnings' ? t('完了・注意箇所あり', 'Complete · marked passages') : job.message || job.kind}</span><JobActions job={job} onReviewTranscript={setDraftReview} /></div>)}</div></AnimatedDetails>}
-      {(media.status === 'missing' || media.status === 'error') &&
+      {completedJobs.length > 0 && <AnimatedDetails className="study-jobs"><summary>{t('処理履歴', 'Job history')} (<AnimatedValue value={completedJobs.length} />)</summary><div>{completedJobs.map(job => <div className="job-status" key={job.id}><span>{job.resultState === 'applied_with_warnings' ? t('完了・注意箇所あり', 'Complete · marked passages') : job.message || job.kind}</span><JobActions job={job} onReviewTranscript={setDraftReview} /></div>)}</div></AnimatedDetails>}
+      <MotionRegion open={media.status === 'missing' || media.status === 'error'}>
         <div
           className="job-status warning"
           role="alert"
@@ -751,7 +752,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
           >
             {t('ファイルを指定', 'Locate file')}
           </Button>
-        </div>}
+        </div></MotionRegion>
       </div>
       <div className="study-grid">
         <div className="study-left">
@@ -948,7 +949,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                         'Confirm this subtitle in the editor before saving a phrase.'
                       )}</p>}
                   </>}
-                {showSave && inspection && formDraft && formKey
+                <MotionSwap className="phrase-save-surface" stateKey={showSave && inspection && formDraft && formKey ? 'form' : 'button'}>{showSave && inspection && formDraft && formKey
                   ? <SaveCardForm
                     key={formKey}
                     segment={formDraft.inspection.source}
@@ -985,7 +986,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                   >
                     <BookmarkPlus size={17} />
                     {t('フレーズを保存', 'Save a phrase')}
-                  </Button>}
+                  </Button>}</MotionSwap>
                 <StudyRegion open={saved} className="study-motion-inline">
                   <p
                     className="phrase-saved"

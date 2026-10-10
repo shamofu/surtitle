@@ -5,13 +5,14 @@ import { useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { ArrowDownToLine, FileVideo2, Headphones, Play, Plus, Search, Upload, X } from 'lucide-react';
 import type { Media } from '../../shared/contracts/media';
-import { useAppearance, useNotifications, useSnapshot } from '../../app/runtime';
+import { useAppearance, useDataActions, useNotifications, useSnapshot } from '../../app/runtime';
 import { nativeAvailable } from '../../shared/native/transport';
 import { languageName, timestamp } from '../../shared/format';
 import { Badge, Button, EmptyState, PageTitle } from '../../shared/ui/index';
 import { TransferDialog } from '../transfer/TransferDialog';
 import { DownloadJobs } from './MediaManagement';
 import { useLibraryDrop } from './useLibraryDrop';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
 
 function MediaRow({ media }: { media: Media }) {
   const { t, locale } = useAppearance();
@@ -34,7 +35,7 @@ function MediaRow({ media }: { media: Media }) {
           <p className="media-row-source">
             <span>{media.kind === 'audio' ? t('音声', 'Audio') : t('動画', 'Video')}</span>
             <span>{media.sourceUrl ? t('URL から追加', 'Imported from URL') : t('ローカルファイル', 'Local file')}</span>
-            {status && <Badge tone={media.status === 'importing' ? 'neutral' : 'warning'}>{status}</Badge>}
+            <MotionSwap as="span" stateKey={media.status}>{status && <Badge tone={media.status === 'importing' ? 'neutral' : 'warning'}>{status}</Badge>}</MotionSwap>
           </p>
         </div>
       </div>
@@ -44,15 +45,15 @@ function MediaRow({ media }: { media: Media }) {
       </div>
       <div className="media-row-subtitles">
         <span className="media-mobile-label">{t('字幕', 'Subtitles')}</span>
-        {media.segmentCount > 0 ? t(`${media.segmentCount} 行`, `${media.segmentCount} lines`) : t('字幕なし', 'No subtitles')}
+        <AnimatedValue value={media.segmentCount > 0 ? t(`${media.segmentCount} 行`, `${media.segmentCount} lines`) : t('字幕なし', 'No subtitles')} />
       </div>
       <div className="media-row-phrases">
         <span className="media-mobile-label">{t('フレーズ', 'Phrases')}</span>
-        {t(`${media.cardCount} 件`, `${media.cardCount} saved`)}
+        <AnimatedValue value={t(`${media.cardCount} 件`, `${media.cardCount} saved`)} />
       </div>
       <div className="media-row-position">
         <span className="media-mobile-label">{t('再生位置 / 長さ', 'Position / duration')}</span>
-        <span>{timestamp(position)} <span className="muted">/ {duration ? timestamp(duration) : '—'}</span></span>
+        <span><AnimatedValue value={timestamp(position)} /> <span className="muted">/ <AnimatedValue value={duration ? timestamp(duration) : '—'} /></span></span>
         {duration !== null && (
           <span className="media-progress" aria-hidden="true">
             <span style={{ width: `${Math.min(100, (position / duration) * 100)}%` }} />
@@ -64,9 +65,10 @@ function MediaRow({ media }: { media: Media }) {
 }
 
 export function LibraryPage() {
-  const { data, loading } = useSnapshot();
+  const { data, loading, error } = useSnapshot();
+  const { refresh } = useDataActions();
   const { t, locale } = useAppearance();
-  const { notify } = useNotifications();
+  const { notify, report } = useNotifications();
   const [importOpen, setImportOpen] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const importPending = useRef(false);
@@ -125,30 +127,30 @@ export function LibraryPage() {
         </Button>
       </PageTitle>
       <p className="library-drop-hint"><Upload size={15} aria-hidden="true" />{t('動画・音声ファイルをここへドロップして追加できます。', 'Drop video or audio files here to add them.')}</p>
-      {dragging && !importOpen && <div className="library-drop-overlay" role="status"><div><Upload size={34} aria-hidden="true" /><strong>{t('ドロップして教材を追加', 'Drop to add your materials')}</strong><p>{t('ファイルと言語を確認してから、ライブラリに追加します。', 'Review the files and languages before adding them to your library.')}</p></div></div>}
+      <MotionRegion open={dragging && !importOpen}><div className="library-drop-overlay" role="status"><div><Upload size={34} aria-hidden="true" /><strong>{t('ドロップして教材を追加', 'Drop to add your materials')}</strong><p>{t('ファイルと言語を確認してから、ライブラリに追加します。', 'Review the files and languages before adding them to your library.')}</p></div></div></MotionRegion>
       <DownloadJobs />
-      {continuing.length > 0 && (
+      <MotionRegion open={continuing.length > 0}>
         <section className="continue-section" aria-labelledby="continue-title">
           <h2 id="continue-title">{t('視聴途中', 'Continue watching')}</h2>
-          <div className="continue-list">
+          <MotionSwap className="continue-list" stateKey={continuing.map(item => item.id).join('|')}>
             {continuing.map((item) => (
               <Link key={item.id} className="continue-row" to="/study/$mediaId" params={{ mediaId: item.id }}>
                 <span className="continue-play" aria-hidden="true"><Play size={19} fill="currentColor" /></span>
                 <div className="continue-copy">
                   <h3>{item.title}</h3>
-                  <p>{languageName(item.learningLanguage, locale)}<span>{t(`${timestamp(item.lastPositionMs)} から再開`, `Resume at ${timestamp(item.lastPositionMs)}`)}</span></p>
+                  <p>{languageName(item.learningLanguage, locale)}<span><AnimatedValue value={t(`${timestamp(item.lastPositionMs)} から再開`, `Resume at ${timestamp(item.lastPositionMs)}`)} /></span></p>
                 </div>
                 <span className="continue-action">{item.kind === 'audio' ? t('続きを聴く', 'Continue listening') : t('続きを観る', 'Continue watching')}</span>
               </Link>
             ))}
-          </div>
+          </MotionSwap>
         </section>
-      )}
+      </MotionRegion>
       <section aria-labelledby="library-list-title">
         <div className="library-toolbar">
           <div className="section-heading">
             <h2 id="library-list-title">{t('教材一覧', 'Your materials')}</h2>
-            {data && <span className="count-pill">{media.length}</span>}
+            <MotionRegion open={!!data} as="span"><span className="count-pill"><AnimatedValue value={media.length} /></span></MotionRegion>
           </div>
           <div className="library-tools">
             <div className="filter-tabs" role="group" aria-label={t('コンテンツの種類', 'Content type')}>
@@ -163,13 +165,19 @@ export function LibraryPage() {
             <div className="search-box">
               <Search size={17} aria-hidden="true" />
               <input placeholder={t('タイトルで検索', 'Search titles')} value={search} onChange={(event) => setSearch(event.target.value)} aria-label={t('ライブラリを検索', 'Search your library')} />
-              {search && <button aria-label={t('検索をクリア', 'Clear search')} onClick={() => setSearch('')}><X size={16} /></button>}
+              <MotionRegion open={!!search} as="span"><button aria-label={t('検索をクリア', 'Clear search')} onClick={() => setSearch('')}><X size={16} /></button></MotionRegion>
             </div>
           </div>
         </div>
+        <MotionSwap stateKey={loading ? 'loading' : !data && error ? 'error' : `${filter}:${filtered.map(item => item.id).join('|')}`}>
         {loading ? (
           <div className="media-list" aria-label={t('読み込み中', 'Loading')} aria-busy="true">
             {[0, 1, 2].map((item) => <div className="skeleton media-skeleton" key={item} />)}
+          </div>
+        ) : !data && error ? (
+          <div className="notice warning" role="alert">
+            <span>{t('教材を読み込めませんでした。', 'Could not load your materials.')} {error.message}</span>
+            <Button onClick={() => void report(() => refresh())}>{t('再試行', 'Retry')}</Button>
           </div>
         ) : filtered.length ? (
           <div className="media-list">
@@ -198,6 +206,7 @@ export function LibraryPage() {
             </EmptyState>
           </div>
         )}
+        </MotionSwap>
       </section>
       {importOpen && <ImportDialog droppedFiles={droppedFiles} dragging={dragging} onBusyChange={busy => {
         importPending.current = busy;

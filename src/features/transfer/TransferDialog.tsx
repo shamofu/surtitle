@@ -23,6 +23,7 @@ import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { useActivities } from '../../app/providers/Activities';
 import { useClearPreparationSessions } from '../ai/PreparationSessions';
 import { clearEditorDraftSessions, flushEditorDrafts } from '../study/editor-drafts/useEditorDraft';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
 
 export function TransferDialog({
   onClose,
@@ -205,18 +206,19 @@ export function TransferDialog({
           {t('復元', 'Restore')}
         </button>
       </div>
-      {busy && <ProgressStatus label={phase === 'exporting' ? t('学習データの書き出し', 'Export learning data') : phase === 'reading_backup' ? t('バックアップの確認', 'Review backup') : t('学習データの復元', 'Restore learning data')} phase={phase} />}
+      <MotionRegion open={busy}><ProgressStatus label={phase === 'exporting' ? t('学習データの書き出し', 'Export learning data') : phase === 'reading_backup' ? t('バックアップの確認', 'Review backup') : t('学習データの復元', 'Restore learning data')} phase={phase} /></MotionRegion>
+      <MotionSwap stateKey={tab === 'export' ? exportedPaths.length ? 'exported' : 'export' : `restore:${preview?.token || 'choose'}`}>
       {tab === 'export' && exportedPaths.length > 0 ? <section aria-label={t('書き出し完了', 'Export complete')}>
         <p role="status">{t('書き出しました。', 'Your export is ready.')}</p>
         <ul>{exportedPaths.map(path => <li key={path}><p style={{ overflowWrap: 'anywhere' }}>{path}</p><Button onClick={() => void report(() => transferApi.revealExportFile(path))}><FolderOpen size={16} />{t('保存先を開く', 'Open containing folder')}</Button></li>)}</ul>
         <footer className="modal-footer"><Button onClick={() => setExportedPaths([])}>{t('別の形式で書き出す', 'Export another format')}</Button><Button variant="primary" onClick={close}>{t('完了', 'Done')}</Button></footer>
       </section> : tab === 'export' ? (
         <>
-          <p className="notice" role="status">{format === 'srt' || format === 'vtt'
+          <p className="notice" role="status"><MotionSwap as="span" stateKey={format === 'srt' || format === 'vtt' ? 'subtitles' : format === 'csv' || format === 'tsv' ? 'phrases' : 'all'}>{format === 'srt' || format === 'vtt'
             ? t('対象：この作品の字幕（翻訳があれば別ファイルも作成）', 'Scope: subtitles for this media, plus a separate translation file when available')
             : format === 'csv' || format === 'tsv'
               ? t('対象：すべての作品のフレーズ', 'Scope: phrases from all media')
-              : t('対象：すべての学習データ', 'Scope: all learning data')}</p>
+              : t('対象：すべての学習データ', 'Scope: all learning data')}</MotionSwap></p>
           <div className="format-list">
             {formats.map((item) => (
               <button
@@ -232,7 +234,7 @@ export function TransferDialog({
                   <small>{item.description}</small>
                 </span>
                 <span className="radio-indicator">
-                  {format === item.id && <Check size={12} />}
+                  <MotionRegion as="span" open={format === item.id}><Check size={12} /></MotionRegion>
                 </span>
               </button>
             ))}
@@ -284,19 +286,19 @@ export function TransferDialog({
             <>
               <div className="restore-summary">
                 <div>
-                  <strong>{preview.mediaCount}</strong>
+                  <strong><AnimatedValue value={preview.mediaCount} /></strong>
                   <span>{t('教材', 'media')}</span>
                 </div>
                 <div>
-                  <strong>{preview.cardCount}</strong>
+                  <strong><AnimatedValue value={preview.cardCount} /></strong>
                   <span>{t('フレーズ', 'phrases')}</span>
                 </div>
                 <div>
-                  <strong>{preview.reviewCount}</strong>
+                  <strong><AnimatedValue value={preview.reviewCount} /></strong>
                   <span>{t('復習記録', 'reviews')}</span>
                 </div>
                 <div>
-                  <strong>{preview.audioCount}</strong>
+                  <strong><AnimatedValue value={preview.audioCount} /></strong>
                   <span>{t('音声', 'clips')}</span>
                 </div>
               </div>
@@ -342,6 +344,7 @@ export function TransferDialog({
           )}
         </>
       )}
+      </MotionSwap>
     </Modal>
   );
 }

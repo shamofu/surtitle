@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useAppearance } from '../../app/runtime';
 import type { ActivityStatus, ProgressUnit } from '../contracts/activity';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../motion';
 import './progress.css';
 
 const phases: Record<string, [string, string]> = {
@@ -57,9 +58,9 @@ export function ProgressStatus({ label, phase, completed, total, unit, status = 
   const ratioOnly = exact && total === 1 && !unit;
   const count = ratioOnly ? `${Math.floor(bounded * 100)}%` : exact ? `${format(bounded)} / ${format(total)}` : completed !== undefined ? format(value) : undefined;
   return <div className={`progress-status${compact ? ' compact' : ''}`} data-status={status} aria-busy={active}>
-    <div className="progress-status-copy"><strong>{label}</strong><span role="status">{progressPhaseLabel(state, t)}</span></div>
-    {active && <progress aria-label={label} {...(exact ? { value: bounded, max: total } : {})} />}
-    {count && <p className="progress-status-count">{unit === 'bytes' && !exact ? `${t('保存中の容量', 'Stored size')}: ` : ''}{count}{exact && active && !ratioOnly ? ` · ${Math.floor(bounded / total * 100)}%` : ''}</p>}
-    {error && <p className="progress-status-error">{error}</p>}
+    <div className="progress-status-copy"><strong>{label}</strong><span role="status"><MotionSwap as="span" stateKey={progressPhaseLabel(state, t)}>{progressPhaseLabel(state, t)}</MotionSwap></span></div>
+    <MotionRegion open={active}><progress aria-label={label} {...(exact ? { value: bounded, max: total } : {})} /></MotionRegion>
+    <MotionRegion open={!!count}><p className="progress-status-count">{unit === 'bytes' && !exact ? `${t('保存中の容量', 'Stored size')}: ` : ''}<AnimatedValue value={`${count ?? ''}${exact && active && !ratioOnly ? ` · ${Math.floor(bounded / total * 100)}%` : ''}`} /></p></MotionRegion>
+    <MotionRegion open={!!error}><p className="progress-status-error"><MotionSwap as="span" stateKey={error ?? ''}>{error}</MotionSwap></p></MotionRegion>
   </div>;
 }

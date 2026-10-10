@@ -19,8 +19,8 @@
 .import-file-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 250px; overflow: auto; border-block: 1px solid var(--border); }
 .import-file-row { display: flex; gap: 12px; align-items: flex-start; padding: 14px 0; }
 .import-file-row + .import-file-row { border-top: 1px solid var(--border); }
-.import-file-row > svg { margin-top: 4px; color: var(--muted); }
-.import-file-row.imported > svg, .import-file-row.existing > svg { color: var(--accent); }
+.import-file-icon { margin-top: 4px; color: var(--muted); transition: color var(--motion-fast) var(--motion-ease); }
+.import-file-row.imported > .import-file-icon, .import-file-row.existing > .import-file-icon { color: var(--accent); }
 .import-file-copy { flex: 1; min-width: 0; }
 .import-file-copy strong { display: block; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 .import-file-path { display: block; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }

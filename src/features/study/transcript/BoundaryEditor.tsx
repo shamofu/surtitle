@@ -9,6 +9,7 @@ import type { ReviewText } from '../../../shared/contracts/transcript';
 import type { TranscriptReview } from '../../../shared/contracts/transcript';
 import { useAppearance } from '../../../app/runtime';
 import { timestamp } from '../../../shared/format';
+import { MotionRegion } from '../../../shared/motion';
 import { Badge, Button } from '../../../shared/ui/index';
 
 import {
@@ -103,7 +104,7 @@ export function BoundaryEditor({
           {t('手動で整える', 'Edit manually')}
         </Button>
       </div>
-      {manual && (
+      <MotionRegion open={!!manual}>{manual && (
         <div className="boundary-manual">
           <p className="helper-text">
             {t(
@@ -156,7 +157,7 @@ export function BoundaryEditor({
             </p>
           )}
         </div>
-      )}
+      )}</MotionRegion>
       {repairs.map((repair) => (
         <div key={repair.jobId} className="repair-result">
           {repair.draft.pendingRanges.length ? (

@@ -16,6 +16,7 @@ import { Button } from '../../shared/ui/index';
 
 import { TranscriptReviewDialog } from '../study/transcript/TranscriptReview';
 import { JobActions } from '../ai/JobActions';
+import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
 
 export function UnknownAttempt({
   attempt,
@@ -55,12 +56,12 @@ export function UnknownAttempt({
           'Request with an unknown outcome',
         )}{' '}
         ·{' '}
-        {unpriced
+        <AnimatedValue value={unpriced
           ? t('料金未算定', 'Cost not calculated')
-          : money(attempt.heldUsd)}
+          : money(attempt.heldUsd)} />
       </h3>
       <p>
-        {unpriced
+        <MotionSwap as="span" stateKey={unpriced ? 'unpriced' : 'reserved'}>{unpriced
           ? t(
               '応答と金額を確認できません。料金未算定の送信記録を保持します。了承しても再送されません。',
               'The outcome and cost are unknown. The unpriced request remains recorded. Acknowledging does not resend it.',
@@ -68,7 +69,7 @@ export function UnknownAttempt({
           : t(
               '課金済みか確認できないため、予約額の全額を保留し、予算から差し引き続けます。この確認では再実行されません。再実行には別の承認が必要です。',
               'Because the charge is unknown, the entire reservation remains held against your budget. Acknowledging it does not retry the request; any retry requires a separate approval.',
-            )}
+            )}</MotionSwap>
       </p>
       <label className="check-field">
         <input
@@ -78,7 +79,7 @@ export function UnknownAttempt({
           onChange={(event) => setAcknowledged(event.target.checked)}
         />
         <span>
-          {unpriced
+          <MotionSwap as="span" stateKey={unpriced ? 'unpriced' : money(attempt.heldUsd)}>{unpriced
             ? t(
                 '金額不明の課金が発生した可能性を了承します。',
                 'I acknowledge that an unknown charge may have occurred.',
@@ -86,7 +87,7 @@ export function UnknownAttempt({
             : t(
                 `課金の可能性を了承し、${money(attempt.heldUsd)} の予約額の保留を維持します。`,
                 `I acknowledge the possible charge and keep ${money(attempt.heldUsd)} reserved.`,
-              )}
+              )}</MotionSwap>
         </span>
       </label>
       <Button
@@ -113,8 +114,9 @@ export function PausedJobs() {
         (job.pendingResults || 0) > 0 ||
         (job.needsAttention ?? job.transcriptReview),
     ) || [];
-  if (!attempts.length && !jobs.length) return null;
   return (
+    <>
+    <MotionRegion open={!!attempts.length || !!jobs.length}>
     <section className="settings-card">
       <div className="settings-section-title">
         <ShieldCheck size={20} />
@@ -130,21 +132,25 @@ export function PausedJobs() {
           </p>
         </div>
       </div>
+      <MotionSwap stateKey={`${attempts.map(attempt => attempt.id).join('|')}:${jobs.map(job => job.id).join('|')}`}>
       {attempts.map((attempt) => (
         <UnknownAttempt key={attempt.id} attempt={attempt} />
       ))}
       {jobs.map((job) => (
         <div className="job-status" key={job.id}>
-          <span>{job.message || job.kind}</span>
+          <MotionSwap as="span" stateKey={job.message || job.kind}>{job.message || job.kind}</MotionSwap>
           <JobActions job={job} onReviewTranscript={setReviewJob} />
         </div>
       ))}
+      </MotionSwap>
+    </section>
+    </MotionRegion>
       {reviewJob && (
         <TranscriptReviewDialog
           jobId={reviewJob}
           onClose={() => setReviewJob(undefined)}
         />
       )}
-    </section>
+    </>
   );
 }

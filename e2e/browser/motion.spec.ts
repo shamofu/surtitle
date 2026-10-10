@@ -228,6 +228,15 @@ test.describe('recorded motion walkthrough', () => {
     await page.goto('/');
     await scenePause();
     await page.locator('.media-card').filter({ hasText: 'A walk along the coast' }).click();
+    await expect(page.getByRole('slider', { name: 'Playback position' })).toBeEnabled();
+    for (const positionMs of [77000, 78000, 79000]) {
+      await page.evaluate(async value => {
+        const fixture = (window as any).__learningFixture;
+        fixture.state.positionMs = value;
+        await fixture.call('player_control', { request: { action: 'pause' } });
+      }, positionMs);
+      await scenePause();
+    }
     await page.getByRole('button', { name: 'Transcript', exact: true }).click();
     await expect(page.getByLabel('Search transcript')).toBeVisible();
     await scenePause();

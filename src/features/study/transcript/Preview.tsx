@@ -8,6 +8,7 @@ import type { ReviewText } from '../../../shared/contracts/transcript';
 
 import { useAppearance } from '../../../app/runtime';
 import { timestamp } from '../../../shared/format';
+import { AnimatedValue, MotionSwap } from '../../../shared/motion';
 import { Badge } from '../../../shared/ui/index';
 
 export function DraftCues({
@@ -47,16 +48,16 @@ export function DraftCues({
             >
               <button className="segment-time" onClick={() => play(cue)}>
                 <Play size={12} />
-                {timestamp(cue.startMs, true)}
+                <AnimatedValue value={timestamp(cue.startMs, true)} />
               </button>
-              <div>
+              <MotionSwap stateKey={`${cue.text}:${cue.status}`}>
                 <p>{cue.text}</p>
                 {cue.status === 'provisional' && (
                   <Badge tone="warning">
                     {t('処理中・未確定', 'Pending / provisional')}
                   </Badge>
                 )}
-              </div>
+              </MotionSwap>
             </article>
           );
         })}
@@ -80,7 +81,7 @@ export function Alternatives({
   return (
     <section className="boundary-alternative">
       <h4>{title}</h4>
-      {segments.length ? (
+      <MotionSwap stateKey={JSON.stringify(segments)}>{segments.length ? (
         segments.map((cue, index) => (
           <div key={index}>
             <button
@@ -97,7 +98,7 @@ export function Alternatives({
         <p className="helper-text">
           {t('この結果に発話はありません。', 'No speech in this result.')}
         </p>
-      )}
+      )}</MotionSwap>
     </section>
   );
 }

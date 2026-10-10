@@ -42,7 +42,7 @@
   display: block;
   height: 100%;
   background: var(--accent);
-  transition: width 0.2s;
+  transition: width var(--motion-fast) var(--motion-ease);
 }
 .review-card {
   border: 1px solid var(--border);
@@ -149,6 +149,7 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 16px;
+  transition: opacity var(--motion-fast) var(--motion-ease);
 }
 .rating-button {
   position: relative;
