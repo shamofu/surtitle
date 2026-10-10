@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from '@playwright/test';
 import { installLearningFixture } from './learning-fixture';
+import { motionDurations } from '../../src/shared/motion';
+
+// Outlive the configured exit and its bounded completion fallback.
+const obsoleteExitDeadline = motionDurations.exit * 1000 + 150;
 
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {
   test(`validation reopens a closing disclosure before focusing its field (${reducedMotion})`, async ({ page }) => {
@@ -24,7 +28,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     expect(result).toMatchObject({ open: true, inert: false, focused: true });
     await expect(details).toHaveAttribute('data-motion-state', 'open');
     // Cross the obsolete exit timer's deadline: it must not close the new state.
-    await page.waitForTimeout(250);
+    await page.waitForTimeout(obsoleteExitDeadline);
     await expect(details).toHaveAttribute('open', '');
     await expect(daily).toBeFocused();
   });
@@ -52,6 +56,6 @@ test('choosing custom model output cancels a disclosure exit', async ({ page }) 
   });
   expect(before).toBe('exiting');
   await expect(details).toHaveAttribute('data-motion-state', 'open');
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(obsoleteExitDeadline);
   await expect(model.getByRole('spinbutton', { name: /^Maximum output tokens/ })).toBeVisible();
 });

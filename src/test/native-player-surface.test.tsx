@@ -79,6 +79,32 @@ it('surfaces placement errors and retries identical bounds without reloading med
   expect(playerApi.loadMedia).toHaveBeenCalledTimes(1);
 });
 
+it('restores the confirmed volume and reports a failed adjustment', async () => {
+  const request = deferred<void>();
+  vi.mocked(playerApi.player).mockImplementation(async control => {
+    if (control.action === 'volume') await request.promise;
+  });
+  render(player());
+  const volume = screen.getByRole('slider', { name: 'Volume' });
+  await waitFor(() => expect(volume).toBeEnabled());
+  fireEvent.wheel(volume, { deltaY: -100 });
+  expect(volume).toHaveValue('85');
+  expect(volume).toHaveAttribute('aria-valuetext', '85%');
+  await act(async () => request.reject(new Error('Volume rejected')));
+  expect(volume).toHaveValue('80');
+  expect(volume).toHaveAttribute('aria-valuetext', '80%');
+  expect(fixture.notify).toHaveBeenCalledWith('Error: Volume rejected', 'error');
+});
+
+it('ignores volume wheel gestures while playback interactions are disabled', async () => {
+  render(player({ interactionsDisabled: true }));
+  const volume = screen.getByRole('slider', { name: 'Volume' });
+  await waitFor(() => expect(volume).toHaveValue('80'));
+  expect(volume).toBeDisabled();
+  fireEvent.wheel(volume, { deltaY: -100 });
+  expect(vi.mocked(playerApi.player).mock.calls.some(([control]) => control.action === 'volume')).toBe(false);
+});
+
 it('hides video for a modal and restores the same bounds afterward', async () => {
   const view = render(player());
   await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith(expect.objectContaining({ action: 'bounds' })));
@@ -92,10 +118,19 @@ it('hides video for a modal and restores the same bounds afterward', async () =>
   await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith(expect.objectContaining({ action: 'bounds' })));
 });
 
-it('offers the selected embedded playback track to the study subtitle chooser', async () => {
+it('offers embedded tracks as study sources and explains that captions appear below the video', async () => {
   const choose = vi.fn();
-  render(player({ settingsOpen: true, onUseStudySubtitles: choose }));
+  const close = vi.fn();
+  render(player({ settingsOpen: true, onSettingsClose: close, onUseStudySubtitles: choose }));
+  expect(await screen.findByText('Study subtitle source')).toBeInTheDocument();
+  expect(screen.getByText('Captions appear below the player. You can import embedded captions here for study.')).toBeInTheDocument();
+  expect(screen.queryByText('Playback captions')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Subtitle track' }), { target: { value: '0' } });
+  await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'track', trackKind: 'sub', value: 0 }));
+  fireEvent.change(screen.getByRole('combobox', { name: 'Subtitle track' }), { target: { value: '1' } });
+  await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'track', trackKind: 'sub', value: 1 }));
   fireEvent.click(await screen.findByRole('button', { name: 'Use these captions for study' }));
+  expect(close).toHaveBeenCalledOnce();
   expect(choose).toHaveBeenCalledExactlyOnceWith(4);
 });
 

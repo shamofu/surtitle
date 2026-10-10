@@ -40,6 +40,7 @@ vi.mock('../app/runtime', () => ({
 vi.mock('../features/study/drafts/DraftStudyPanel', () => ({ DraftStudyPanel: () => <div>Draft panel</div> }));
 vi.mock('@tanstack/react-virtual', () => ({
   useVirtualizer: ({ count, getScrollElement }: { count: number; getScrollElement: () => HTMLElement | null }) => ({
+    scrollRect: { width: 400, height: 600 },
     measure: fixture.measure,
     takeSnapshot: () => [],
     scrollToIndex: fixture.scrollToIndex,

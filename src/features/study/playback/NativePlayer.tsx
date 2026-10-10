@@ -18,9 +18,9 @@ import {
   Repeat2,
   RotateCcw,
   RotateCw,
-  Volume2,
 } from 'lucide-react';
 import { playerApi } from './api';
+import { VolumeControl } from './VolumeControl';
 
 import { nativeAvailable } from '../../../shared/native/transport';
 
@@ -90,6 +90,7 @@ export function NativePlayer({
   const [seekDraft, setSeekDraft] = useState<number | null>(null);
   const seekInput = useRef<number | null>(null);
   const seekOperation = useRef(0);
+  const volumeOperation = useRef(0);
   const [loop, setLoop] = useState(false);
   const loopActive = useRef(false);
   const loopOperation = useRef(0);
@@ -116,6 +117,17 @@ export function NativePlayer({
   const selectionSignature = selected
     ? JSON.stringify([selected.id, selected.startMs, selected.endMs])
     : '';
+  const changeVolume = useCallback(async (value: number) => {
+    const operation = volumeOperation.current;
+    if (!await control({ action: 'volume', value })) return;
+    try {
+      if (operation !== volumeOperation.current) return;
+      const current = await playerApi.playerState();
+      if (operation === volumeOperation.current) acceptState(current);
+    } catch (error) {
+      if (operation === volumeOperation.current) notify(String(error), 'error');
+    }
+  }, [control, acceptState, notify]);
   const previousSelection = useRef({
     mediaId: media.id,
     revision: selectionRevision,
@@ -215,6 +227,7 @@ export function NativePlayer({
     return () => {
       disposed = true;
       seekOperation.current += 1;
+      volumeOperation.current += 1;
       stop();
       void playerApi.player({ action: 'hide' }).catch(() => {});
     };
@@ -481,8 +494,8 @@ export function NativePlayer({
                 </select>
                 <ChevronDown size={12} />
               </label>
-              <Volume2 size={16} aria-hidden="true" />
-              <input className="volume-slider" type="range" min="0" max="100" value={state?.volume ?? 100} disabled={!loaded} onChange={(event) => void control({ action: 'volume', value: Number(event.target.value) })} aria-label={t('音量', 'Volume')} />
+              <VolumeControl key={media.id} value={state?.volume ?? 100} disabled={controlsDisabled}
+                label={t('音量', 'Volume')} onChange={changeVolume} />
               <IconButton label={t('全画面表示を切り替える', 'Toggle fullscreen')} aria-pressed={fullscreen} disabled={!loaded} onClick={() => {
                 const next = !fullscreen;
                 setFullscreen(next);
@@ -507,7 +520,7 @@ export function NativePlayer({
               const tracks = state?.tracks.filter((track) => track.kind === kind) || [];
               return tracks.length > 0 && (
                 <label key={kind} className="field">
-                  <span>{kind === 'audio' ? t('学習する音声', 'Study audio') : t('再生字幕', 'Playback captions')}</span>
+                  <span>{kind === 'audio' ? t('学習する音声', 'Study audio') : t('学習用の字幕ソース', 'Study subtitle source')}</span>
                   <select
                     aria-label={kind === 'audio' ? t('音声トラック', 'Audio track') : t('字幕トラック', 'Subtitle track')}
                     disabled={controlsDisabled}
@@ -516,18 +529,22 @@ export function NativePlayer({
                       ? selectAudio(Number(event.target.value))
                       : control({ action: 'track', trackKind: kind, value: Number(event.target.value) }))}
                   >
-                    {kind === 'sub' && <option value={0}>{t('非表示', 'Off')}</option>}
+                    {kind === 'sub' && <option value={0}>{t('選択なし', 'None selected')}</option>}
                     {tracks.map((track) => (
                       <option key={track.id} value={track.id}>
                         {[track.language, track.title || `${kind} ${track.id}`].filter(Boolean).join(' · ')}
                       </option>
                     ))}
                   </select>
+                  {kind === 'sub' && <small className="helper-text">{t('字幕はプレイヤーの下に表示します。埋め込み字幕はここから学習用に取り込めます。', 'Captions appear below the player. You can import embedded captions here for study.')}</small>}
                   {kind === 'sub' && onUseStudySubtitles && (() => {
                     const selectedTrack = tracks.find(track => track.selected);
                     return selectedTrack && !selectedTrack.external && selectedTrack.ffIndex != null && <Button
                       disabled={controlsDisabled}
-                      onClick={() => void settingsExit.close(() => onUseStudySubtitles(selectedTrack.ffIndex!))}
+                      onClick={() => void settingsExit.close(() => {
+                        onSettingsClose();
+                        onUseStudySubtitles(selectedTrack.ffIndex!);
+                      })}
                     >{t('この字幕を学習に使う', 'Use these captions for study')}</Button>;
                   })()}
                 </label>

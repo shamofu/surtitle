@@ -109,6 +109,7 @@ vi.mock('@tanstack/react-router', () => ({
 }));
 vi.mock('@tanstack/react-virtual', () => ({
   useVirtualizer: ({ count }: { count: number }) => ({
+    scrollRect: { width: 400, height: 600 },
     scrollToIndex: fixture.scroll,
     scrollToOffset: fixture.scrollOffset,
     measure: () => {},
@@ -664,7 +665,7 @@ describe('study navigation and unfinished phrases', () => {
     expect(aiApi.createQuote).not.toHaveBeenCalled();
   });
 
-  it('restores searched transcript settings and offset after inspecting a result', async () => {
+  it.each(['Back to transcript', 'Return to watching'])('restores searched transcript settings and offset with %s after replaying a result', async returnAction => {
     mount();
     await ready();
     openTranscript();
@@ -675,11 +676,16 @@ describe('study navigation and unfinished phrases', () => {
     fireEvent.scroll(list, { target: { scrollTop: 120 } });
     fireEvent.click(screen.getByRole('button', { name: cues[0].text }));
     await screen.findByRole('button', { name: 'Back to transcript' });
-    fireEvent.click(screen.getByRole('button', { name: 'Back to transcript' }));
-    expect(await screen.findByLabelText('Search transcript')).toHaveValue('like');
+    fireEvent.click(inspectReplay());
+    await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'source-seek', startMs: cues[0].startMs, endMs: cues[0].endMs }));
+    await waitFor(() => expect(screen.getByRole('button', { name: returnAction })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: returnAction }));
+    await waitFor(() => expect(screen.getByLabelText('Search transcript')).toBeVisible());
+    expect(screen.getByLabelText('Search transcript')).toHaveValue('like');
     expect(screen.getByRole('button', { name: 'Toggle translations' })).toHaveAttribute('aria-pressed', 'true');
     expect(fixture.scrollOffset).toHaveBeenLastCalledWith(120, { behavior: 'auto' });
     expect(screen.getByRole('button', { name: 'Follow playback' })).toBeVisible();
+    if (returnAction === 'Return to watching') expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' });
   });
 
   it('retains separate source drafts after Escape and clears only the saved draft', async () => {

@@ -5,11 +5,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SurfaceProvider, useSurface } from '../app/providers/Surface';
 import { NotificationsProvider, useNotifications } from '../app/providers/Notifications';
 import { Modal, useModalExit } from '../shared/ui';
+import { motionDurations } from '../shared/motion';
 
 const motion = vi.hoisted(() => ({ reduced: false }));
-vi.mock('../shared/motion', () => ({
-  motionDurations: { fast: 0.12, enter: 0.18, exit: 0.12 },
-  motionEase: [0.2, 0, 0, 1],
+vi.mock('../shared/motion', async importOriginal => ({
+  ...await importOriginal<typeof import('../shared/motion')>(),
   useAppMotion: () => ({ reducedMotion: motion.reduced }),
 }));
 vi.mock('../app/runtime', async () => ({
@@ -24,6 +24,7 @@ beforeEach(() => {
   HTMLDialogElement.prototype.close = function () { this.open = false; };
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
+const exitFallbackMs = motionDurations.exit * 1000 + 100;
 
 function Editor({ onClose, action, locked = false }: { onClose: () => void; action: () => void | Promise<void>; locked?: boolean }) {
   const exit = useModalExit();
@@ -86,7 +87,7 @@ it('keeps the native surface hidden and notifications reachable through exit, th
   expect(screen.getByText('Mutate 0')).toBeInTheDocument();
   fireEvent.click(within(dialog).getByRole('button', { name: 'Saved' }));
   expect(within(dialog).getByRole('button', { name: 'Saved' })).toBeDisabled();
-  await act(async () => { vi.advanceTimersByTime(119); });
+  await act(async () => { vi.advanceTimersByTime(exitFallbackMs - 1); });
   expect(navigate).not.toHaveBeenCalled();
   await act(async () => { vi.advanceTimersByTime(1); });
   expect(navigate).toHaveBeenCalledOnce();
@@ -104,9 +105,31 @@ it('keeps close requests locked but accepts a successful programmatic close whil
   expect(dialog).toHaveAttribute('data-state', 'open');
   expect(action).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText('Accepted close'));
-  await act(async () => { vi.advanceTimersByTime(120); });
+  await act(async () => { vi.advanceTimersByTime(exitFallbackMs); });
   expect(action).toHaveBeenCalledOnce();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+it('commits after the dialog exit animation ends without waiting for the watchdog', async () => {
+  const action = vi.fn();
+  app(action);
+  fireEvent.click(screen.getByText('Open editor'));
+  const dialog = screen.getByRole('dialog');
+  fireEvent.click(screen.getByText('Accepted close'));
+  const finish = (target: Element, animationName: string) => {
+    fireEvent(target, Object.assign(new Event('animationend', { bubbles: true }), { animationName }));
+  };
+  finish(dialog.querySelector('.modal-body')!, 'modal-exit');
+  finish(dialog, 'modal-backdrop-exit');
+  finish(dialog, 'modal-enter');
+  expect(action).not.toHaveBeenCalled();
+  expect(screen.getByText('Video hidden')).toBeInTheDocument();
+  await act(async () => { finish(dialog, 'modal-exit'); });
+  expect(action).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.getByText('Video visible')).toBeInTheDocument();
+  await act(async () => { vi.advanceTimersByTime(exitFallbackMs); });
+  expect(action).toHaveBeenCalledOnce();
 });
 
 it('exits a nested confirmation before its editor without exposing the native video between them', async () => {
@@ -115,12 +138,12 @@ it('exits a nested confirmation before its editor without exposing the native vi
   fireEvent.click(screen.getByText('Open confirmation'));
   fireEvent.click(screen.getByText('Close both'));
   expect(screen.getByRole('dialog', { name: 'Editor' })).toHaveAttribute('data-state', 'open');
-  await act(async () => { vi.advanceTimersByTime(120); });
+  await act(async () => { vi.advanceTimersByTime(exitFallbackMs); });
   expect(screen.queryByRole('dialog', { name: 'Confirmation' })).not.toBeInTheDocument();
   expect(screen.getByRole('dialog', { name: 'Editor' })).toHaveAttribute('data-state', 'closing');
   expect(screen.getByText('Video hidden')).toBeInTheDocument();
   expect(closed).not.toHaveBeenCalled();
-  await act(async () => { vi.advanceTimersByTime(120); });
+  await act(async () => { vi.advanceTimersByTime(exitFallbackMs); });
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(screen.getByText('Video visible')).toBeInTheDocument();
   expect(closed).toHaveBeenCalledOnce();
@@ -132,13 +155,13 @@ it('reopens the same dialog and preserves state after native close fails', async
   fireEvent.click(screen.getByText('Open editor'));
   fireEvent.click(screen.getByText('Mutate 0'));
   fireEvent.click(screen.getByText('Accepted close'));
-  await act(async () => { vi.advanceTimersByTime(120); });
+  await act(async () => { vi.advanceTimersByTime(exitFallbackMs); });
   expect(screen.getByRole('dialog')).toHaveAttribute('data-state', 'open');
   expect(screen.getByText('Mutate 1')).toBeInTheDocument();
   expect(screen.getByText('Close failed')).toBeInTheDocument();
   expect(screen.getByText('Video hidden')).toBeInTheDocument();
   fireEvent.click(screen.getByText('Accepted close'));
-  await act(async () => { vi.advanceTimersByTime(120); });
+  await act(async () => { vi.advanceTimersByTime(exitFallbackMs); });
   expect(action).toHaveBeenCalledTimes(2);
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
@@ -175,7 +198,7 @@ it('finishes an in-flight exit immediately when the motion preference changes to
   });
   expect(action).toHaveBeenCalledOnce();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  await act(async () => { vi.advanceTimersByTime(120); });
+  await act(async () => { vi.advanceTimersByTime(exitFallbackMs); });
   expect(action).toHaveBeenCalledOnce();
 });
 

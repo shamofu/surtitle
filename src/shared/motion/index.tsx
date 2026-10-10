@@ -3,8 +3,9 @@ import { createContext, useContext, useLayoutEffect, useMemo, useSyncExternalSto
 import { domAnimation, LazyMotion, MotionConfig } from 'motion/react';
 import type { MotionPreference } from '../contracts/settings';
 
-export const motionDurations = { fast: 0.12, enter: 0.18, exit: 0.12 } as const;
-export const motionEase = [0.2, 0, 0, 1] as const;
+export const motionDurations = { fast: 0.16, enter: 0.3, exit: 0.22 } as const;
+export const motionEase = [0.22, 0.61, 0.36, 1] as const;
+export const motionCssEase = `cubic-bezier(${motionEase.join(', ')})`;
 
 // Components rendered outside the application provider remain fully usable without motion.
 const MotionContext = createContext({ reducedMotion: true });

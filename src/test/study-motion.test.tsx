@@ -3,11 +3,12 @@ import { useEffect, useState, type HTMLAttributes, type ReactNode } from 'react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { StudyRegion, useStudyPresence, useStudyRegionActive } from '../features/study/StudyPresence';
+import { motionDurations } from '../shared/motion';
 
 const fixture = vi.hoisted(() => ({ reducedMotion: false, completions: [] as ((definition: unknown) => void)[] }));
-vi.mock('../shared/motion', () => ({
+vi.mock('../shared/motion', async importOriginal => ({
+  ...await importOriginal<typeof import('../shared/motion')>(),
   useAppMotion: () => ({ reducedMotion: fixture.reducedMotion }),
-  motionDurations: { fast: .12, enter: .18, exit: .12 }, motionEase: [.2, 0, 0, 1],
 }));
 vi.mock('motion/react-m', () => ({
   div: ({ animate, initial: _initial, variants: _variants, transition: _transition, onAnimationComplete, ...props }: HTMLAttributes<HTMLDivElement> & {
@@ -111,7 +112,9 @@ it('releases retained geometry when a WebView never delivers animation completio
   const view = render(<StudyRegion open><p>Panel</p></StudyRegion>);
   view.rerender(<StudyRegion open={false}><p>Panel</p></StudyRegion>);
   expect(screen.getByText('Panel')).toBeInTheDocument();
-  act(() => vi.advanceTimersByTime(250));
+  act(() => vi.advanceTimersByTime(motionDurations.exit * 1000 + 99));
+  expect(screen.getByText('Panel')).toBeInTheDocument();
+  act(() => vi.advanceTimersByTime(1));
   expect(screen.queryByText('Panel')).not.toBeInTheDocument();
   expect(document.querySelector('.study-motion-region')).toHaveAttribute('hidden');
 });

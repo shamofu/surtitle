@@ -248,12 +248,12 @@ function JobQuoteSurface({ inline, title, onClose, children, busy, modalProps }:
     const finish = () => { if (generation === revision.current) onExited(); };
     if (reducedMotion) { finish(); return; }
     // Keep completion bounded even when WebView animation frames are suspended.
-    const timer = window.setTimeout(finish, motionDurations.exit * 1000);
+    const timer = window.setTimeout(finish, motionDurations.exit * 1000 + 100);
     return () => { ++revision.current; window.clearTimeout(timer); };
   }, [inline, open, reducedMotion, onExited]);
   return inline ? <m.section aria-label={title} data-state={open ? 'open' : 'closing'} inert={!open} aria-hidden={!open || undefined}
     initial={reducedMotion ? false : 'hidden'} animate={open ? 'shown' : 'hidden'}
-    variants={{ shown: { opacity: 1, y: 0 }, hidden: { opacity: 0, y: reducedMotion ? 0 : 4 } }}
+    variants={{ shown: { opacity: 1, y: 0 }, hidden: { opacity: 0, y: reducedMotion ? 0 : 8 } }}
     transition={{ duration: reducedMotion ? 0 : open ? motionDurations.enter : motionDurations.exit, ease: motionEase }}
     onAnimationComplete={definition => { if (definition === 'hidden' && !open) onExited(); }}
     onClickCapture={event => { if (!open) { event.preventDefault(); event.stopPropagation(); } }}

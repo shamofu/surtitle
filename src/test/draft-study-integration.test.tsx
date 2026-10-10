@@ -112,6 +112,7 @@ vi.mock('@tanstack/react-router', () => ({
 }));
 vi.mock('@tanstack/react-virtual', () => ({
   useVirtualizer: ({ count }: { count: number }) => ({
+    scrollRect: { width: 400, height: 600 },
     scrollToIndex: vi.fn(),
     scrollToOffset: vi.fn(),
     measure: () => {},

@@ -127,6 +127,10 @@ impl Mpv {
                 ("input-default-bindings", "no".into()),
                 ("input-vo-keyboard", "no".into()),
                 ("input-cursor", "no".into()),
+                // Captions are rendered by the study UI below the native video.
+                // Keep subtitle tracks decoded for selection and study import.
+                ("sub-visibility", "no".into()),
+                ("secondary-sub-visibility", "no".into()),
                 ("wid", (child as usize).to_string()),
                 ("vo", "gpu-next".into()),
                 ("gpu-api", "d3d11".into()),

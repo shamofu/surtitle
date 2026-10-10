@@ -55,6 +55,9 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await capture('phrase-save');
       await page.locator('.save-phrase-form').getByRole('button', { name: locale === 'ja' ? 'あとで続ける' : 'Continue later', exact: true }).click();
       await page.getByRole('button', { name: locale === 'ja' ? '視聴に戻る' : 'Return to watching', exact: true }).click();
+      await expect(page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript')).toBeVisible();
+      await expect(page.locator('.study-companion h2')).toBeFocused();
+      await page.getByRole('button', { name: locale === 'ja' ? 'パネルを閉じる' : 'Close panel', exact: true }).click();
       await expect(page.locator('.study-companion')).toBeHidden();
       if (size.width < 1000) {
         await expect(page.getByTestId('native-player-viewport')).toBeInViewport();

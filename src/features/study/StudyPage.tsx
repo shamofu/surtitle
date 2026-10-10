@@ -998,7 +998,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                 <Button
                   className="return-to-watching"
                   disabled={!playerReady || busy || saveBusy}
-                  onClick={() => void closePanel(true)}
+                  onClick={() => void closePanel(true, fromTranscript ? 'transcript' : null)}
                 >
                   <Play size={17} />
                   {t('視聴に戻る', 'Return to watching')}

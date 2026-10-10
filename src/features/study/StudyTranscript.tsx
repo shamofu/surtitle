@@ -23,6 +23,7 @@ import { resolveSourceSelection } from './source-selection';
 import { useAppearance } from '../../app/runtime';
 import { timestamp } from '../../shared/format';
 import { Badge, Button, EmptyState, IconButton } from '../../shared/ui/index';
+import { useAppMotion } from '../../shared/motion';
 import { DraftStudyPanel } from './drafts/DraftStudyPanel';
 import type { PlayRange } from './drafts/lifecycle';
 import { StudyRegion } from './StudyPresence';
@@ -95,6 +96,7 @@ export function StudyTranscript({
   onTranscribeRange?: (range: { startMs: number; endMs: number }) => void;
 }) {
   const { t } = useAppearance();
+  const { reducedMotion } = useAppMotion();
   const tabsId = useId();
   const visibleTab = tab === 'draft' ? 'transcription' : tab;
   const tabs = [
@@ -113,6 +115,7 @@ export function StudyTranscript({
     onViewStateChange(next);
   }, [onViewStateChange]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const followedSubtitle = useRef<string | undefined>(undefined);
   const filtered = segments.filter(item => (!markedOnly || item.status === 'generated_review' || item.timingPrecision === 'source_block' || !!item.reviewIssues?.length) && `${item.text} ${item.translation || ''}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
   const cached = viewState.measurementCache;
   const initialMeasurements = cached?.search === search && cached.showTranslations === showTranslations ? cached : undefined;
@@ -126,6 +129,8 @@ export function StudyTranscript({
     estimateSize: () => showTranslations ? 156 : 126,
     overscan: 6,
   });
+  const viewportWidth = virtualizer.scrollRect?.width ?? 0;
+  const viewportHeight = virtualizer.scrollRect?.height ?? 0;
 
   useLayoutEffect(() => {
     if (!active || tab !== 'transcript' || !scrollRef.current) return;
@@ -139,15 +144,30 @@ export function StudyTranscript({
     if (!following || search) {
       virtualizer.scrollToOffset(viewStateRef.current.scrollOffset, { behavior: 'auto' });
     }
-  }, [active, tab, search, showTranslations, filtered.length]);
+  }, [active, tab, search, showTranslations, filtered.length, viewportWidth, viewportHeight]);
 
   useLayoutEffect(
     () => {
-      if (!active || !following || search || tab !== 'transcript') return;
+      if (!active || !following || search || tab !== 'transcript') {
+        followedSubtitle.current = undefined;
+        return;
+      }
       const index = filtered.findIndex(item => item.id === activeId);
-      if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center', behavior: 'auto' });
+      // A retained panel can still have the hidden viewport's zero-height
+      // measurement when it opens. Align after ResizeObserver reports its size.
+      if (index < 0 || viewportHeight <= 0) return;
+      const scroll = scrollRef.current;
+      const smooth = !reducedMotion && followedSubtitle.current !== undefined &&
+        followedSubtitle.current !== activeId;
+      followedSubtitle.current = activeId;
+      virtualizer.scrollToIndex(index, { align: 'center', behavior: smooth ? 'smooth' : 'auto' });
+      return () => {
+        // Interrupt an in-flight follow before manual scrolling, hiding the
+        // panel, changing motion preferences, or following another subtitle.
+        if (scroll) virtualizer.scrollToOffset(scroll.scrollTop, { behavior: 'auto' });
+      };
     },
-    [active, activeId, following, search, tab, filtered.length, showTranslations]
+    [active, activeId, following, search, tab, filtered.length, showTranslations, reducedMotion, viewportWidth, viewportHeight]
   );
 
   return (

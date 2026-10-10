@@ -860,6 +860,31 @@ mod subtitle_tests {
                 track_kind: None,
             }
         }
+        fn assert_subtitles_hidden(player: &Player) {
+            for property in ["sub-visibility", "secondary-sub-visibility"] {
+                assert_eq!(player.native.string(property).as_deref(), Some("no"));
+            }
+        }
+        fn wait_for_hidden_subtitle(player: &mut Player, text: &str) {
+            let deadline = Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                pump_messages();
+                let state = player.poll();
+                assert!(state.error.is_none(), "{:?}", state.error);
+                assert_subtitles_hidden(player);
+                if player
+                    .subtitle_text()
+                    .is_some_and(|value| value.contains(text))
+                {
+                    return;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "hidden subtitle was not decoded: {text}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(30));
+            }
+        }
         fn wait_for_stop(player: &mut Player, expected: u64) {
             let deadline = Instant::now() + std::time::Duration::from_secs(5);
             loop {
@@ -884,6 +909,12 @@ mod subtitle_tests {
         }
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("日本語 & resume.mkv");
+        let embedded = temp.path().join("embedded.srt");
+        std::fs::write(
+            &embedded,
+            "1\n00:00:00,000 --> 00:00:03,000\nEmbedded caption\n",
+        )
+        .unwrap();
         let ffmpeg = std::path::PathBuf::from(
             std::env::var_os("SURTITLE_TEST_FFMPEG").expect("explicit FFmpeg path"),
         );
@@ -911,6 +942,8 @@ mod subtitle_tests {
                 "lavfi",
                 "-i",
                 "sine=frequency=880:sample_rate=16000",
+                "-i",
+                embedded.to_str().unwrap(),
                 "-t",
                 "3",
                 "-map",
@@ -919,10 +952,14 @@ mod subtitle_tests {
                 "1:a",
                 "-map",
                 "2:a",
+                "-map",
+                "3:s",
                 "-c:v",
                 "ffv1",
                 "-c:a",
                 "pcm_s16le",
+                "-c:s",
+                "srt",
             ])
             .arg(&source)
             .output()
@@ -953,6 +990,7 @@ mod subtitle_tests {
         {
             let resources = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
             let mut player = Player::new(&resources, parent as isize).unwrap();
+            assert_subtitles_hidden(&player);
             let initial_revision = player.poll().revision;
             player
                 .load_selected(&source.canonicalize().unwrap(), 1500, Some(2))
@@ -989,6 +1027,38 @@ mod subtitle_tests {
                 "resume position was {}",
                 state.position_ms
             );
+            let embedded_track = state
+                .tracks
+                .iter()
+                .find(|track| track.kind == "sub" && track.ff_index == Some(3))
+                .unwrap();
+            player
+                .control(&Control {
+                    value: Some(embedded_track.id as f64),
+                    track_kind: Some("sub".into()),
+                    ..command("track", None, None)
+                })
+                .unwrap();
+            wait_for_hidden_subtitle(&mut player, "Embedded caption");
+            for (index, text) in ["Study caption", "Updated caption"].into_iter().enumerate() {
+                let subtitle = temp.path().join(format!("study-{index}.srt"));
+                std::fs::write(
+                    &subtitle,
+                    format!("1\n00:00:00,000 --> 00:00:03,000\n{text}\n"),
+                )
+                .unwrap();
+                player.subtitle(&subtitle).unwrap();
+                wait_for_hidden_subtitle(&mut player, text);
+                assert_eq!(
+                    player
+                        .poll()
+                        .tracks
+                        .iter()
+                        .filter(|track| track.kind == "sub" && track.title == "Surtitle")
+                        .count(),
+                    1
+                );
+            }
             assert_eq!(
                 state
                     .tracks
@@ -1012,6 +1082,7 @@ mod subtitle_tests {
             player.stop().unwrap();
             assert_eq!(player.poll().revision, previous_revision + 1);
             player.load(&source).unwrap();
+            assert_subtitles_hidden(&player);
             assert_eq!(player.poll().revision, previous_revision + 2);
             player
                 .control(&Control {

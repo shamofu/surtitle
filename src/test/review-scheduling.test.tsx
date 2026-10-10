@@ -11,6 +11,7 @@ import type { ReactNode } from 'react';
 import { ReviewPage } from '../features/cards/ReviewPage';
 import { cardsApi } from '../features/cards/api';
 import type { StudyCard } from '../shared/contracts/cards';
+import { motionDurations } from '../shared/motion';
 
 let cards: StudyCard[];
 let surfaceHidden = false;
@@ -185,7 +186,7 @@ it('retains an inert rated card until its bounded exit finishes, then enables on
   expect(screen.queryByText('Another phrase')).not.toBeInTheDocument();
   fireEvent.keyDown(window, { key: '1' });
   expect(cardsApi.rateCard).toHaveBeenCalledOnce();
-  await act(async () => { vi.advanceTimersByTime(120); });
+  await act(async () => { vi.advanceTimersByTime(motionDurations.exit * 1000 + 100); });
   expect(screen.queryByText('look into')).not.toBeInTheDocument();
   expect(screen.getByText('Another phrase')).toBeInTheDocument();
   fireEvent.keyDown(window, { key: '1' });
@@ -194,7 +195,7 @@ it('retains an inert rated card until its bounded exit finishes, then enables on
   await act(async () => { fireEvent.keyDown(window, { key: '1' }); });
   expect(cardsApi.rateCard).toHaveBeenCalledTimes(2);
   expect(screen.queryByText('Review complete')).not.toBeInTheDocument();
-  await act(async () => { vi.advanceTimersByTime(120); });
+  await act(async () => { vi.advanceTimersByTime(motionDurations.exit * 1000 + 100); });
   expect(screen.getByText('Review complete')).toBeInTheDocument();
 });
 
@@ -218,7 +219,7 @@ it('cancels an old exit when the same schedule becomes present again', async () 
   expect(screen.getByText('look into').closest('.review-transition')).toHaveAttribute('inert');
   cards = original;
   view.rerender(<ReviewPage />);
-  await act(async () => { vi.advanceTimersByTime(120); });
+  await act(async () => { vi.advanceTimersByTime(motionDurations.exit * 1000 + 100); });
   expect(screen.getByText('look into').closest('.review-transition')).not.toHaveAttribute('inert');
   fireEvent.keyDown(window, { code: 'Space', key: ' ' });
   expect(screen.getByText('investigate')).toBeInTheDocument();

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { forwardRef, useLayoutEffect, useRef, useState, type ComponentPropsWithoutRef } from 'react';
-import { motionDurations, useAppMotion } from '../motion';
+import { motionCssEase, motionDurations, useAppMotion } from '../motion';
 
 const revealDetails = new WeakMap<HTMLDetailsElement, () => void>();
 
@@ -81,10 +81,10 @@ export const AnimatedDetails = forwardRef<HTMLDetailsElement, ComponentPropsWith
       const duration = 1000 * (requestedOpen ? motionDurations.enter : motionDurations.exit);
       animations = content.map(child => child.animate(
         requestedOpen ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }],
-        { duration, easing: 'cubic-bezier(.2, 0, 0, 1)', fill: 'both' },
+        { duration, easing: motionCssEase, fill: 'both' },
       ));
       void Promise.all(animations.map(animation => animation.finished)).then(complete, () => {});
-      fallback = window.setTimeout(complete, duration + 80);
+      fallback = window.setTimeout(complete, duration + 100);
       return cancel;
     }, [requestedOpen, present, reducedMotion]);
     return <details {...props} open={present} data-motion-state={requestedOpen ? 'open' : present ? 'exiting' : 'closed'}

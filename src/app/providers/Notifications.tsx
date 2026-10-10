@@ -109,12 +109,12 @@ function ToastMessage({ toast, dismiss, remove }: { toast: Toast; dismiss: (id: 
   useEffect(() => {
     if (!toast.closing) return;
     if (reducedMotion) { remove(toast.id); return; }
-    const fallback = window.setTimeout(() => remove(toast.id), motionDurations.exit * 1000 + 80);
+    const fallback = window.setTimeout(() => remove(toast.id), motionDurations.exit * 1000 + 100);
     return () => clearTimeout(fallback);
   }, [toast.closing, toast.id, reducedMotion, remove]);
   return <m.button className={`toast ${toast.kind}`} disabled={toast.closing}
-    initial={reducedMotion ? false : { opacity: 0, y: -6 }}
-    animate={{ opacity: toast.closing ? 0 : 1, y: toast.closing && !reducedMotion ? -6 : 0 }}
+    initial={reducedMotion ? false : { opacity: 0, y: -10 }}
+    animate={{ opacity: toast.closing ? 0 : 1, y: toast.closing && !reducedMotion ? -8 : 0 }}
     transition={{ duration: reducedMotion ? 0 : toast.closing ? motionDurations.exit : motionDurations.enter, ease: motionEase }}
     onAnimationComplete={() => { if (toast.closing) remove(toast.id); }}
     onClick={() => dismiss(toast.id)}>{toast.text}</m.button>;

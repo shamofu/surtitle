@@ -15,10 +15,14 @@
 .speed-select { position: relative; display: flex; align-items: center; }
 .speed-select select { font-size: 13px; border: 0; background: transparent; padding: 8px 20px 8px 6px; height: 40px; appearance: none; }
 .speed-select svg { position: absolute; right: 4px; pointer-events: none; }
-.volume-slider { width: 58px; height: 4px; border: 0; padding: 0; margin: 0 10px 0 6px; accent-color: var(--accent); }
+.volume-control { display: flex; align-items: center; gap: 6px; height: 32px; margin-right: 6px; }
+.volume-control svg { flex-shrink: 0; }
+.volume-slider { width: 58px; height: 4px; border: 0; padding: 0; margin: 0; accent-color: var(--accent); }
+.volume-value { min-width: 4ch; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; color: var(--text); }
+.volume-control:has(:disabled) { opacity: .5; }
 .repeat-control { color: var(--muted); }
 .repeat-control.active { color: var(--accent); background: var(--accent-soft); }
 .track-controls { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
 .track-controls label { display: flex; flex-direction: column; gap: 8px; min-width: 180px; flex: 1; font-size: 14px; color: var(--muted); }
 .track-controls select { width: 100%; font-size: 15px; }
-@media (max-width: 1150px) { .player-time { margin-inline: 2px; } .volume-slider { width: 44px; margin-right: 4px; } .player-controls { padding-inline: 8px; } }
+@media (max-width: 1150px) { .player-time { margin-inline: 2px; } .volume-slider { width: 44px; } .volume-control { gap: 4px; margin-right: 4px; } .player-controls { padding-inline: 8px; } }

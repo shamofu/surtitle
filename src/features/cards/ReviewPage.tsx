@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, useIsPresent, usePresence } from 'motion/react';
 import * as m from 'motion/react-m';
 import { Link } from '@tanstack/react-router';
@@ -31,6 +31,9 @@ function ReviewTransition({ children }: { children: ReactNode }) {
   const [present, safeToRemove] = usePresence();
   const { reducedMotion } = useAppMotion();
   const revision = useRef(0);
+  const animation = useMemo(() => ({ present }), [present]);
+  const currentAnimation = useRef(animation);
+  currentAnimation.current = animation;
 
   useEffect(() => {
     const generation = ++revision.current;
@@ -43,7 +46,7 @@ function ReviewTransition({ children }: { children: ReactNode }) {
       return;
     }
     // Removing the old card must not depend on animation frames in a hidden window.
-    const timer = window.setTimeout(finish, motionDurations.exit * 1000);
+    const timer = window.setTimeout(finish, motionDurations.exit * 1000 + 100);
     return () => {
       ++revision.current;
       window.clearTimeout(timer);
@@ -60,6 +63,9 @@ function ReviewTransition({ children }: { children: ReactNode }) {
       animate={present ? 'shown' : 'hidden'}
       variants={{ shown: { opacity: 1 }, hidden: { opacity: 0 } }}
       transition={{ duration: reducedMotion ? 0 : present ? motionDurations.enter : motionDurations.exit, ease: motionEase }}
+      onAnimationComplete={definition => {
+        if (definition === 'hidden' && !present && currentAnimation.current === animation) safeToRemove?.();
+      }}
       onClickCapture={(event) => {
         if (!present) { event.preventDefault(); event.stopPropagation(); }
       }}

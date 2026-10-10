@@ -4,11 +4,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { JobActions } from '../features/ai/JobActions';
 import { aiApi } from '../features/ai/api';
 import type { AiQuote, JobSummary } from '../shared/contracts/ai';
+import { motionDurations } from '../shared/motion';
 
 const fixture = vi.hoisted(() => ({ reduced: false, errors: [] as string[] }));
-vi.mock('../shared/motion', () => ({
-  motionDurations: { enter: 0.18, exit: 0.12, fast: 0.12 },
-  motionEase: [0.2, 0, 0, 1],
+vi.mock('../shared/motion', async importOriginal => ({
+  ...await importOriginal<typeof import('../shared/motion')>(),
   useAppMotion: () => ({ reducedMotion: fixture.reduced }),
 }));
 vi.mock('../features/ai/api', () => ({ aiApi: { createRetryQuote: vi.fn(), reapproveQuote: vi.fn() } }));
@@ -38,6 +38,7 @@ beforeEach(() => {
   vi.mocked(aiApi.reapproveQuote).mockResolvedValue(undefined);
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
+const exitFallbackMs = motionDurations.exit * 1000 + 100;
 
 async function openQuote() {
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Resume remaining work' })); });
@@ -57,14 +58,14 @@ it('retains a closing inline quote while locking approval and removes it before 
   expect(approval).toBeDisabled();
   fireEvent.click(approval);
   expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
-  await act(async () => { vi.advanceTimersByTime(119); });
+  await act(async () => { vi.advanceTimersByTime(exitFallbackMs - 1); });
   expect(panel).toBeInTheDocument();
   await act(async () => { vi.advanceTimersByTime(1); });
   expect(panel).not.toBeInTheDocument();
   const reopened = await openQuote();
   expect(reopened).toHaveAttribute('data-state', 'open');
   expect(screen.getByRole('checkbox')).not.toBeChecked();
-  await act(async () => { vi.advanceTimersByTime(240); });
+  await act(async () => { vi.advanceTimersByTime(exitFallbackMs * 2); });
   expect(reopened).toBeInTheDocument();
   expect(aiApi.createRetryQuote).toHaveBeenCalledTimes(2);
 });
@@ -78,7 +79,7 @@ it('closes after successful approval without sending another request during exit
   expect(panel).toHaveAttribute('data-state', 'closing');
   fireEvent.click(approval);
   expect(aiApi.reapproveQuote).toHaveBeenCalledExactlyOnceWith(quote);
-  await act(async () => { vi.advanceTimersByTime(120); });
+  await act(async () => { vi.advanceTimersByTime(exitFallbackMs); });
   expect(panel).not.toBeInTheDocument();
 });
 

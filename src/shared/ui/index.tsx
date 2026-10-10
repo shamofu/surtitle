@@ -4,7 +4,7 @@ import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode } f
 import { createPortal } from 'react-dom';
 import { ArrowUpRight, LoaderCircle, X } from 'lucide-react';
 import { useSurface, useAppearance } from '../../app/runtime';
-import { motionDurations, useAppMotion } from '../motion';
+import { motionCssEase, motionDurations, useAppMotion } from '../motion';
 import './modal-motion.css';
 export { useModalExit } from './useModalExit';
 
@@ -123,7 +123,7 @@ export function Modal({
     if (reducedMotion) { finishExit(); return; }
     // A bounded timer also completes in a hidden WebView; cancelled CSS animations
     // cannot deliver a stale completion to a dialog that has been reopened.
-    const timer = window.setTimeout(finishExit, motionDurations.exit * 1000);
+    const timer = window.setTimeout(finishExit, motionDurations.exit * 1000 + 100);
     return () => window.clearTimeout(timer);
   }, [open, reducedMotion, finishExit]);
   function requestClose() {
@@ -137,7 +137,10 @@ export function Modal({
       tabIndex={-1}
       data-state={open ? 'open' : 'closing'}
       data-motion={reducedMotion ? 'reduced' : 'full'}
-      style={{ '--modal-duration': `${open ? motionDurations.enter : motionDurations.exit}s` } as CSSProperties}
+      style={{ '--modal-duration': `${open ? motionDurations.enter : motionDurations.exit}s`, '--modal-ease': motionCssEase } as CSSProperties}
+      onAnimationEnd={(event) => {
+        if (event.target === event.currentTarget && event.animationName === 'modal-exit') finishExit();
+      }}
       onCancel={(event) => {
         event.preventDefault();
         event.stopPropagation();
