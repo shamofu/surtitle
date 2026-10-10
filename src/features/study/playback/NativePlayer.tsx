@@ -69,6 +69,7 @@ export function NativePlayer({
   const { refresh } = useDataActions();
   const settingsExit = useModalExit(settingsOpen);
   const viewport = useRef<HTMLDivElement>(null);
+  const surfaceButton = useRef<HTMLButtonElement>(null);
   const [state, setState] = useState<PlayerState>();
   const playerRevision = useRef(-1);
   const acceptState = useCallback((current: PlayerState) => {
@@ -114,6 +115,22 @@ export function NativePlayer({
     },
     [notify],
   );
+  const toggleSurface = () => {
+    if (!loaded || surfaceHidden || interactionsDisabled || settingsOpen) return;
+    surfaceButton.current?.focus({ preventScroll: true });
+    // Let the native player choose from its current state, even when clicks
+    // arrive faster than the periodic player-state snapshots.
+    void control({ action: 'toggle-pause' });
+  };
+  const surfaceClick = useRef(toggleSurface);
+  surfaceClick.current = toggleSurface;
+  useEffect(() => {
+    if (!nativeAvailable()) return;
+    // The native video is a sibling HWND above the WebView, so DOM clicks alone
+    // cannot receive pointer input from the actual decoded image.
+    return subscribeNative<void>('player-surface-click', () => surfaceClick.current(),
+      error => notify(String(error), 'error'));
+  }, [notify]);
   const selectionSignature = selected
     ? JSON.stringify([selected.id, selected.startMs, selected.endMs])
     : '';
@@ -454,6 +471,10 @@ export function NativePlayer({
               </Button>
             )}
           </div>
+          {loaded && <button ref={surfaceButton} type="button" className="player-surface-toggle"
+            disabled={interactionsDisabled || surfaceHidden || settingsOpen}
+            aria-label={state?.paused !== false ? t('映像を再生', 'Play video') : t('映像を一時停止', 'Pause video')}
+            onClick={toggleSurface} />}
         </div>
         <fieldset className="player-controls" disabled={interactionsDisabled}>
           <div className="seek-control">

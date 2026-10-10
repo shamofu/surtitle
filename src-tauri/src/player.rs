@@ -133,6 +133,14 @@ impl Player {
     pub fn load(&mut self, path: &Path) -> Result<()> {
         self.load_selected(path, 0, None)
     }
+    /// Install on the GUI thread; the callback must not acquire the player lock.
+    pub fn on_surface_click(&self, callback: impl Fn() + Send + Sync + 'static) -> Result<()> {
+        #[cfg(windows)]
+        self.native.on_surface_click(callback)?;
+        #[cfg(not(windows))]
+        let _ = callback;
+        Ok(())
+    }
     /// Unload the old file and its pending stops without changing window geometry.
     /// The caller hides the surface when no replacement media can be opened.
     pub fn stop(&mut self) -> Result<()> {
@@ -256,6 +264,16 @@ impl Player {
     }
     pub fn control(&mut self, c: &Control) -> Result<()> {
         match c.action.as_str() {
+            "toggle-pause" => {
+                // Sample the actual clock and pending seek intent under the same
+                // session lock, so rapid clicks never toggle a stale UI snapshot.
+                let state = self.poll();
+                ensure!(state.ready, "Wait for the media player to finish loading");
+                self.control(&Control {
+                    action: if state.paused { "play" } else { "pause" }.into(),
+                    ..c.clone()
+                })?;
+            }
             "draft-mode" => {
                 ensure!(
                     matches!(c.value, Some(0. | 1.)),
@@ -976,7 +994,7 @@ mod subtitle_tests {
                 class.as_ptr(),
                 std::ptr::null(),
                 WS_POPUP,
-                0,
+                -32000,
                 0,
                 32,
                 32,
@@ -991,6 +1009,11 @@ mod subtitle_tests {
             let resources = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
             let mut player = Player::new(&resources, parent as isize).unwrap();
             assert_subtitles_hidden(&player);
+            assert!(
+                player
+                    .control(&command("toggle-pause", None, None))
+                    .is_err()
+            );
             let initial_revision = player.poll().revision;
             player
                 .load_selected(&source.canonicalize().unwrap(), 1500, Some(2))
@@ -1109,6 +1132,55 @@ mod subtitle_tests {
                 );
                 std::thread::sleep(std::time::Duration::from_millis(30));
             }
+            // Exercise the real video host, which contains mpv's disabled child.
+            // Its click only emits an intent; playback remains owned by control.
+            let clicks = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let observed = clicks.clone();
+            player
+                .on_surface_click(move || {
+                    observed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                })
+                .unwrap();
+            unsafe {
+                ShowWindow(parent, SW_SHOWNOACTIVATE);
+            }
+            player
+                .native
+                .bounds(&Bounds {
+                    x: 0.,
+                    y: 0.,
+                    width: 32.,
+                    height: 32.,
+                    scale_factor: 1.,
+                })
+                .unwrap();
+            let host = player.native.surface_window();
+            unsafe {
+                let decoder = GetWindow(host, GW_CHILD);
+                assert!(!decoder.is_null(), "mpv did not create its embedded child");
+                assert_ne!(
+                    GetWindowLongPtrW(decoder, GWL_STYLE) as u32 & WS_DISABLED,
+                    0
+                );
+                assert_eq!(SendMessageW(host, WM_NCHITTEST, 0, 0), HTCLIENT as isize);
+                SendMessageW(host, WM_LBUTTONDOWN, 0, 10 | (10 << 16));
+                SendMessageW(host, WM_LBUTTONUP, 0, 10 | (10 << 16));
+            }
+            assert_eq!(clicks.load(std::sync::atomic::Ordering::Relaxed), 1);
+            assert!(
+                !player.poll().paused,
+                "the native callback bypassed playback control"
+            );
+            player
+                .control(&command("toggle-pause", None, None))
+                .unwrap();
+            assert!(player.poll().paused);
+            assert_eq!(player.native.string("pause").as_deref(), Some("yes"));
+            player
+                .control(&command("toggle-pause", None, None))
+                .unwrap();
+            assert!(!player.poll().paused);
+            assert_eq!(player.native.string("pause").as_deref(), Some("no"));
             // Exercise the real decoder clock, independently of webview timers.
             for target in [1800, 400] {
                 let mut revision = player.poll().revision;
@@ -1116,6 +1188,15 @@ mod subtitle_tests {
                     .control(&command("seek", Some(target), None))
                     .unwrap();
                 assert!(player.pending_seek.is_some());
+                // Toggle intent during a native seek must survive its restart.
+                player
+                    .control(&command("toggle-pause", None, None))
+                    .unwrap();
+                assert!(player.state.paused);
+                player
+                    .control(&command("toggle-pause", None, None))
+                    .unwrap();
+                assert!(!player.state.paused);
                 let deadline = Instant::now() + std::time::Duration::from_secs(5);
                 loop {
                     pump_messages();
@@ -1145,7 +1226,9 @@ mod subtitle_tests {
             player.configure_sentence_pause(true, vec![500, 1500, 2500]);
             player.control(&command("seek", Some(0), None)).unwrap();
             wait_for_stop(&mut player, 500);
-            player.control(&command("play", None, None)).unwrap();
+            player
+                .control(&command("toggle-pause", None, None))
+                .unwrap();
             wait_for_stop(&mut player, 1500);
             player
                 .control(&command("seek", Some(0), Some(2100)))

@@ -95,8 +95,8 @@ vi.mock('../features/study/editor-drafts/api', () => ({
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
 vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, closeWindow: vi.fn() }));
 vi.mock('@tauri-apps/api/event', () => ({
-  listen: vi.fn(async (_name: string, listener: typeof fixture.listener) => {
-    fixture.listener = listener;
+  listen: vi.fn(async (name: string, listener: typeof fixture.listener) => {
+    if (name === 'player-state') fixture.listener = listener;
     return () => {};
   }),
 }));

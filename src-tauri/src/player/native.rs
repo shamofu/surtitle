@@ -9,6 +9,7 @@ use windows_sys::Win32::System::LibraryLoader::{
     LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
+mod input;
 type Handle = *mut c_void;
 type Create = unsafe extern "C" fn() -> Handle;
 type Init = unsafe extern "C" fn(Handle) -> i32;
@@ -220,6 +221,13 @@ impl Mpv {
     }
     pub fn bounds(&self, b: &Bounds) -> Result<()> {
         place_video_window(self.child, b)
+    }
+    pub fn on_surface_click(&self, callback: impl Fn() + Send + Sync + 'static) -> Result<()> {
+        input::install(self.child, std::sync::Arc::new(callback))
+    }
+    #[cfg(all(test, feature = "e2e-test"))]
+    pub(super) fn surface_window(&self) -> windows_sys::Win32::Foundation::HWND {
+        self.child
     }
     pub fn hide(&self) {
         unsafe {

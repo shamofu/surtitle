@@ -132,10 +132,19 @@ impl Services {
     pub fn playback_tick(&self, persist: bool) -> Result<PlayerState> {
         self.playback.tick(&self.db, persist)
     }
-    pub fn initialize_player(&self, resources: &Path, parent: isize) -> Result<()> {
+    pub fn initialize_player(
+        &self,
+        resources: &Path,
+        parent: isize,
+        on_surface_click: impl Fn() + Send + Sync + 'static,
+    ) -> Result<()> {
         *lock(&self.runtime_dir)? = resources.join("native");
-        self.playback
-            .install(crate::player::Player::new(resources, parent))
+        self.playback.install(
+            crate::player::Player::new(resources, parent).and_then(|player| {
+                player.on_surface_click(on_surface_click)?;
+                Ok(player)
+            }),
+        )
     }
     pub fn shutdown(&self) {
         self.tools.shutdown.cancel();

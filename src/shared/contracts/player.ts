@@ -32,6 +32,7 @@ export interface PlayerControlRequest {
     | 'source-loop'
     | 'play'
     | 'pause'
+    | 'toggle-pause'
     | 'seek'
     | 'rate'
     | 'volume'

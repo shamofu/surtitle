@@ -9,13 +9,21 @@ import type { PlayerState } from '../shared/contracts/player';
 const fixture = vi.hoisted(() => ({
   hidden: false, notify: vi.fn(), ready: vi.fn(), position: vi.fn(),
   listeners: new Set<(event: { payload: PlayerState }) => void>(),
+  surfaceListeners: new Set<(event: { payload: void }) => void>(),
 }));
 vi.mock('../features/study/playback/api', () => ({ playerApi: { loadMedia: vi.fn(), playerState: vi.fn(), player: vi.fn() } }));
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
 vi.mock('../shared/native/events', () => ({
-  subscribeNative: (_event: string, listener: (event: { payload: PlayerState }) => void) => {
-    fixture.listeners.add(listener);
-    return () => fixture.listeners.delete(listener);
+  subscribeNative: (event: string, listener: (event: { payload: unknown }) => void) => {
+    if (event === 'player-surface-click') {
+      fixture.surfaceListeners.add(listener);
+      return () => fixture.surfaceListeners.delete(listener);
+    }
+    if (event === 'player-state') {
+      fixture.listeners.add(listener);
+      return () => fixture.listeners.delete(listener);
+    }
+    return () => {};
   },
 }));
 vi.mock('../app/runtime', () => ({
@@ -40,6 +48,16 @@ function emitPosition(positionMs: number, revision: number) {
     fixture.listeners.forEach(listener => listener({ payload: { ...playerState, paused: false, positionMs, revision } }));
   });
 }
+function clickSurface(source: 'native' | 'DOM') {
+  if (source === 'native') {
+    act(() => fixture.surfaceListeners.forEach(listener => listener({ payload: undefined })));
+  } else {
+    fireEvent.click(screen.getByRole('button', { name: /^(Play|Pause) video$/ }));
+  }
+}
+function toggleRequests() {
+  return vi.mocked(playerApi.player).mock.calls.map(([request]) => request).filter(request => request.action === 'toggle-pause');
+}
 async function renderPlaying() {
   vi.mocked(playerApi.playerState).mockResolvedValue({ ...playerState, paused: false, positionMs: 1000 });
   render(player());
@@ -55,6 +73,7 @@ function seekRequests() {
 beforeEach(() => {
   fixture.hidden = false;
   fixture.listeners.clear();
+  fixture.surfaceListeners.clear();
   vi.mocked(playerApi.loadMedia).mockResolvedValue();
   vi.mocked(playerApi.player).mockResolvedValue();
   vi.mocked(playerApi.playerState).mockResolvedValue(playerState);
@@ -65,6 +84,88 @@ beforeEach(() => {
   HTMLDialogElement.prototype.close = function () { this.open = false; };
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
+
+it.each(['native', 'DOM'] as const)('toggles playback exactly once for a %s video click and focuses the video control', async source => {
+  render(player());
+  const surface = await screen.findByRole('button', { name: 'Play video' });
+  vi.mocked(playerApi.player).mockClear();
+  clickSurface(source);
+  expect(toggleRequests()).toEqual([{ action: 'toggle-pause' }]);
+  expect(surface).toHaveFocus();
+  expect(vi.mocked(playerApi.player).mock.calls.some(([request]) => request.action === 'play' || request.action === 'pause')).toBe(false);
+
+  emitPosition(500, 11);
+  expect(screen.getByRole('button', { name: 'Pause video' })).toBe(surface);
+  clickSurface(source);
+  expect(toggleRequests()).toEqual([{ action: 'toggle-pause' }, { action: 'toggle-pause' }]);
+});
+
+it.each(['native', 'DOM'] as const)('sends every rapid %s video click to the native toggle without waiting for a state snapshot', async source => {
+  const pending = deferred<void>();
+  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'toggle-pause' ? pending.promise : Promise.resolve());
+  render(player());
+  await screen.findByRole('button', { name: 'Play video' });
+  clickSurface(source);
+  clickSurface(source);
+  clickSurface(source);
+  expect(toggleRequests()).toEqual(Array.from({ length: 3 }, () => ({ action: 'toggle-pause' })));
+  expect(screen.getByRole('button', { name: 'Play video' })).toBeEnabled();
+  await act(async () => pending.resolve());
+});
+
+it('ignores native and viewport clicks until the player is loaded', async () => {
+  const loading = deferred<void>();
+  vi.mocked(playerApi.loadMedia).mockReturnValue(loading.promise);
+  render(player());
+  expect(screen.queryByRole('button', { name: 'Play video' })).not.toBeInTheDocument();
+  expect(fixture.surfaceListeners.size).toBe(1);
+  clickSurface('native');
+  fireEvent.click(screen.getByTestId('native-player-viewport'));
+  expect(toggleRequests()).toEqual([]);
+  await act(async () => loading.resolve());
+  await screen.findByRole('button', { name: 'Play video' });
+  clickSurface('native');
+  expect(toggleRequests()).toEqual([{ action: 'toggle-pause' }]);
+});
+
+it.each(['disabled', 'modal', 'settings'] as const)('blocks both video click paths while %s and accepts them again after reopening', async guard => {
+  const view = render(player());
+  await screen.findByRole('button', { name: 'Play video' });
+  fixture.hidden = guard === 'modal';
+  view.rerender(player({ interactionsDisabled: guard === 'disabled', settingsOpen: guard === 'settings' }));
+  expect(screen.getByRole('button', { name: 'Play video' })).toBeDisabled();
+  clickSurface('native');
+  clickSurface('DOM');
+  expect(toggleRequests()).toEqual([]);
+
+  fixture.hidden = false;
+  view.rerender(player());
+  expect(screen.getByRole('button', { name: 'Play video' })).toBeEnabled();
+  clickSurface('native');
+  clickSurface('DOM');
+  expect(toggleRequests()).toEqual([{ action: 'toggle-pause' }, { action: 'toggle-pause' }]);
+});
+
+it('ignores native and viewport clicks after playback fails', async () => {
+  render(player());
+  await screen.findByRole('button', { name: 'Play video' });
+  act(() => fixture.listeners.forEach(listener => listener({ payload: { ...playerState, revision: 11, error: 'Player disconnected' } })));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Player disconnected');
+  expect(screen.queryByRole('button', { name: 'Play video' })).not.toBeInTheDocument();
+  clickSurface('native');
+  fireEvent.click(screen.getByTestId('native-player-viewport'));
+  expect(toggleRequests()).toEqual([]);
+});
+
+it('unsubscribes native video clicks when the player unmounts', async () => {
+  const view = render(player());
+  await screen.findByRole('button', { name: 'Play video' });
+  expect(fixture.surfaceListeners.size).toBe(1);
+  view.unmount();
+  expect(fixture.surfaceListeners.size).toBe(0);
+  clickSurface('native');
+  expect(toggleRequests()).toEqual([]);
+});
 
 it('surfaces placement errors and retries identical bounds without reloading media', async () => {
   let fail = true;

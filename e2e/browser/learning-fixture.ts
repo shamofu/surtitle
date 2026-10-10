@@ -239,6 +239,7 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
           const request = args.request;
           if (request.action === 'pause') state.paused = true;
           if (request.action === 'play') state.paused = false;
+          if (request.action === 'toggle-pause') state.paused = !state.paused;
           if (request.action === 'seek') state.positionMs = request.value;
           if (request.action === 'source-seek') {
             state.positionMs = Math.max(0, request.startMs - (snapshot.settings.replayContextMs ?? 0));

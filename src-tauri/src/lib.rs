@@ -36,7 +36,12 @@ pub fn run() {
             } else {
                 resources
             };
-            services.initialize_player(&resources, parent)?;
+            let click_handle = app.handle().clone();
+            services.initialize_player(&resources, parent, move || {
+                // Native input may arrive during a window operation that already
+                // holds the playback mutex. Let the UI apply its interaction gate.
+                let _ = click_handle.emit_to("main", "player-surface-click", ());
+            })?;
             app.manage(services.clone());
             let update_state = services.clone();
             tauri::async_runtime::spawn(async move {

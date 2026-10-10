@@ -23,7 +23,8 @@ vi.mock('../features/study/playback/api', () => ({
 }));
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
 vi.mock('../shared/native/events', () => ({
-  subscribeNative: (_event: string, callback: typeof fixture.listeners[number], error: typeof fixture.errors[number]) => {
+  subscribeNative: (event: string, callback: typeof fixture.listeners[number], error: typeof fixture.errors[number]) => {
+    if (event !== 'player-state') return () => {};
     fixture.listeners.push(callback);
     fixture.errors.push(error);
     const stop = vi.fn();

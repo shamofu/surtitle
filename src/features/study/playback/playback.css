@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 .player-card { display: flex; flex-direction: column; flex: 1; min-height: 180px; min-width: 0; background: #000; border-radius: 8px; overflow: hidden; }
 .native-player-viewport { position: relative; flex: 1; min-height: 100px; width: 100%; overflow: hidden; background: #000; }
+.player-surface-toggle { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; background: transparent; border: 0; }
+.player-surface-toggle:focus-visible { outline-offset: -3px; }
 .video-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; color: #C0C9D6; }
 .video-placeholder p { font-size: 13px; line-height: 1.7; max-width: 60ch; text-align: center; overflow-wrap: anywhere; }
 .player-controls { flex-shrink: 0; padding: 6px 12px 8px; background: var(--surface); }

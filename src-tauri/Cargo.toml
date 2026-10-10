@@ -32,7 +32,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 reqwest = { version = "0.13", features = ["json", "stream"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_LibraryLoader"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader"] }
 
 [features]
 default = []
