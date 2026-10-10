@@ -10,6 +10,8 @@ export interface PlayerTrack {
 }
 
 export interface PlayerState {
+  /** Native snapshot ordering, including snapshots returned by direct queries. */
+  revision?: number;
   sentencePause?: boolean;
   ready?: boolean;
   positionMs: number;

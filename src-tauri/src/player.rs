@@ -16,6 +16,9 @@ pub struct Track {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerState {
+    /// Orders sampled states even when IPC replies and events arrive out of order.
+    #[serde(default)]
+    pub revision: u64,
     pub position_ms: u64,
     pub duration_ms: u64,
     pub paused: bool,
@@ -32,6 +35,7 @@ pub struct PlayerState {
 impl Default for PlayerState {
     fn default() -> Self {
         Self {
+            revision: 0,
             position_ms: 0,
             duration_ms: 0,
             paused: true,
@@ -45,6 +49,12 @@ impl Default for PlayerState {
             ready: false,
             sentence_pause: false,
         }
+    }
+}
+impl PlayerState {
+    fn snapshot(&mut self) -> Self {
+        self.revision = self.revision.saturating_add(1);
+        self.clone()
     }
 }
 #[derive(Debug, Clone, Deserialize)]
@@ -130,6 +140,7 @@ impl Player {
         #[cfg(windows)]
         self.native.command(&["stop"])?;
         self.state = PlayerState {
+            revision: self.state.revision,
             rate: self.state.rate,
             volume: self.state.volume,
             sentence_pause: self.state.sentence_pause,
@@ -585,7 +596,50 @@ impl Player {
                 Err(error) => self.state.error = Some(error.to_string()),
             }
         }
-        self.state.clone()
+        self.state.snapshot()
+    }
+}
+
+#[cfg(test)]
+mod revision_tests {
+    use super::*;
+
+    #[test]
+    fn snapshots_order_unchanged_samples_and_preserve_older_values() {
+        let mut state = PlayerState::default();
+        let first = state.snapshot();
+        let second = state.snapshot();
+        assert_eq!((first.revision, second.revision), (1, 2));
+        assert_eq!(first.position_ms, second.position_ms);
+        assert_eq!(serde_json::to_value(second).unwrap()["revision"], 2);
+        state.revision = u64::MAX;
+        assert_eq!(state.snapshot().revision, u64::MAX);
+    }
+
+    #[test]
+    fn older_state_payloads_default_to_revision_zero() {
+        let mut payload = serde_json::to_value(PlayerState::default()).unwrap();
+        payload.as_object_mut().unwrap().remove("revision");
+        let restored: PlayerState = serde_json::from_value(payload).unwrap();
+        assert_eq!(restored.revision, 0);
+    }
+
+    #[cfg(all(not(windows), feature = "e2e-test"))]
+    #[test]
+    fn poll_revisions_survive_loading_stopping_and_reloading_media() {
+        let source = tempfile::NamedTempFile::new().unwrap();
+        let mut player = Player::new(Path::new("."), 0).unwrap();
+        let first = player.poll();
+        let second = player.poll();
+        assert_eq!(second.revision, first.revision + 1);
+        player.load(source.path()).unwrap();
+        let loaded = player.poll();
+        assert_eq!(loaded.revision, second.revision + 1);
+        player.stop().unwrap();
+        let stopped = player.poll();
+        assert_eq!(stopped.revision, loaded.revision + 1);
+        player.load(source.path()).unwrap();
+        assert_eq!(player.poll().revision, stopped.revision + 1);
     }
 }
 
@@ -899,11 +953,13 @@ mod subtitle_tests {
         {
             let resources = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
             let mut player = Player::new(&resources, parent as isize).unwrap();
+            let initial_revision = player.poll().revision;
             player
                 .load_selected(&source.canonicalize().unwrap(), 1500, Some(2))
                 .unwrap();
             assert!(!player.state.ready);
             assert_eq!(player.state.position_ms, 1500);
+            assert_eq!(player.poll().revision, initial_revision + 1);
             let deadline = Instant::now() + std::time::Duration::from_secs(10);
             loop {
                 pump_messages();
@@ -952,7 +1008,11 @@ mod subtitle_tests {
                     .and_then(|t| t.ff_index),
                 Some(1)
             );
+            let previous_revision = player.poll().revision;
+            player.stop().unwrap();
+            assert_eq!(player.poll().revision, previous_revision + 1);
             player.load(&source).unwrap();
+            assert_eq!(player.poll().revision, previous_revision + 2);
             player
                 .control(&Control {
                     action: "play".into(),
@@ -979,6 +1039,38 @@ mod subtitle_tests {
                 std::thread::sleep(std::time::Duration::from_millis(30));
             }
             // Exercise the real decoder clock, independently of webview timers.
+            for target in [1800, 400] {
+                let mut revision = player.poll().revision;
+                player
+                    .control(&command("seek", Some(target), None))
+                    .unwrap();
+                assert!(player.pending_seek.is_some());
+                let deadline = Instant::now() + std::time::Duration::from_secs(5);
+                loop {
+                    pump_messages();
+                    let state = player.poll();
+                    assert!(state.revision > revision);
+                    revision = state.revision;
+                    assert!(state.error.is_none(), "{:?}", state.error);
+                    if player.pending_seek.is_none() {
+                        assert!(
+                            state.position_ms.abs_diff(target) <= 250,
+                            "settled seek to {target} reported {}",
+                            state.position_ms
+                        );
+                        assert!(!state.paused, "seek to {target} lost playing state");
+                        let decoder_ms = player.native.number("time-pos").unwrap() * 1000.;
+                        assert!(
+                            (decoder_ms - target as f64).abs() <= 250.,
+                            "decoder seek to {target} settled at {decoder_ms}"
+                        );
+                        assert_eq!(player.native.string("pause").as_deref(), Some("no"));
+                        break;
+                    }
+                    assert!(Instant::now() < deadline, "seek to {target} did not finish");
+                    std::thread::sleep(std::time::Duration::from_millis(30));
+                }
+            }
             player.configure_sentence_pause(true, vec![500, 1500, 2500]);
             player.control(&command("seek", Some(0), None)).unwrap();
             wait_for_stop(&mut player, 500);

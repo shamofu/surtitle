@@ -70,6 +70,15 @@ export function NativePlayer({
   const settingsExit = useModalExit(settingsOpen);
   const viewport = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<PlayerState>();
+  const playerRevision = useRef(-1);
+  const acceptState = useCallback((current: PlayerState) => {
+    if (current.revision !== undefined) {
+      if (current.revision < playerRevision.current) return false;
+      playerRevision.current = current.revision;
+    }
+    setState(current);
+    return true;
+  }, []);
   const [loadStatus, setLoadStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [loadError, setLoadError] = useState('');
   const [surfaceError, setSurfaceError] = useState('');
@@ -79,6 +88,8 @@ export function NativePlayer({
   const loadBusy = useRef(false);
   const loaded = loadStatus === 'ready';
   const [seekDraft, setSeekDraft] = useState<number | null>(null);
+  const seekInput = useRef<number | null>(null);
+  const seekOperation = useRef(0);
   const [loop, setLoop] = useState(false);
   const loopActive = useRef(false);
   const loopOperation = useRef(0);
@@ -94,8 +105,10 @@ export function NativePlayer({
       }
       try {
         await playerApi.player(request);
+        return true;
       } catch (error) {
         notify(String(error), 'error');
+        return false;
       }
     },
     [notify],
@@ -145,7 +158,10 @@ export function NativePlayer({
     setLoadStatus('loading');
     setLoadError('');
     setState(undefined);
+    playerRevision.current = -1;
     setSeekDraft(null);
+    seekInput.current = null;
+    seekOperation.current += 1;
     loopActive.current = false;
     loopOperation.current += 1;
     setLoop(false);
@@ -161,7 +177,7 @@ export function NativePlayer({
     };
     const accept = (current: PlayerState) => {
       if (disposed || failed) return;
-      setState(current);
+      if (!acceptState(current)) return;
       if (current.error) {
         fail(current.error);
       } else {
@@ -187,7 +203,7 @@ export function NativePlayer({
         requested = true;
         const snapshotRevision = eventRevision;
         const current = await playerApi.playerState();
-        if (eventRevision === snapshotRevision) accept(current);
+        if (current.revision !== undefined || eventRevision === snapshotRevision) accept(current);
       })
       .catch(fail)
       .finally(() => {
@@ -198,10 +214,11 @@ export function NativePlayer({
       });
     return () => {
       disposed = true;
+      seekOperation.current += 1;
       stop();
       void playerApi.player({ action: 'hide' }).catch(() => {});
     };
-  }, [media.id, media.path, onReady, loadAttempt]);
+  }, [media.id, media.path, onReady, loadAttempt, acceptState]);
   function retryLoad() {
     if (loadBusy.current || interactionsDisabled || loadStatus !== 'error') return;
     // Guard synchronously as well as disabling the button; two clicks in one
@@ -329,7 +346,7 @@ export function NativePlayer({
         action: 'sentence-pause',
         value: enabled ? 1 : 0,
       });
-      setState(await playerApi.playerState());
+      acceptState(await playerApi.playerState());
       await refresh();
     } catch (error) {
       notify(String(error), 'error');
@@ -337,11 +354,36 @@ export function NativePlayer({
   }
   const position = seekDraft ?? state?.positionMs ?? media.lastPositionMs;
   const controlsDisabled = !loaded || interactionsDisabled;
+  function previewSeek(value: number) {
+    seekOperation.current += 1;
+    seekInput.current = value;
+    setSeekDraft(value);
+  }
+  function cancelSeek() {
+    seekOperation.current += 1;
+    seekInput.current = null;
+    setSeekDraft(null);
+  }
   function commitSeek() {
-    if (seekDraft !== null && !controlsDisabled) {
-      void control({ action: 'seek', value: seekDraft });
-      setSeekDraft(null);
-    }
+    if (controlsDisabled) { cancelSeek(); return; }
+    const target = seekInput.current;
+    if (target === null) return;
+    // Release/blur can both fire. Commit once and keep the chosen position
+    // visible until the command and a fresh native snapshot have completed.
+    seekInput.current = null;
+    const operation = ++seekOperation.current;
+    void (async () => {
+      try {
+        if (!await control({ action: 'seek', value: target })) return;
+        if (operation !== seekOperation.current) return;
+        const current = await playerApi.playerState();
+        if (operation === seekOperation.current) acceptState(current);
+      } catch (error) {
+        if (operation === seekOperation.current) notify(String(error), 'error');
+      } finally {
+        if (operation === seekOperation.current) setSeekDraft(null);
+      }
+    })();
   }
   async function toggleLoop() {
     if (!selected || controlsDisabled || loopBusy) return;
@@ -406,8 +448,14 @@ export function NativePlayer({
               type="range" min="0" max={Math.max(duration, 1)} step="100"
               value={Math.min(position, duration || 1)}
               disabled={!loaded || !duration}
-              onChange={(event) => setSeekDraft(Number(event.target.value))}
+              onPointerDown={(event) => {
+                if (event.button !== 0 || controlsDisabled) return;
+                event.currentTarget.setPointerCapture(event.pointerId);
+                previewSeek(event.currentTarget.valueAsNumber);
+              }}
+              onChange={(event) => previewSeek(event.currentTarget.valueAsNumber)}
               onPointerUp={commitSeek} onKeyUp={commitSeek} onBlur={commitSeek}
+              onPointerCancel={cancelSeek}
               aria-label={t('再生位置', 'Playback position')}
               style={{ '--progress': `${duration ? (position / duration) * 100 : 0}%` } as React.CSSProperties}
             />
