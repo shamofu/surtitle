@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { isAbsolute, resolve } from 'node:path';
-import { writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, resolve } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
 
 const execute = promisify(execFile);
 const script = fileURLToPath(new URL('./native-window.ps1', import.meta.url));
@@ -29,8 +29,44 @@ export async function requestNativeWindowSize(width, height) {
 
 export async function resizeNativeWindow(width, height) {
   await requestNativeWindowSize(width, height);
-  await browser.waitUntil(async () => browser.execute((w, h) => innerWidth === w && innerHeight === h, width, height),
-    { timeoutMsg: 'The top-level native resize did not reach the WebView viewport' });
+  let dom;
+  try {
+    await browser.waitUntil(async () => {
+      dom = await readDomGeometry();
+      return dom.innerWidth === width && dom.innerHeight === height;
+    }, { timeoutMsg: 'The top-level native resize did not reach the WebView viewport' });
+  } catch (cause) {
+    const observation = {
+      capturedAt: new Date().toISOString(), requested: { width, height }, dom,
+      error: { name: cause?.name, message: String(cause?.message ?? cause), stack: cause?.stack },
+      diagnosticErrors: {},
+    };
+    if (process.platform === 'win32') {
+      const results = await Promise.allSettled([nativeWindow('inspect'), inspectNativeMonitor()]);
+      for (const [index, key] of ['native', 'monitor'].entries()) {
+        const result = results[index];
+        if (result.status === 'fulfilled') observation[key] = result.value;
+        else observation.diagnosticErrors[key] = String(result.reason?.message ?? result.reason);
+      }
+    }
+    const path = resolve(`test-results/native/native-window-resize-${width}x${height}.json`);
+    let artifact;
+    try {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify(observation, null, 2));
+      artifact = `See ${path}`;
+    } catch (error) {
+      artifact = `Could not write resize diagnostics: ${error.message}`;
+    }
+    const root = observation.native?.[0];
+    const monitor = observation.monitor?.monitors.find(item => item.handle === observation.monitor.current);
+    const details = {
+      requested: observation.requested, dom,
+      native: root && { dpi: root.dpi, client: root.client, screen: root.screen },
+      monitor, diagnosticErrors: observation.diagnosticErrors,
+    };
+    throw new Error(`${observation.error.message}. Resize diagnostics: ${JSON.stringify(details)}. ${artifact}`, { cause });
+  }
   await assertNativeVideoBounds(false);
 }
 
@@ -75,14 +111,18 @@ export function verifyNativeGeometry(native, dom, video = true) {
   close(surface.screen.Bottom - surface.screen.Top, expected.height, 'Native video height disagrees with DOM');
 }
 
+function readDomGeometry() {
+  return browser.execute(() => {
+    const rect = document.querySelector('[data-testid="native-player-viewport"]')?.getBoundingClientRect();
+    return { innerWidth, innerHeight, devicePixelRatio, viewport: rect && { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
+  });
+}
+
 export async function assertNativeVideoBounds(video = true) {
   if (process.platform !== 'win32') return;
   let observation;
   await browser.waitUntil(async () => {
-    const dom = await browser.execute(() => {
-      const rect = document.querySelector('[data-testid="native-player-viewport"]')?.getBoundingClientRect();
-      return { innerWidth, innerHeight, devicePixelRatio, viewport: rect && { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
-    });
+    const dom = await readDomGeometry();
     const native = await nativeWindow('inspect');
     observation = { native, dom };
     try { verifyNativeGeometry(native, dom, video); return true; } catch (error) { observation.error = error.message; return false; }
