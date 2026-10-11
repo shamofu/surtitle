@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "identifier": "app.surtitle.evaluation.redesignfinal20261011d",
+  "installedSha256": "34af843982fe59203c57b54696c68b934657ff4f5289e885d79d3564149f5a65",
+  "passed": true,
+  "passing": 15,
+  "skipped": 1,
+  "skipReason": "Optional job-details shortcut case: disposable fixture has no jobs",
+  "splitExecution": true,
+  "initialRun": {
+    "renderingPassed": 2,
+    "reason": "Old WebDriver text equality included hidden compact caption label",
+    "continuityFailed": 1,
+    "phrasePassed": 6,
+    "motionPassed": 4,
+    "phraseFailed": 2
+  },
+  "correctedRerun": {
+    "productionChanged": false,
+    "continuityPassed": 1,
+    "phrasePassed": 8,
+    "packageChanged": false,
+    "assertionsRelaxed": false,
+    "selector": "button[aria-label=\"Explore meaning\"]"
+  },
+  "completedAt": "2026-10-11T15:04:07.9170908Z"
+}

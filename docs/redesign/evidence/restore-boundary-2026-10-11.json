@@ -1,0 +1,45 @@
+{
+  "scope": "Final targeted synchronization and committed-restore failure review",
+  "synchronization": {
+    "reproduced": "A resource query begun before a native commit resolved during the 80ms coalescing window; completion time suppressed invalidation and unchanged checkpoint recovery left stale data fresh.",
+    "correction": "Cancel matching reads before invalidation, without completion-time freshness assumptions; throwOnError keeps failed active refetches queued for retry.",
+    "newRegressionTests": 3,
+    "targetedUiPassed": 24,
+    "coverage": ["Inactive stale query", "Initial active read in flight", "Active refetch failure and recovery"]
+  },
+  "restore": {
+    "reproduced": "In an isolated temporary profile, a directory at preferences.json rejects atomic replacement with Windows error5. Learning generation and content had already changed, but the old API returned Err and suppressed the restore event.",
+    "correction": "Successful DB replacement returns RestoreResult with explicit post-commit warnings; playback reconciliation continues and exactly one Restore notification publishes after native locks are released.",
+    "targetedNativePassed": 4,
+    "targetedNativeFailed": 0,
+    "separateRealMpvIntegrationIgnored": 1,
+    "checks": ["Committed generation/content retained", "Cleanup warning surfaced", "Exactly one restore revision", "Shared result serialization"]
+  },
+  "workspace": {
+    "rustToolchain": "1.99.0",
+    "command": "cargo test --workspace --all-features --locked",
+    "passed": 555,
+    "failed": 0,
+    "ignored": 12,
+    "ignoredClassification": "Harness entries include separately executed integrations and subprocess helpers exercised by parent tests; this is not a count of unexecuted requirements.",
+    "byPackage": {"surtitle":182,"surtitle-ai":246,"surtitle-ai-validation":19,"surtitle-core":86,"surtitle-tools":22},
+    "log": "work/rust-1.99-restore-boundary-workspace.log"
+  },
+  "format": "cargo fmt --all -- --check passed",
+  "clippy": "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings passed",
+  "ipcGenerator": "Generated contract check and its scripts-project test passed",
+  "realMpvRestore": {
+    "test": "application::transfer::restore_tests::real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks",
+    "passed": 1,
+    "failed": 0,
+    "ignored": 0,
+    "seconds": 7.66,
+    "rustToolchain": "1.99.0",
+    "runtime": "0.41.0-surtitle-ffmpeg-9.0.2-20261011",
+    "mpvSha256": "17409eefce3e4916c51fa6abaa5332fe0dc1550a1dd355afd31a918547297fad",
+    "fixtureFfmpeg": "C:/Users/shamo/ffmpeg/ffmpeg.exe (existing external9.0.1)",
+    "log": "work/rust-1.99-restore-boundary-mpv.log",
+    "scope": "Isolated temporary profile and hidden32x32 native window; backup/transaction failure recovery, restored resume/audio-stream/subtitle state,168 persisted stress ticks, sentence pause, missing-source recovery and volume after restart"
+  },
+  "limitations": "Only the changed real-MPV restore integration was rerun; other native integration observations remain in their prior records. This test checks playback state, not audible audio quality. No paid requests were made. Root-owned final frontend/browser/package results are recorded separately."
+}

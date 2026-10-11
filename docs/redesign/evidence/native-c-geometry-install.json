@@ -1,0 +1,17 @@
+{
+  "finalAcceptance": false,
+  "payloadSha256": {
+    "surtitle.exe": "b6946dff5737312b6d4d7b9140359f68ff7ed0ef7e6f0f30b4f4c709f72ce8b5",
+    "native/mpv-2.dll": "17409eefce3e4916c51fa6abaa5332fe0dc1550a1dd355afd31a918547297fad",
+    "native/onnxruntime.dll": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471",
+    "native/onnxruntime_providers_shared.dll": "87f6878cdc1f80b3a9afa5b0c84663315030b4957f5bbb6b66470557cb2f48d8"
+  },
+  "freshInstallPassed": true,
+  "schemaVersion": 1,
+  "startupPassed": true,
+  "geometryCandidate": true,
+  "installRoot": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\work\\rendering-evaluation\\installed-final-c\\日本語 & application",
+  "applicationIdentifier": "app.surtitle.evaluation.redesignfinal20261011c",
+  "reason": "Window fitting and compact-height geometry snapshot; final restore-boundary correction is pending.",
+  "testedAt": "2026-10-11T14:51:46.3319639Z"
+}

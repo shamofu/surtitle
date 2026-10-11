@@ -20,12 +20,12 @@ type DraftSaveGateWindow = FixtureWindow & {
 async function openStudy(page: Page, locale: 'en' | 'ja' = 'en', theme: 'light' | 'dark' = 'light') {
   await installLearningFixture(page, locale, theme);
   await page.goto('/study/visual-fixture');
-  await expect(page.getByRole('button', { name: locale === 'ja' ? 'この字幕を確認' : 'Inspect this subtitle', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: locale === 'ja' ? '意味を調べる' : 'Explore meaning', exact: true })).toBeEnabled();
 }
 
 async function createDraft(page: Page, locale: 'en' | 'ja' = 'en') {
-  await page.getByRole('button', { name: locale === 'ja' ? 'この字幕を確認' : 'Inspect this subtitle', exact: true }).click();
-  await page.getByRole('button', { name: locale === 'ja' ? 'フレーズを確認・保存' : 'Review and save phrase', exact: true }).click();
+  await page.getByRole('button', { name: locale === 'ja' ? '意味を調べる' : 'Explore meaning', exact: true }).click();
+  await page.locator('.phrase-save-toggle').click();
   await page.getByLabel(locale === 'ja' ? '語彙・フレーズ' : 'Word or phrase', { exact: true }).fill('take a little detour');
   await page.getByLabel(locale === 'ja' ? '意味' : 'Meaning', { exact: true }).fill('少し寄り道をする');
 }
@@ -57,7 +57,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     await toggle.press('Enter');
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
     await expect(page.locator('.study-companion h2')).toBeFocused();
-    await expect(page.getByRole('button', { name: 'Close panel', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Close panel', exact: true })).toBeVisible();
     await page.getByLabel('Search transcript').fill('coast');
     await page.getByRole('button', { name: 'Show translations', exact: true }).click();
     await page.getByRole('tab', { name: 'Suggestions', exact: true }).click();
@@ -75,27 +75,14 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
   });
 }
 
-test('finishing the drawer opening preserves focus when search has already started', async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await openStudy(page);
-  await page.evaluate(() => {
-    const dock = document.querySelector('.study-companion-dock')!;
-    dock.addEventListener('transitionrun', function startSearch(event) {
-      if (event.target !== dock || (event as TransitionEvent).propertyName !== 'width') return;
-      dock.removeEventListener('transitionrun', startSearch);
-      const search = document.querySelector<HTMLInputElement>('input[aria-label="Search transcript"]')!;
-      search.focus();
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'c');
-      search.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-  });
+test('opening the panel keeps search focus and input through subsequent frames', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' }); await openStudy(page);
   await page.getByRole('button', { name: 'Transcript', exact: true }).click();
   const search = page.getByLabel('Search transcript');
-  await expect(search).toHaveValue('c');
-  await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
-  await expect(search).toBeFocused();
-  await page.keyboard.type('oast');
-  await expect(search).toHaveValue('coast');
+  await search.fill('c');
+  await page.evaluate(async()=>{for(let i=0;i<20;i++)await new Promise(requestAnimationFrame);});
+  await expect(search).toHaveValue('c');await expect(search).toBeFocused();
+  await page.keyboard.type('oast');await expect(search).toHaveValue('coast');
   await expect(page.locator('.transcript-row').first()).toContainText('coast');
 });
 
@@ -104,7 +91,7 @@ test('real router saves unfinished phrases before leaving and restores them on r
   await createDraft(page);
   await page.getByRole('button', { name: 'Continue later', exact: true }).click();
   await page.getByRole('button', { name: 'Close panel', exact: true }).click();
-  await page.getByRole('button', { name: 'Unfinished phrases (1)', exact: true }).click();
+  await page.getByRole('button', { name: 'Activity & tools', exact: true }).click();
   await page.locator('.study-phrase-draft > .button').click();
   await expect(page.getByRole('textbox', { name: 'Meaning', exact: true })).toHaveValue('少し寄り道をする');
   await blockDraftSaves(page);
@@ -123,7 +110,7 @@ test('real router saves unfinished phrases before leaving and restores them on r
   expect(await page.evaluate(() => (window as FixtureWindow).__learningFixture.calls.some(call => call.command === 'delete_editor_draft'))).toBe(false);
   await page.locator('.media-card').filter({ hasText: 'A walk along the coast' }).click();
   await expect(page).toHaveURL(/\/study\/visual-fixture$/);
-  await page.getByRole('button', { name: 'Unfinished phrases (1)', exact: true }).click();
+  await page.getByRole('button', { name: 'Activity & tools', exact: true }).click();
   await page.locator('.study-phrase-draft > .button').click();
   await expect(page.getByLabel('Word or phrase', { exact: true })).toHaveValue('take a little detour');
   await expect(page.getByRole('textbox', { name: 'Meaning', exact: true })).toHaveValue('少し寄り道をする（あとで追記）');
@@ -238,9 +225,14 @@ for (const locale of ['en', 'ja'] as const) {
       element.dispatchEvent(new Event('scroll', { bubbles: true }));
     }, filteredOffset);
     await row.locator('.segment-text').scrollIntoViewIfNeeded();
-    const offset = await list.evaluate(element => element.scrollTop);
-
+    // Search can still be measuring newly visible rows. Capture the position
+    // at the actual user action, after Playwright's visibility/scroll checks.
+    await row.locator('.segment-text').evaluate(button => button.addEventListener('click', () => {
+      const list = button.closest('.transcript-scroll')!;
+      list.setAttribute('data-inspection-offset', String(list.scrollTop));
+    }, { once: true }));
     await row.locator('.segment-text').click();
+    const offset = Number(await list.getAttribute('data-inspection-offset'));
     await expect(back).toBeVisible();
     const callsBeforeReplay = await page.evaluate(() => (window as FixtureWindow).__learningFixture.calls.length);
     await page.locator('.context-actions').getByRole('button', { name: locale === 'ja' ? 'この区間を再生' : 'Play this passage', exact: true }).click();
@@ -287,7 +279,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
     await openStudy(page, locale, theme);
     await createDraft(page, locale);
     await page.getByRole('button', { name: locale === 'ja' ? 'あとで続ける' : 'Continue later', exact: true }).click();
-    await page.getByRole('button', { name: locale === 'ja' ? '入力途中のフレーズ (1)' : 'Unfinished phrases (1)', exact: true }).click();
+    await page.getByRole('button', { name: locale === 'ja' ? '処理・管理' : 'Activity & tools', exact: true }).click();
     await expect(page.locator('.study-phrase-draft')).toBeInViewport();
     await expect(page.locator('.caption-navigation')).toBeInViewport();
     await expect(page.getByRole('button', { name: locale === 'ja' ? '次の字幕' : 'Next subtitle', exact: true })).toBeInViewport();
@@ -326,8 +318,9 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
     await page.getByLabel(locale === 'ja' ? '語彙・フレーズ' : 'Word or phrase', { exact: true }).fill(longTerm);
     await page.getByRole('button', { name: locale === 'ja' ? 'あとで続ける' : 'Continue later', exact: true }).click();
     await page.getByRole('button', { name: locale === 'ja' ? 'パネルを閉じる' : 'Close panel', exact: true }).click();
-    await page.getByRole('button', { name: locale === 'ja' ? '書き出し・管理' : 'Export and manage', exact: true }).click();
-    await page.getByRole('button', { name: locale === 'ja' ? '入力途中のフレーズ (1)' : 'Unfinished phrases (1)', exact: true }).click();
+    await page.getByRole('button', { name: locale === 'ja' ? '処理・管理' : 'Activity & tools', exact: true }).click();
+    await expect(page.locator('.study-auxiliary')).toBeVisible();
+    const videoBeforeHistory = await page.getByTestId('native-player-viewport').boundingBox();
     const draft = page.locator('.study-phrase-draft');
     await draft.scrollIntoViewIfNeeded();
     expect(await draft.evaluate(element => {
@@ -337,9 +330,23 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       return label.right <= time.left && time.right <= remove.left && element.scrollWidth <= element.clientWidth;
     })).toBe(true);
     await page.locator('.study-jobs > summary').filter({ hasText: locale === 'ja' ? '処理履歴' : 'Job history' }).click();
-    const history = page.locator('.study-jobs').last().locator(':scope > div');
-    expect(await history.evaluate(element => element.clientHeight <= 72 && element.scrollHeight > element.clientHeight)).toBe(true);
-    expect(await page.locator('.study-auxiliary').evaluate(element => element.clientHeight <= 180 && element.scrollHeight > element.clientHeight)).toBe(true);
+    const history = page.locator('.study-jobs').last();
+    await expect(history).toHaveAttribute('open', '');
+    await expect.poll(() => history.evaluate(element => element.getAnimations().filter(animation => animation.playState === 'running').length)).toBe(0);
+    const activity = page.locator('.study-auxiliary');
+    // Activity owns its scroll, so growing history cannot take height from the video.
+    expect(await activity.evaluate(element => {
+      const panel = element.closest('.study-companion')!.getBoundingClientRect();
+      const bounds = element.getBoundingClientRect();
+      return element.clientHeight > 200 && element.scrollHeight > element.clientHeight
+        && bounds.top >= panel.top && bounds.bottom <= panel.bottom + 1;
+    })).toBe(true);
+    const lastJob = history.getByText('Completed translation 11', { exact: true });
+    await lastJob.scrollIntoViewIfNeeded();
+    await expect(lastJob).toBeInViewport();
+    const videoAfterHistory = await page.getByTestId('native-player-viewport').boundingBox();
+    expect(videoAfterHistory!.width).toBeCloseTo(videoBeforeHistory!.width, 0);
+    expect(videoAfterHistory!.height).toBeCloseTo(videoBeforeHistory!.height, 0);
     await page.screenshot({ path: testInfo.outputPath('study-expanded-history.png'), animations: 'disabled' });
     await page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true }).click();
     await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');

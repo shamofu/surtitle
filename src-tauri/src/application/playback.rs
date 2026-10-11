@@ -468,7 +468,7 @@ pub async fn play_card_audio(
 pub(super) fn restore_learning_archive(
     state: &AppState,
     archive: &surtitle_core::LearningArchive,
-) -> Result<()> {
+) -> Result<super::transfer::RestoreResult> {
     surtitle_core::transfer::validate(archive)?;
     let _review = lock(&state.ai_session.transcript_review)?;
     let mut playback = state.playback.operation()?;
@@ -481,12 +481,23 @@ pub(super) fn restore_learning_archive(
         .join("backups")
         .join(format!("before-restore-{}.sqlite", surtitle_core::id()));
     let restored = lock(&state.db)?.restore(archive, &backup);
+    let mut outcome = super::transfer::RestoreResult::default();
     if restored.is_ok() {
-        crate::application::transcript::automatic::detach_publications(state, None)?;
-        state.preferences.update(|preferences| {
+        if let Err(error) =
+            crate::application::transcript::automatic::detach_publications(state, None)
+        {
+            outcome.warnings.push(format!(
+                "Could not finish detaching old transcription sessions: {error}"
+            ));
+        }
+        if let Err(error) = state.preferences.update(|preferences| {
             preferences.ai_continuations.clear();
             Ok(())
-        })?;
+        }) {
+            outcome.warnings.push(format!(
+                "Could not clear old AI continuation settings: {error}"
+            ));
+        }
     }
     // On a transaction/backup failure the old database is intact; reopen its
     // retained current item too, so a failed restore does not strand the player.
@@ -499,18 +510,34 @@ pub(super) fn restore_learning_archive(
         if let Err(error) = load_media_locked(state, &mut playback, id) {
             playback.detach();
             if let Some(player) = playback.optional_player() {
-                player.stop()?;
+                if let Err(stop_error) = player.stop() {
+                    outcome.warnings.push(format!(
+                        "Could not stop playback after reopening failed: {stop_error}"
+                    ));
+                }
                 player.hide();
                 player.set_error(error.to_string());
             }
             // Database replacement remains committed even if playback fails.
             // Its missing/error state is exposed without undoing restored data.
             playback.set_error(error.to_string());
+            outcome
+                .warnings
+                .push(format!("Could not reopen the current media: {error}"));
         }
     } else if let Some(player) = playback.optional_player() {
         player.hide();
     }
-    restored
+    restored?;
+    // The learning transaction is authoritative even if a later local cleanup
+    // fails. Always reconcile editors/queries with the new generation; never
+    // misreport a committed restore as an operation the user should repeat.
+    drop(playback);
+    drop(_review);
+    state
+        .changes
+        .publish(super::changes::ChangeDomain::Restore, None);
+    Ok(outcome)
 }
 
 #[cfg(test)]

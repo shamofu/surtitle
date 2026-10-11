@@ -1,8 +1,10 @@
 pub(crate) mod cards;
+pub(crate) mod changes;
 pub(crate) mod continuations;
 pub(crate) mod editor_drafts;
 pub(crate) mod subtitles;
 pub(crate) mod transfer;
+pub(crate) mod ui_drafts;
 // Application services and use cases. IPC adapters live in `crate::commands`.
 pub(crate) mod ai;
 pub(crate) mod download;
@@ -29,9 +31,11 @@ pub(crate) use preferences::{Preferences, PreferencesStore, QuoteContext, Update
 
 pub type AppState = Arc<Services>;
 pub struct Services {
+    pub(crate) changes: changes::Changes,
     _instance_lock: std::fs::File,
     root: PathBuf,
     db: Mutex<Store>,
+    workspace: Mutex<surtitle_core::workspace::WorkspaceStore>,
     preferences: PreferencesStore,
     playback: PlaybackCoordinator,
     restores: Mutex<HashMap<String, RestorePlan>>,
@@ -45,6 +49,7 @@ pub struct Services {
 #[derive(Default)]
 struct AiSession {
     runtime: ai::runtime::RuntimeRegistry,
+    dispatch: ai::scheduler::DispatchQueue,
     preparation: Mutex<Option<PreparationCancellation>>,
     transcript_review: Mutex<()>,
 }
@@ -94,14 +99,20 @@ impl Services {
         let preferences = PreferencesStore::open(root.join("preferences.json"))?;
         models::reconcile_credential_project(&preferences, &root)?;
         let db = Store::open(root.join("learning.sqlite"))?;
+        let workspace =
+            surtitle_core::workspace::WorkspaceStore::open(root.join("workspace.sqlite"))?;
         let ai = surtitle_ai::AiStore::open(root.join("charges.sqlite"))?;
         let tools = ToolRuntime::open(root.join("tools"), tool_path)?;
-        let downloads = download::DownloadManager::open(&root)?;
+        let changes = changes::Changes::default();
+        let downloads = download::DownloadManager::open_with_changes(&root, changes.clone())?;
+        let operations = operations::OperationRegistry::with_changes(changes.clone());
         ai.recover_interrupted()?;
         let state = Arc::new(Self {
+            changes,
             _instance_lock: instance_lock,
             root,
             db: Mutex::new(db),
+            workspace: Mutex::new(workspace),
             preferences,
             playback: PlaybackCoordinator::default(),
             restores: Mutex::new(HashMap::new()),
@@ -111,7 +122,7 @@ impl Services {
             runtime_dir: Mutex::new(PathBuf::new()),
             ai_session: AiSession::default(),
             downloads,
-            operations: operations::OperationRegistry::default(),
+            operations,
         });
         transcript::automatic::recover(&state)?;
         Ok(state)

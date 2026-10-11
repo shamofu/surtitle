@@ -9,6 +9,7 @@ import { PreparationSessionsProvider } from '../features/ai/PreparationSessions'
 import { MotionProvider } from '../shared/motion';
 import { useSettings } from '../shared/query/snapshot';
 import { nativeAvailable } from '../shared/native/transport';
+import { EditingProvider } from './providers/Editing';
 
 function AppMotionProvider({ children }: { children: ReactNode }) {
   const { data: settings } = useSettings();
@@ -23,7 +24,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
       <SurfaceProvider>
         <NotificationsProvider>
           <SnapshotProvider>
-            <AppearanceProvider><ActivityProvider><PreparationSessionsProvider>{children}</PreparationSessionsProvider></ActivityProvider></AppearanceProvider>
+            <AppearanceProvider><EditingProvider><ActivityProvider><PreparationSessionsProvider>{children}</PreparationSessionsProvider></ActivityProvider></EditingProvider></AppearanceProvider>
           </SnapshotProvider>
         </NotificationsProvider>
       </SurfaceProvider>

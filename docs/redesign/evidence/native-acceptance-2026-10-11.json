@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-11",
+  "command": "node e2e/support/run-required-rust-tests.mjs SUITE --evidence-dir DIRECTORY",
+  "passedTests": 8,
+  "cloudCalls": 0,
+  "tests": [
+    {
+      "suite": "windows-native",
+      "test": "application::media_tools::card_audio::tests::installed_ffmpeg_preserves_native_rate_wav_tail_without_padding",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "seconds": 12.79
+    },
+    {
+      "suite": "windows-native",
+      "test": "application::media_tools::card_audio::tests::installed_ffmpeg_preserves_source_clock_and_cleans_failed_outputs",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "seconds": 150.22
+    },
+    {
+      "suite": "windows-native",
+      "test": "command::tests::multitrack_extraction_preserves_selected_stream",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "seconds": 12.04
+    },
+    {
+      "suite": "windows-native",
+      "test": "player::subtitle_tests::real_mpv_load_restores_position_and_maps_audio_stream",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "seconds": 16.38
+    },
+    {
+      "suite": "windows-native",
+      "test": "application::transfer::restore_tests::real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "seconds": 6.75
+    },
+    {
+      "suite": "windows-native",
+      "test": "prepare::tests::real_silero_and_ffmpeg_preserve_selection_time",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "seconds": 16.52
+    },
+    {
+      "suite": "windows-six-hour",
+      "test": "prepare::tests::six_hour_streaming_acceptance",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "seconds": 112.95
+    },
+    {
+      "suite": "windows-spoken",
+      "test": "prepare::spoken_pause_test::real_spoken_audio_and_interior_pause_require_only_local_warning_review",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "seconds": 14.39,
+      "rustToolchain": "1.99.0 (b940084d7 2026-09-28)"
+    }
+  ],
+  "sixHour": {
+    "chunk_count": 180,
+    "cloud_calls": 0,
+    "core_samples": 345600000,
+    "memory_scope": "Rust acceptance process only; external FFmpeg excluded",
+    "peak_working_set_bytes": 49152000,
+    "retained_bytes": 331616017,
+    "sent_samples_including_context": 362784000,
+    "source_duration_ms": 21600000,
+    "temporary_pcm_removed": true,
+    "wall_seconds": 112.7916828
+  },
+  "fixture": {
+    "description": "Six-minute synthetic English desktop TTS fixture looped sixty times, not varied natural conversation",
+    "durationSeconds": 21600,
+    "sourceBytes": 356721999,
+    "sourceSha256": "d2c83db95403a993b6e19ffaa0608615d5abecbd8ec3064f98bab86e249c7034"
+  },
+  "assets": {
+    "sileroSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+    "onnxRuntimeSha256": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471"
+  },
+  "limitations": "Timings include a shared development host. Peak working set covers only the Rust process, not external FFmpeg. No live profile was opened or changed.",
+  "rustToolchain": "Original seven tests: 1.98.0; windows-spoken: 1.99.0. Later independent Rust1.99 native reruns are retained under work/required-rust-tests/redesign-rust-1.99.",
+  "spokenEvidence": "spoken-pause-2026-10-11.json",
+  "adaptivePacingValidation": {
+    "rustToolchain": "1.99.0",
+    "aiLibraryPassed": 246,
+    "aiLibraryIgnored": 5,
+    "ignoredClassification": "Three separately executed integrations and two subprocess helpers exercised by their parent tests.",
+    "nativeAiJobsPassed": 35,
+    "approvalUiPassed": 12,
+    "clippyAllTargetsAllFeatures": "passed for surtitle-ai and surtitle",
+    "migration": "Preserves observed cooldowns, future Retry-After, approvals and unknown holds; removes only unobserved legacy default floor",
+    "additionalPaidRequestsForPolicyChange": 0,
+    "pairedLiveComparison": "natural-pacing-2026-10-11.json"
+  }
+}

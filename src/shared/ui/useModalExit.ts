@@ -9,7 +9,7 @@ interface PendingExit {
   running: boolean;
 }
 
-/** Run an already accepted close only after the native dialog has left the top layer. */
+/** Commit an already accepted close once, retaining the modal while async work settles. */
 export function useModalExit(active = true) {
   const [exiting, setExiting] = useState(false);
   const pending = useRef<PendingExit | null>(null);

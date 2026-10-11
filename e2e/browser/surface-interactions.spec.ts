@@ -22,14 +22,16 @@ test('nested dialogs own Escape and restore focus in order', async ({ page }) =>
   await expect(page.getByRole('dialog', { name: 'Confirmation' })).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: 'Editor' })).toBeVisible();
   await expect(innerOpener).toBeFocused();
-  await expect(page.getByTestId('surface-state')).toHaveText('hidden');
+  await expect(page.getByTestId('surface-state')).toHaveText('blocked');
+  await expect(page.getByTestId('occlusion-count')).toHaveText('1');
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(opener).toBeFocused();
-  await expect(page.getByTestId('surface-state')).toHaveText('visible');
+  await expect(page.getByTestId('surface-state')).toHaveText('available');
+  await expect(page.getByTestId('occlusion-count')).toHaveText('0');
 });
 
-test('notifications stay visible and clickable on the native top layer', async ({ page }) => {
+test('notifications stay visible and clickable inside the active portal', async ({ page }) => {
   await page.getByRole('button', { name: 'Open editor' }).click();
   await page.getByRole('button', { name: 'Fail save' }).click();
   const notification = page.getByRole('button', { name: 'Could not save' });

@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('inspect', 'resize', 'capture', 'sample')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('inspect', 'resize', 'capture', 'sample', 'monitor', 'move-monitor')][string]$Action,
     [Parameter(Mandatory)][string]$Application,
     [int]$Width,
     [int]$Height,
     [string]$Screenshot,
+    [long]$Monitor,
     [ValidateRange(100, 5000)][int]$DurationMs = 1500,
     [ValidateRange(5, 100)][int]$IntervalMs = 10
 )
@@ -18,6 +19,13 @@ $apps = @(Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($expected)) 
 if ($apps.Count -ne 1) { throw "Expected exactly one window for the configured test executable, found $($apps.Count)." }
 $window = $apps[0].MainWindowHandle
 Add-Type -Path (Join-Path $PSScriptRoot 'native-window.cs')
+if ($Action -eq 'monitor') {
+    [SurtitleNativeWindow]::InspectMonitor($window) | ConvertTo-Json -Depth 6
+    exit 0
+}
+if ($Action -eq 'move-monitor') {
+    [SurtitleNativeWindow]::MoveToMonitor($window, $Monitor)
+}
 if ($Action -eq 'sample') {
     # Warm the interop process before the test triggers its short animation.
     # Only the configured test application's HWND tree is inspected.

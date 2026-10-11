@@ -12,7 +12,7 @@ async function openSurfaces(page: Page) {
 }
 
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {
-  test(`dialog exit keeps the native surface hidden and preserves toast identity (${reducedMotion})`, async ({ page }) => {
+  test(`nested dialog dismissal releases only its own input block and preserves toast identity (${reducedMotion})`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion });
     await openSurfaces(page);
     const opener = page.getByRole('button', { name: 'Open editor', exact: true });
@@ -25,23 +25,20 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     await innerOpener.click();
     const inner = page.getByRole('dialog', { name: 'Confirmation', exact: true });
     await expect(inner.getByRole('button', { name: 'Could not save', exact: true })).toBeVisible();
-    expect(await originalToast!.evaluate(element => element === document.querySelector('dialog:last-of-type .toast'))).toBe(true);
-    const closing = await inner.evaluate(async element => {
-      element.dispatchEvent(new Event('cancel', { bubbles: true, cancelable: true }));
-      await new Promise(requestAnimationFrame);
-      return { attached: element.isConnected, state: element.getAttribute('data-state'), inert: element.querySelector('.modal-body')?.hasAttribute('inert'), surface: document.querySelector('[data-testid="surface-state"]')?.textContent };
-    });
-    if (reducedMotion === 'no-preference') expect(closing).toEqual({ attached: true, state: 'closing', inert: true, surface: 'hidden' });
-    else expect(closing.attached).toBe(false);
+    expect(await originalToast!.evaluate(element => element === [...document.querySelectorAll('[data-app-modal]')].at(-1)?.querySelector('.toast'))).toBe(true);
+    await expect(page.getByTestId('occlusion-count')).toHaveText('2');
+    await page.keyboard.press('Escape');
     await expect(inner).toHaveCount(0);
     await expect(innerOpener).toBeFocused();
-    await expect(page.getByTestId('surface-state')).toHaveText('hidden');
-    expect(await originalToast!.evaluate(element => element === document.querySelector('dialog .toast'))).toBe(true);
+    await expect(page.getByTestId('surface-state')).toHaveText('blocked');
+    await expect(page.getByTestId('occlusion-count')).toHaveText('1');
+    expect(await originalToast!.evaluate(element => element === document.querySelector('[data-app-modal] .toast'))).toBe(true);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(opener).toBeFocused();
-    await expect(page.getByTestId('surface-state')).toHaveText('visible');
-    expect(await originalToast!.evaluate(element => element.isConnected && !element.closest('dialog'))).toBe(true);
+    await expect(page.getByTestId('surface-state')).toHaveText('available');
+    await expect(page.getByTestId('occlusion-count')).toHaveText('0');
+    expect(await originalToast!.evaluate(element => element.isConnected && !element.closest('[data-app-modal]'))).toBe(true);
     await toast.click();
     await expect(toast).toHaveCount(0);
   });
@@ -49,7 +46,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
 
 }
 
-test('animation preference applies only after saving, survives reload, and follows live OS changes', async ({ page }) => {
+test('animation preference autosaves, survives reload, and follows live OS changes', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await installLearningFixture(page, 'en', 'dark');
   await page.goto('/settings');
@@ -57,15 +54,13 @@ test('animation preference applies only after saving, survives reload, and follo
   await expect(preference).toHaveValue('system');
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
   await preference.selectOption('reduce');
-  await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
-  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduce');
   await page.reload();
   await expect(preference).toHaveValue('reduce');
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduce');
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await preference.selectOption('system');
-  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await expect.poll(() => page.evaluate(async () => (await (window as any).__learningFixture.call('get_app_snapshot')).settings.motionPreference)).toBe('system');
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduce');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
@@ -73,7 +68,7 @@ test('animation preference applies only after saving, survives reload, and follo
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduce');
 });
 
-test('live OS reduction keeps the shown study region opaque and finishes an active exit', async ({ page }) => {
+test('live OS reduction keeps the shown study region opaque and layout changes immediate', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await installLearningFixture(page, 'en', 'light');
   await page.goto('/study/visual-fixture');
@@ -89,18 +84,8 @@ test('live OS reduction keeps the shown study region opaque and finishes an acti
   await expect(page.getByLabel('Search transcript')).toBeVisible();
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
-  const closing = await page.getByRole('button', { name: 'Transcript', exact: true }).evaluate(async button => {
-    const panel = document.querySelector('.study-companion') as HTMLElement;
-    await new Promise<void>(resolve => {
-      const observer = new MutationObserver(() => {
-        if (panel.inert) { observer.disconnect(); resolve(); }
-      });
-      observer.observe(panel, { attributes: true });
-      (button as HTMLButtonElement).click();
-    });
-    return { hidden: panel.hidden, inert: panel.inert };
-  });
-  expect(closing).toEqual({ hidden: false, inert: true });
+  await transcript.click();
+  await expect(panel).toBeHidden();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(panel).toBeHidden();
   await expect(region).toBeHidden();
@@ -181,26 +166,20 @@ test.describe('recorded motion walkthrough', () => {
     await scenePause();
     await page.getByRole('button', { name: 'Transcript', exact: true }).click();
     await expect(page.locator('.study-companion')).toBeHidden();
-    await page.getByRole('button', { name: 'Inspect this subtitle', exact: true }).click();
-    await page.getByRole('button', { name: 'Review and save phrase', exact: true }).click();
+    await page.getByRole('button', { name: 'Explore meaning', exact: true }).click();
+    await page.locator('.phrase-panel').getByRole('button', { name: 'Save phrase', exact: true }).click();
     await page.getByLabel('Word or phrase', { exact: true }).fill('A phrase to revisit');
     await scenePause();
     await page.getByRole('button', { name: 'Continue later', exact: true }).click();
     await page.getByRole('link', { name: 'Phrases', exact: true }).click();
-    await page.getByLabel('Actions for take a little detour', { exact: true }).click();
-    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await page.getByRole('button', { name: 'Edit phrase', exact: true }).click();
     const editor = page.getByRole('dialog', { name: 'Edit phrase', exact: true });
     await editor.getByLabel('Meaning', { exact: true }).fill('A short diversion');
     await scenePause();
     await page.keyboard.press('Escape');
-    const confirmation = page.getByRole('dialog', { name: 'Save your changes?', exact: true });
-    await expect(confirmation).toBeVisible();
-    await scenePause();
-    await confirmation.getByRole('button', { name: 'Keep editing', exact: true }).click();
-    await expect(confirmation).toHaveCount(0);
-    await editor.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(editor).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Phrase updated.', exact: true })).toBeVisible();
+    await expect(page.locator('.phrase-card')).toContainText('A short diversion');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
     await scenePause();
     await page.getByRole('link', { name: 'Settings', exact: true }).click();
     const preference = page.getByRole('combobox', { name: 'Animations', exact: true });

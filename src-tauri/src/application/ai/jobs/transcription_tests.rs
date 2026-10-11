@@ -169,6 +169,84 @@ impl Fixture {
 }
 
 #[tokio::test]
+async fn queued_audio_replacement_stops_before_reservation_and_releases_the_lane() {
+    let fixture = Fixture::new().await;
+    let occupied = fixture
+        .state
+        .ai_session
+        .dispatch
+        .enqueue("other-request", true);
+    let active = occupied.try_acquire().unwrap();
+    let service = fixture.service(Scenario::Transcription);
+    let approved = fixture.approve();
+    let approval_id = approved.approval_id.clone();
+    let baseline = serde_json::to_value(fixture.rows()).unwrap();
+    let worker = fixture.start(approved, service.clone());
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !fixture
+            .state
+            .ai_session
+            .dispatch
+            .is_waiting(&fixture.quote.id)
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("audio worker must finish its initial hash and join the dispatch queue");
+    assert!(service.sent_ordinals().is_empty());
+    assert!(attempts(fixture.directory.path(), &fixture.quote.id).is_empty());
+
+    // Preserve the path and file size: only source content changes during the
+    // queue wait, so metadata/source-scope checks alone cannot catch this.
+    let mut replacement = std::fs::read(&fixture.source_path).unwrap();
+    let tail = replacement.last_mut().unwrap();
+    *tail ^= 1;
+    std::fs::write(&fixture.source_path, replacement).unwrap();
+    drop(active);
+
+    assert!(finished(worker).await.is_err());
+    assert!(service.sent_ordinals().is_empty());
+    assert!(attempts(fixture.directory.path(), &fixture.quote.id).is_empty());
+    assert_eq!(
+        fixture.state.ai.quote(&fixture.quote.id).unwrap().state,
+        "needs_review"
+    );
+    assert_eq!(
+        fixture
+            .state
+            .ai
+            .job_issue(&fixture.quote.id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        "source"
+    );
+    assert_eq!(serde_json::to_value(fixture.rows()).unwrap(), baseline);
+    assert!(
+        !fixture
+            .state
+            .ai_session
+            .dispatch
+            .is_waiting(&fixture.quote.id)
+    );
+    assert!(
+        fixture
+            .state
+            .ai_session
+            .dispatch
+            .worker(&approval_id)
+            .is_some()
+    );
+    let next = fixture
+        .state
+        .ai_session
+        .dispatch
+        .enqueue("next-request", true);
+    assert!(next.try_acquire().is_some());
+}
+
+#[tokio::test]
 async fn immutable_audio_preparation_uses_current_subtitles_at_quote_time_and_preserves_later_edits()
  {
     for edit_after_quote in [false, true] {
@@ -268,6 +346,43 @@ async fn waiting(fixture: &Fixture) -> RetryStatus {
     .expect("worker should enter HTTP429 wait")
 }
 
+async fn observed_cooldown(fixture: &Fixture, mut checkpoint: Checkpoint) {
+    reached(&mut checkpoint).await;
+    // Retain the final two seconds of an observed server cooldown. The first
+    // response is in flight; subsequent work must wait without reserving.
+    let conn = rusqlite::Connection::open(fixture.directory.path().join("charges.sqlite")).unwrap();
+    conn.execute(
+        "UPDATE ai_transcription_pacing SET cooldown_until_ms=?",
+        [chrono::Utc::now().timestamp_millis() + 2_000],
+    )
+    .unwrap();
+    checkpoint.resume();
+}
+
+#[tokio::test]
+async fn normal_transcription_reaches_the_next_dispatch_without_a_fixed_wait() {
+    let fixture = Fixture::new().await;
+    let service = fixture.service(Scenario::Transcription);
+    let mut checkpoint = service.checkpoint(Stage::BeforeDispatch, 1);
+    let worker = fixture.start(fixture.approve_retries(false), service.clone());
+    tokio::time::timeout(Duration::from_secs(5), checkpoint.reached())
+        .await
+        .unwrap();
+    assert_eq!(service.sent_ordinals(), [0]);
+    assert!(fixture.rows().iter().any(|row| row.text == "Hello."));
+    assert!(
+        fixture
+            .state
+            .ai
+            .pacing_status(&fixture.quote.id)
+            .unwrap()
+            .is_none()
+    );
+    checkpoint.resume();
+    finished(worker).await.unwrap();
+    assert_eq!(service.sent_ordinals(), [0, 1]);
+}
+
 async fn pacing(fixture: &Fixture) -> PacingStatus {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -282,14 +397,16 @@ async fn pacing(fixture: &Fixture) -> PacingStatus {
 }
 
 #[tokio::test]
-async fn pacing_spaces_dispatches_without_reserving_and_preserves_live_edits() {
+async fn observed_cooldown_waits_without_reserving_and_preserves_live_edits() {
     let fixture = Fixture::new().await;
     let service = fixture.service(Scenario::Transcription);
+    let checkpoint = service.checkpoint(Stage::AfterSend, 0);
     let worker = fixture.start(fixture.approve_retries(false), service.clone());
+    observed_cooldown(&fixture, checkpoint).await;
     let delay = pacing(&fixture).await;
     assert_eq!(delay.ordinal, 1);
-    assert_eq!(delay.interval_ms, 10_000);
-    assert!(!delay.slowed);
+    assert_eq!(delay.interval_ms, 0);
+    assert!(delay.slowed);
     assert_eq!(service.sent_ordinals(), [0]);
     assert_eq!(
         attempts(fixture.directory.path(), &fixture.quote.id).len(),
@@ -324,7 +441,7 @@ async fn pacing_spaces_dispatches_without_reserving_and_preserves_live_edits() {
         .into_iter()
         .find(|row| row.text == "Hello.")
         .unwrap();
-    correction.text = "Human correction during normal send spacing.".into();
+    correction.text = "Human correction during observed server cooldown.".into();
     correction.status = "confirmed".into();
     crate::application::subtitles::edit_segment(fixture.state.clone(), correction.clone()).unwrap();
     finished(worker).await.unwrap();
@@ -337,7 +454,7 @@ async fn pacing_spaces_dispatches_without_reserving_and_preserves_live_edits() {
             |row| row.get(0),
         )
         .unwrap();
-    assert!(elapsed >= 10_000, "dispatches were only {elapsed}ms apart");
+    assert!(elapsed >= 2_000, "dispatches were only {elapsed}ms apart");
     assert_eq!(
         serde_json::to_value(
             fixture
@@ -364,7 +481,9 @@ async fn pause_cancel_or_reapproval_during_pacing_stops_the_old_worker() {
     for action in ["pause", "cancel", "reapprove"] {
         let fixture = Fixture::new().await;
         let service = fixture.service(Scenario::Transcription);
+        let checkpoint = service.checkpoint(Stage::AfterSend, 0);
         let worker = fixture.start(fixture.approve_retries(false), service.clone());
+        observed_cooldown(&fixture, checkpoint).await;
         let delay = pacing(&fixture).await;
         let before = attempts(fixture.directory.path(), &fixture.quote.id);
         if action == "cancel" {
@@ -411,7 +530,9 @@ async fn pacing_rechecks_budget_and_source_before_the_next_reservation() {
     for change_source in [false, true] {
         let fixture = Fixture::new().await;
         let service = fixture.service(Scenario::Transcription);
+        let checkpoint = service.checkpoint(Stage::AfterSend, 0);
         let worker = fixture.start(fixture.approve_retries(false), service.clone());
+        observed_cooldown(&fixture, checkpoint).await;
         pacing(&fixture).await;
         let before = attempts(fixture.directory.path(), &fixture.quote.id);
         if change_source {

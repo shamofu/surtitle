@@ -1,0 +1,43 @@
+{
+  "adapter": "NVIDIA GeForce RTX 5070 Ti",
+  "decoderCopyBack": true,
+  "finalSize": [
+    1284,
+    751
+  ],
+  "framesPresented": 247,
+  "glVersion": "4.6.0 NVIDIA 616.92",
+  "limitations": [
+    "WGL NV extension route; other vendors untested",
+    "Prototype only; no Tauri integration",
+    "No device-loss recovery yet"
+  ],
+  "nativeReceipts": [],
+  "optionalTargetDiagnostic": {
+    "cpuReadback": true,
+    "diagnosticOnly": true,
+    "distinctRgbColors": 38696,
+    "size": [
+      1284,
+      751
+    ]
+  },
+  "perFrameJsIpc": false,
+  "properties": {
+    "decoder-frame-drop-count": "0",
+    "frame-drop-count": "0",
+    "hwdec-current": "d3d11va-copy",
+    "time-pos": "0.000000",
+    "video-params/h": "1080",
+    "video-params/w": "1920",
+    "vo-delayed-frame-count": "0"
+  },
+  "renderedTargetCpuReadback": false,
+  "renderer": "NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2",
+  "resizes": 0,
+  "route": "WGL_NV_DX_interop2 + D3D11 composition swapchain + WebView2 visual host",
+  "seconds": 8.0030762,
+  "webMessages": [
+    "{\"ready\":true,\"ratio\":1}"
+  ]
+}

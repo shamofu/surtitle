@@ -52,15 +52,15 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       expect(await rows.count()).toBeGreaterThan(0);
       expect(await rows.count()).toBeLessThan(50);
       await capture('transcript');
-      await page.getByRole('button', { name: locale === 'ja' ? 'この字幕を確認' : 'Inspect this subtitle', exact: true }).click();
+      await page.getByRole('button', { name: locale === 'ja' ? '意味を調べる' : 'Explore meaning', exact: true }).click();
       await expect(page.getByRole('button', { name: locale === 'ja' ? '元の位置から再生を再開' : 'Resume from original position', exact: true })).toBeVisible();
       if (size.width < 1000) {
         await page.getByRole('button', { name: locale === 'ja' ? '元の位置から再生を再開' : 'Resume from original position', exact: true }).scrollIntoViewIfNeeded();
         await expect(page.getByRole('button', { name: locale === 'ja' ? '元の位置から再生を再開' : 'Resume from original position', exact: true })).toBeInViewport();
       }
       await capture('phrase');
-      await page.getByRole('button', { name: locale === 'ja' ? '意味を見る' : 'Show meaning', exact: true }).click();
-      await page.getByRole('button', { name: locale === 'ja' ? 'フレーズを確認・保存' : 'Review and save phrase', exact: true }).click();
+      await expect(page.locator('.context-meaning')).toBeVisible();
+      await page.locator('.phrase-save-toggle').click();
       await expect(page.getByLabel(locale === 'ja' ? '語彙・フレーズ' : 'Word or phrase', { exact: true })).toBeVisible();
       await page.locator('.save-phrase-form').scrollIntoViewIfNeeded();
       await capture('phrase-save');

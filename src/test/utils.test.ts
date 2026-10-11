@@ -42,20 +42,19 @@ describe('long media ranges', () => {
 });
 describe('approval and due state', () => {
   const now = Date.parse('2026-09-08T00:00:00Z');
-  it('requires explicit acknowledgement, budget permission, and an unexpired quote', () => {
+  it('requires budget permission and an unexpired quote before Start', () => {
     const quote = {
       canApprove: true,
       expiresAt: new Date(now + 1000).toISOString(),
     };
-    expect(quoteCanBeApproved(quote, false, now)).toBe(false);
-    expect(quoteCanBeApproved({ ...quote, canApprove: false }, true, now)).toBe(
+    expect(quoteCanBeApproved({ ...quote, canApprove: false }, now)).toBe(
       false,
     );
-    expect(quoteCanBeApproved(quote, true, now + 1000)).toBe(false);
+    expect(quoteCanBeApproved(quote, now + 1000)).toBe(false);
     expect(
-      quoteCanBeApproved({ ...quote, expiresAt: 'invalid' }, true, now),
+      quoteCanBeApproved({ ...quote, expiresAt: 'invalid' }, now),
     ).toBe(false);
-    expect(quoteCanBeApproved(quote, true, now)).toBe(true);
+    expect(quoteCanBeApproved(quote, now)).toBe(true);
   });
   it('excludes suspended, invalid, and future cards from the due queue', () => {
     const cards = [

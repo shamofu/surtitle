@@ -40,3 +40,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [build-dependencies]
 serde_json = "1"
+
+[[example]]
+name = "redesign_preparation"
+required-features = ["development-validation"]

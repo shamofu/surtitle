@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "testedAt": "2026-10-11T15:03:30.542Z",
+  "beforePid": 30600,
+  "afterPid": 20636,
+  "sourceAudioHash": "43f5940f122d519a31c23e2e303505f3b8b0e27afe2960d6b9ed7a0b53cbd982",
+  "savedCardId": "e90d1c5e-e823-485d-9c78-7ec6a0c9e6b2",
+  "unicodeTextPreserved": true,
+  "closedImmediatelyAfterEditing": true,
+  "staleNativeWriterRejected": true,
+  "realOsImeCompositionTested": false,
+  "paidRequests": 0
+}

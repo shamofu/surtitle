@@ -32,6 +32,7 @@ impl LocalChild {
     ) -> Result<(Self, Option<ChildStdout>)> {
         check_cancel(&cancel)?;
         snapshot.verify().map_err(local_error)?;
+        check_cancel(&cancel)?;
         let mut command = Command::new(&snapshot.tool.executable);
         command
             .args(args)

@@ -12,6 +12,12 @@ export interface AiPricePreference {
   inputMicrousdPerMillion: number;
   outputMicrousdPerMillion: number;
 }
+export interface PriceLookup {
+  price: AiPricePreference | null;
+  candidates: { sku: string; description: string; direction: string; microusdPerMillion: number }[];
+  complete: boolean;
+  observedAtMs: number;
+}
 
 export interface AiModelPreference {
   modelId: string;

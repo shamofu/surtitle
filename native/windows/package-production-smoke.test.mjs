@@ -23,6 +23,10 @@ test('requires explicit application paths and refuses duplicate/unknown probe sw
   assert.throws(() => parseOptions([...args, '--expected-application-sha256', 'a'.repeat(64)]), /Unknown/);
   assert.throws(() => parseOptions([...args, '--application', 'other.exe']), /duplicate/);
   assert.throws(() => parseOptions([...args, '--skip-playback']), /Unknown/);
+  assert.equal(parseOptions([...args, '--app-id', 'app.surtitle.evaluation.redesign20261011'])['app-id'], 'app.surtitle.evaluation.redesign20261011');
+  for (const identifier of ['app.surtitle.desktop', '../private', 'another.application', 'app.surtitle.evaluation.']) {
+    assert.throws(() => parseOptions([...args, '--app-id', identifier]), /isolated evaluation/);
+  }
 });
 test('refuses inherited credentials, approved budgets and every nonzero/unknown accounting condition', () => {
   assert.equal(validateSnapshot(snapshot(), fixture).savedModelPreferenceCount, 0);

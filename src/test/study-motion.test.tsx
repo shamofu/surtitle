@@ -19,7 +19,7 @@ function Panel({ open, children }: { open: boolean; children: ReactNode }) {
   </div>;
 }
 
-it('deactivates a closing drawer while retaining its last form until geometry finishes', () => {
+it('deactivates and removes a closing drawer immediately without a geometry transition', () => {
   function Session() {
     const [open, setOpen] = useState(true);
     return <><button onClick={() => setOpen(false)}>Close</button><Panel open={open}>
@@ -30,13 +30,13 @@ it('deactivates a closing drawer while retaining its last form until geometry fi
   const field = screen.getByLabelText('Draft');
   fireEvent.change(field, { target: { value: 'edited phrase' } });
   fireEvent.click(screen.getByText('Close'));
-  const region = field.closest('.study-motion-region')!;
+  const region = document.querySelector('.study-motion-region')!;
   expect(region).toHaveAttribute('inert');
   expect(region).toHaveAttribute('aria-hidden', 'true');
-  expect(region).not.toHaveAttribute('hidden');
-  expect(field).toHaveValue('edited phrase');
+  expect(region).toHaveAttribute('hidden');
+  expect(field).not.toBeInTheDocument();
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-  expect(screen.getByTestId('dock')).toHaveAttribute('data-moving', 'true');
+  expect(screen.getByTestId('dock')).toHaveAttribute('data-moving', 'false');
   const transition = new Event('transitionend', { bubbles: true });
   Object.defineProperty(transition, 'propertyName', { value: 'width' });
   fireEvent(screen.getByTestId('dock'), transition);

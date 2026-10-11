@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { PausedJobs } from './PausedJobs';
+import { RecoveredInputs } from './RecoveredInputs';
 import { ToolRow } from './ToolRow';
-import { equalSetting, mergeSettingsRefresh } from './merge-settings';
-import { useSettingsExitGuard } from './useSettingsExitGuard';
+import { settingsEditor, settingsFields, settingsFromFields } from './editing';
+import { useEditingSession } from '../../shared/editing/useEditingSession';
+import { useQueryClient } from '@tanstack/react-query';
+
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { continuationApi, type AiContinuation } from '../ai/continuations';
@@ -17,7 +20,7 @@ import {
   HardDrive,
   KeyRound,
   RefreshCw,
-  Save,
+
   ScanSearch,
   ShieldCheck,
   SlidersHorizontal,
@@ -39,25 +42,15 @@ import {
   useNotifications,
 } from '../../app/runtime';
 import { money } from '../../shared/format';
-import { Button, Field, Modal, PageTitle } from '../../shared/ui/index';
+import { Button, Field, PageTitle } from '../../shared/ui/index';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { AnimatedDetails, openAnimatedDetails } from '../../shared/ui/AnimatedDetails';
 import { useActivities } from '../../app/providers/Activities';
 import { LanguageInput } from '../../shared/ui/LanguageInput';
 import { TransferDialog } from '../transfer/TransferDialog';
 
-import { ModelEditor, emptyModel, validOutputTokens } from '../ai/ModelEditor';
+import { ModelEditor, emptyModel, validOutputTokens, validTokenInput, type ModelInputDraft } from '../ai/ModelEditor';
 import { AnimatedValue, MotionRegion, MotionSwap, useAppMotion } from '../../shared/motion';
-
-function completeBudgets(settings: AppSettings): AppSettings {
-  return {
-    ...settings,
-    motionPreference: settings.motionPreference ?? 'system',
-    monthlyBudgetUsd: settings.monthlyBudgetUsd ?? settings.dailyBudgetUsd,
-    perJobBudgetUsd: settings.perJobBudgetUsd ?? settings.dailyBudgetUsd,
-    aiModels: settings.aiModels ?? {},
-  };
-}
 
 const learningLevels = [
   ['A1', '挨拶や簡単な自己紹介ができる', 'Greetings and simple introductions'],
@@ -77,12 +70,26 @@ export function SettingsPage() {
   const { t } = useAppearance();
   const { reducedMotion } = useAppMotion();
   const { report, notify } = useNotifications();
-  const [draft, setDraft] = useState<AppSettings>();
-  const savedSettings = useRef<AppSettings | undefined>(undefined);
+  const client = useQueryClient();
+  const [session] = useState(() => settingsEditor(client));
+  const editing = useEditingSession(session);
+  const draft = editing.ready && data ? settingsFromFields(editing.fields, data.settings) : undefined;
+  const busy = editing.saving;
+  const modelInputs = JSON.parse(editing.fields.modelInputs || '{}') as Partial<Record<AiPurpose, ModelInputDraft>>;
+  function setDraft(update: (current: AppSettings | undefined) => AppSettings | undefined) {
+    if (!data || !editing.ready) return;
+    const previous = settingsFromFields(session.getSnapshot().fields, data.settings);
+    const next = update(previous);
+    if (next) {
+      const before = settingsFields(previous);
+      session.change(Object.fromEntries(Object.entries(settingsFields(next)).filter(([key, value]) => value !== before[key])));
+    }
+  }
+
   const lastMonthlyBudget = useRef(0);
-  const [busy, setBusy] = useState(false);
+
   const { runTracked } = useActivities();
-  const savePending = useRef(false);
+
   const priceRequests = useRef(new Set<AiPurpose>());
   const [pricing, setPricing] = useState(false);
   const page = useRef<HTMLDivElement>(null);
@@ -126,17 +133,6 @@ export function SettingsPage() {
       mounted = false;
     };
   }, []);
-  useEffect(() => {
-    if (!data?.settings) return;
-    const previous = savedSettings.current;
-    const next = completeBudgets(data.settings);
-    savedSettings.current = next;
-    setDraft((current) => {
-      const refreshed = mergeSettingsRefresh(previous, current, next);
-      if (Number.isFinite(refreshed.monthlyBudgetUsd)) lastMonthlyBudget.current = refreshed.monthlyBudgetUsd!;
-      return refreshed;
-    });
-  }, [data?.settings]);
   function change<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     setDraft((current) => {
       if (!current) return current;
@@ -158,23 +154,11 @@ export function SettingsPage() {
       return updated;
     });
   }
-  async function save() {
-    if (!draft || !valid || credentialBusy || savePending.current || priceRequests.current.size) return false;
-    const submitted = completeBudgets(draft);
-    const previousSaved = savedSettings.current;
-    savePending.current = true;
-    setBusy(true);
-    try {
-      const saved = await report(async () => {
-        await mutate(() => settingsApi.updateSettings(submitted), { kind: 'snapshot' });
-        return true;
-      }, t('設定を保存しました。', 'Settings saved.'));
-      if (saved && savedSettings.current === previousSaved) savedSettings.current = submitted;
-      return saved;
-    } finally {
-      savePending.current = false;
-      setBusy(false);
-    }
+  const save = session.flush;
+  function changeNumber(key: 'retention' | 'replayContextMs' | 'monthlyBudgetUsd' | 'dailyBudgetUsd' | 'perJobBudgetUsd', raw: string) {
+    const number = raw.trim() === '' ? Number.NaN : Number(raw);
+    change(key, key === 'retention' ? number / 100 : number);
+    session.change({ [key === 'retention' ? 'retentionInput' : key]: raw });
   }
   async function importCredential() {
     setCredentialBusy(true);
@@ -239,9 +223,12 @@ export function SettingsPage() {
     dailyBudgetUsd: budgetError(draft?.dailyBudgetUsd ?? 0),
     perJobBudgetUsd: budgetError(perJobBudget),
   };
-  const valid = !!draft && !Object.values(errors).some(Boolean) && Object.values(draft.aiModels || {}).every(model => !model || validOutputTokens(model.maxOutputTokens));
-  const dirty = !!draft && !equalSetting(draft, savedSettings.current);
-  const exitGuard = useSettingsExitGuard(dirty, busy, save, pricing);
+  const modelInputValid = Object.values(modelInputs).every(input => !input ||
+    (input.maxOutputTokens === undefined || validTokenInput(input.maxOutputTokens, 1, 1048576)) &&
+    (input.thinkingBudget === undefined || validTokenInput(input.thinkingBudget, 0, 65536)));
+  const valid = !!draft && modelInputValid && !Object.values(errors).some(Boolean) && Object.values(draft.aiModels || {}).every(model => !model || validOutputTokens(model.maxOutputTokens));
+  const dirty = editing.dirty || !modelInputValid;
+
   function reviewErrors() {
     const invalid = page.current?.querySelector<HTMLElement>('input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"]');
     if (!invalid) return;
@@ -255,8 +242,8 @@ export function SettingsPage() {
   const retentionPreset = [0.85, 0.9, 0.95].find((value) => Math.abs(value - (draft?.retention ?? 0.9)) < 0.000001);
   const continuation = continuations.find(item => item.id === resume) || continuations[0];
   return (
-    <div ref={page} className="settings-page page-enter">
-      <MotionRegion mode="status" open={!!continuation}>{continuation && <div className="notice"><span>{t('途中のAI依頼に戻れます。', 'You can return to your unfinished AI request.')}</span><Button disabled={!valid || credentialBusy || pricing} busy={busy} onClick={async () => { if (await save()) { exitGuard.allowSavedNavigation(); void navigate({ to: '/study/$mediaId', params: { mediaId: continuation.mediaId }, search: { resume: continuation.id } }); } }}>{t('保存して元の操作に戻る', 'Save and return to your request')}</Button></div>}</MotionRegion>
+    <div ref={page} className="settings-page" onBlur={() => void save()}>
+      <MotionRegion mode="status" open={!!continuation}>{continuation && <div className="notice"><span>{t('途中のAI依頼に戻れます。', 'You can return to your unfinished AI request.')}</span><Button disabled={credentialBusy} busy={busy} onClick={async () => { if (await save()) { void navigate({ to: '/study/$mediaId', params: { mediaId: continuation.mediaId }, search: { resume: continuation.id } }); } }}>{t('元の操作に戻る', 'Return to your request')}</Button></div>}</MotionRegion>
       <PageTitle
         title={t('設定', 'Settings')}
         description={t(
@@ -273,9 +260,15 @@ export function SettingsPage() {
             <SlidersHorizontal size={16} />
             {t('学習', 'Learning')}
           </a>
+          <a href="#appearance">
+            <SlidersHorizontal size={16} />{t('表示', 'Appearance')}
+          </a>
           <a href="#ai">
             <KeyRound size={16} />
-            {t('AIと利用額', 'AI & usage')}
+            {t('AI', 'AI')}
+          </a>
+          <a href="#budget">
+            <CircleDollarSign size={16} />{t('利用状況', 'Usage')}
           </a>
           <a href="#tools">
             <Wrench size={16} />
@@ -300,7 +293,7 @@ export function SettingsPage() {
                 </p>
               </div>
             </div>
-            <fieldset disabled={!draft || busy}>
+            <fieldset disabled={!draft}>
               <div className="field-row">
                 <Field
                   label={t('学習する言語', 'Learning language')}
@@ -361,14 +354,11 @@ export function SettingsPage() {
                   <summary>{t('復習の詳細設定', 'Advanced review settings')}</summary>
                   <Field label={t('目標の記憶保持率（%）', 'Target retention (%)')} error={errors.retention} hint={t('次の復習まで覚えていることを目指す割合です。高いほど復習が増えます。標準は90%です。', 'The proportion you aim to remember until the next review. Higher values mean more reviews. The standard is 90%.')}>
                   <input
-                    type="number"
-                    min="70"
-                    max="97"
-                    step="1"
-                    value={Number.isNaN(draft?.retention) ? '' : Number(((draft?.retention ?? 0.9) * 100).toFixed(4))}
+                    type="text" inputMode="decimal"
+                    value={editing.fields.retentionInput ?? ''}
                     onChange={(event) => {
                       setRetentionCustom(true);
-                      change('retention', event.target.value === '' ? Number.NaN : Number(event.target.value) / 100);
+                      changeNumber('retention', event.target.value);
                     }}
                   />
                 </Field>
@@ -387,25 +377,16 @@ export function SettingsPage() {
                 )}
               >
                 <input
-                  type="number"
-                  min="0"
-                  max="1000"
-                  step="1"
-                  value={
-                    Number.isNaN(draft?.replayContextMs)
-                      ? ''
-                      : (draft?.replayContextMs ?? 150)
-                  }
-                  onChange={(event) =>
-                    change(
-                      'replayContextMs',
-                      event.target.value === ''
-                        ? Number.NaN
-                        : Number(event.target.value),
-                    )
-                  }
+                  type="text" inputMode="numeric"
+                  value={editing.fields.replayContextMs ?? ''}
+                  onChange={(event) => changeNumber('replayContextMs', event.target.value)}
                 />
               </Field>
+            </fieldset>
+          </section>
+          <section id="appearance" className="settings-card">
+            <div className="settings-section-title"><SlidersHorizontal size={20} /><h2>{t('表示', 'Appearance')}</h2></div>
+            <fieldset disabled={!draft}>
               <div className="field-row">
                 <Field label={t('表示言語', 'Interface language')}>
                   <select
@@ -440,7 +421,7 @@ export function SettingsPage() {
                 </Field>
               </div>
               <div className="field-row">
-                <Field label={t('アニメーション', 'Animations')} hint={t('保存後に適用されます。動きを減らすと、画面の切り替えや開閉をすぐに完了します。', 'Applied after saving. Reduced motion makes transitions and dialogs complete immediately.')}>
+                <Field label={t('アニメーション', 'Animations')} hint={t('動きを減らすと、画面の切り替えや開閉をすぐに完了します。', 'Reduced motion makes transitions and dialogs complete immediately.')}>
                   <select
                     value={draft?.motionPreference ?? 'system'}
                     onChange={(event) => change('motionPreference', event.target.value as AppSettings['motionPreference'])}
@@ -453,7 +434,7 @@ export function SettingsPage() {
             </fieldset>
           </section>
           <section id="ai" className="settings-group" aria-labelledby="ai-settings-heading">
-            <h2 id="ai-settings-heading">{t('AIと利用額', 'AI & usage')}</h2>
+            <h2 id="ai-settings-heading">{t('AI', 'AI')}</h2>
           <section id="vertex" className="settings-card">
             <div className="settings-section-title">
               <KeyRound size={20} />
@@ -467,7 +448,7 @@ export function SettingsPage() {
                 </p>
               </div>
             </div>
-            <fieldset disabled={!draft || busy}>
+            <fieldset disabled={!draft}>
               <div className="field-row">
                 <Field label={t('プロジェクト ID', 'Project ID')} hint={t('サービスアカウントのJSONから読み込みます。変更する場合は別のJSONを読み込んでください。', 'Read from the service-account JSON. Import another JSON key to change it.')}>
                   <input
@@ -536,7 +517,7 @@ export function SettingsPage() {
               </div>
             </div>
             <div className="model-catalogue">
-              <Button busy={modelsBusy} disabled={!draft || busy || credentialBusy || !nativeAvailable() || !data?.settings.credentialConfigured} onClick={() => void discoverModels()}>
+              <Button busy={modelsBusy} disabled={!draft || credentialBusy || !nativeAvailable() || !data?.settings.credentialConfigured} onClick={() => void discoverModels()}>
                 <RefreshCw size={15} />
                 {t('Vertexからモデル候補を取得', 'Fetch Vertex model candidates')}
               </Button>
@@ -545,7 +526,7 @@ export function SettingsPage() {
               <MotionRegion mode="status" open={!!modelNotice}><p role="status"><MotionSwap disabled as="span" stateKey={modelNotice}>{modelNotice}</MotionSwap></p></MotionRegion>
               <MotionRegion mode="status" open={modelsBusy}><ProgressStatus label={t('AIモデルの候補', 'AI model candidates')} phase="discovering_models" /></MotionRegion>
             </div>
-            <ModelSetup models={draft?.aiModels || {}} location={draft?.vertexLocation || 'global'} candidates={modelCatalogue.key === catalogueKey ? modelCatalogue.models : []} disabled={!draft || busy || credentialBusy} onChange={aiModels => change('aiModels', aiModels)} />
+            <ModelSetup models={draft?.aiModels || {}} location={draft?.vertexLocation || 'global'} candidates={modelCatalogue.key === catalogueKey ? modelCatalogue.models : []} disabled={!draft || credentialBusy} onChange={aiModels => change('aiModels', aiModels)} />
             <AnimatedDetails><summary>{t('用途ごとの詳細設定', 'Detailed settings by purpose')}</summary>
             {(
               [
@@ -567,11 +548,18 @@ export function SettingsPage() {
                   }
                 </h3>
                 <ModelEditor
+                  key={editing.ready ? purpose : `loading:${purpose}`}
                   purpose={purpose}
                   value={draft?.aiModels?.[purpose] || emptyModel(purpose)}
                   location={draft?.vertexLocation || 'global'}
                   candidates={modelCatalogue.key === catalogueKey ? modelCatalogue.models : []}
-                  disabled={!draft || busy}
+                  disabled={!draft}
+                  autoApplyRates
+                  inputDraft={modelInputs[purpose]}
+                  onInputDraftChange={input => {
+                    const current = JSON.parse(session.getSnapshot().fields.modelInputs || '{}');
+                    session.change({ modelInputs: JSON.stringify({ ...current, [purpose]: input }) });
+                  }}
                   onPricePendingChange={(pending) => {
                     if (pending) priceRequests.current.add(purpose);
                     else priceRequests.current.delete(purpose);
@@ -591,6 +579,7 @@ export function SettingsPage() {
               </section>
             ))}
             </AnimatedDetails>
+          </section>
           </section>
           <section id="budget" className="settings-card">
             <div className="settings-section-title">
@@ -641,14 +630,11 @@ export function SettingsPage() {
               <div className="currency-input">
                 <CircleDollarSign size={18} />
                 <input
-                  type="number"
-                  min="0"
-                  max="1000"
-                  step="0.01"
-                  value={Number.isNaN(monthlyBudget) ? '' : monthlyBudget}
-                  disabled={!draft || busy}
+                  type="text" inputMode="decimal"
+                  value={editing.fields.monthlyBudgetUsd ?? ''}
+                  disabled={!draft}
                   onChange={(event) =>
-                    change('monthlyBudgetUsd', event.target.value === '' ? Number.NaN : Number(event.target.value))
+                    changeNumber('monthlyBudgetUsd', event.target.value)
                   }
                 />
               </div>
@@ -663,15 +649,15 @@ export function SettingsPage() {
               <div className="field-row">
                 <div className="settings-field-group">
                   <Field label={t('1日の上限（USD）', 'Daily limit (USD)')} error={errors.dailyBudgetUsd} hint={t('UTC基準の暦日ごとに集計します。', 'Usage is counted by UTC calendar day.')}>
-                    <input type="number" min="0" max="1000" step="0.01" value={Number.isNaN(draft?.dailyBudgetUsd) ? '' : draft?.dailyBudgetUsd ?? 0} disabled={!draft || busy} onChange={(event) => change('dailyBudgetUsd', event.target.value === '' ? Number.NaN : Number(event.target.value))} />
+                    <input type="text" inputMode="decimal" value={editing.fields.dailyBudgetUsd ?? ''} disabled={!draft} onChange={(event) => changeNumber('dailyBudgetUsd', event.target.value)} />
                   </Field>
-                  <Button disabled={!draft || busy || !Number.isFinite(monthlyBudget) || draft.dailyBudgetUsd === monthlyBudget} onClick={() => change('dailyBudgetUsd', monthlyBudget)}>{t('月額と同じに戻す', 'Match the monthly budget')}</Button>
+                  <Button disabled={!draft || !Number.isFinite(monthlyBudget) || draft.dailyBudgetUsd === monthlyBudget} onClick={() => change('dailyBudgetUsd', monthlyBudget)}>{t('月額と同じに戻す', 'Match the monthly budget')}</Button>
                 </div>
                 <div className="settings-field-group">
                   <Field label={t('1処理の上限（USD）', 'Per-job limit (USD)')} error={errors.perJobBudgetUsd} hint={t('1処理には、文字起こしなどの複数のリクエストを含む場合があります。', 'One job can include multiple requests, such as transcription chunks.')}>
-                    <input type="number" min="0" max="1000" step="0.01" value={Number.isNaN(perJobBudget) ? '' : perJobBudget} disabled={!draft || busy} onChange={(event) => change('perJobBudgetUsd', event.target.value === '' ? Number.NaN : Number(event.target.value))} />
+                    <input type="text" inputMode="decimal" value={editing.fields.perJobBudgetUsd ?? ''} disabled={!draft} onChange={(event) => changeNumber('perJobBudgetUsd', event.target.value)} />
                   </Field>
-                  <Button disabled={!draft || busy || !Number.isFinite(monthlyBudget) || perJobBudget === monthlyBudget} onClick={() => change('perJobBudgetUsd', monthlyBudget)}>{t('月額と同じに戻す', 'Match the monthly budget')}</Button>
+                  <Button disabled={!draft || !Number.isFinite(monthlyBudget) || perJobBudget === monthlyBudget} onClick={() => change('perJobBudgetUsd', monthlyBudget)}>{t('月額と同じに戻す', 'Match the monthly budget')}</Button>
                 </div>
               </div>
             </AnimatedDetails>
@@ -684,7 +670,6 @@ export function SettingsPage() {
             </p>
           </section>
           <PausedJobs />
-          </section>
           <section id="tools" className="settings-card">
             <div className="settings-section-title">
               <Wrench size={20} />
@@ -728,7 +713,7 @@ export function SettingsPage() {
             >
               <select
                 value={draft?.ytDlpChannel || 'stable'}
-                disabled={!draft || busy}
+                disabled={!draft}
                 onChange={(event) =>
                   change(
                     'ytDlpChannel',
@@ -799,33 +784,16 @@ export function SettingsPage() {
               <ArrowDownToLine size={16} />
               {t('エクスポート・復元を開く', 'Export or restore')}
             </Button>
+            <RecoveredInputs />
           </section>
         </div>
       </div>
-      <div className="settings-save">
-        <div>
-          <strong role="status"><MotionSwap disabled as="span" stateKey={busy ? 'saving' : !draft ? 'unavailable' : dirty ? 'dirty' : 'saved'}>{busy ? t('保存中…', 'Saving…') : !draft ? t('デスクトップアプリで設定できます', 'Settings are available in the desktop app') : dirty ? t('未保存の変更があります', 'You have unsaved changes') : t('設定は保存済みです', 'Settings are saved')}</MotionSwap></strong>
-          <p><MotionSwap disabled as="span" stateKey={pricing ? 'pricing' : draft && !valid ? 'invalid' : 'ready'}>{pricing ? t('モデルの料金を取得中です。取得が終わると保存できます。', 'Retrieving model prices. You can save when the requests finish.') : draft && !valid ? t('入力内容を確認してください。', 'Check the entered values.') : t('学習・AI・更新チャンネルの変更は保存すると反映されます。', 'Save to apply learning, AI, and update-channel changes.')}</MotionSwap></p>
-        </div>
-        <div className="settings-save-actions">
-          <MotionRegion mode="status" as="span" open={!!draft && !valid}><Button disabled={busy} onClick={reviewErrors}>{t('入力エラーを確認', 'Review errors')}</Button></MotionRegion>
-          <Button variant="primary" busy={busy} disabled={!valid || !dirty || credentialBusy || pricing} onClick={() => void save()}>
-            <Save size={16} />
-            {t('変更を保存', 'Save changes')}
-          </Button>
-        </div>
+      <div className="settings-save autosave-footer" aria-busy={busy || pricing}>
+        <span role="status">{busy ? t('保存中…', 'Saving…') : !draft ? t('設定を読み込み中…', 'Loading settings…') : dirty ? t('入力途中の内容を保持しています。有効な変更は自動保存します。', 'Unfinished input is kept. Valid changes save automatically.') : t('変更は自動保存されます', 'Changes save automatically')}</span>
+        {!valid && draft && <Button onClick={reviewErrors}>{t('入力エラーを確認', 'Review errors')}</Button>}
       </div>
-      {exitGuard.open && <Modal {...exitGuard.modalProps} title={t('変更を保存しますか？', 'Save your changes?')} onClose={exitGuard.keepEditing} closeDisabled={exitGuard.busy}>
-        <p>{t('設定に未保存の変更があります。保存してから移動するか、変更を破棄できます。', 'Your settings have unsaved changes. Save them before leaving, or discard them.')}</p>
-        <MotionRegion mode="status" open={!!exitGuard.error}><p className="notice warning" role="alert">{exitGuard.error}</p></MotionRegion>
-        <MotionRegion mode="status" open={pricing}><p role="status">{t('モデルの料金を取得中です。取得が終わると保存できます。', 'Retrieving model prices. You can save when the requests finish.')}</p></MotionRegion>
-        <MotionRegion mode="status" open={!valid}><p className="helper-text">{t('入力内容を修正するには「編集を続ける」を選んでください。', 'Choose Keep editing to correct the values before saving.')}</p></MotionRegion>
-        <footer className="modal-footer settings-exit-actions">
-          <Button disabled={exitGuard.busy} onClick={exitGuard.keepEditing}>{t('編集を続ける', 'Keep editing')}</Button>
-          <Button variant="danger" disabled={exitGuard.busy} onClick={() => void exitGuard.discardAndLeave()}>{t('破棄して移動', 'Discard and leave')}</Button>
-          <Button variant="primary" busy={exitGuard.busy} disabled={!valid || credentialBusy || pricing} onClick={() => void exitGuard.saveAndLeave()}>{t('保存して移動', 'Save and leave')}</Button>
-        </footer>
-      </Modal>}
+      {editing.error && <p className="notice warning" role="alert">{editing.error}<Button onClick={() => void save()}>{t('再試行', 'Retry')}</Button></p>}
+      {editing.recovery && <div className="notice warning"><p>{t('設定の変更前に保存した入力があります。', 'Input from an earlier version of your settings is available.')}</p><textarea aria-label={t('前の入力', 'Previous input')} readOnly value={JSON.stringify(editing.recovery, null, 2)} /><Button onClick={() => session.recover()}>{t('この入力から編集を続ける', 'Continue editing this input')}</Button></div>}
       {transfer && <TransferDialog onClose={() => setTransfer(false)} />}
     </div>
   );

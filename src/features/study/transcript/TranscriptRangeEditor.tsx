@@ -205,8 +205,8 @@ export function TranscriptRangeEditor({
           />
           <span>
             {t(
-              'この区間全体の原音を聴き、発話がないことを確認した',
-              'I listened to this entire range and confirmed there is no speech',
+              'この区間には発話がない',
+              'No speech in this range',
             )}
           </span>
         </label>

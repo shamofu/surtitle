@@ -19,11 +19,15 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
         { id: 'youtube', request: { ...request, title: 'YouTube lesson', pathOrUrl: 'https://youtube.com/watch?v=fixture' }, status: 'running', phase: 'downloading', storedBytes: 2097152, totalBytes: 1048576, totalBytesExact: false, updatedAt: new Date().toISOString() },
       ];
       const operations = [{ id: 'tool-fixture', kind: 'tool', toolId: 'ffmpeg', label: 'FFmpeg', parentId: 'download:youtube', status: 'running', phase: 'verifying', updatedAt: new Date().toISOString() }];
+      let revision = 0;
+      const changed = () => { for (const domain of ['downloads', 'operations']) fixture.publish('data-changed', { version: 1, epoch: 'fixture', revision: ++revision, domain }); };
       fixture.finishProgress = () => {
         downloads[0].status = 'completed'; downloads[0].phase = 'completed'; downloads[0].storedBytes = 4194304; downloads[0].updatedAt = new Date().toISOString();
         downloads[1].status = 'failed'; downloads[1].updatedAt = new Date().toISOString();
         operations[0].status = 'failed'; operations[0].updatedAt = new Date().toISOString();
+        changed();
       };
+      changed();
       fixture.call = async (command: string, args?: Record<string, unknown>) => {
         if (command === 'list_download_jobs') return structuredClone(downloads);
         if (command === 'list_operation_progress') return structuredClone(operations);
@@ -54,18 +58,19 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
   });
 }
 
-test('activity on Study requests native surface hiding and restores bounds through the mocked transport', async ({ page }) => {
+test('activity on Study subtracts its opaque card while preserving video bounds through the mocked transport', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await installLearningFixture(page, 'en', 'dark');
   await page.goto('/study/visual-fixture');
-  const inspect = page.getByRole('button', { name: 'Inspect this subtitle', exact: true });
+  const inspect = page.getByRole('button', { name: 'Explore meaning', exact: true });
   await expect(inspect).toBeEnabled();
   // This verifies the browser-to-native contract using fixture calls, not native video rendering.
   const lastSurfaceAction = () => page.evaluate(() => (window as any).__learningFixture.calls
     .filter((call: any) => call.command === 'player_control' && ['hide', 'bounds'].includes(call.args.request?.action))
-    .at(-1)?.args.request.action);
-  await expect.poll(lastSurfaceAction).toBe('bounds');
+    .at(-1)?.args.request);
+  await expect.poll(async () => (await lastSurfaceAction())?.action).toBe('bounds');
+  const before = (await lastSurfaceAction()).bounds;
   await page.evaluate(() => {
     const fixture = (window as any).__learningFixture;
     const original = fixture.call.bind(fixture);
@@ -76,19 +81,28 @@ test('activity on Study requests native surface hiding and restores bounds throu
       }];
       return original(command, args);
     };
+    fixture.publish('data-changed', { version: 1, epoch: 'fixture', revision: 1, domain: 'downloads' });
   });
   const trigger = page.getByRole('button', { name: 'Open activity', exact: true });
   await expect(trigger.locator('.nav-count')).toHaveText('1');
   await trigger.click();
   const dialog = page.getByRole('dialog', { name: 'Activity', exact: true });
   await expect(dialog).toBeVisible();
-  await expect.poll(lastSurfaceAction).toBe('hide');
+  await expect.poll(async () => (await lastSurfaceAction())?.bounds?.inputBlocked).toBe(true);
+  const opened = await lastSurfaceAction();
+  expect(opened.action).toBe('bounds');
+  expect(opened.bounds.width).toBe(before.width);
+  expect(opened.bounds.height).toBe(before.height);
+  expect(opened.bounds.occlusions.length).toBeGreaterThan(0);
+  expect(opened.bounds.occlusions[0].width).toBeGreaterThan(0);
+  expect(opened.bounds.occlusions[0].height).toBeGreaterThan(0);
   const progress = dialog.getByRole('progressbar', { name: 'Audio download', exact: true });
   await expect(progress).not.toHaveAttribute('value');
   await expect(progress).toHaveCSS('animation-name', 'none');
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
-  await expect.poll(lastSurfaceAction).toBe('bounds');
+  await expect.poll(async () => (await lastSurfaceAction())?.bounds?.inputBlocked).toBe(false);
+  expect((await lastSurfaceAction()).bounds.occlusions).toHaveLength(0);
   await expect(trigger).toBeFocused();
   await expect(inspect).toBeEnabled();
 });

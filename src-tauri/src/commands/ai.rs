@@ -23,7 +23,21 @@ pub fn get_app_snapshot(state: State<'_, AppState>) -> std::result::Result<AppSn
 
 #[tauri::command]
 pub async fn import_credential(state: State<'_, AppState>) -> std::result::Result<bool, String> {
-    crate::application::models::import_credential(state.inner().clone()).await
+    let committed_changes = state.changes.clone();
+    let changed_settings = None;
+    let changed_jobs = None;
+    let result = crate::application::models::import_credential(state.inner().clone()).await;
+    if matches!(&result, Ok(true)) {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Settings,
+            changed_settings,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Jobs,
+            changed_jobs,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -43,7 +57,10 @@ pub async fn approve_quote(
     acknowledge_unqualified: bool,
     retry_policy_version: Option<u32>,
 ) -> std::result::Result<(), String> {
-    crate::application::ai::jobs::approve_quote(
+    let committed_changes = state.changes.clone();
+    let changed_jobs = None;
+    let changed_budget = None;
+    let result = crate::application::ai::jobs::approve_quote(
         state.inner().clone(),
         quote_id,
         digest,
@@ -51,7 +68,18 @@ pub async fn approve_quote(
         acknowledge_unqualified,
         retry_policy_version,
     )
-    .await
+    .await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Jobs,
+            changed_jobs,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Budget,
+            changed_budget,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -68,7 +96,45 @@ pub fn apply_saved_ai_result(
     job_id: String,
     ordinal: u32,
 ) -> std::result::Result<(), String> {
-    crate::application::ai::results::apply_saved_ai_result(state.inner().clone(), job_id, ordinal)
+    let committed_changes = state.changes.clone();
+    let changed_jobs = Some(job_id.clone());
+    let changed_budget = None;
+    let changed_subtitles = None;
+    let changed_media = None;
+    let changed_review = Some(job_id.clone());
+    let changed_drafts = None;
+    let result = crate::application::ai::results::apply_saved_ai_result(
+        state.inner().clone(),
+        job_id,
+        ordinal,
+    );
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Jobs,
+            changed_jobs,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Budget,
+            changed_budget,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Subtitles,
+            changed_subtitles,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Media,
+            changed_media,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Review,
+            changed_review,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Drafts,
+            changed_drafts,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -88,7 +154,10 @@ pub async fn reapprove_quote(
     acknowledge_unqualified: bool,
     retry_policy_version: Option<u32>,
 ) -> std::result::Result<(), String> {
-    crate::application::ai::jobs::reapprove_quote(
+    let committed_changes = state.changes.clone();
+    let changed_jobs = None;
+    let changed_budget = None;
+    let result = crate::application::ai::jobs::reapprove_quote(
         state.inner().clone(),
         quote_id,
         digest,
@@ -96,7 +165,18 @@ pub async fn reapprove_quote(
         acknowledge_unqualified,
         retry_policy_version,
     )
-    .await
+    .await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Jobs,
+            changed_jobs,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Budget,
+            changed_budget,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -112,7 +192,41 @@ pub fn retry_ai_application(
     state: State<'_, AppState>,
     job_id: String,
 ) -> std::result::Result<(), String> {
-    crate::application::ai::jobs::retry_ai_application(state.inner().clone(), job_id)
+    let committed_changes = state.changes.clone();
+    let changed_jobs = Some(job_id.clone());
+    let changed_budget = None;
+    let changed_subtitles = None;
+    let changed_media = None;
+    let changed_review = Some(job_id.clone());
+    let changed_drafts = None;
+    let result = crate::application::ai::jobs::retry_ai_application(state.inner().clone(), job_id);
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Jobs,
+            changed_jobs,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Budget,
+            changed_budget,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Subtitles,
+            changed_subtitles,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Media,
+            changed_media,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Review,
+            changed_review,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Drafts,
+            changed_drafts,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -128,7 +242,21 @@ pub fn list_transcript_issues(
 
 #[tauri::command]
 pub fn pause_ai_job(state: State<'_, AppState>, job_id: String) -> std::result::Result<(), String> {
-    crate::application::ai::jobs::pause_ai_job(state.inner().clone(), job_id)
+    let committed_changes = state.changes.clone();
+    let changed_jobs = Some(job_id.clone());
+    let changed_budget = None;
+    let result = crate::application::ai::jobs::pause_ai_job(state.inner().clone(), job_id);
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Jobs,
+            changed_jobs,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Budget,
+            changed_budget,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -136,7 +264,21 @@ pub fn cancel_ai_job(
     state: State<'_, AppState>,
     job_id: String,
 ) -> std::result::Result<(), String> {
-    crate::application::ai::jobs::cancel_ai_job(state.inner().clone(), job_id)
+    let committed_changes = state.changes.clone();
+    let changed_jobs = Some(job_id.clone());
+    let changed_budget = None;
+    let result = crate::application::ai::jobs::cancel_ai_job(state.inner().clone(), job_id);
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Jobs,
+            changed_jobs,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Budget,
+            changed_budget,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -144,7 +286,22 @@ pub fn resolve_unknown_attempt(
     state: State<'_, AppState>,
     attempt_id: String,
 ) -> std::result::Result<(), String> {
-    crate::application::ai::jobs::resolve_unknown_attempt(state.inner().clone(), attempt_id)
+    let committed_changes = state.changes.clone();
+    let changed_jobs = None;
+    let changed_budget = None;
+    let result =
+        crate::application::ai::jobs::resolve_unknown_attempt(state.inner().clone(), attempt_id);
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Jobs,
+            changed_jobs,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Budget,
+            changed_budget,
+        );
+    }
+    result
 }
 
 #[tauri::command]

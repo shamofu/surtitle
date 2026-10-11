@@ -1,0 +1,140 @@
+{
+  "date": "2026-10-11",
+  "kind": "two matched synthetic speech fixtures",
+  "rows": [
+    {
+      "language": "en",
+      "voice": "Microsoft Zira Desktop",
+      "reference": "Please keep the video large. I want to learn this useful expression, then continue listening to the story.",
+      "referenceUnits": 18,
+      "metric": "word edit rate",
+      "audioDurationMs": 7368.125,
+      "audioSha256": "332f20d4ba31b8528698090ea9a65a94ca0cc1b415c2d7703a47250c30368215",
+      "results": [
+        {
+          "engine": "whisper.cpp 1.9.5 / multilingual base / CPU 4 threads",
+          "wallMs": 1027,
+          "text": "please keep the video large. I want to learn this useful expression,\r\nthen continue listening to the story.\r\n",
+          "cues": [
+            {
+              "startMs": 0,
+              "endMs": 4720,
+              "text": " please keep the video large. I want to learn this useful expression,"
+            },
+            {
+              "startMs": 4720,
+              "endMs": 7600,
+              "text": " then continue listening to the story."
+            }
+          ],
+          "providerCostUsd": 0,
+          "costNote": "Local inference; hardware/electricity excluded",
+          "normalizedErrorCount": 0,
+          "normalizedErrorRate": 0.0,
+          "timeRangeValidWith20msQuantization": false
+        },
+        {
+          "engine": "gemini-3.1-flash-lite",
+          "wallMs": 2284,
+          "firstTextMs": 1917,
+          "text": "Please keep the video large. I want to learn this useful expression, then continue listening to the story.",
+          "cues": [
+            {
+              "endMs": 2420,
+              "startMs": 0,
+              "text": "Please keep the video large."
+            },
+            {
+              "endMs": 7369,
+              "startMs": 3030,
+              "text": "I want to learn this useful expression, then continue listening to the story."
+            }
+          ],
+          "providerCostUsd": null,
+          "usage": {
+            "candidatesTokenCount": 103,
+            "promptTokenCount": 407,
+            "totalTokenCount": 510
+          },
+          "costState": "unpriced",
+          "publishedRateEstimateUsdRange": [
+            0.00025625,
+            0.000358
+          ],
+          "costNote": "Catalog returned HTTP 403. Ledger charge is unknown. Range uses published text/audio rates because reported prompt tokens lack modality breakdown; not an invoice.",
+          "normalizedErrorCount": 0,
+          "normalizedErrorRate": 0.0,
+          "timeRangeValidWith20msQuantization": true
+        }
+      ]
+    },
+    {
+      "language": "ja",
+      "voice": "Microsoft Haruka Desktop",
+      "reference": "映像を大きく表示してください。役に立つ表現を覚えてから、物語の続きを聞きたいです。",
+      "referenceUnits": 38,
+      "metric": "character edit rate",
+      "audioDurationMs": 8161.375,
+      "audioSha256": "ac259c0580066959121288661747f856f27febf611dcdf02ba99bfc11e340627",
+      "results": [
+        {
+          "engine": "whisper.cpp 1.9.5 / multilingual base / CPU 4 threads",
+          "wallMs": 1245,
+          "text": "映像を大きく表示してください。 役に立つ表現を覚えてから、物語の続きを聞きたいです。\r\n",
+          "cues": [
+            {
+              "startMs": 0,
+              "endMs": 9160,
+              "text": "映像を大きく表示してください。 役に立つ表現を覚えてから、物語の続きを聞きたいです。"
+            }
+          ],
+          "providerCostUsd": 0,
+          "costNote": "Local inference; hardware/electricity excluded",
+          "normalizedErrorCount": 0,
+          "normalizedErrorRate": 0.0,
+          "timeRangeValidWith20msQuantization": false
+        },
+        {
+          "engine": "gemini-3.1-flash-lite",
+          "wallMs": 2157,
+          "firstTextMs": 1858,
+          "text": "映像を大きく表示してください。 役に立つ表現を覚えてから、物語の続きを聞きたいです。",
+          "cues": [
+            {
+              "endMs": 1780,
+              "startMs": 40,
+              "text": "映像を大きく表示してください。"
+            },
+            {
+              "endMs": 8162,
+              "startMs": 2860,
+              "text": "役に立つ表現を覚えてから、物語の続きを聞きたいです。"
+            }
+          ],
+          "providerCostUsd": null,
+          "usage": {
+            "candidatesTokenCount": 72,
+            "promptTokenCount": 427,
+            "totalTokenCount": 499
+          },
+          "costState": "unpriced",
+          "publishedRateEstimateUsdRange": [
+            0.00021475,
+            0.0003215
+          ],
+          "costNote": "Catalog returned HTTP 403. Ledger charge is unknown. Range uses published text/audio rates because reported prompt tokens lack modality breakdown; not an invoice.",
+          "normalizedErrorCount": 0,
+          "normalizedErrorRate": 0.0,
+          "timeRangeValidWith20msQuantization": true
+        }
+      ]
+    }
+  ],
+  "providerRequests": 2,
+  "automaticRetries": 0,
+  "whisperArchiveSha256": "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb",
+  "whisperModelSha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+  "whisperModelBytes": 147951465,
+  "pricingSource": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+  "limitations": "Single run per engine/language, clean synthesized desktop voices, no accent/noise/music coverage. Timing bounds are checked, not word-alignment ground truth. End-to-end process timing includes startup and provider auth/network. Local installation remains an evaluation prototype, not an installed application feature."
+}

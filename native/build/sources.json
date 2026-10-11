@@ -11,12 +11,12 @@
       "sha256": "068960e89211f2adc80af03f637fa393fb5e407d3dd23592c8fe8c5490bb7ae4"
     },
     {
-      "ref": "n8.1.2",
+      "ref": "n9.0.2",
       "license": "GPL-3.0-or-later",
-      "commit": "38b88335f99e76ed89ff3c93f877fdefce736c13",
+      "commit": "946fcce07b6dcd0331c8cc609192aeff5e1924f8",
       "id": "ffmpeg",
       "repo": "FFmpeg/FFmpeg",
-      "sha256": "2ae7e42343cfffb811d15cfe98b6d005f082595fcdf034d30a4ff90cfed9f9c6"
+      "sha256": "0aa2b1de2a5698b20a23e93d539a9a8e82ca0117496c5bdf05d198805f42bb3b"
     },
     {
       "ref": "VER-2-14-3",

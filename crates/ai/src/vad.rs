@@ -141,9 +141,34 @@ impl SileroVad {
     /// Caller must terminate its FFmpeg child on cancellation to unblock pipe reads.
     pub fn analyze_pcm16(
         &mut self,
-        mut reader: impl Read,
+        reader: impl Read,
         cancel: &AtomicBool,
         mut progress: impl FnMut(u64),
+    ) -> Result<VadAnalysis> {
+        self.analyze_pcm16_inner(reader, cancel, |samples, _| {
+            progress(samples);
+            Ok(())
+        })
+    }
+
+    /// Observe growing pause evidence for local encoding only. The complete
+    /// EOF analysis remains authoritative before a quote can be prepared.
+    pub(crate) fn analyze_pcm16_staged(
+        &mut self,
+        reader: impl Read,
+        cancel: &AtomicBool,
+        mut progress: impl FnMut(u64, &[Pause]) -> Result<()>,
+    ) -> Result<VadAnalysis> {
+        self.analyze_pcm16_inner(reader, cancel, |samples, detector| {
+            progress(samples, &detector.clone().finish())
+        })
+    }
+
+    fn analyze_pcm16_inner(
+        &mut self,
+        mut reader: impl Read,
+        cancel: &AtomicBool,
+        mut progress: impl FnMut(u64, &PauseDetector) -> Result<()>,
     ) -> Result<VadAnalysis> {
         self.reset();
         let mut detector = PauseDetector::new(16_000)?;
@@ -161,14 +186,14 @@ impl SileroVad {
             conservative.push(conservative_probability(probability), valid)?;
             total_samples += valid as u64;
             if total_samples >= next_progress {
-                progress(total_samples);
+                progress(total_samples, &detector)?;
                 next_progress = total_samples + 16_000;
             }
         }
         if total_samples == 0 {
             return Err(vad_error("audio stream is empty"));
         }
-        progress(total_samples);
+        progress(total_samples, &detector)?;
         Ok(VadAnalysis {
             sample_rate: 16_000,
             total_samples,

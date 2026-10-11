@@ -33,6 +33,7 @@ pub struct DownloadJobSnapshot {
     pub tool_receipt_id: Option<String>,
 }
 pub struct DownloadJob {
+    changes: super::changes::Changes,
     pub cancel: CancellationToken,
     snapshot: Mutex<DownloadJobSnapshot>,
 }
@@ -56,16 +57,24 @@ impl DownloadJob {
         snapshot.total_bytes = total_bytes;
         snapshot.total_bytes_exact = exact && total_bytes.is_some_and(|total| total > 0);
         snapshot.updated_at = surtitle_core::now();
+        drop(snapshot);
+        self.changes
+            .publish(super::changes::ChangeDomain::Downloads, None);
         Ok(())
     }
 }
 pub struct DownloadManager {
+    changes: super::changes::Changes,
     path: PathBuf,
     jobs: Mutex<HashMap<String, Arc<DownloadJob>>>,
     persistence: Mutex<()>,
 }
 impl DownloadManager {
+    #[cfg(test)]
     pub fn open(root: &Path) -> Result<Self> {
+        Self::open_with_changes(root, super::changes::Changes::default())
+    }
+    pub fn open_with_changes(root: &Path, changes: super::changes::Changes) -> Result<Self> {
         let path = root.join("download-jobs.json");
         let mut saved: Vec<DownloadJobSnapshot> = if path.exists() {
             ensure!(
@@ -113,6 +122,7 @@ impl DownloadManager {
                 (
                     s.id.clone(),
                     Arc::new(DownloadJob {
+                        changes: changes.clone(),
                         snapshot: Mutex::new(s),
                         cancel: CancellationToken::new(),
                     }),
@@ -120,6 +130,7 @@ impl DownloadManager {
             })
             .collect();
         let manager = Self {
+            changes,
             path,
             jobs: Mutex::new(jobs),
             persistence: Mutex::new(()),
@@ -138,6 +149,7 @@ impl DownloadManager {
     pub fn start(&self, request: ImportRequest) -> Result<(String, Arc<DownloadJob>)> {
         let id = surtitle_core::id();
         let job = Arc::new(DownloadJob {
+            changes: self.changes.clone(),
             cancel: CancellationToken::new(),
             snapshot: Mutex::new(DownloadJobSnapshot {
                 id: id.clone(),
@@ -179,6 +191,8 @@ impl DownloadManager {
             jobs.insert(id.clone(), job.clone());
         }
         self.persist()?;
+        self.changes
+            .publish(super::changes::ChangeDomain::Downloads, None);
         Ok((id, job))
     }
     pub fn cancel(&self, id: &str) -> Result<()> {
@@ -214,7 +228,10 @@ impl DownloadManager {
             snapshot.tool_receipt_id = Some(receipt_id.to_owned());
         }
         // Persist before extraction/download, so a crash retains the association.
-        self.persist()
+        self.persist()?;
+        self.changes
+            .publish(super::changes::ChangeDomain::Downloads, None);
+        Ok(())
     }
     pub fn finish(&self, id: &str, result: Result<String>) -> Result<()> {
         let job = lock(&self.jobs)?
@@ -241,7 +258,15 @@ impl DownloadManager {
             }
             snapshot.updated_at = surtitle_core::now();
         }
-        self.persist()
+        self.persist()?;
+        self.changes
+            .publish(super::changes::ChangeDomain::Downloads, None);
+        let media_id = lock(&job.snapshot)?.media_id.clone();
+        if let Some(media_id) = media_id {
+            self.changes
+                .publish(super::changes::ChangeDomain::Media, Some(media_id));
+        }
+        Ok(())
     }
     fn persist(&self) -> Result<()> {
         let _guard = lock(&self.persistence)?;

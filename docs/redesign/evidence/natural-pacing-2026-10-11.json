@@ -1,0 +1,571 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-11",
+  "kind": "matched public natural English speech and bounded serial dispatch comparison",
+  "fixture": {
+    "sourceCommit": "5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5",
+    "insertedSilenceSamples": 8000,
+    "samples": 103280,
+    "durationMs": 6455.0,
+    "audioSha256": "fa8b76e7a25c71efa915e467e6aaf5d193146eeda5eac9d484406efdc7516f53",
+    "reference": "STUFF IT INTO YOU HIS BELLY COUNSELLED HIM HELLO BERTIE ANY GOOD IN YOUR MIND",
+    "automaticMfaWords": [
+      {
+        "startMs": 330.0,
+        "endMs": 780.0,
+        "text": "stuff"
+      },
+      {
+        "startMs": 780.0,
+        "endMs": 870.0,
+        "text": "it"
+      },
+      {
+        "startMs": 870.0,
+        "endMs": 1160.0,
+        "text": "into"
+      },
+      {
+        "startMs": 1160.0,
+        "endMs": 1400.0,
+        "text": "you"
+      },
+      {
+        "startMs": 1550.0,
+        "endMs": 1750.0,
+        "text": "his"
+      },
+      {
+        "startMs": 1750.0,
+        "endMs": 2110.0,
+        "text": "belly"
+      },
+      {
+        "startMs": 2110.0,
+        "endMs": 2610.0,
+        "text": "counselled"
+      },
+      {
+        "startMs": 2610.0,
+        "endMs": 2800.0,
+        "text": "him"
+      },
+      {
+        "startMs": 4205.0,
+        "endMs": 4465.0,
+        "text": "hello"
+      },
+      {
+        "startMs": 4465.0,
+        "endMs": 5025.0,
+        "text": "bertie"
+      },
+      {
+        "startMs": 5055.0,
+        "endMs": 5225.0,
+        "text": "any"
+      },
+      {
+        "startMs": 5225.0,
+        "endMs": 5555.0,
+        "text": "good"
+      },
+      {
+        "startMs": 5555.0,
+        "endMs": 5635.0,
+        "text": "in"
+      },
+      {
+        "startMs": 5635.0,
+        "endMs": 5765.0,
+        "text": "your"
+      },
+      {
+        "startMs": 5765.0,
+        "endMs": 6235.0,
+        "text": "mind"
+      }
+    ],
+    "sources": [
+      {
+        "stem": "1089-134686-0001",
+        "originals": [
+          {
+            "url": "https://raw.githubusercontent.com/MontrealCorpusTools/aligned-librispeech/5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5/librispeech_test_clean/1089/1089-134686-0001.wav",
+            "file": "1089-134686-0001.wav",
+            "sha256": "6b0b24796a1017a65007d392b9f8d6e64e030cdafbf82d8ffa4235fe4b371443",
+            "bytes": 104844
+          },
+          {
+            "url": "https://raw.githubusercontent.com/MontrealCorpusTools/aligned-librispeech/5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5/librispeech_test_clean/1089/1089-134686-0001.lab",
+            "file": "1089-134686-0001.lab",
+            "sha256": "0a82f678afe953b8ac316479bbe3548169e249817dfc236153c5aad966da92b3",
+            "bytes": 42
+          },
+          {
+            "url": "https://raw.githubusercontent.com/MontrealCorpusTools/aligned-librispeech/5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5/librispeech_aligned/1089/1089-134686-0001.TextGrid",
+            "file": "1089-134686-0001.TextGrid",
+            "sha256": "7af2a45d42e7ca8fcad6310fd2e2089adf883cf346873c138c1a0815ea1aa0e6",
+            "bytes": 4649
+          }
+        ],
+        "samples": 52400,
+        "pcmSha256": "b52828469c97b5867391d346c440d7afa635b42e6040eaabdbe6ddc8d7ad525b"
+      },
+      {
+        "stem": "1089-134686-0003",
+        "originals": [
+          {
+            "url": "https://raw.githubusercontent.com/MontrealCorpusTools/aligned-librispeech/5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5/librispeech_test_clean/1089/1089-134686-0003.wav",
+            "file": "1089-134686-0003.wav",
+            "sha256": "2db232f2d626af81adb8b224bdcc72d71ed94e9f7180194a6279e532a08c9115",
+            "bytes": 85804
+          },
+          {
+            "url": "https://raw.githubusercontent.com/MontrealCorpusTools/aligned-librispeech/5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5/librispeech_test_clean/1089/1089-134686-0003.lab",
+            "file": "1089-134686-0003.lab",
+            "sha256": "47ad56a9f71a9af9df360a3825070def4355bc4bf65defe6a180237f1d90677e",
+            "bytes": 34
+          },
+          {
+            "url": "https://raw.githubusercontent.com/MontrealCorpusTools/aligned-librispeech/5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5/librispeech_aligned/1089/1089-134686-0003.TextGrid",
+            "file": "1089-134686-0003.TextGrid",
+            "sha256": "7b10f440fa9b2d662e0b3bf3bd330a4181eea3c57ef3a93d03041cb18cced9f3",
+            "bytes": 3953
+          }
+        ],
+        "samples": 42880,
+        "pcmSha256": "8a5f532db44f46bbcc1a139475c0f1c9850f2379bd82f59e5e91e71421ae9075"
+      }
+    ],
+    "referenceWords": 15
+  },
+  "settings": {
+    "model": "gemini-3.1-flash-lite",
+    "location": "global",
+    "maxOutputTokens": 2048,
+    "maxAudioSeconds": 15,
+    "thinking": "omit",
+    "responseMode": "stream_generate_content"
+  },
+  "maximumPaidRequests": 6,
+  "actualPaidDispatches": 6,
+  "automaticRetries": 0,
+  "concurrency": 1,
+  "conditionOrderMs": [
+    0,
+    10000,
+    0,
+    10000,
+    0,
+    10000
+  ],
+  "conditions": [
+    {
+      "startFloorMs": 0,
+      "requests": 3,
+      "measuredInterStartIntervalsMs": [
+        1854,
+        2317
+      ],
+      "meanInterStartMs": 2085.5,
+      "meanCommandWallMs": 1882.1782666673244,
+      "meanDispatchToSettlementMs": 1647.3333333333333,
+      "meanFirstTextMs": 1608,
+      "observed429": 0,
+      "unknownOutcomes": 0
+    },
+    {
+      "startFloorMs": 10000,
+      "requests": 3,
+      "measuredInterStartIntervalsMs": [
+        10195,
+        10195,
+        10202
+      ],
+      "meanInterStartMs": 10197.333333333334,
+      "meanCommandWallMs": 2085.6960666654536,
+      "meanDispatchToSettlementMs": 1879,
+      "meanFirstTextMs": 1799.6666666666667,
+      "observed429": 0,
+      "unknownOutcomes": 0
+    }
+  ],
+  "local": {
+    "engine": "whisper.cpp 1.9.5 / multilingual base / CPU4",
+    "wallMs": 1222.0151000001351,
+    "audioSha256": "fa8b76e7a25c71efa915e467e6aaf5d193146eeda5eac9d484406efdc7516f53",
+    "binarySha256": "331dba46d6427105d2b802cdbc7eae916ea1c5abf9b0d3b5cfe460d8db8e4366",
+    "modelSha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+    "text": "\"Stuff it into you,\" his belly counseled him.\n\"Hello, Bertie, any good in your mind?\"",
+    "cues": [
+      {
+        "startMs": 0,
+        "endMs": 3680,
+        "text": " \"Stuff it into you,\" his belly counseled him."
+      },
+      {
+        "startMs": 3680,
+        "endMs": 6220,
+        "text": " \"Hello, Bertie, any good in your mind?\""
+      }
+    ],
+    "normalizedWordErrors": 1,
+    "normalizedWordErrorRate": 0.06666666666666667,
+    "timeRangesValidWithin20msQuantization": true
+  },
+  "provider": [
+    {
+      "index": 1,
+      "conditionFloorMs": 0,
+      "artificialWaitMs": 0,
+      "wallMs": 1974.3173999995633,
+      "dispatchIntervalMs": null,
+      "transportObservation": {
+        "firstTextMs": 1666,
+        "lastTextMs": 1795,
+        "settledMs": 1921,
+        "textBytes": 181,
+        "textChunks": 4
+      },
+      "jobId": "67fd395d-d967-4a73-a44e-daeec44f25a4",
+      "digest": "616d9d65dd4df4119521b1ae0e722856b1918aba5d07b0e9fe059a485aff7230",
+      "requestBodySha256": "072ecf8de01775b4e5af86be641168616c1fdc3cabb088a12d2229b35c9e678a",
+      "attemptId": "0ffcc805-0f08-4140-ae90-053f69a3d84e",
+      "dispatchedAtMs": 1791727922466,
+      "settledAtMs": 1791727924152,
+      "dispatchToSettlementMs": 1686,
+      "usage": {
+        "candidatesTokenCount": 75,
+        "promptTokenCount": 384,
+        "totalTokenCount": 459
+      },
+      "chargedMicrousd": null,
+      "costState": "unpriced",
+      "text": "stuff it into you, his belly counseled him. Hello, Bertie, any good in your mind?",
+      "cues": [
+        {
+          "endMs": 2340,
+          "startMs": 420,
+          "text": "stuff it into you, his belly counseled him."
+        },
+        {
+          "endMs": 6229,
+          "startMs": 4259,
+          "text": "Hello, Bertie, any good in your mind?"
+        }
+      ],
+      "normalizedWordErrors": 1,
+      "normalizedWordErrorRate": 0.06666666666666667,
+      "timeRangesValidWithin20msQuantization": true,
+      "publishedRateEstimateUsdRange": [
+        0.0002085,
+        0.0003045
+      ]
+    },
+    {
+      "index": 2,
+      "conditionFloorMs": 10000,
+      "artificialWaitMs": 8235,
+      "wallMs": 1785.0937000002887,
+      "dispatchIntervalMs": 10195,
+      "transportObservation": {
+        "firstTextMs": 1504,
+        "lastTextMs": 1677,
+        "settledMs": 1734,
+        "textBytes": 179,
+        "textChunks": 4
+      },
+      "jobId": "3d97e061-36ce-422e-9158-328181227ca2",
+      "digest": "3bc1c5351a4d224c605315d3b7e1fcf5f6ff7c6f77a443423e918f775b2e7c97",
+      "requestBodySha256": "072ecf8de01775b4e5af86be641168616c1fdc3cabb088a12d2229b35c9e678a",
+      "attemptId": "a50f8239-96f6-4e65-97ec-a4552ac892c3",
+      "dispatchedAtMs": 1791727932661,
+      "settledAtMs": 1791727934242,
+      "dispatchToSettlementMs": 1581,
+      "usage": {
+        "candidatesTokenCount": 73,
+        "promptTokenCount": 384,
+        "totalTokenCount": 457
+      },
+      "chargedMicrousd": null,
+      "costState": "unpriced",
+      "text": "stuff it into you, his belly counseled him. Hello, Bertie, any good in your mind?",
+      "cues": [
+        {
+          "endMs": 3530,
+          "startMs": 0,
+          "text": "stuff it into you, his belly counseled him."
+        },
+        {
+          "endMs": 6257,
+          "startMs": 4257,
+          "text": "Hello, Bertie, any good in your mind?"
+        }
+      ],
+      "normalizedWordErrors": 1,
+      "normalizedWordErrorRate": 0.06666666666666667,
+      "timeRangesValidWithin20msQuantization": true,
+      "publishedRateEstimateUsdRange": [
+        0.0002055,
+        0.0003015
+      ]
+    },
+    {
+      "index": 3,
+      "conditionFloorMs": 0,
+      "artificialWaitMs": 0,
+      "wallMs": 1955.7060000006459,
+      "dispatchIntervalMs": 1854,
+      "transportObservation": {
+        "firstTextMs": 1683,
+        "lastTextMs": 1866,
+        "settledMs": 1907,
+        "textBytes": 179,
+        "textChunks": 4
+      },
+      "jobId": "547642ff-2e6b-4781-bf94-82aaf085eeae",
+      "digest": "9113a32c1e09a72bfcca03bf11598d2ec668160b7d1a7323b74f26a9b4b76fb2",
+      "requestBodySha256": "072ecf8de01775b4e5af86be641168616c1fdc3cabb088a12d2229b35c9e678a",
+      "attemptId": "6cc7b037-2a4c-40c4-a509-c17bf527c78c",
+      "dispatchedAtMs": 1791727934515,
+      "settledAtMs": 1791727936263,
+      "dispatchToSettlementMs": 1748,
+      "usage": {
+        "candidatesTokenCount": 73,
+        "promptTokenCount": 384,
+        "totalTokenCount": 457
+      },
+      "chargedMicrousd": null,
+      "costState": "unpriced",
+      "text": "stuff it into you, his belly counseled him. Hello, Bertie. Any good in your mind?",
+      "cues": [
+        {
+          "endMs": 3540,
+          "startMs": 0,
+          "text": "stuff it into you, his belly counseled him."
+        },
+        {
+          "endMs": 6455,
+          "startMs": 4256,
+          "text": "Hello, Bertie. Any good in your mind?"
+        }
+      ],
+      "normalizedWordErrors": 1,
+      "normalizedWordErrorRate": 0.06666666666666667,
+      "timeRangesValidWithin20msQuantization": true,
+      "publishedRateEstimateUsdRange": [
+        0.0002055,
+        0.0003015
+      ]
+    },
+    {
+      "index": 4,
+      "conditionFloorMs": 10000,
+      "artificialWaitMs": 8176,
+      "wallMs": 2244.4812999965507,
+      "dispatchIntervalMs": 10195,
+      "transportObservation": {
+        "firstTextMs": 1946,
+        "lastTextMs": 2097,
+        "settledMs": 2188,
+        "textBytes": 180,
+        "textChunks": 4
+      },
+      "jobId": "7db73b8a-cdd0-485e-ae8d-3bbd3b5d4d2e",
+      "digest": "40f8183ee344f31c5f3976fe9f2981e8b8e9cd67caad144d0a62fa040676d67b",
+      "requestBodySha256": "072ecf8de01775b4e5af86be641168616c1fdc3cabb088a12d2229b35c9e678a",
+      "attemptId": "322b07ab-ea1c-4315-bc5e-a4a9c8072e02",
+      "dispatchedAtMs": 1791727944710,
+      "settledAtMs": 1791727946750,
+      "dispatchToSettlementMs": 2040,
+      "usage": {
+        "candidatesTokenCount": 72,
+        "promptTokenCount": 384,
+        "totalTokenCount": 456
+      },
+      "chargedMicrousd": null,
+      "costState": "unpriced",
+      "text": "stuff it into you, his belly counselled him. Hello, Bertie, any good in your mind?",
+      "cues": [
+        {
+          "endMs": 3530,
+          "startMs": 0,
+          "text": "stuff it into you, his belly counselled him."
+        },
+        {
+          "endMs": 6455,
+          "startMs": 4272,
+          "text": "Hello, Bertie, any good in your mind?"
+        }
+      ],
+      "normalizedWordErrors": 0,
+      "normalizedWordErrorRate": 0.0,
+      "timeRangesValidWithin20msQuantization": true,
+      "publishedRateEstimateUsdRange": [
+        0.000204,
+        0.0003
+      ]
+    },
+    {
+      "index": 5,
+      "conditionFloorMs": 0,
+      "artificialWaitMs": 0,
+      "wallMs": 1716.5114000017638,
+      "dispatchIntervalMs": 2317,
+      "transportObservation": {
+        "firstTextMs": 1475,
+        "lastTextMs": 1619,
+        "settledMs": 1662,
+        "textBytes": 178,
+        "textChunks": 4
+      },
+      "jobId": "c727f2b0-07c8-4253-8faf-ac5e1f304787",
+      "digest": "83767130e7faa29fcc4606782d36781fa52de99ed3f711a38a755f57b9df16d2",
+      "requestBodySha256": "072ecf8de01775b4e5af86be641168616c1fdc3cabb088a12d2229b35c9e678a",
+      "attemptId": "6c6caf1b-963f-4f76-9e25-807357cf40fd",
+      "dispatchedAtMs": 1791727947027,
+      "settledAtMs": 1791727948535,
+      "dispatchToSettlementMs": 1508,
+      "usage": {
+        "candidatesTokenCount": 72,
+        "promptTokenCount": 384,
+        "totalTokenCount": 456
+      },
+      "chargedMicrousd": null,
+      "costState": "unpriced",
+      "text": "stuff it into you, his belly counseled him. Hello Bertie, any good in your mind?",
+      "cues": [
+        {
+          "endMs": 3530,
+          "startMs": 0,
+          "text": "stuff it into you, his belly counseled him."
+        },
+        {
+          "endMs": 6455,
+          "startMs": 4440,
+          "text": "Hello Bertie, any good in your mind?"
+        }
+      ],
+      "normalizedWordErrors": 1,
+      "normalizedWordErrorRate": 0.06666666666666667,
+      "timeRangesValidWithin20msQuantization": true,
+      "publishedRateEstimateUsdRange": [
+        0.000204,
+        0.0003
+      ]
+    },
+    {
+      "index": 6,
+      "conditionFloorMs": 10000,
+      "artificialWaitMs": 8413,
+      "wallMs": 2227.513199999521,
+      "dispatchIntervalMs": 10202,
+      "transportObservation": {
+        "firstTextMs": 1949,
+        "lastTextMs": 2129,
+        "settledMs": 2177,
+        "textBytes": 179,
+        "textChunks": 4
+      },
+      "jobId": "281a6564-8255-486a-8d19-329382de4448",
+      "digest": "46c0084567cee34db0262f7f5d95e852d4df4c6a37eaf001005167b80901a771",
+      "requestBodySha256": "072ecf8de01775b4e5af86be641168616c1fdc3cabb088a12d2229b35c9e678a",
+      "attemptId": "135f4320-9549-4c39-bd0d-2cee02029627",
+      "dispatchedAtMs": 1791727957229,
+      "settledAtMs": 1791727959245,
+      "dispatchToSettlementMs": 2016,
+      "usage": {
+        "candidatesTokenCount": 73,
+        "promptTokenCount": 384,
+        "totalTokenCount": 457
+      },
+      "chargedMicrousd": null,
+      "costState": "unpriced",
+      "text": "stuff it into you, his belly counseled him. Hello, Bertie, any good in your mind?",
+      "cues": [
+        {
+          "endMs": 3390,
+          "startMs": 0,
+          "text": "stuff it into you, his belly counseled him."
+        },
+        {
+          "endMs": 6226,
+          "startMs": 4256,
+          "text": "Hello, Bertie, any good in your mind?"
+        }
+      ],
+      "normalizedWordErrors": 1,
+      "normalizedWordErrorRate": 0.06666666666666667,
+      "timeRangesValidWithin20msQuantization": true,
+      "publishedRateEstimateUsdRange": [
+        0.0002055,
+        0.0003015
+      ]
+    }
+  ],
+  "cleanup": {
+    "copiedEncryptedCredentialRemoved": true,
+    "originalEncryptedCredentialUnchanged": true,
+    "completedNormalRequests": 6
+  },
+  "httpObservation": {
+    "successfulSettledResponses": 6,
+    "observed429": 0,
+    "retryAfterHeadersCaptured": false,
+    "note": "All six native calls settled successfully; non-2xx cannot settle in this path. No 429 occurred. The current validation CLI does not retain raw Retry-After headers, so header absence is not asserted."
+  },
+  "pricing": {
+    "catalogStatus": 403,
+    "invoicedCostKnown": false,
+    "totalPublishedRateEstimateUsdRange": [
+      0.001233,
+      0.0018089999999999998
+    ],
+    "source": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+    "note": "Published-rate estimate only; prompt usage omits modality breakdown. Ledger charge remains null/unpriced."
+  },
+  "productionPacingChangedDuringMeasurement": false,
+  "adoptedPolicy": {
+    "healthyLaneStartFloorMs": 0,
+    "first429CooldownMs": 20000,
+    "maximumAdaptiveIntervalMs": 60000,
+    "longerRetryAfterPreserved": true,
+    "concurrentDispatches": 1,
+    "approvalAndUnknownOutcomeGuardsPreserved": true
+  },
+  "limitations": [
+    "Six requests total, three per condition, one account/region/model and one short repeated English fixture; not a quota or sustained-throughput guarantee.",
+    "Alternating intervals begin with no-floor; its first request has no preceding interval, leaving two measured no-floor gaps and three10s-floor gaps.",
+    "Repetition, server caching, shared-host load, OAuth/network startup and time-varying provider load can affect latency.",
+    "Development-validation preserves native one-request approval/accounting/manifest guards but intentionally excludes desktop client pacing. The harness adds a10s gate using actual previous dispatch timestamps; it does not execute the desktop queue.",
+    "Whisper and Vertex receive identical recorded speech, but two clean audiobook utterances from one English speaker do not cover conversation, other languages, accents, noise or music.",
+    "Strict word edits include British/American orthographic variants. MFA automatic word intervals are reference anchors, not human ground truth; cue-bound checks do not prove alignment accuracy."
+  ],
+  "rawEvidence": [
+    {
+      "file": "work/ai-evaluation/natural-pacing-20261011/fixture.json",
+      "sha256": "1bc88f99a9806cd0d1cd61d92c61fca9965880c5672a1aa66f88d535fd4b3c3b"
+    },
+    {
+      "file": "work/ai-evaluation/natural-pacing-20261011/local-results.json",
+      "sha256": "b4623dfa01939d80fc8bd52c42faf71a6eac859469abd25a53df28b06b89f2db"
+    },
+    {
+      "file": "work/ai-evaluation/natural-pacing-20261011/provider-results.json",
+      "sha256": "37dffa2b8723847696364a5b23e9c73b36ac4e544317b3230a0143f7fec3d8e8"
+    },
+    {
+      "file": "work/ai-evaluation/natural-pacing-20261011/final-report.stdout.log",
+      "sha256": "645f6fc9cdae6795420e01d89ea418d5e115e620a9054b03cdfe16095093330d"
+    },
+    {
+      "file": "work/ai-evaluation/natural-pacing-20261011/cleanup.json",
+      "sha256": "d109b70bc4426db98f59a3c74ae24a33aad1506ed720e5205ebdb4ad94ad66bf"
+    },
+    {
+      "file": "work/ai-evaluation/natural-pacing-20261011/provider-started.json",
+      "sha256": "6ec701fb00de8bbd8f944924838333b8040a090728ee141f891e8674808f2b02"
+    }
+  ]
+}

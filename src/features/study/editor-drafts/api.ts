@@ -28,18 +28,18 @@ export interface EditorDraftInput {
 }
 const versionReference = ({ id, version }: EditorDraftReference): EditorDraftReference => ({ id, version });
 export const editorDraftApi = {
-  list: (mediaId: string) => call<EditorDraft[]>('list_editor_drafts', { mediaId }),
-  save: (request: EditorDraftInput) => call<EditorDraft>('save_editor_draft', { request }),
-  discard: (reference: EditorDraftReference) => call<void>('delete_editor_draft', { reference: versionReference(reference) }),
+  list: (mediaId: string) => call('list_editor_drafts', { mediaId }),
+  save: (request: EditorDraftInput) => call('save_editor_draft', { request }),
+  discard: (reference: EditorDraftReference) => call('delete_editor_draft', { reference: versionReference(reference) }),
   rebind: (reference: EditorDraftReference, sourceCues: SubtitleSegment[]) =>
-    call<EditorDraft>('rebind_editor_draft', { reference: versionReference(reference), sourceCues }),
+    call('rebind_editor_draft', { reference: versionReference(reference), sourceCues }),
   commitSubtitle: (reference: EditorDraftReference, segment: SubtitleSegment) =>
-    call<string | null>('commit_subtitle_editor_draft', { reference: versionReference(reference), segment }),
+    call('commit_subtitle_editor_draft', { reference: versionReference(reference), segment }),
   savePhrase: (reference: EditorDraftReference, request: {
     mediaId: string; segmentId: string; sourceCueIds?: string[];
     sourceRange?: { startMs: number; endMs: number };
     term: string; meaning: string; example: string; explanation?: string; translation?: string;
-  }, operationId?: string) => call<void>('save_phrase_editor_draft', { reference: versionReference(reference), request, operationId }),
+  }, operationId?: string) => call('save_phrase_editor_draft', { reference: versionReference(reference), request, operationId }),
 };
 
 export function editorSourceKey(cues: Pick<SubtitleSegment, 'id'>[]) {

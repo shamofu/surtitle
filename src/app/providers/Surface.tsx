@@ -9,15 +9,17 @@ import {
 import type { ReactNode } from 'react';
 interface Surface {
   surfaceHidden: boolean;
-  activeModal: HTMLDialogElement | null;
+  /** Opaque web surfaces whose bounds must be excluded from the native video. */
+  occludingElements: readonly HTMLElement[];
+  activeModal: HTMLElement | null;
   notificationHost: HTMLElement | null;
-  registerModal: (dialog: HTMLDialogElement, notificationHost: HTMLElement) => () => void;
+  registerModal: (dialog: HTMLElement, notificationHost: HTMLElement) => () => void;
 }
-interface ModalSurface { dialog: HTMLDialogElement; notificationHost: HTMLElement }
+interface ModalSurface { dialog: HTMLElement; notificationHost: HTMLElement }
 const Context = createContext<Surface | null>(null);
 export function SurfaceProvider({ children }: { children: ReactNode }) {
   const [modals, setModals] = useState<ModalSurface[]>([]);
-  const registerModal = useCallback((dialog: HTMLDialogElement, notificationHost: HTMLElement) => {
+  const registerModal = useCallback((dialog: HTMLElement, notificationHost: HTMLElement) => {
     const entry = { dialog, notificationHost };
     setModals(current => [...current, entry]);
     return () => {
@@ -27,6 +29,7 @@ export function SurfaceProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       surfaceHidden: modals.length > 0,
+      occludingElements: modals.map(modal => modal.dialog),
       activeModal: modals.at(-1)?.dialog ?? null,
       notificationHost: modals.at(-1)?.notificationHost ?? null,
       registerModal,

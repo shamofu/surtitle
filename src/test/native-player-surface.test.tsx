@@ -9,6 +9,8 @@ import type { PlayerState } from '../shared/contracts/player';
 const fixture = vi.hoisted(() => ({
   hidden: false, notify: vi.fn(), ready: vi.fn(), position: vi.fn(),
   viewportWidth: 320,
+  viewportTop: 0,
+  occludingElements: [] as HTMLElement[],
   listeners: new Set<(event: { payload: PlayerState }) => void>(),
   surfaceListeners: new Set<(event: { payload: void }) => void>(),
 }));
@@ -31,7 +33,7 @@ vi.mock('../app/runtime', () => ({
   useAppearance: () => ({ t: (_ja: string, en: string) => en }),
   useNotifications: () => ({ notify: fixture.notify }),
   useDataActions: () => ({ refresh: async () => {} }),
-  useSurface: () => ({ surfaceHidden: fixture.hidden, registerModal: () => () => {} }),
+  useSurface: () => ({ surfaceHidden: fixture.hidden, activeModal: fixture.occludingElements.at(-1) ?? null, occludingElements: fixture.occludingElements, registerModal: () => () => {} }),
 }));
 const media: Media = { id: 'video', title: 'Video', path: 'C:/video.mkv', kind: 'video', durationMs: 10000, learningLanguage: 'en', explanationLanguage: 'ja', createdAt: '', lastPositionMs: 0, segmentCount: 0, cardCount: 0, status: 'ready' };
 const playerState: PlayerState = { revision: 10, ready: true, positionMs: 0, durationMs: 10000, paused: true, rate: 1, volume: 80, tracks: [{ id: 1, kind: 'sub', title: 'English', selected: true, ffIndex: 4 }] };
@@ -53,7 +55,7 @@ function clickSurface(source: 'native' | 'DOM') {
   if (source === 'native') {
     act(() => fixture.surfaceListeners.forEach(listener => listener({ payload: undefined })));
   } else {
-    fireEvent.click(screen.getByRole('button', { name: /^(Play|Pause) video$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^(Play|Pause) video$/, hidden: true }));
   }
 }
 function toggleRequests() {
@@ -85,18 +87,20 @@ function seekRequests() {
 beforeEach(() => {
   fixture.hidden = false;
   fixture.viewportWidth = 320;
+  fixture.viewportTop = 0;
+  fixture.occludingElements = [];
   fixture.listeners.clear();
   fixture.surfaceListeners.clear();
   vi.mocked(playerApi.loadMedia).mockResolvedValue();
   vi.mocked(playerApi.player).mockResolvedValue();
   vi.mocked(playerApi.playerState).mockResolvedValue(playerState);
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ x: 0, y: 0, top: 0, left: 0, width: fixture.viewportWidth, height: 200, bottom: 200, right: fixture.viewportWidth, toJSON: () => ({}) }));
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ x: 0, y: fixture.viewportTop, top: fixture.viewportTop, left: 0, width: fixture.viewportWidth, height: 200, bottom: fixture.viewportTop + 200, right: fixture.viewportWidth, toJSON: () => ({}) }));
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('PointerEvent', MouseEvent);
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   HTMLDialogElement.prototype.close = function () { this.open = false; };
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); fixture.occludingElements.forEach(element => element.remove()); vi.restoreAllMocks(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
 
 it.each(['native', 'DOM'] as const)('toggles playback exactly once for a %s video click and focuses the video control', async source => {
   render(player());
@@ -146,7 +150,7 @@ it.each(['disabled', 'modal', 'settings'] as const)('blocks both video click pat
   await screen.findByRole('button', { name: 'Play video' });
   fixture.hidden = guard === 'modal';
   view.rerender(player({ interactionsDisabled: guard === 'disabled', settingsOpen: guard === 'settings' }));
-  expect(screen.getByRole('button', { name: 'Play video' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Play video', hidden: true })).toBeDisabled();
   clickSurface('native');
   clickSurface('DOM');
   expect(toggleRequests()).toEqual([]);
@@ -193,6 +197,28 @@ it('surfaces placement errors and retries identical bounds without reloading med
   expect(playerApi.loadMedia).toHaveBeenCalledTimes(1);
 });
 
+it('reveals an overlapping card after failed clipping has hidden the native surface', async () => {
+  const view = render(player());
+  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+  const clipping = deferred<void>();
+  const recovery = deferred<void>();
+  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds'
+    ? clipping.promise : request.action === 'hide' ? recovery.promise : Promise.resolve());
+  const card = document.createElement('section');
+  document.body.append(card);
+  fixture.occludingElements = [card];
+  fixture.hidden = true;
+  view.rerender(player());
+  expect(card.dataset.nativeOcclusion).toBe('pending');
+
+  await act(async () => clipping.reject(new Error('Clipping rejected')));
+  await waitFor(() => expect(placementRequests().at(-1)?.action).toBe('hide'));
+  expect(card.dataset.nativeOcclusion).toBe('pending');
+  await act(async () => recovery.resolve());
+  expect(card).not.toHaveAttribute('data-native-occlusion');
+  expect(screen.getByText(/Clipping rejected/)).toBeInTheDocument();
+});
+
 it('restores the confirmed volume and reports a failed adjustment', async () => {
   const request = deferred<void>();
   vi.mocked(playerApi.player).mockImplementation(async control => {
@@ -219,17 +245,137 @@ it('ignores volume wheel gestures while playback interactions are disabled', asy
   expect(vi.mocked(playerApi.player).mock.calls.some(([control]) => control.action === 'volume')).toBe(false);
 });
 
-it('hides video for a modal and restores the same bounds afterward', async () => {
+it('keeps video bounds visible while modal input is blocked', async () => {
   const view = render(player());
   await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith(expect.objectContaining({ action: 'bounds' })));
   vi.mocked(playerApi.player).mockClear();
   fixture.hidden = true;
   view.rerender(player());
-  await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'hide' }));
+  await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith(expect.objectContaining({ action: 'bounds', bounds: expect.objectContaining({ width: 320, height: 200, inputBlocked: true }) })));
+  expect(placementRequests().some(request => request.action === 'hide')).toBe(false);
   vi.mocked(playerApi.player).mockClear();
   fixture.hidden = false;
   view.rerender(player());
   await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith(expect.objectContaining({ action: 'bounds' })));
+});
+
+it('keeps the full video geometry and clips only its portion outside the page', async () => {
+  fixture.viewportTop = -30;
+  render(player());
+  await waitFor(() => expect(placementRequests().at(-1)).toEqual(expect.objectContaining({
+    action: 'bounds', bounds: expect.objectContaining({ y: -30, width: 320, height: 200,
+      clip: { x: 0, y: 0, width: 320, height: 170 } }),
+  })));
+});
+
+it('withholds an overlapping opaque card until its native clipping acknowledgement', async () => {
+  const view = render(player());
+  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+  const pending = deferred<void>();
+  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
+  const card = document.createElement('section');
+  document.body.append(card);
+  Object.defineProperty(card, 'getBoundingClientRect', { value: () => ({ x: 200, y: 20, width: 200, height: 100,
+    left: 200, right: 400, top: 20, bottom: 120, toJSON: () => ({}) }) });
+  fixture.occludingElements = [card];
+  fixture.hidden = true;
+  view.rerender(player());
+  expect(card.dataset.nativeOcclusion).toBe('pending');
+  expect(placementRequests().at(-1)?.bounds).toEqual(expect.objectContaining({
+    width: 320, height: 200, inputBlocked: true,
+    occlusions: [{ x: 200, y: 20, width: 200, height: 100 }],
+  }));
+  await act(async () => pending.resolve());
+  expect(card).not.toHaveAttribute('data-native-occlusion');
+  expect(placementRequests().at(-1)?.action).toBe('bounds');
+});
+
+it.each(['input', 'disabled input', 'removed input', 'dialog'] as const)(
+  'restores focus lost while clipping is pending to the %s or active dialog fallback', async target => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    const view = render(player());
+    await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+    const pending = deferred<void>();
+    vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
+    const card = document.createElement('section');
+    card.tabIndex = -1;
+    const input = document.createElement('input');
+    input.value = 'keep this phrase';
+    card.append(input);
+    document.body.append(card);
+    (target === 'dialog' ? card : input).focus();
+    input.setSelectionRange(5, 9);
+    fixture.occludingElements = [card];
+    fixture.hidden = true;
+    view.rerender(player());
+    expect(card.dataset.nativeOcclusion).toBe('pending');
+    // jsdom does not implement CSS visibility focus loss. Reproduce the BODY
+    // state observed in real WebView2 while the clipping acknowledgement waits.
+    (document.activeElement as HTMLElement).blur();
+    if (target === 'disabled input') input.disabled = true;
+    if (target === 'removed input') input.remove();
+    expect(document.body).toHaveFocus();
+    await act(async () => pending.resolve());
+    expect(card).not.toHaveAttribute('data-native-occlusion');
+    expect(target === 'input' ? input : card).toHaveFocus();
+    if (target === 'input') expect([input.selectionStart, input.selectionEnd]).toEqual([5, 9]);
+  },
+);
+
+it('preserves focus and selection moved to another descendant before the clipping acknowledgement', async () => {
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+  const view = render(player());
+  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+  const pending = deferred<void>();
+  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
+  const card = document.createElement('section');
+  card.tabIndex = -1;
+  const previous = document.createElement('input');
+  const current = document.createElement('input');
+  current.value = 'new selection';
+  card.append(previous, current);
+  document.body.append(card);
+  previous.focus();
+  fixture.occludingElements = [card];
+  fixture.hidden = true;
+  view.rerender(player());
+  previous.blur();
+  current.focus();
+  current.setSelectionRange(4, 9);
+  await act(async () => pending.resolve());
+  expect(current).toHaveFocus();
+  expect([current.selectionStart, current.selectionEnd]).toEqual([4, 9]);
+});
+
+it('does not restore an older modal during cleanup or a stale acknowledgement after a nested modal opens', async () => {
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+  const view = render(player());
+  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+  const pending = deferred<void>();
+  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
+  const outer = document.createElement('section');
+  outer.tabIndex = -1;
+  const previous = document.createElement('input');
+  outer.append(previous);
+  document.body.append(outer);
+  previous.focus();
+  fixture.occludingElements = [outer];
+  fixture.hidden = true;
+  view.rerender(player());
+  previous.blur();
+  const inner = document.createElement('section');
+  inner.tabIndex = -1;
+  const current = document.createElement('input');
+  inner.append(current);
+  document.body.append(inner);
+  fixture.occludingElements = [outer, inner];
+  view.rerender(player());
+  expect(document.body).toHaveFocus();
+  expect(inner.dataset.nativeOcclusion).toBe('pending');
+  current.focus();
+  await act(async () => pending.resolve());
+  expect(current).toHaveFocus();
+  expect(inner).not.toHaveAttribute('data-native-occlusion');
 });
 
 it('coalesces animated bounds while one placement is pending and sends the final width', async () => {
@@ -244,7 +390,7 @@ it('coalesces animated bounds while one placement is pending and sends the final
   await waitFor(() => expect(placementRequests().filter(request => request.action === 'bounds').map(request => request.bounds?.width)).toEqual([320, 240]));
 });
 
-it('replaces pending resized bounds with a modal hide before restoring the final geometry', async () => {
+it('coalesces modal input blocking with the final geometry without hiding the video', async () => {
   const pending = deferred<void>();
   vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
   const view = render(player());
@@ -255,13 +401,13 @@ it('replaces pending resized bounds with a modal hide before restoring the final
   view.rerender(player());
   expect(placementRequests()).toEqual([]);
   await act(async () => pending.resolve());
-  await waitFor(() => expect(placementRequests()).toEqual([{ action: 'hide' }]));
+  await waitFor(() => expect(placementRequests()).toEqual([expect.objectContaining({ action: 'bounds', bounds: expect.objectContaining({ width: 240, inputBlocked: true }) })]));
   fixture.hidden = false;
   view.rerender(player());
   await waitFor(() => expect(placementRequests().at(-1)).toEqual(expect.objectContaining({ action: 'bounds', bounds: expect.objectContaining({ width: 240 }) })));
 });
 
-it('keeps a hide barrier when a modal reopens the same geometry before the old placement settles', async () => {
+it('does not hide or resend identical video geometry when a modal opens and closes before placement settles', async () => {
   const pending = deferred<void>();
   vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
   const view = render(player());
@@ -274,8 +420,7 @@ it('keeps a hide barrier when a modal reopens the same geometry before the old p
   await resizeSurface(320);
   expect(placementRequests()).toEqual([]);
   await act(async () => pending.resolve());
-  await waitFor(() => expect(placementRequests().map(request => request.action)).toEqual(['hide', 'bounds']));
-  expect(placementRequests().at(-1)?.bounds?.width).toBe(320);
+  expect(placementRequests()).toEqual([]);
 });
 
 it('hides after an in-flight placement on unmount without sending its queued resize', async () => {
@@ -340,7 +485,7 @@ it('keeps browser and IME shortcuts local and does not repeat a held play toggle
   await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'seek', value: 5000 }));
   fixture.hidden = true;
   view.rerender(player());
-  await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'hide' }));
+  await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith(expect.objectContaining({ action: 'bounds', bounds: expect.objectContaining({ inputBlocked: true }) })));
   vi.mocked(playerApi.player).mockClear();
   fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
   expect(playerApi.player).not.toHaveBeenCalled();

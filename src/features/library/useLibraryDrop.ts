@@ -28,7 +28,7 @@ export function useLibraryDrop({
       subscribeNative('tauri://drag-enter', enter, fail),
       subscribeNative('tauri://drag-over', enter, fail),
       subscribeNative('tauri://drag-leave', leave, fail),
-      subscribeNative<{ paths: string[] }>('tauri://drag-drop', ({ payload }) => {
+      subscribeNative('tauri://drag-drop', ({ payload }) => {
         leave();
         if (allowed() && payload.paths?.length) current.current.onDrop(payload.paths);
       }, fail),

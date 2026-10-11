@@ -26,7 +26,7 @@ import { VolumeControl } from './VolumeControl';
 import { nativeAvailable } from '../../../shared/native/transport';
 
 import type { Media } from '../../../shared/contracts/media';
-import type { PlayerControlRequest, PlayerState } from '../../../shared/contracts/player';
+import type { PlayerControlRequest, PlayerState, PlayerSurfaceRect } from '../../../shared/contracts/player';
 import type { SubtitleSegment } from '../../../shared/contracts/media';
 
 import {
@@ -46,6 +46,13 @@ type SurfacePlacement = {
   signature: string;
   complete?: (error?: unknown) => void;
 };
+const noOccludingElements: readonly HTMLElement[] = [];
+const surfaceRect = (rect: DOMRect): PlayerSurfaceRect => ({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+function intersection(a: PlayerSurfaceRect, b: PlayerSurfaceRect): PlayerSurfaceRect {
+  const x = Math.max(a.x, b.x), y = Math.max(a.y, b.y);
+  return { x, y, width: Math.max(0, Math.min(a.x + a.width, b.x + b.width) - x),
+    height: Math.max(0, Math.min(a.y + a.height, b.y + b.height) - y) };
+}
 
 // One native HWND is shared across player mounts. Serialize its placements so an
 // old bounds acknowledgement cannot overtake a modal/unmount hide or newer media.
@@ -62,17 +69,27 @@ const surfacePlacement = (() => {
     if (!next) return;
     if (hide === next) hide = undefined;
     if (same(confirmed, next)) {
-      if (same(wanted, next)) wanted = undefined;
+      if (same(wanted, next)) { wanted = undefined; next.complete?.(); }
       flush();
       return;
     }
     active = true;
     void playerApi.player(next.request).then(() => {
       confirmed = next;
-      if (!hide && same(wanted, next)) { wanted?.complete?.(); wanted = undefined; }
+      if (!hide && same(wanted, next)) {
+        const complete = wanted?.complete;
+        wanted = undefined;
+        complete?.();
+      }
     }, error => {
       confirmed = undefined;
-      if (!hide && same(wanted, next)) { wanted?.complete?.(error); wanted = undefined; }
+      if (!hide && same(wanted, next)) {
+        const complete = wanted?.complete;
+        // A completion may enqueue recovery work. Clear the old slot first so
+        // that work keeps its acknowledgement and can reveal withheld cards.
+        wanted = undefined;
+        complete?.(error);
+      }
     }).finally(() => { active = false; flush(); });
   };
   return (owner: object, request: SurfacePlacement['request'], complete?: SurfacePlacement['complete']) => {
@@ -114,7 +131,9 @@ export function NativePlayer({
 }) {
   const { t } = useAppearance();
   const { notify } = useNotifications();
-  const { surfaceHidden } = useSurface();
+  const { surfaceHidden, activeModal, occludingElements = noOccludingElements } = useSurface();
+  const activeModalRef = useRef(activeModal);
+  activeModalRef.current = activeModal;
   const { refresh } = useDataActions();
   const settingsExit = useModalExit(settingsOpen);
   const viewport = useRef<HTMLDivElement>(null);
@@ -178,7 +197,7 @@ export function NativePlayer({
     if (!nativeAvailable()) return;
     // The native video is a sibling HWND above the WebView, so DOM clicks alone
     // cannot receive pointer input from the actual decoded image.
-    return subscribeNative<void>('player-surface-click', () => surfaceClick.current(),
+    return subscribeNative('player-surface-click', () => surfaceClick.current(),
       error => notify(String(error), 'error'));
   }, [notify]);
   const selectionSignature = selected
@@ -265,7 +284,7 @@ export function NativePlayer({
         onReady(current.ready === true);
       }
     };
-    const stop = subscribeNative<PlayerState>(
+    const stop = subscribeNative(
       'player-state',
       (event) => {
         if (requested) {
@@ -315,6 +334,25 @@ export function NativePlayer({
     if (!nativeAvailable()) return;
     let frame = 0;
     let disposed = false;
+    let placementVersion = 0;
+    const marked = new Set<HTMLElement>();
+    const focusBeforeHide = new Map<HTMLElement, HTMLElement>();
+    const measuredCards = new Map<HTMLElement, string>();
+    const revealCards = () => {
+      const top = activeModalRef.current;
+      const target = top && marked.has(top) ? focusBeforeHide.get(top) ?? top : undefined;
+      for (const element of marked) delete element.dataset.nativeOcclusion;
+      // visibility:hidden can move focus to BODY while the native exclusion is
+      // pending. Restore only that lost focus in the current top modal; newer
+      // child/other-modal focus and input selection must remain untouched.
+      if (target && top?.isConnected && document.hasFocus() && document.activeElement === document.body) {
+        const connectedTarget = target.isConnected && top.contains(target) ? target : top;
+        connectedTarget.focus({ preventScroll: true });
+        if (document.activeElement === document.body) top.focus({ preventScroll: true });
+      }
+      marked.clear();
+      focusBeforeHide.clear();
+    };
     setSurfaceError('');
     const measure = () => {
         frame = 0;
@@ -323,15 +361,33 @@ export function NativePlayer({
         const main = viewport.current
           ?.closest('.page-content')
           ?.getBoundingClientRect();
+        const windowRect = { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
+        const pageClip = main ? intersection(surfaceRect(main), windowRect) : windowRect;
+        const clip = rect ? intersection(surfaceRect(rect), pageClip) : pageClip;
+        const occlusions: PlayerSurfaceRect[] = [];
+        for (const element of occludingElements) {
+          if (!element.isConnected) continue;
+          const card = surfaceRect(element.getBoundingClientRect());
+          const overlap = intersection(card, clip);
+          if (overlap.width <= 0 || overlap.height <= 0) continue;
+          occlusions.push(card);
+          const signature = JSON.stringify(card);
+          if (measuredCards.get(element) !== signature) {
+            if (document.activeElement instanceof HTMLElement && element.contains(document.activeElement)) {
+              focusBeforeHide.set(element, document.activeElement);
+            }
+            element.dataset.nativeOcclusion = 'pending';
+            marked.add(element);
+            measuredCards.set(element, signature);
+          }
+        }
+        const version = ++placementVersion;
         const hidden =
-          surfaceHidden ||
           !loaded ||
           !rect ||
           rect.width < 1 ||
           rect.height < 1 ||
-          rect.top < (main?.top || 0) ||
-          rect.bottom >
-            Math.min(main?.bottom || window.innerHeight, window.innerHeight) ||
+          clip.width < 1 || clip.height < 1 ||
           document.hidden;
         const request = hidden
           ? { action: 'hide' as const }
@@ -343,12 +399,22 @@ export function NativePlayer({
                 width: rect.width,
                 height: rect.height,
                 scaleFactor: window.devicePixelRatio,
+                clip,
+                occlusions,
+                inputBlocked: surfaceHidden || interactionsDisabled,
               },
             };
         surfacePlacement(surfaceOwner.current, request, error => {
-          if (disposed) return;
-          if (error) setSurfaceError(String(error));
-          else if (!hidden) setSurfaceError('');
+          if (disposed || version !== placementVersion) return;
+          if (error) {
+            setSurfaceError(String(error));
+            // An explicit display error must never leave the native HWND over
+            // an inaccessible dialog. This is failure recovery, not modal policy.
+            surfacePlacement(surfaceOwner.current, { action: 'hide' }, revealCards);
+          } else {
+            revealCards();
+            if (!hidden) setSurfaceError('');
+          }
         });
     };
     const update = () => {
@@ -367,22 +433,23 @@ export function NativePlayer({
     if (viewport.current) observer.observe(viewport.current);
     const scrollContainer = viewport.current?.closest('.page-content');
     if (scrollContainer) observer.observe(scrollContainer);
+    for (const element of occludingElements) observer.observe(element);
     window.addEventListener('resize', update);
     window.addEventListener('scroll', update, true);
     document.addEventListener('visibilitychange', visibility);
-    // A modal or failed load must enqueue its hide before a pending placement
-    // can finish; waiting for RAF here can leave the HWND above the dialog.
-    if (surfaceHidden || !loaded || document.hidden) measure();
-    else update();
+    // New opaque cards are withheld until their region has been acknowledged;
+    // the uncovered video keeps rendering with unchanged geometry.
+    measure();
     return () => {
       disposed = true;
+      revealCards();
       window.cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener('resize', update);
       window.removeEventListener('scroll', update, true);
       document.removeEventListener('visibilitychange', visibility);
     };
-  }, [loaded, surfaceHidden, media.id, surfaceAttempt]);
+  }, [loaded, surfaceHidden, occludingElements, interactionsDisabled, media.id, surfaceAttempt]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (
@@ -557,9 +624,10 @@ export function NativePlayer({
               <Button className="player-skip" variant="ghost" aria-label={t('5 秒戻る', 'Back 5 seconds')} disabled={!loaded} onClick={() => void control({ action: 'seek', value: Math.max(0, position - 5000) })}>
                 <RotateCcw size={18} />{t('5秒', '5s')}
               </Button>
-              <IconButton className="play-button" label={state?.paused !== false ? t('再生', 'Play') : t('一時停止', 'Pause')} disabled={!loaded} onClick={() => void control({ action: state?.paused ? 'play' : 'pause' })}>
+              <Button className="play-button" aria-label={state?.paused !== false ? t('再生', 'Play') : t('一時停止', 'Pause')} disabled={!loaded} onClick={() => void control({ action: state?.paused ? 'play' : 'pause' })}>
                 <MotionSwap as="span" stateKey={state?.paused !== false ? 'play' : 'pause'}>{state?.paused !== false ? <Play size={19} fill="currentColor" /> : <Pause size={19} fill="currentColor" />}</MotionSwap>
-              </IconButton>
+                <span>{state?.paused !== false ? t('再生', 'Play') : t('一時停止', 'Pause')}</span>
+              </Button>
               <Button className="player-skip" variant="ghost" aria-label={t('5 秒進む', 'Forward 5 seconds')} disabled={!loaded} onClick={() => void control({ action: 'seek', value: Math.min(duration, position + 5000) })}>
                 <RotateCw size={18} />{t('5秒', '5s')}
               </Button>

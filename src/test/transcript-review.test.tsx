@@ -284,7 +284,7 @@ describe('transcript review and local adoption', () => {
     expect(aiApi.approveQuote).not.toHaveBeenCalled();
     expect(
       screen.getByRole('button', { name: 'Adopt these subtitles' }),
-    ).toBeDisabled();
+    ).toBeEnabled();
   });
   it('shows a joined sentence with both exact original groups and repetitions without adopting or sending', async () => {
     const joined = {
@@ -378,10 +378,10 @@ describe('transcript review and local adoption', () => {
     expect(within(details).queryByText(/Unrelated/)).not.toBeInTheDocument();
     expect(details).not.toHaveTextContent('internal-join-id');
     expect(details).not.toHaveTextContent('exact_transport_edge_group_v1');
-    expect(screen.getByRole('checkbox')).not.toBeChecked();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Adopt these subtitles' }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     const joinedSection = within(details)
       .getByRole('heading', { name: 'Joined subtitle' })
       .closest('section')!;
@@ -540,7 +540,7 @@ describe('transcript review and local adoption', () => {
     await screen.findByText(
       /AI generated subtitles in a range where no speech was detected/,
     );
-    expect(screen.getByRole('checkbox')).toBeDisabled();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', { name: 'I checked the audio and subtitles' }),
     );
@@ -556,8 +556,8 @@ describe('transcript review and local adoption', () => {
     await screen.findByRole('button', { name: 'Reviewed' });
     expect(
       screen.getByRole('button', { name: 'Adopt these subtitles' }),
-    ).toBeDisabled();
-    expect(screen.getByRole('checkbox')).not.toBeChecked();
+    ).toBeEnabled();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(studyApi.applyTranscriptReview).not.toHaveBeenCalled();
     expect(aiApi.approveQuote).not.toHaveBeenCalled();
   });
@@ -656,7 +656,7 @@ describe('transcript review and local adoption', () => {
     );
     fireEvent.click(screen.getByText('Show subtitles for this range'));
     expect(screen.getByText(original.text)).toBeVisible();
-    expect(screen.getByRole('checkbox')).toBeDisabled();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', { name: 'Listen to this range' }),
     );
@@ -685,11 +685,11 @@ describe('transcript review and local adoption', () => {
     );
     expect(
       screen.getByRole('button', { name: 'Adopt these subtitles' }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(studyApi.applyTranscriptReview).not.toHaveBeenCalled();
     expect(aiApi.approveQuote).not.toHaveBeenCalled();
   });
-  it('keeps both original alternatives and requires a separate adoption acknowledgement', async () => {
+  it('keeps both original alternatives and uses one separate adoption action', async () => {
     vi.mocked(studyApi.transcriptReview).mockResolvedValue(received);
     vi.mocked(studyApi.resolveTranscriptBoundary).mockResolvedValue(resolved);
     vi.mocked(studyApi.applyTranscriptReview).mockResolvedValue({
@@ -716,8 +716,7 @@ describe('transcript review and local adoption', () => {
     expect(studyApi.applyTranscriptReview).not.toHaveBeenCalled();
     expect(
       screen.getByRole('button', { name: 'Adopt these subtitles' }),
-    ).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox'));
+    ).toBeEnabled();
     fireEvent.click(
       screen.getByRole('button', { name: 'Adopt these subtitles' }),
     );
@@ -742,7 +741,7 @@ describe('transcript review and local adoption', () => {
     });
     render(<TranscriptReviewDialog jobId="job-1" onClose={() => {}} />);
     await screen.findByText(/ranges have no validated subtitles/);
-    expect(screen.getByRole('checkbox')).toBeDisabled();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Adopt these subtitles' }),
     ).toBeDisabled();

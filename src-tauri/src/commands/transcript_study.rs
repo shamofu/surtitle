@@ -15,8 +15,20 @@ pub async fn prepare_draft_selection(
     state: State<'_, AppState>,
     request: PrepareSelection,
 ) -> std::result::Result<SelectionView, String> {
-    crate::application::transcript::study::prepare_draft_selection(state.inner().clone(), request)
-        .await
+    let committed_changes = state.changes.clone();
+    let changed_drafts = None;
+    let result = crate::application::transcript::study::prepare_draft_selection(
+        state.inner().clone(),
+        request,
+    )
+    .await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Drafts,
+            changed_drafts,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -33,8 +45,20 @@ pub async fn update_draft_selection(
     state: State<'_, AppState>,
     request: UpdateSelection,
 ) -> std::result::Result<SelectionView, String> {
-    crate::application::transcript::study::update_draft_selection(state.inner().clone(), request)
-        .await
+    let committed_changes = state.changes.clone();
+    let changed_drafts = None;
+    let result = crate::application::transcript::study::update_draft_selection(
+        state.inner().clone(),
+        request,
+    )
+    .await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Drafts,
+            changed_drafts,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -42,7 +66,19 @@ pub fn remove_draft_selection(
     state: State<'_, AppState>,
     request: SelectionVersion,
 ) -> std::result::Result<(), String> {
-    crate::application::transcript::study::remove_draft_selection(state.inner().clone(), request)
+    let committed_changes = state.changes.clone();
+    let changed_drafts = None;
+    let result = crate::application::transcript::study::remove_draft_selection(
+        state.inner().clone(),
+        request,
+    );
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Drafts,
+            changed_drafts,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -51,12 +87,21 @@ pub async fn save_draft_selection_card(
     request: SelectionCard,
     operation_id: Option<String>,
 ) -> std::result::Result<(), String> {
-    crate::application::transcript::study::save_draft_selection_card(
+    let committed_changes = state.changes.clone();
+    let changed_cards = None;
+    let result = crate::application::transcript::study::save_draft_selection_card(
         state.inner().clone(),
         request,
         operation_id,
     )
-    .await
+    .await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Cards,
+            changed_cards,
+        );
+    }
+    result
 }
 
 #[tauri::command]

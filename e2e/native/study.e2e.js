@@ -121,7 +121,7 @@ describe('real native learning workflow (no cloud requests)', () => {
       await expectPageTop(`/study/${mediaId}`);
     }
   });
-  it('plays one selected interval, pauses at its end, changes speed, and hides the surface for a modal', async function () {
+  it('plays one selected interval, pauses at its end, changes speed, and retains uncovered video for a modal', async function () {
     // Linux CI validates the application flow; libmpv native HWND playback is Windows-only.
     if (process.platform !== 'win32') { this.skip(); return; }
     await navigate(`/study/${mediaId}`);
@@ -132,11 +132,11 @@ describe('real native learning workflow (no cloud requests)', () => {
     await invoke('player_control', { request: { action: 'rate', value: 1.25 } });
     assert.equal((await invoke('get_player_state')).rate, 1.25);
     await $('button=Playback settings').click();
-    await expect($('dialog')).toBeDisplayed();
-    await browser.waitUntil(async () => !(await invoke('get_player_state')).surfaceVisible, { timeoutMsg: 'Native child window remained visible over the modal' });
+    await expect($('[role="dialog"]')).toBeDisplayed();
+    await browser.waitUntil(async () => (await invoke('get_player_state')).surfaceVisible, { timeoutMsg: 'Native video disappeared while the modal was open' });
     await browser.saveScreenshot(resolve('test-results/native/ai-modal.png'));
     await $('button[aria-label="Close"]').click();
-    await expect($('dialog')).not.toExist();
+    await expect($('[role="dialog"]')).not.toExist();
     await browser.waitUntil(async () => (await invoke('get_player_state')).surfaceVisible, { timeoutMsg: 'Native surface did not return after closing the modal' });
   });
   it('preserves milliseconds in the subtitle editor and replaces the generated subtitle track after repeated edits', async () => {
@@ -154,11 +154,11 @@ describe('real native learning workflow (no cloud requests)', () => {
     await $('[aria-label="Subtitle list"]').waitForDisplayed();
     await $('.transcript-row').moveTo();
     await $('[aria-label="Edit subtitle"]').click();
-    await $('dialog').waitForDisplayed();
-    const times = await $$('dialog .field-row input');
+    await $('[role="dialog"]').waitForDisplayed();
+    const times = await $$('[role="dialog"] .field-row input');
     await expect(times[0]).toHaveValue('0:00.125');
     await expect(times[1]).toHaveValue('0:00.875');
-    const subtitleInput = $('dialog textarea');
+    const subtitleInput = $('[role="dialog"] textarea');
     if (process.platform === 'win32') {
       // WebView2's WebDriver clear can omit the input event for controlled fields.
       // Use editing keys, as in replay-context, and verify replacement before saving.
@@ -172,7 +172,7 @@ describe('real native learning workflow (no cloud requests)', () => {
     }
     await expect(subtitleInput).toHaveValue('Milliseconds survive a text-only edit.');
     await $('button=Confirm and save').click();
-    await expect($('dialog')).not.toExist();
+    await expect($('[role="dialog"]')).not.toExist();
     const saved = (await invoke('list_segments', { mediaId })).find(segment => segment.id === original.id);
     assert.equal(saved.startMs, 125);
     assert.equal(saved.endMs, 875);

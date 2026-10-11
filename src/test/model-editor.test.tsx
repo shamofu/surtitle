@@ -9,12 +9,8 @@ import {
   render,
   screen,
 } from '@testing-library/react';
-import { ModelEditor, emptyModel } from '../features/ai/ModelEditor';
-import type {
-  AiModelPreference,
-  AiPurpose,
-  DiscoveredModel,
-} from '../shared/contracts/ai';
+import { ModelEditor, emptyModel, type ModelInputDraft } from '../features/ai/ModelEditor';
+import type { AiModelPreference, AiPurpose, DiscoveredModel } from '../shared/contracts/ai';
 import { aiApi } from '../features/ai/api';
 
 vi.mock('../features/ai/api', () => ({
@@ -67,6 +63,25 @@ const state = () =>
     screen.getByTestId('value').textContent || '{}',
   ) as AiModelPreference;
 describe('arbitrary model and price selection', () => {
+  it('retains incomplete token input across remount without applying an invalid model value', () => {
+    const value = { ...emptyModel('vocabulary'), thinkingBudget: 1024 };
+    let raw: ModelInputDraft = { manual: false, input: '', output: '' };
+    const onChange = vi.fn();
+    const editor = () => <ModelEditor value={value} onChange={onChange} purpose="vocabulary" location="global" inputDraft={raw} onInputDraftChange={next => { raw = next; }} />;
+    const first = render(editor());
+    fireEvent.change(screen.getByRole('combobox', { name: /^Output limit/ }), { target: { value: 'custom' } });
+    fireEvent.change(screen.getByRole('textbox', { name: /^Maximum output tokens/ }), { target: { value: '1e' } });
+    first.rerender(editor());
+    fireEvent.change(screen.getByRole('textbox', { name: 'Thinking token budget' }), { target: { value: '-' } });
+    expect(onChange).not.toHaveBeenCalled();
+    first.unmount();
+    render(editor());
+    fireEvent.click(screen.getByText('Output, thinking, and pricing'));
+    expect(screen.getByRole('textbox', { name: /^Maximum output tokens/ })).toHaveValue('1e');
+    expect(screen.getByRole('textbox', { name: 'Thinking token budget' })).toHaveValue('-');
+    fireEvent.change(screen.getByRole('textbox', { name: /^Maximum output tokens/ }), { target: { value: '16000' } });
+    expect(onChange).toHaveBeenLastCalledWith({ ...value, maxOutputTokens: 16000 });
+  });
   it('uses shared candidates without fetching or selecting a model automatically', () => {
     const onChange = vi.fn();
     const value = { ...emptyModel('translation'), modelId: 'gemini-saved' };
@@ -156,7 +171,7 @@ describe('arbitrary model and price selection', () => {
     expect(state().maxOutputTokens).toBe(tokens);
     expect(preset).toHaveValue('standard');
     expect(
-      screen.queryByRole('spinbutton', { name: /^Maximum output tokens/ }),
+      screen.queryByRole('textbox', { name: /^Maximum output tokens/ }),
     ).not.toBeInTheDocument();
   });
   it('opens custom settings without changing the preset value and retains a custom limit', () => {
@@ -166,10 +181,10 @@ describe('arbitrary model and price selection', () => {
     });
     expect(state().maxOutputTokens).toBe(8192);
     expect(container.querySelector('details')).toHaveAttribute('open');
-    const tokens = screen.getByRole('spinbutton', {
+    const tokens = screen.getByRole('textbox', {
       name: /^Maximum output tokens/,
     });
-    expect(tokens).toHaveAttribute('max', '1048576');
+    expect(tokens).toHaveAttribute('inputmode', 'numeric');
     fireEvent.change(tokens, { target: { value: '131072' } });
     expect(state().maxOutputTokens).toBe(131072);
     fireEvent.change(screen.getByRole('combobox', { name: /Gemini model ID/ }), {

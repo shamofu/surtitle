@@ -1,31 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { call } from '../../shared/native/transport';
-import type {
-  AiPricePreference,
-  AiModelPreference,
-  DiscoveredModel,
-  AiQuote,
-  SavedAiResult,
-  TranscriptionPreparation,
-  AiRuntimeSnapshot,
-} from '../../shared/contracts/ai';
+import type { AiModelPreference, AiQuote } from '../../shared/contracts/ai';
 
 export const aiApi = {
-  runtime: (jobId: string) => call<AiRuntimeSnapshot | null>('get_ai_runtime', { jobId }),
+  runtime: (jobId: string) => call('get_ai_runtime', { jobId }),
   vertexModels: (location?: string) =>
-    call<DiscoveredModel[]>('list_vertex_models', { location }),
+    call('list_vertex_models', { location }),
   vertexPrice: (modelId: string, location?: string) =>
-    call<{
-      price: AiPricePreference | null;
-      candidates: {
-        sku: string;
-        description: string;
-        direction: string;
-        microusdPerMillion: number;
-      }[];
-      complete: boolean;
-      observedAtMs: number;
-    }>('lookup_vertex_price', { modelId, location }),
+    call('lookup_vertex_price', { modelId, location }),
   createQuote: (request: {
     mediaId: string;
     kind: AiQuote['kind'];
@@ -33,9 +15,9 @@ export const aiApi = {
     endMs: number;
     focusTerm?: string;
     model?: AiModelPreference;
-  }) => call<AiQuote>('create_quote', { request }),
+  }) => call('create_quote', { request }),
   prepareTranscription: (mediaId: string, startMs: number, endMs: number, wholeMedia = false, operationId?: string) =>
-    call<TranscriptionPreparation>('prepare_transcription', {
+    call('prepare_transcription', {
       mediaId,
       startMs,
       endMs,
@@ -43,50 +25,50 @@ export const aiApi = {
       operationId,
     }),
   transcriptionPreparations: (mediaId: string) =>
-    call<TranscriptionPreparation[]>('list_transcription_preparations', {
+    call('list_transcription_preparations', {
       mediaId,
     }),
   createTranscriptionQuote: (
     preparationId: string,
     model?: AiModelPreference,
-  ) => call<AiQuote>('create_transcription_quote', { preparationId, model }),
+  ) => call('create_transcription_quote', { preparationId, model }),
   prepareBoundaryRepair: (
     jobId: string,
     draftDigest: string,
     boundaryId: string,
   ) =>
-    call<AiQuote>('prepare_boundary_repair', {
+    call('prepare_boundary_repair', {
       jobId,
       draftDigest,
       boundaryId,
     }),
-  cancelPreparation: (operationId?: string) => call<void>('cancel_preparation', { operationId }),
+  cancelPreparation: (operationId?: string) => call('cancel_preparation', { operationId }),
   approveQuote: (quote: AiQuote) =>
-    call<void>('approve_quote', {
+    call('approve_quote', {
       quoteId: quote.id,
       digest: quote.digest || '',
-      acknowledgeUnpriced: quote.unpriced === true,
+      acknowledgeUnpriced: quote.unpriced === true || quote.maximumUsd == null,
       acknowledgeUnqualified: true,
       retryPolicyVersion: quote.retryPolicy?.version,
     }),
   reapproveQuote: (quote: AiQuote) =>
-    call<void>('reapprove_quote', {
+    call('reapprove_quote', {
       quoteId: quote.id,
       digest: quote.digest || '',
-      acknowledgeUnpriced: quote.unpriced === true,
+      acknowledgeUnpriced: quote.unpriced === true || quote.maximumUsd == null,
       acknowledgeUnqualified: true,
       retryPolicyVersion: quote.retryPolicy?.version,
     }),
   createRetryQuote: (jobId: string) =>
-    call<AiQuote>('create_retry_quote', { jobId }),
-  reviewAiJob: (jobId: string) => call<AiQuote>('review_ai_job', { jobId }),
-  retryAiApplication: (jobId: string) => call<void>('retry_ai_application', { jobId }),
+    call('create_retry_quote', { jobId }),
+  reviewAiJob: (jobId: string) => call('review_ai_job', { jobId }),
+  retryAiApplication: (jobId: string) => call('retry_ai_application', { jobId }),
   savedAiResults: (jobId: string) =>
-    call<SavedAiResult[]>('list_saved_ai_results', { jobId }),
+    call('list_saved_ai_results', { jobId }),
   applySavedAiResult: (jobId: string, ordinal: number) =>
-    call<void>('apply_saved_ai_result', { jobId, ordinal }),
-  pauseAiJob: (jobId: string) => call<void>('pause_ai_job', { jobId }),
-  cancelAiJob: (jobId: string) => call<void>('cancel_ai_job', { jobId }),
+    call('apply_saved_ai_result', { jobId, ordinal }),
+  pauseAiJob: (jobId: string) => call('pause_ai_job', { jobId }),
+  cancelAiJob: (jobId: string) => call('cancel_ai_job', { jobId }),
   resolveUnknownAttempt: (attemptId: string) =>
-    call<void>('resolve_unknown_attempt', { attemptId }),
+    call('resolve_unknown_attempt', { attemptId }),
 };

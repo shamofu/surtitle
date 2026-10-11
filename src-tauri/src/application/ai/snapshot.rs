@@ -1,23 +1,88 @@
 use super::*;
+use crate::application::changes::ChangeDomain;
+
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) media: Option<Vec<surtitle_core::Media>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) cards: Option<Vec<surtitle_core::StudyCard>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) tools: Option<Vec<crate::application::tool_runtime::ToolStatus>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) settings: Option<surtitle_core::AppSettings>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) jobs: Option<Vec<JobSummary>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) budget: Option<BudgetSummary>,
+}
 
 pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, String> {
     (|| {
+        let (jobs, budget) = ai_snapshot(&state)?;
         let (media, cards) = {
             let db = lock(&state.db)?;
             (db.list_media()?, db.list_cards()?)
         };
-        let p = state.preferences.read()?.clone();
-        let summary = state.ai.summary()?;
-        let unknown_jobs: std::collections::HashSet<_> = summary
-            .unknown_attempts
-            .iter()
-            .filter(|a| a.state == "unknown")
-            .map(|a| a.job_id.as_str())
-            .collect();
-        let jobs = state
+        Ok(AppSnapshot {
+            media,
+            cards,
+            tools: crate::application::tool_runtime::statuses(&state)?,
+            settings: state.settings()?,
+            jobs,
+            budget,
+        })
+    })()
+    .map_err(err)
+}
+
+pub fn get_snapshot_patch(
+    state: AppState,
+    domains: Vec<ChangeDomain>,
+) -> std::result::Result<SnapshotPatch, String> {
+    (|| {
+        let mut patch = SnapshotPatch::default();
+        if domains.contains(&ChangeDomain::Media) {
+            patch.media = Some(lock(&state.db)?.list_media()?);
+        }
+        if domains.contains(&ChangeDomain::Cards) {
+            patch.cards = Some(lock(&state.db)?.list_cards()?);
+        }
+        if domains.contains(&ChangeDomain::Settings) {
+            patch.settings = Some(state.settings()?);
+        }
+        if domains.contains(&ChangeDomain::Tools) {
+            patch.tools = Some(crate::application::tool_runtime::statuses(&state)?);
+        }
+        if domains.contains(&ChangeDomain::Jobs) || domains.contains(&ChangeDomain::Budget) {
+            let (jobs, budget) = ai_snapshot(&state)?;
+            if domains.contains(&ChangeDomain::Jobs) {
+                patch.jobs = Some(jobs);
+            }
+            if domains.contains(&ChangeDomain::Budget) {
+                patch.budget = Some(budget);
+            }
+        }
+        Ok(patch)
+    })()
+    .map_err(err)
+}
+
+fn ai_snapshot(state: &AppState) -> Result<(Vec<JobSummary>, BudgetSummary)> {
+    let p = state.preferences.read()?.clone();
+    let summary = state.ai.summary()?;
+    let unknown_jobs: std::collections::HashSet<_> = summary
+        .unknown_attempts
+        .iter()
+        .filter(|a| a.state == "unknown")
+        .map(|a| a.job_id.as_str())
+        .collect();
+    let jobs = state
             .ai
             .list_jobs()?
             .into_iter()
+            .filter(|quote| quote.state != "prepared")
             .map(|q| {
                 let has_audio = q.requests.iter().any(|request| request.audio_duration_ms > 0);
                 let has_transcript_result = has_audio && state.ai.has_transcript_result(&q.id)?;
@@ -30,16 +95,16 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                 let transcription_ranges = if has_audio {
                     // Damaged or unavailable local preparation metadata must
                     // not hide the library or the independently stored ledger.
-                    crate::application::transcript::automatic::progress_ranges(&state, &q.id).unwrap_or_default()
+                    crate::application::transcript::automatic::progress_ranges(state, &q.id).unwrap_or_default()
                 } else { Vec::new() };
                 let result_state = if applied {
-                    let has_warnings = crate::application::transcript::automatic::applied_has_warnings(&state, &q.id)?;
+                    let has_warnings = crate::application::transcript::automatic::applied_has_warnings(state, &q.id)?;
                     if has_warnings { "applied_with_warnings" } else { "applied" }
                 } else if has_transcript_result { "ready" } else { "none" };
                 let issue = state.ai.job_issue(&q.id)?;
                 let retry = state.ai.retry_status(&q.id)?;
                 let pacing = state.ai.pacing_status(&q.id)?;
-                let pending_results = saved_results(&state, &q.id)?
+                let pending_results = saved_results(state, &q.id)?
                     .iter()
                     .filter(|result| !result.applied)
                     .count();
@@ -105,6 +170,9 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                 } else if execution_outcome.as_deref() == Some("partial") {
                     ("全区間の処理が終了しました。一部の結果を取得できませんでしたが、成功した結果は使えます。", "All sections were processed. Some responses could not be finalized; successful results are available.")
                 } else { (ja, en) };
+                let (ja, en) = if status == "running" && state.ai_session.dispatch.is_waiting(&q.id) {
+                    ("順番を待っています。実行中の区間が終わると処理します。", "Queued. Processing continues after the current request finishes.")
+                } else { (ja, en) };
                 let message = if p.settings.locale == "ja" { ja } else { en }.to_owned();
                 let processed = if skip_rejected { q.request_counts.succeeded + q.request_counts.rejected } else { q.completed_requests };
                 Ok(JobSummary {
@@ -130,35 +198,29 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        let unknown_attempts = summary
-            .unknown_attempts
-            .into_iter()
-            .filter(|a| a.state == "unknown")
-            .map(|a| UnknownAttemptSummary {
-                id: a.id,
-                job_id: a.job_id,
-                ordinal: a.ordinal,
-                held_usd: a.held_or_charged_microusd.map(|amount| amount as f64 / 1_000_000.),
-                created_at: utc_time(a.created_at_ms),
-            })
-            .collect();
-        Ok(AppSnapshot {
-            media,
-            cards,
-            tools: crate::application::tool_runtime::statuses(&state)?,
-            settings: state.settings()?,
-            jobs,
-            budget: BudgetSummary {
-                spent_usd: summary.monthly_actual_charged_microusd as f64 / 1_000_000.,
-                reserved_usd: summary.monthly_held_microusd as f64 / 1_000_000.,
-                limit_usd: summary.limits.monthly_microusd as f64 / 1_000_000.,
-                unknown_attempts,
-                unpriced_attempts: summary.unpriced_attempts,
-                monetary_totals_complete: summary.monetary_totals_complete,
-            },
+    let unknown_attempts = summary
+        .unknown_attempts
+        .into_iter()
+        .filter(|a| a.state == "unknown")
+        .map(|a| UnknownAttemptSummary {
+            id: a.id,
+            job_id: a.job_id,
+            ordinal: a.ordinal,
+            held_usd: a
+                .held_or_charged_microusd
+                .map(|amount| amount as f64 / 1_000_000.),
+            created_at: utc_time(a.created_at_ms),
         })
-    })()
-    .map_err(err)
+        .collect();
+    let budget = BudgetSummary {
+        spent_usd: summary.monthly_actual_charged_microusd as f64 / 1_000_000.,
+        reserved_usd: summary.monthly_held_microusd as f64 / 1_000_000.,
+        limit_usd: summary.limits.monthly_microusd as f64 / 1_000_000.,
+        unknown_attempts,
+        unpriced_attempts: summary.unpriced_attempts,
+        monetary_totals_complete: summary.monetary_totals_complete,
+    };
+    Ok((jobs, budget))
 }
 
 fn execution_outcome(

@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render as baseRender, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { CardsPage } from '../features/cards/CardsPage';
 import { EditCardDialog } from '../features/cards/CardManagement';
 import { cardsApi } from '../features/cards/api';
 import type { StudyCard } from '../shared/contracts/cards';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { uiDraftApi } from '../shared/editing/drafts';
 import { MotionProvider } from '../shared/motion';
 
 const fixture = vi.hoisted(() => ({
@@ -18,7 +20,7 @@ const fixture = vi.hoisted(() => ({
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, to, className }: { children: ReactNode; to: string; className?: string }) => <a href={to} className={className}>{children}</a>,
 }));
-vi.mock('../features/cards/api', () => ({ cardsApi: { editCard: vi.fn(), suspendCard: vi.fn() } }));
+vi.mock('../features/cards/api', () => ({ cardsApi: { editCard: vi.fn(), editState: vi.fn(), saveEdit: vi.fn(), suspendCard: vi.fn() } }));
 vi.mock('../app/runtime', () => {
   const registerModal = () => () => {};
   const useFixture = () => ({
@@ -32,18 +34,37 @@ vi.mock('../app/runtime', () => {
   return { useSnapshot: useFixture, useDataActions: useFixture, useAppearance: useFixture, useNotifications: useFixture, useSurface: useFixture };
 });
 
+vi.mock('../shared/editing/drafts', () => import('./editing-mocks'));
+vi.mock('../shared/editing/session', async importOriginal => {
+  const actual = await importOriginal<typeof import('../shared/editing/session')>();
+  return { ...actual, editingSession: (kind: 'card', id: string, adapter: import('../shared/editing/session').EditAdapter) => new actual.EditingSession(kind, id, adapter) };
+});
+const clients: QueryClient[] = [];
+function render(node: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); clients.push(client);
+  const view = baseRender(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
+  return { ...view, rerender: (next: ReactNode) => view.rerender(<QueryClientProvider client={client}>{next}</QueryClientProvider>) };
+}
+let revision = 0;
+let saved: StudyCard;
 const card: StudyCard = {
   id: 'english', mediaId: 'media', segmentId: 'cue', term: 'look into', meaning: 'investigate', example: 'Look into this.',
   language: 'en', dueAt: '2030-01-01T00:00:00Z', createdAt: '2026-01-01T00:00:00Z', reviewCount: 0, suspended: false,
 };
 beforeEach(() => {
   fixture.data = { cards: [card, { ...card, id: 'japanese', term: '調べる', language: 'ja' }], media: [] };
+  saved = { ...card }; revision = 0;
+  vi.mocked(cardsApi.editState).mockImplementation(async () => ({ card: saved, revision: String(revision) }));
+  vi.mocked(cardsApi.saveEdit).mockImplementation(async (request, expected) => {
+    expect(expected).toBe(String(revision)); saved = { ...saved, ...request };
+    return { card: saved, revision: String(++revision) };
+  });
   fixture.loading = false;
   fixture.error = null;
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   HTMLDialogElement.prototype.close = function () { this.open = false; };
 });
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+afterEach(async () => { cleanup(); await act(async () => {}); clients.splice(0).forEach(client => client.clear()); vi.clearAllMocks(); });
 
 it('opens one phrase menu, dismisses outside without swallowing the action, and restores focus only for Escape', async () => {
   const user = userEvent.setup();
@@ -60,7 +81,7 @@ it('opens one phrase menu, dismisses outside without swallowing the action, and 
   expect(screen.getByRole('textbox', { name: 'Search your phrases' })).toHaveFocus();
   await user.click(english);
   await user.tab();
-  expect(within(english.closest('details')!).getByRole('button', { name: 'Edit' })).toHaveFocus();
+  expect(within(english.closest('details')!).getByRole('button', { name: 'Suspend reviews' })).toHaveFocus();
   await user.keyboard('{Escape}');
   expect(english.closest('details')).not.toHaveAttribute('open');
   expect(english).toHaveFocus();
@@ -152,48 +173,38 @@ it('keeps IME input and retained rows in place while filters remove stale action
   }
 });
 
-it.each(['Cancel', 'Close', 'Escape', 'backdrop'])('protects dirty phrase edits when dismissed with %s', async (method) => {
-  const close = vi.fn();
+it.each(['Close', 'Escape', 'backdrop'])('flushes dirty phrase edits when dismissed with %s without confirmation', async method => {
+  const close = vi.fn(), user = userEvent.setup();
   render(<EditCardDialog card={card} onClose={close} />);
-  const editor = screen.getByRole('dialog', { name: 'Edit phrase' });
-  expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  await waitFor(() => expect(screen.getByLabelText('Meaning')).toBeEnabled());
+  expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'new meaning' } });
-  if (method === 'Escape') fireEvent(editor, new Event('cancel', { cancelable: true }));
-  else if (method === 'backdrop') {
-    fireEvent.pointerDown(editor);
-    fireEvent.pointerUp(editor);
-    fireEvent.click(editor);
-  } else fireEvent.click(within(editor).getByRole('button', { name: method }));
-  const confirmation = screen.getByRole('dialog', { name: 'Save your changes?' });
-  expect(close).not.toHaveBeenCalled();
-  fireEvent.click(within(confirmation).getByRole('button', { name: 'Keep editing' }));
+  if (method === 'Escape') await user.keyboard('{Escape}');
+  else if (method === 'backdrop') await user.click(document.querySelector('.modal-overlay')!);
+  else await user.click(screen.getAllByRole('button', { name: 'Close' }).at(-1)!);
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
   expect(screen.queryByRole('dialog', { name: 'Save your changes?' })).not.toBeInTheDocument();
-  expect(screen.getByLabelText('Meaning')).toHaveValue('new meaning');
-  fireEvent.click(within(editor).getByRole('button', { name: 'Cancel' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
-  expect(close).toHaveBeenCalledOnce();
-  expect(cardsApi.editCard).not.toHaveBeenCalled();
+  await waitFor(() => expect(cardsApi.saveEdit).toHaveBeenCalledWith(expect.objectContaining({ id: card.id, meaning: 'new meaning' }), '0'));
+  expect(uiDraftApi.save).toHaveBeenCalled();
 });
 
-it('locks all editing and dismissal during save, keeps failed changes, then saves from the close confirmation', async () => {
+it('keeps inputs editable during save, retains failed changes, and retries inline', async () => {
   const close = vi.fn();
   let fail!: (error: Error) => void;
-  vi.mocked(cardsApi.editCard).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+  vi.mocked(cardsApi.saveEdit).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
   render(<EditCardDialog card={card} onClose={close} />);
-  const editor = screen.getByRole('dialog', { name: 'Edit phrase' });
-  fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'changed meaning' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-  screen.getAllByRole('textbox').forEach(input => expect(input).toBeDisabled());
-  expect(within(editor).getByRole('button', { name: 'Close' })).toBeDisabled();
-  fireEvent(editor, new Event('cancel', { cancelable: true }));
-  expect(close).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.getByLabelText('Meaning')).toBeEnabled());
+  const meaning = screen.getByLabelText('Meaning');
+  fireEvent.change(meaning, { target: { value: 'changed meaning' } });
+  fireEvent.blur(meaning);
+  await waitFor(() => expect(cardsApi.saveEdit).toHaveBeenCalledOnce());
+  screen.getAllByRole('textbox').forEach(input => expect(input).toBeEnabled());
+  fireEvent.change(meaning, { target: { value: 'newer meaning while saving' } });
   await act(async () => fail(new Error('Save unavailable')));
-  expect(screen.getByRole('alert')).toHaveTextContent('Save unavailable');
-  expect(screen.getByLabelText('Meaning')).toHaveValue('changed meaning');
-  expect(screen.getByLabelText('Meaning')).toBeEnabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-  vi.mocked(cardsApi.editCard).mockResolvedValueOnce(undefined);
-  fireEvent.click(screen.getByRole('button', { name: 'Save and close' }));
-  await waitFor(() => expect(close).toHaveBeenCalledOnce());
-  expect(cardsApi.editCard).toHaveBeenLastCalledWith(expect.objectContaining({ id: card.id, meaning: 'changed meaning' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Save unavailable');
+  expect(meaning).toHaveValue('newer meaning while saving');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  await waitFor(() => expect(saved.meaning).toBe('newer meaning while saving'));
+  expect(cardsApi.saveEdit).toHaveBeenLastCalledWith(expect.objectContaining({ id: card.id, meaning: 'newer meaning while saving' }), '0');
+  expect(close).not.toHaveBeenCalled();
 });

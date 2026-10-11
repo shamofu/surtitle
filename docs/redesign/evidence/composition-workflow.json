@@ -1,0 +1,60 @@
+{
+  "passed": true,
+  "receipts": [
+    {
+      "action": "play",
+      "paused": "no",
+      "position": 2.4,
+      "saved": false
+    },
+    {
+      "action": "select",
+      "paused": "yes",
+      "position": 2,
+      "saved": false
+    },
+    {
+      "action": "meaning",
+      "paused": "yes",
+      "position": 2,
+      "saved": false
+    },
+    {
+      "action": "save",
+      "paused": "yes",
+      "position": 2,
+      "saved": true
+    },
+    {
+      "action": "resume",
+      "paused": "no",
+      "position": 2,
+      "saved": true
+    },
+    {
+      "action": "state",
+      "paused": "no",
+      "position": 2.066667,
+      "saved": true
+    },
+    {
+      "action": "state",
+      "paused": "no",
+      "position": 3.3,
+      "saved": true
+    }
+  ],
+  "resumedPositions": [
+    2.066667,
+    3.3
+  ],
+  "resizedClient": [
+    1024,
+    700
+  ],
+  "unicodeInput": true,
+  "realOsIme": false,
+  "transport": "CDP input into real WebView2; native WebMessage/mpv/file roundtrip",
+  "screenshotScope": "WebView visual only; excludes native video visual",
+  "productionApp": false
+}

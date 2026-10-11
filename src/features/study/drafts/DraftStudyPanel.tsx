@@ -436,7 +436,7 @@ function DraftStudyContent({
       )}
       <MotionRegion open={!!active}>{active && (
         <DraftSelectionEditor
-          key={`${active.id}:${active.version}`}
+          key={active.id}
           selection={{
             ...active,
             canConfirm:

@@ -43,7 +43,10 @@ cmake_build() {
 meson_build dav1d -Denable_tools=false -Denable_tests=false
 ffmpeg_output="$build_root/objects/ffmpeg"
 mkdir -p "$ffmpeg_output"
-if [[ ! -f "$ffmpeg_output/ffbuild/config.mak" ]] || ! grep -q '^CONFIG_LIBDAV1D=yes' "$ffmpeg_output/ffbuild/config.mak"; then
+if [[ ! -f "$ffmpeg_output/ffbuild/config.mak" ]] \
+    || ! grep -q '^CONFIG_LIBDAV1D=yes' "$ffmpeg_output/ffbuild/config.mak" \
+    || ! grep -q '^CONFIG_D3D11VA=yes' "$ffmpeg_output/ffbuild/config.mak" \
+    || ! grep -q '^CONFIG_DXVA2=yes' "$ffmpeg_output/ffbuild/config.mak"; then
   (cd "$ffmpeg_output" && "$source_root/ffmpeg/configure" \
     --prefix="$prefix" --arch=x86_64 --target-os=mingw32 --enable-cross-compile \
     --cross-prefix=x86_64-w64-mingw32- --cc=x86_64-w64-mingw32-gcc-posix \
@@ -52,9 +55,15 @@ if [[ ! -f "$ffmpeg_output/ffbuild/config.mak" ]] || ! grep -q '^CONFIG_LIBDAV1D
     --enable-static --disable-shared --disable-autodetect --disable-programs \
     --disable-doc --disable-debug --disable-network --disable-avdevice \
     --disable-encoders --disable-muxers --enable-w32threads --enable-libdav1d \
+    --enable-hwaccels --enable-d3d11va --enable-dxva2 \
     --extra-cflags=-D_WIN32_WINNT=0x0A00 \
     --extra-ldflags="-L$prefix/lib -static-libgcc -static-libstdc++ -static") 2>&1 | tee "$logs/ffmpeg-configure.log"
 fi
+# Autodetection is deliberately disabled above; require the Windows decoders
+# explicitly so a GPU renderer cannot silently ship with CPU-only decoding.
+for feature in CONFIG_HWACCELS CONFIG_D3D11VA CONFIG_DXVA2 CONFIG_H264_D3D11VA_HWACCEL CONFIG_HEVC_D3D11VA_HWACCEL CONFIG_VP9_D3D11VA_HWACCEL; do
+  grep -q "^${feature}=yes" "$ffmpeg_output/ffbuild/config.mak" || { echo "Missing required FFmpeg hardware capability: $feature" >&2; exit 1; }
+done
 make -C "$ffmpeg_output" -j "$jobs" 2>&1 | tee "$logs/ffmpeg-build.log"
 make -C "$ffmpeg_output" install 2>&1 | tee "$logs/ffmpeg-install.log"
 meson_build freetype -Dzlib=internal -Dharfbuzz=disabled

@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { transferApi } from './api';
 import type { ExportFormat } from '../../shared/contracts/transfer';
-import type { RestorePreview } from '../../shared/contracts/transfer';
+import type { RestorePreview, RestoreResult } from '../../shared/contracts/transfer';
 import {
   useDataActions,
   useAppearance,
@@ -23,6 +23,7 @@ import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { useActivities } from '../../app/providers/Activities';
 import { useClearPreparationSessions } from '../ai/PreparationSessions';
 import { clearEditorDraftSessions, flushEditorDrafts } from '../study/editor-drafts/useEditorDraft';
+import { flushEdits, refreshEdits } from '../../shared/editing/session';
 import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
 
 export function TransferDialog({
@@ -34,7 +35,7 @@ export function TransferDialog({
 }) {
   const { mutate } = useDataActions();
   const { t } = useAppearance();
-  const { report } = useNotifications();
+  const { report, notify } = useNotifications();
   const { runTracked } = useActivities();
   const clearPreparations = useClearPreparationSessions();
   const [tab, setTab] = useState<'export' | 'restore'>('export');
@@ -45,7 +46,7 @@ export function TransferDialog({
   const close = () => { if (!busy) void exit.close(onClose); };
   const [phase, setPhase] = useState('exporting');
   const [preview, setPreview] = useState<RestorePreview | null>(null);
-  const [acknowledged, setAcknowledged] = useState(false);
+  const [restoredWarnings, setRestoredWarnings] = useState<string[] | null>(null);
   const mounted = useRef(true);
   const previewRequest = useRef(0);
   useEffect(() => {
@@ -134,6 +135,7 @@ export function TransferDialog({
     try {
       const paths = await report(() => runTracked({ kind: 'export', label: t('学習データの書き出し', 'Export learning data'), phase: 'exporting', mediaId }, async () => {
         await flushEditorDrafts();
+        if (!await flushEdits()) throw new Error(t('入力の保存に失敗しました。再試行してください。', 'Could not save your input. Please retry.'));
         return transferApi.exportLearning(format, mediaId);
       }, { classifyResult: paths => ({ status: paths.length ? 'completed' : 'cancelled' }) }));
       if (mounted.current && paths?.length) setExportedPaths(paths);
@@ -155,30 +157,47 @@ export function TransferDialog({
     }
     if (result) {
       setPreview(result);
-      setAcknowledged(false);
     }
     setBusy(false);
   }
   async function restoreData() {
-    if (!preview || !acknowledged || busy || exit.exiting) return;
+    if (!preview || busy || exit.exiting) return;
     setBusy(true);
     setPhase('restoring');
     const result = await report(
       () => runTracked({ kind: 'restore', label: t('学習データの復元', 'Restore learning data'), phase: 'restoring' }, async () => {
         await flushEditorDrafts();
-        await mutate(async () => {
-          await transferApi.restoreLearning(preview.token);
-          clearEditorDraftSessions();
-          clearPreparations();
-        }, {
-          kind: 'restore',
-        });
-        return true;
+        if (!await flushEdits()) throw new Error(t('入力の保存に失敗しました。再試行してください。', 'Could not save your input. Please retry.'));
+        let restored: RestoreResult | undefined;
+        try {
+          await mutate(async () => {
+            restored = await transferApi.restoreLearning(preview.token);
+            clearEditorDraftSessions();
+            clearPreparations();
+            await refreshEdits();
+          }, { kind: 'restore' });
+        } catch (error) {
+          if (!restored) throw error;
+          // The native commit already happened. A later UI refresh failure must
+          // never offer the destructive restore action again as if it failed.
+          restored = { warnings: [...restored.warnings, `${t(
+            '画面の更新に失敗しました。入力は保持されています。',
+            'The view could not refresh. Your input is retained.',
+          )} ${String(error)}`] };
+        }
+        return restored;
       }),
-      t('学習データを復元しました。', 'Learning data restored.'),
     );
     setBusy(false);
-    if (result) await exit.close(onClose);
+    if (result) {
+      if (result.warnings.length) {
+        setRestoredWarnings(result.warnings);
+        setPreview(null);
+      } else {
+        notify(t('学習データを復元しました。', 'Learning data restored.'));
+        await exit.close(onClose);
+      }
+    }
   }
   return (
     <Modal
@@ -188,6 +207,12 @@ export function TransferDialog({
       eyebrow="YOUR WORDS, YOUR DATA"
       onClose={close}
     >
+      {restoredWarnings ? <>
+        <p role="status">{t('学習データを復元しました。', 'Learning data restored.')}</p>
+        <p className="helper-text">{t('復元後の処理に問題がありました。復元をやり直す必要はありません。', 'Some follow-up work could not finish. The restore does not need to be repeated.')}</p>
+        <ul>{restoredWarnings.map((warning, index) => <li key={index} className="notice warning">{warning}</li>)}</ul>
+        <footer className="modal-footer"><Button variant="primary" onClick={close}>{t('完了', 'Done')}</Button></footer>
+      </> : <>
       <div className="segmented-control">
         <button
           className={tab === 'export' ? 'selected' : ''}
@@ -307,19 +332,14 @@ export function TransferDialog({
                   {warning}
                 </p>
               ))}
-              <label className="check-field">
-                <input
-                  type="checkbox"
-                  checked={acknowledged}
-                  onChange={(event) => setAcknowledged(event.target.checked)}
-                />
+              <p className="notice warning">
                 <span>
                   {t(
-                    '復元内容を確認しました。現在の学習データを置き換えて復元します。',
-                    'I reviewed this backup and want to replace the current learning data.',
+                    '現在の教材・カード・復習履歴を、このバックアップの内容に置き換えます。',
+                    'This replaces your current media, cards, and review history with this backup.',
                   )}
                 </span>
-              </label>
+              </p>
               <p className="helper-text">
                 {t(
                   'このデバイスの認証情報・課金台帳・ツール設定は保持します。新しいデバイスでは初期設定が必要です。',
@@ -333,11 +353,10 @@ export function TransferDialog({
                 <Button
                   variant="primary"
                   busy={busy}
-                  disabled={!acknowledged}
                   onClick={() => void restoreData()}
                 >
                   <ArchiveRestore size={16} />
-                  {t('復元する', 'Restore backup')}
+                  {t('現在の学習データを置き換えて復元', 'Replace learning data and restore')}
                 </Button>
               </footer>
             </>
@@ -345,6 +364,7 @@ export function TransferDialog({
         </>
       )}
       </MotionSwap>
+      </>}
     </Modal>
   );
 }

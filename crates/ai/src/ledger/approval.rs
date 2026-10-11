@@ -1,5 +1,5 @@
 //! Preparation, explicit approval, and job lifecycle changes.
-use super::accounting::{check_budget, has_blocking_attempt, read_job};
+use super::accounting::{check_budget, has_unknown_attempt, read_job};
 use super::{audit, AiStore, BudgetLimits, JobQuote};
 use crate::{AiError, PreparedJob, Result};
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
@@ -251,8 +251,17 @@ impl AiStore {
             return Err(AiError::ApprovalRequired);
         }
         self.check_model_permission(&plan, job_id, at)?;
-        if has_blocking_attempt(&tx)? {
-            return Err(AiError::InFlight);
+        if has_unknown_attempt(&tx)? {
+            return Err(AiError::UnknownOutcome);
+        }
+        // Other approved jobs may join the native dispatch queue. A currently
+        // executing attempt on this same job cannot be superseded by reapproval.
+        if tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM ai_attempts WHERE job_id=? AND state='reserved')",
+            [job_id],
+            |row| row.get::<_, bool>(0),
+        )? {
+            return Err(AiError::WorkerBusy);
         }
         if let Some(until) = super::retries::retry_floor(&tx, job_id, at)? {
             return Err(AiError::RetryWaiting(until));

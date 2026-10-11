@@ -5,6 +5,12 @@ type IpcResult<T> = std::result::Result<T, String>;
 use super::playback::restore_learning_archive;
 use serde::Serialize;
 mod transfer_dialog;
+
+/// A successful learning-data replacement can still need operational cleanup.
+#[derive(Debug, Default, Serialize)]
+pub struct RestoreResult {
+    pub warnings: Vec<String>,
+}
 pub async fn export_learning(
     state: AppState,
     format: String,
@@ -171,7 +177,7 @@ pub async fn restore_learning(
     app: tauri::AppHandle,
     state: AppState,
     token: String,
-) -> IpcResult<()> {
+) -> IpcResult<RestoreResult> {
     let state = state.clone();
     let archive = take_restore_archive(&state, &token).map_err(err)?;
     on_main(app, move || restore_learning_archive(&state, &archive))

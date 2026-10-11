@@ -1,0 +1,1143 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-11",
+  "releaseSource": "https://ffmpeg.org/download.html",
+  "releases": [
+    {
+      "version": "9.0.2",
+      "tag": "n9.0.2",
+      "commit": "946fcce07b6dcd0331c8cc609192aeff5e1924f8",
+      "signedTagVerifiedByGitHub": true,
+      "sourceSha256": "0aa2b1de2a5698b20a23e93d539a9a8e82ca0117496c5bdf05d198805f42bb3b",
+      "tagUrl": "https://api.github.com/repos/FFmpeg/FFmpeg/git/ref/tags/n9.0.2"
+    },
+    {
+      "version": "8.1.3",
+      "tag": "n8.1.3",
+      "commit": "1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7",
+      "signedTagVerifiedByGitHub": true,
+      "sourceSha256": "a406fe831cbb605f5fe50e43eb566e502ae63ff3b3206bfa744e4b31b8bb73ac",
+      "tagUrl": "https://api.github.com/repos/FFmpeg/FFmpeg/git/ref/tags/n8.1.3"
+    }
+  ],
+  "build": {
+    "result": "passed",
+    "mpv": "0.41.0",
+    "candidateFfmpeg": "9.0.2",
+    "compatibilityPatches": [],
+    "productionFlagsUnchanged": true,
+    "oldHeadersAndLibrariesRemovedBeforeBuild": true,
+    "image": "surtitle-redesign-ffmpeg-9.0.2",
+    "log": "work\\ffmpeg-native-evaluation\\build-9.0.2.log",
+    "logSha256": "2db354dfcf26f22a194ee88253191e4481920643b5c2100a3d103c4b727e7a68",
+    "dllSha256": "17409eefce3e4916c51fa6abaa5332fe0dc1550a1dd355afd31a918547297fad",
+    "dllBytes": 54273939,
+    "correspondingSourceSha256": "133a3701ac8e9be44946c9417b3f227f501ec2718f01f265a130352fbae6b63d",
+    "correspondingSourceBytes": 87568769,
+    "noticeComparison": [
+      {
+        "path": "evidence/toolchain-notices/g++-mingw-w64-x86-64-posix-copyright",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "evidence/toolchain-notices/gcc-mingw-w64-x86-64-posix-copyright",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "evidence/toolchain-notices/mingw-w64-common-copyright",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "evidence/toolchain-notices/mingw-w64-x86-64-dev-copyright",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/dav1d/COPYING",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/ffmpeg/COPYING.GPLv2",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/ffmpeg/COPYING.GPLv3",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/ffmpeg/COPYING.LGPLv2.1",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/ffmpeg/COPYING.LGPLv3",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/ffmpeg/LICENSE.md",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/freetype-dlg/LICENSE",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/freetype/FTL.TXT",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/freetype/LICENSE.TXT",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/fribidi/COPYING",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/glslang/AML-glslang.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/glslang/Apache-2.0.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/glslang/BSD-2-Clause.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/glslang/BSD-3-Clause.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/glslang/Bison-exception-2.2.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/glslang/GPL-3.0-or-later.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/glslang/LICENSE.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/glslang/MIT-Khronos-old.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/glslang/MIT.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/harfbuzz/COPYING",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/libass/COPYING",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/libplacebo-Vulkan-Headers/Apache-2.0.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/libplacebo-Vulkan-Headers/LICENSE.md",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/libplacebo-Vulkan-Headers/MIT.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/libplacebo-fast_float/LICENSE-APACHE",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/libplacebo-fast_float/LICENSE-BOOST",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/libplacebo-fast_float/LICENSE-MIT",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/libplacebo-glad/LICENSE",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/libplacebo-jinja/LICENSE.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/libplacebo-markupsafe/LICENSE.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/libplacebo-nuklear/LICENSE",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/libplacebo/LICENSE",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/mpv/Copyright",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/mpv/LICENSE.GPL",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/mpv/LICENSE.LGPL",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/shaderc/LICENSE",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/spirv-cross/Apache-2.0.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/spirv-cross/CC-BY-4.0.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/spirv-cross/LICENSE",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/spirv-cross/LicenseRef-KhronosFreeUse.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/spirv-cross/MIT.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/spirv-headers/CC-BY-4.0.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/spirv-headers/LICENSE",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/spirv-headers/MIT.txt",
+        "includedInCurrentNotice": true
+      },
+      {
+        "path": "notices/spirv-tools/LICENSE",
+        "includedInCurrentNotice": true
+      }
+    ]
+  },
+  "baseline": {
+    "rawReport": "work\\ffmpeg-native-evaluation\\baseline-runtime\\native.json",
+    "rawSha256": "0d98bf53bc1928c7bc929b8dd882493171e838669465c5cac077489cee400861",
+    "dllSha256": "9b613e13e9608501a7c72027a1fb0f49fe6e1c0278863ad2b519f4e859aa3b10",
+    "hardware": {
+      "hresult": "0x00000000",
+      "hardwareOnly": true,
+      "created": true,
+      "featureLevel": "0xb000",
+      "adapter": "NVIDIA GeForce RTX 5070 Ti",
+      "vendorId": "0x10de",
+      "deviceId": "0x2c05",
+      "dedicatedVideoMemory": 16771973120
+    },
+    "fixtures": [
+      {
+        "fixture": "h264-1920x1080-multi.mp4",
+        "ffmpegVersion": "8.1.2",
+        "mpvVersion": "mpv v0.41.0",
+        "playbackAdvanced": true,
+        "properties": {
+          "current-vo": "gpu-next",
+          "hwdec-current": "d3d11va",
+          "video-format": "h264",
+          "video-codec": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+          "video-params/w": "1920",
+          "video-params/h": "1080",
+          "time-pos": "2.033333",
+          "duration": "8.000000",
+          "frame-drop-count": "0",
+          "decoder-frame-drop-count": "0",
+          "vo-delayed-frame-count": "0",
+          "estimated-vf-fps": "30.000000"
+        },
+        "pausedExactSeek": {
+          "position": "1.266667",
+          "paused": "yes"
+        },
+        "selectedSecondAudio": true,
+        "loop": {
+          "wraps": 3,
+          "minimum": 0.5,
+          "maximum": 0.933333
+        },
+        "clipping": {
+          "regionKind": 3,
+          "videoPointRetained": true,
+          "popupPointExcluded": true,
+          "playbackContinued": true
+        },
+        "audioClockPhases": [
+          {
+            "name": "normal",
+            "speed": 1.0,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.6e-05,
+            "p95AbsoluteAvsyncSeconds": 9e-06,
+            "audioAdvancedSeconds": 1.964918,
+            "videoAdvancedSeconds": 2.0
+          },
+          {
+            "name": "faster",
+            "speed": 1.5,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 6.3e-05,
+            "p95AbsoluteAvsyncSeconds": 1e-05,
+            "audioAdvancedSeconds": 2.9430250000000004,
+            "videoAdvancedSeconds": 2.9333329999999997
+          },
+          {
+            "name": "afterSeek",
+            "speed": 1.0,
+            "seekSeconds": 3.0,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1e-05,
+            "p95AbsoluteAvsyncSeconds": 8e-06,
+            "audioAdvancedSeconds": 1.963095,
+            "videoAdvancedSeconds": 1.9666669999999997
+          }
+        ]
+      },
+      {
+        "fixture": "h264-3840x2160-multi.mp4",
+        "ffmpegVersion": "8.1.2",
+        "mpvVersion": "mpv v0.41.0",
+        "playbackAdvanced": true,
+        "properties": {
+          "current-vo": "gpu-next",
+          "hwdec-current": "d3d11va",
+          "video-format": "h264",
+          "video-codec": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+          "video-params/w": "3840",
+          "video-params/h": "2160",
+          "time-pos": "2.000000",
+          "duration": "8.000000",
+          "frame-drop-count": "0",
+          "decoder-frame-drop-count": "0",
+          "vo-delayed-frame-count": "0",
+          "estimated-vf-fps": "30.000000"
+        },
+        "pausedExactSeek": {
+          "position": "1.266667",
+          "paused": "yes"
+        },
+        "selectedSecondAudio": true,
+        "loop": {
+          "wraps": 3,
+          "minimum": 0.5,
+          "maximum": 0.933333
+        },
+        "clipping": {
+          "regionKind": 3,
+          "videoPointRetained": true,
+          "popupPointExcluded": true,
+          "playbackContinued": true
+        },
+        "audioClockPhases": [
+          {
+            "name": "normal",
+            "speed": 1.0,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.1e-05,
+            "p95AbsoluteAvsyncSeconds": 9e-06,
+            "audioAdvancedSeconds": 1.9665119999999998,
+            "videoAdvancedSeconds": 1.9333330000000002
+          },
+          {
+            "name": "faster",
+            "speed": 1.5,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.7e-05,
+            "p95AbsoluteAvsyncSeconds": 8e-06,
+            "audioAdvancedSeconds": 2.948184,
+            "videoAdvancedSeconds": 2.966666
+          },
+          {
+            "name": "afterSeek",
+            "speed": 1.0,
+            "seekSeconds": 3.0,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.2e-05,
+            "p95AbsoluteAvsyncSeconds": 9e-06,
+            "audioAdvancedSeconds": 1.965245,
+            "videoAdvancedSeconds": 1.9666670000000002
+          }
+        ]
+      },
+      {
+        "fixture": "hevc-1920x1080-multi.mp4",
+        "ffmpegVersion": "8.1.2",
+        "mpvVersion": "mpv v0.41.0",
+        "playbackAdvanced": true,
+        "properties": {
+          "current-vo": "gpu-next",
+          "hwdec-current": "d3d11va",
+          "video-format": "hevc",
+          "video-codec": "H.265 / HEVC (High Efficiency Video Coding)",
+          "video-params/w": "1920",
+          "video-params/h": "1080",
+          "time-pos": "2.033333",
+          "duration": "8.000000",
+          "frame-drop-count": "0",
+          "decoder-frame-drop-count": "0",
+          "vo-delayed-frame-count": "0",
+          "estimated-vf-fps": "30.000000"
+        },
+        "pausedExactSeek": {
+          "position": "1.266667",
+          "paused": "yes"
+        },
+        "selectedSecondAudio": true,
+        "loop": {
+          "wraps": 4,
+          "minimum": 0.5,
+          "maximum": 0.933333
+        },
+        "clipping": {
+          "regionKind": 3,
+          "videoPointRetained": true,
+          "popupPointExcluded": true,
+          "playbackContinued": true
+        },
+        "audioClockPhases": [
+          {
+            "name": "normal",
+            "speed": 1.0,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 2e-05,
+            "p95AbsoluteAvsyncSeconds": 1e-05,
+            "audioAdvancedSeconds": 1.9644180000000002,
+            "videoAdvancedSeconds": 2.0
+          },
+          {
+            "name": "faster",
+            "speed": 1.5,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 2.2e-05,
+            "p95AbsoluteAvsyncSeconds": 1.2e-05,
+            "audioAdvancedSeconds": 2.948337,
+            "videoAdvancedSeconds": 2.966666
+          },
+          {
+            "name": "afterSeek",
+            "speed": 1.0,
+            "seekSeconds": 3.0,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.7e-05,
+            "p95AbsoluteAvsyncSeconds": 1e-05,
+            "audioAdvancedSeconds": 1.9715820000000002,
+            "videoAdvancedSeconds": 1.9333329999999997
+          }
+        ]
+      },
+      {
+        "fixture": "hevc-3840x2160-multi.mp4",
+        "ffmpegVersion": "8.1.2",
+        "mpvVersion": "mpv v0.41.0",
+        "playbackAdvanced": true,
+        "properties": {
+          "current-vo": "gpu-next",
+          "hwdec-current": "d3d11va",
+          "video-format": "hevc",
+          "video-codec": "H.265 / HEVC (High Efficiency Video Coding)",
+          "video-params/w": "3840",
+          "video-params/h": "2160",
+          "time-pos": "2.033333",
+          "duration": "8.000000",
+          "frame-drop-count": "0",
+          "decoder-frame-drop-count": "0",
+          "vo-delayed-frame-count": "0",
+          "estimated-vf-fps": "30.000000"
+        },
+        "pausedExactSeek": {
+          "position": "1.266667",
+          "paused": "yes"
+        },
+        "selectedSecondAudio": true,
+        "loop": {
+          "wraps": 3,
+          "minimum": 0.5,
+          "maximum": 0.933333
+        },
+        "clipping": {
+          "regionKind": 3,
+          "videoPointRetained": true,
+          "popupPointExcluded": true,
+          "playbackContinued": true
+        },
+        "audioClockPhases": [
+          {
+            "name": "normal",
+            "speed": 1.0,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.4e-05,
+            "p95AbsoluteAvsyncSeconds": 9e-06,
+            "audioAdvancedSeconds": 1.9650500000000002,
+            "videoAdvancedSeconds": 1.9666670000000002
+          },
+          {
+            "name": "faster",
+            "speed": 1.5,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.3e-05,
+            "p95AbsoluteAvsyncSeconds": 1.3e-05,
+            "audioAdvancedSeconds": 2.9499839999999997,
+            "videoAdvancedSeconds": 2.966666
+          },
+          {
+            "name": "afterSeek",
+            "speed": 1.0,
+            "seekSeconds": 3.0,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.1e-05,
+            "p95AbsoluteAvsyncSeconds": 1e-05,
+            "audioAdvancedSeconds": 1.9013520000000002,
+            "videoAdvancedSeconds": 1.9333330000000002
+          }
+        ]
+      },
+      {
+        "fixture": "av1-1920x1080-multi.mp4",
+        "ffmpegVersion": "8.1.2",
+        "mpvVersion": "mpv v0.41.0",
+        "playbackAdvanced": true,
+        "properties": {
+          "current-vo": "gpu-next",
+          "hwdec-current": "d3d11va",
+          "video-format": "av1",
+          "video-codec": "Alliance for Open Media AV1",
+          "video-params/w": "1920",
+          "video-params/h": "1080",
+          "time-pos": "2.033333",
+          "duration": "8.000000",
+          "frame-drop-count": "0",
+          "decoder-frame-drop-count": "0",
+          "vo-delayed-frame-count": "0",
+          "estimated-vf-fps": "30.000000"
+        },
+        "pausedExactSeek": {
+          "position": "1.266667",
+          "paused": "yes"
+        },
+        "selectedSecondAudio": true,
+        "loop": {
+          "wraps": 4,
+          "minimum": 0.5,
+          "maximum": 1.266667
+        },
+        "clipping": {
+          "regionKind": 3,
+          "videoPointRetained": true,
+          "popupPointExcluded": true,
+          "playbackContinued": true
+        },
+        "audioClockPhases": [
+          {
+            "name": "normal",
+            "speed": 1.0,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 0.000101,
+            "p95AbsoluteAvsyncSeconds": 1.2e-05,
+            "audioAdvancedSeconds": 1.964153,
+            "videoAdvancedSeconds": 1.966667
+          },
+          {
+            "name": "faster",
+            "speed": 1.5,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 2.2e-05,
+            "p95AbsoluteAvsyncSeconds": 1.1e-05,
+            "audioAdvancedSeconds": 2.9510449999999997,
+            "videoAdvancedSeconds": 2.933334
+          },
+          {
+            "name": "afterSeek",
+            "speed": 1.0,
+            "seekSeconds": 3.0,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.7e-05,
+            "p95AbsoluteAvsyncSeconds": 1e-05,
+            "audioAdvancedSeconds": 1.9632249999999996,
+            "videoAdvancedSeconds": 1.9666670000000002
+          }
+        ]
+      },
+      {
+        "fixture": "av1-3840x2160-multi.mp4",
+        "ffmpegVersion": "8.1.2",
+        "mpvVersion": "mpv v0.41.0",
+        "playbackAdvanced": true,
+        "properties": {
+          "current-vo": "gpu-next",
+          "hwdec-current": "d3d11va",
+          "video-format": "av1",
+          "video-codec": "Alliance for Open Media AV1",
+          "video-params/w": "3840",
+          "video-params/h": "2160",
+          "time-pos": "2.033333",
+          "duration": "8.000000",
+          "frame-drop-count": "0",
+          "decoder-frame-drop-count": "0",
+          "vo-delayed-frame-count": "0",
+          "estimated-vf-fps": "30.000000"
+        },
+        "pausedExactSeek": {
+          "position": "1.266667",
+          "paused": "yes"
+        },
+        "selectedSecondAudio": true,
+        "loop": {
+          "wraps": 4,
+          "minimum": 0.5,
+          "maximum": 1.266667
+        },
+        "clipping": {
+          "regionKind": 3,
+          "videoPointRetained": true,
+          "popupPointExcluded": true,
+          "playbackContinued": true
+        },
+        "audioClockPhases": [
+          {
+            "name": "normal",
+            "speed": 1.0,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 9e-06,
+            "p95AbsoluteAvsyncSeconds": 7e-06,
+            "audioAdvancedSeconds": 1.9653850000000002,
+            "videoAdvancedSeconds": 1.9666669999999997
+          },
+          {
+            "name": "faster",
+            "speed": 1.5,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 2.3e-05,
+            "p95AbsoluteAvsyncSeconds": 1.9e-05,
+            "audioAdvancedSeconds": 2.9500830000000002,
+            "videoAdvancedSeconds": 2.933333
+          },
+          {
+            "name": "afterSeek",
+            "speed": 1.0,
+            "seekSeconds": 3.0,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 9e-06,
+            "p95AbsoluteAvsyncSeconds": 8e-06,
+            "audioAdvancedSeconds": 1.9147210000000001,
+            "videoAdvancedSeconds": 1.9333330000000002
+          }
+        ]
+      }
+    ]
+  },
+  "candidate": {
+    "rawReport": "work\\ffmpeg-native-evaluation\\candidate-runtime\\native.json",
+    "rawSha256": "4667ef4970dcf875e3dbcc52efdcf11c05211f4c41c0e8a86c2c106778a50ac2",
+    "dllSha256": "17409eefce3e4916c51fa6abaa5332fe0dc1550a1dd355afd31a918547297fad",
+    "hardware": {
+      "hresult": "0x00000000",
+      "hardwareOnly": true,
+      "created": true,
+      "featureLevel": "0xb000",
+      "adapter": "NVIDIA GeForce RTX 5070 Ti",
+      "vendorId": "0x10de",
+      "deviceId": "0x2c05",
+      "dedicatedVideoMemory": 16771973120
+    },
+    "fixtures": [
+      {
+        "fixture": "h264-1920x1080-multi.mp4",
+        "ffmpegVersion": "9.0.2",
+        "mpvVersion": "mpv v0.41.0",
+        "playbackAdvanced": true,
+        "properties": {
+          "current-vo": "gpu-next",
+          "hwdec-current": "d3d11va",
+          "video-format": "h264",
+          "video-codec": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+          "video-params/w": "1920",
+          "video-params/h": "1080",
+          "time-pos": "2.000000",
+          "duration": "8.000000",
+          "frame-drop-count": "0",
+          "decoder-frame-drop-count": "0",
+          "vo-delayed-frame-count": "0",
+          "estimated-vf-fps": "30.000000"
+        },
+        "pausedExactSeek": {
+          "position": "1.266667",
+          "paused": "yes"
+        },
+        "selectedSecondAudio": true,
+        "loop": {
+          "wraps": 3,
+          "minimum": 0.5,
+          "maximum": 0.933333
+        },
+        "clipping": {
+          "regionKind": 3,
+          "videoPointRetained": true,
+          "popupPointExcluded": true,
+          "playbackContinued": true
+        },
+        "audioClockPhases": [
+          {
+            "name": "normal",
+            "speed": 1.0,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.8e-05,
+            "p95AbsoluteAvsyncSeconds": 1.4e-05,
+            "audioAdvancedSeconds": 1.9669919999999999,
+            "videoAdvancedSeconds": 1.9666670000000002
+          },
+          {
+            "name": "faster",
+            "speed": 1.5,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 2.1e-05,
+            "p95AbsoluteAvsyncSeconds": 1.8e-05,
+            "audioAdvancedSeconds": 2.94864,
+            "videoAdvancedSeconds": 2.933333
+          },
+          {
+            "name": "afterSeek",
+            "speed": 1.0,
+            "seekSeconds": 3.0,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.3e-05,
+            "p95AbsoluteAvsyncSeconds": 1.2e-05,
+            "audioAdvancedSeconds": 1.9650100000000004,
+            "videoAdvancedSeconds": 1.9666669999999997
+          }
+        ]
+      },
+      {
+        "fixture": "h264-3840x2160-multi.mp4",
+        "ffmpegVersion": "9.0.2",
+        "mpvVersion": "mpv v0.41.0",
+        "playbackAdvanced": true,
+        "properties": {
+          "current-vo": "gpu-next",
+          "hwdec-current": "d3d11va",
+          "video-format": "h264",
+          "video-codec": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+          "video-params/w": "3840",
+          "video-params/h": "2160",
+          "time-pos": "2.000000",
+          "duration": "8.000000",
+          "frame-drop-count": "0",
+          "decoder-frame-drop-count": "0",
+          "vo-delayed-frame-count": "0",
+          "estimated-vf-fps": "30.000000"
+        },
+        "pausedExactSeek": {
+          "position": "1.266667",
+          "paused": "yes"
+        },
+        "selectedSecondAudio": true,
+        "loop": {
+          "wraps": 4,
+          "minimum": 0.5,
+          "maximum": 1.266667
+        },
+        "clipping": {
+          "regionKind": 3,
+          "videoPointRetained": true,
+          "popupPointExcluded": true,
+          "playbackContinued": true
+        },
+        "audioClockPhases": [
+          {
+            "name": "normal",
+            "speed": 1.0,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 2.3e-05,
+            "p95AbsoluteAvsyncSeconds": 1.6e-05,
+            "audioAdvancedSeconds": 1.9673910000000001,
+            "videoAdvancedSeconds": 1.9666670000000002
+          },
+          {
+            "name": "faster",
+            "speed": 1.5,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 2.5e-05,
+            "p95AbsoluteAvsyncSeconds": 1.7e-05,
+            "audioAdvancedSeconds": 2.949322,
+            "videoAdvancedSeconds": 2.9333329999999997
+          },
+          {
+            "name": "afterSeek",
+            "speed": 1.0,
+            "seekSeconds": 3.0,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.6e-05,
+            "p95AbsoluteAvsyncSeconds": 1.1e-05,
+            "audioAdvancedSeconds": 1.9653179999999995,
+            "videoAdvancedSeconds": 1.9666670000000002
+          }
+        ]
+      },
+      {
+        "fixture": "hevc-1920x1080-multi.mp4",
+        "ffmpegVersion": "9.0.2",
+        "mpvVersion": "mpv v0.41.0",
+        "playbackAdvanced": true,
+        "properties": {
+          "current-vo": "gpu-next",
+          "hwdec-current": "d3d11va",
+          "video-format": "hevc",
+          "video-codec": "H.265 / HEVC (High Efficiency Video Coding)",
+          "video-params/w": "1920",
+          "video-params/h": "1080",
+          "time-pos": "2.000000",
+          "duration": "8.000000",
+          "frame-drop-count": "0",
+          "decoder-frame-drop-count": "0",
+          "vo-delayed-frame-count": "0",
+          "estimated-vf-fps": "30.000000"
+        },
+        "pausedExactSeek": {
+          "position": "1.266667",
+          "paused": "yes"
+        },
+        "selectedSecondAudio": true,
+        "loop": {
+          "wraps": 4,
+          "minimum": 0.5,
+          "maximum": 0.933333
+        },
+        "clipping": {
+          "regionKind": 3,
+          "videoPointRetained": true,
+          "popupPointExcluded": true,
+          "playbackContinued": true
+        },
+        "audioClockPhases": [
+          {
+            "name": "normal",
+            "speed": 1.0,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.2e-05,
+            "p95AbsoluteAvsyncSeconds": 1.1e-05,
+            "audioAdvancedSeconds": 1.9655680000000002,
+            "videoAdvancedSeconds": 2.0
+          },
+          {
+            "name": "faster",
+            "speed": 1.5,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 4.5e-05,
+            "p95AbsoluteAvsyncSeconds": 1.9e-05,
+            "audioAdvancedSeconds": 2.945508,
+            "videoAdvancedSeconds": 2.9333329999999997
+          },
+          {
+            "name": "afterSeek",
+            "speed": 1.0,
+            "seekSeconds": 3.0,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.2e-05,
+            "p95AbsoluteAvsyncSeconds": 9e-06,
+            "audioAdvancedSeconds": 1.962984,
+            "videoAdvancedSeconds": 1.9666669999999997
+          }
+        ]
+      },
+      {
+        "fixture": "hevc-3840x2160-multi.mp4",
+        "ffmpegVersion": "9.0.2",
+        "mpvVersion": "mpv v0.41.0",
+        "playbackAdvanced": true,
+        "properties": {
+          "current-vo": "gpu-next",
+          "hwdec-current": "d3d11va",
+          "video-format": "hevc",
+          "video-codec": "H.265 / HEVC (High Efficiency Video Coding)",
+          "video-params/w": "3840",
+          "video-params/h": "2160",
+          "time-pos": "2.000000",
+          "duration": "8.000000",
+          "frame-drop-count": "0",
+          "decoder-frame-drop-count": "0",
+          "vo-delayed-frame-count": "0",
+          "estimated-vf-fps": "30.000000"
+        },
+        "pausedExactSeek": {
+          "position": "1.266667",
+          "paused": "yes"
+        },
+        "selectedSecondAudio": true,
+        "loop": {
+          "wraps": 3,
+          "minimum": 0.5,
+          "maximum": 0.933333
+        },
+        "clipping": {
+          "regionKind": 3,
+          "videoPointRetained": true,
+          "popupPointExcluded": true,
+          "playbackContinued": true
+        },
+        "audioClockPhases": [
+          {
+            "name": "normal",
+            "speed": 1.0,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.6e-05,
+            "p95AbsoluteAvsyncSeconds": 1.5e-05,
+            "audioAdvancedSeconds": 1.965566,
+            "videoAdvancedSeconds": 2.0
+          },
+          {
+            "name": "faster",
+            "speed": 1.5,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.9e-05,
+            "p95AbsoluteAvsyncSeconds": 1.3e-05,
+            "audioAdvancedSeconds": 2.948541,
+            "videoAdvancedSeconds": 2.966666
+          },
+          {
+            "name": "afterSeek",
+            "speed": 1.0,
+            "seekSeconds": 3.0,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.2e-05,
+            "p95AbsoluteAvsyncSeconds": 1e-05,
+            "audioAdvancedSeconds": 1.9143340000000002,
+            "videoAdvancedSeconds": 1.9666670000000002
+          }
+        ]
+      },
+      {
+        "fixture": "av1-1920x1080-multi.mp4",
+        "ffmpegVersion": "9.0.2",
+        "mpvVersion": "mpv v0.41.0",
+        "playbackAdvanced": true,
+        "properties": {
+          "current-vo": "gpu-next",
+          "hwdec-current": "d3d11va",
+          "video-format": "av1",
+          "video-codec": "Alliance for Open Media AV1",
+          "video-params/w": "1920",
+          "video-params/h": "1080",
+          "time-pos": "2.000000",
+          "duration": "8.000000",
+          "frame-drop-count": "0",
+          "decoder-frame-drop-count": "0",
+          "vo-delayed-frame-count": "0",
+          "estimated-vf-fps": "30.000000"
+        },
+        "pausedExactSeek": {
+          "position": "1.266667",
+          "paused": "yes"
+        },
+        "selectedSecondAudio": true,
+        "loop": {
+          "wraps": 3,
+          "minimum": 0.5,
+          "maximum": 0.933333
+        },
+        "clipping": {
+          "regionKind": 3,
+          "videoPointRetained": true,
+          "popupPointExcluded": true,
+          "playbackContinued": true
+        },
+        "audioClockPhases": [
+          {
+            "name": "normal",
+            "speed": 1.0,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.6e-05,
+            "p95AbsoluteAvsyncSeconds": 1.1e-05,
+            "audioAdvancedSeconds": 1.964765,
+            "videoAdvancedSeconds": 1.933333
+          },
+          {
+            "name": "faster",
+            "speed": 1.5,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.3e-05,
+            "p95AbsoluteAvsyncSeconds": 9e-06,
+            "audioAdvancedSeconds": 2.9458460000000004,
+            "videoAdvancedSeconds": 2.933334
+          },
+          {
+            "name": "afterSeek",
+            "speed": 1.0,
+            "seekSeconds": 3.0,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.2e-05,
+            "p95AbsoluteAvsyncSeconds": 1e-05,
+            "audioAdvancedSeconds": 1.9553550000000004,
+            "videoAdvancedSeconds": 1.9666670000000002
+          }
+        ]
+      },
+      {
+        "fixture": "av1-3840x2160-multi.mp4",
+        "ffmpegVersion": "9.0.2",
+        "mpvVersion": "mpv v0.41.0",
+        "playbackAdvanced": true,
+        "properties": {
+          "current-vo": "gpu-next",
+          "hwdec-current": "d3d11va",
+          "video-format": "av1",
+          "video-codec": "Alliance for Open Media AV1",
+          "video-params/w": "3840",
+          "video-params/h": "2160",
+          "time-pos": "2.000000",
+          "duration": "8.000000",
+          "frame-drop-count": "0",
+          "decoder-frame-drop-count": "0",
+          "vo-delayed-frame-count": "0",
+          "estimated-vf-fps": "30.000000"
+        },
+        "pausedExactSeek": {
+          "position": "1.266667",
+          "paused": "yes"
+        },
+        "selectedSecondAudio": true,
+        "loop": {
+          "wraps": 4,
+          "minimum": 0.5,
+          "maximum": 0.933333
+        },
+        "clipping": {
+          "regionKind": 3,
+          "videoPointRetained": true,
+          "popupPointExcluded": true,
+          "playbackContinued": true
+        },
+        "audioClockPhases": [
+          {
+            "name": "normal",
+            "speed": 1.0,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 9.2e-05,
+            "p95AbsoluteAvsyncSeconds": 1.2e-05,
+            "audioAdvancedSeconds": 1.964251,
+            "videoAdvancedSeconds": 1.966667
+          },
+          {
+            "name": "faster",
+            "speed": 1.5,
+            "seekSeconds": 0.5,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1.9e-05,
+            "p95AbsoluteAvsyncSeconds": 8e-06,
+            "audioAdvancedSeconds": 2.9469290000000004,
+            "videoAdvancedSeconds": 2.933333
+          },
+          {
+            "name": "afterSeek",
+            "speed": 1.0,
+            "seekSeconds": 3.0,
+            "settlingSeconds": 0.25,
+            "sampleCount": 40,
+            "maximumAbsoluteAvsyncSeconds": 1e-05,
+            "p95AbsoluteAvsyncSeconds": 8e-06,
+            "audioAdvancedSeconds": 1.914987,
+            "videoAdvancedSeconds": 1.9333330000000002
+          }
+        ]
+      }
+    ]
+  },
+  "decision": "FFmpeg 9.0.2 passed the unpatched build and matched playback/clock checks; 8.1.3 fallback was not needed.",
+  "limitations": [
+    "Synthetic8-second fixtures and one Windows/NVIDIA host; not a general decoder performance benchmark.",
+    "Hidden native window does not test WebView composition or visible overlay behavior.",
+    "WASAPI volume0 exercises the audio driver clock; mpv-reported avsync is not an acoustic or perceptual lip-sync measurement.",
+    "No installed application profile, paid API, production DLL, or production manifest changed by this summarizer."
+  ],
+  "adoption": {
+    "worktreeRuntimeMatchesCandidate": true,
+    "stagedCorrespondingSourceMatchesCandidate": true,
+    "selectedSource": {
+      "ref": "n9.0.2",
+      "license": "GPL-3.0-or-later",
+      "commit": "946fcce07b6dcd0331c8cc609192aeff5e1924f8",
+      "id": "ffmpeg",
+      "repo": "FFmpeg/FFmpeg",
+      "sha256": "0aa2b1de2a5698b20a23e93d539a9a8e82ca0117496c5bdf05d198805f42bb3b"
+    },
+    "previousCandidate": "work/rendering-evaluation/hardware-candidate/",
+    "installedApplicationChanged": false
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "purpose": "2026-10-11 FFmpeg 9.0.2 production D3D11 candidate adopted in redesign worktree",
+  "noticeFilesVerified": 49,
+  "files": {
+    "libmpv-build-evidence.json": {
+      "sha256": "75af74aa6a2f4114855b8fb5ab5cd62243b444f0da265f338690be7650a337c3",
+      "bytes": 16586
+    },
+    "libmpv-source.tar.gz": {
+      "sha256": "133a3701ac8e9be44946c9417b3f227f501ec2718f01f265a130352fbae6b63d",
+      "bytes": 87568769
+    },
+    "mpv-2.dll": {
+      "sha256": "17409eefce3e4916c51fa6abaa5332fe0dc1550a1dd355afd31a918547297fad",
+      "bytes": 54273939
+    },
+    "onnxruntime-source-inventory.json": {
+      "sha256": "36ceb1c616046b5be4c482553a9727f54d399fa2c4587f25f9d969bbe2d979a5",
+      "bytes": 30008
+    },
+    "onnxruntime-source.tar.gz": {
+      "sha256": "841008105a20befabfe2a032c36d693014d81c9bf8d1d136fb9c60585296a119",
+      "bytes": 320571053
+    }
+  }
+}

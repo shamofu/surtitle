@@ -44,6 +44,9 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const [portalRoot] = useState(() => {
     const element = document.createElement('div');
     element.className = 'notification-portal';
+    // React Aria recognizes toast layers while hiding modal background content.
+    // This container moves between hosts; it must not inherit stale aria-hidden.
+    element.dataset.reactAriaTopLayer = '';
     return element;
   });
   const host = notificationHost ?? pageHost;

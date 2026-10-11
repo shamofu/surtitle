@@ -3,12 +3,15 @@ import type { Page } from '@playwright/test';
 import type { AppSnapshot } from '../../src/shared/contracts/snapshot';
 import type { SubtitleSegment } from '../../src/shared/contracts/media';
 import type { AiContinuation } from '../../src/features/ai/continuations';
+import type { UiDraft } from '../../src/shared/contracts/editing';
 import type { EditorDraft, EditorDraftInput, EditorDraftReference } from '../../src/features/study/editor-drafts/api';
 
 // This fixture is installed only by Playwright through request interception.
 // The ordinary browser preview continues to have no fabricated native state.
 export async function installLearningFixture(page: Page, locale: 'ja' | 'en', theme: 'light' | 'dark', options: {
   segmentOverrides?: Record<number, Partial<SubtitleSegment>>;
+  segmentCount?: number;
+  cardCount?: number;
 } = {}) {
   const media = {
     id: 'visual-fixture', title: 'A walk along the coast', path: 'test-fixture.mp4',
@@ -16,7 +19,7 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
     learningLanguage: 'en', explanationLanguage: 'ja', status: 'ready' as const,
     createdAt: '2026-09-01T00:00:00Z', segmentCount: 120, cardCount: 2,
   };
-  const segments: SubtitleSegment[] = Array.from({ length: 120 }, (_, index) => ({
+  const segments: SubtitleSegment[] = Array.from({ length: options.segmentCount ?? 120 }, (_, index) => ({
     id: `visual-cue-${index}`, mediaId: media.id, startMs: index * 7000, endMs: (index + 1) * 7000,
     text: index === 10 ? 'Sometimes the best way to find your way is to take a little detour.' : [
       'We took the path that follows the coast.', 'There is no need to hurry.',
@@ -41,23 +44,32 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
     jobs: [], budget: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 },
     tools: [{ id: 'ffmpeg', name: 'FFmpeg', provider: 'external', status: 'ready', canRollback: false, version: '8.0' }],
   };
+  if (options.cardCount !== undefined) {
+    snapshot.cards = Array.from({ length: options.cardCount }, (_, index) => ({ ...snapshot.cards[0], id: `phrase-${index}`, term: `phrase ${String(index).padStart(5, '0')} take a little detour` }));
+  }
+  snapshot.media[0].segmentCount = segments.length;
+  snapshot.media[0].cardCount = snapshot.cards.length;
   await page.addInitScript(({ snapshot, segments }) => {
     const storageKey = 'surtitle-browser-learning-fixture';
     const editorDrafts = new Map<string, EditorDraft>();
+    const uiDrafts = new Map<string, UiDraft>();
+    const recoveredDrafts = new Map<string, UiDraft>();
     const continuations = new Map<string, AiContinuation>();
     const stored = localStorage.getItem(storageKey);
     if (stored) {
       const saved = JSON.parse(stored) as {
         snapshot: AppSnapshot; segments: SubtitleSegment[];
-        editorDrafts: EditorDraft[]; continuations: AiContinuation[];
+        editorDrafts: EditorDraft[]; continuations: AiContinuation[]; uiDrafts?: UiDraft[];
       };
       Object.assign(snapshot, saved.snapshot);
       segments.splice(0, segments.length, ...saved.segments);
       saved.editorDrafts.forEach(draft => editorDrafts.set(draft.id, draft));
       saved.continuations.forEach(item => continuations.set(item.id, item));
+      saved.uiDrafts?.forEach(item => item.archiveId ? recoveredDrafts.set(item.archiveId, item) : uiDrafts.set(`${item.kind}:${item.entityId}`, item));
     }
     const persist = () => localStorage.setItem(storageKey, JSON.stringify({
       snapshot, segments, editorDrafts: [...editorDrafts.values()], continuations: [...continuations.values()],
+      uiDrafts: [...uiDrafts.values(), ...recoveredDrafts.values()],
     }));
     const currentMedia = (mediaId: string) => {
       const item = snapshot.media.find(media => media.id === mediaId);
@@ -122,11 +134,18 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
     const calls: { command: string; args: Record<string, any> }[] = [];
     let closeCount = 0;
     let draftSaveFailure: string | null = null;
-    const publish = (event: string, payload: unknown) => subscribers.get(event)?.forEach(callback => callback({ payload }));
+    let revision = 0;
+    const domains = new Map<string, number>();
+    const publish = (event: string, payload: any) => {
+      if (event === 'data-changed') { revision = Math.max(revision, payload.revision); domains.set(payload.domain, payload.revision); }
+      subscribers.get(event)?.forEach(callback => callback({ payload }));
+    };
     localStorage.setItem('surtitle-review-notified-day', new Date().toLocaleDateString('en-CA'));
     Object.assign(window, { __learningFixture: {
       calls,
       state,
+      snapshot,
+      publish,
       setDraftSaveFailure(message: string | null) { draftSaveFailure = message; },
       subscribeClose(callback: () => boolean) { closeSubscribers.add(callback); return () => closeSubscribers.delete(callback); },
       requestClose() { return [...closeSubscribers].some(callback => callback()); },
@@ -140,6 +159,45 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
       async call(command: string, args: Record<string, any> = {}) {
         calls.push({ command, args });
         if (command === 'get_app_snapshot') return structuredClone(snapshot);
+        if (command === 'get_change_checkpoint') return { version: 1, epoch: 'fixture', revision, domains: [...domains].map(([domain, revision]) => ({ domain, revision })) };
+        if (command === 'get_snapshot_patch') return Object.fromEntries((args.domains as (keyof AppSnapshot)[]).map(domain => [domain, structuredClone(snapshot[domain])]));
+        if (command === 'get_settings_state') return { settings: structuredClone(snapshot.settings), revision: comparable(snapshot.settings) };
+        if (command === 'update_settings_patch') {
+          if (args.expectedRevision !== comparable(snapshot.settings)) throw new Error('Settings changed; keep your input and reload');
+          Object.assign(snapshot.settings, structuredClone(args.patch.budgets ?? args.patch));
+          if (args.patch.budgets) snapshot.budget.limitUsd = args.patch.budgets.monthlyBudgetUsd;
+          persist();
+          return { settings: structuredClone(snapshot.settings), revision: comparable(snapshot.settings) };
+        }
+        if (command === 'get_ui_draft') return structuredClone(uiDrafts.get(`${args.kind}:${args.entityId}`) ?? null);
+        if (command === 'list_ui_drafts') return structuredClone([...uiDrafts.values(), ...recoveredDrafts.values()]);
+        if (command === 'archive_ui_draft') {
+          if (draftSaveFailure) throw new Error(draftSaveFailure);
+          const result: UiDraft = { ...structuredClone(args.request), revision: recoveredDrafts.size + 1,
+            archiveId: crypto.randomUUID(), updatedAt: new Date().toISOString(), stale: true };
+          recoveredDrafts.set(result.archiveId!, result); persist(); return structuredClone(result);
+        }
+        if (command === 'save_ui_draft') {
+          if (draftSaveFailure) throw new Error(draftSaveFailure);
+          const request = args.request;
+          const key = `${request.kind}:${request.entityId}`;
+          const previous = uiDrafts.get(key);
+          if (request.expectedRevision !== (previous?.revision ?? 0)) throw new Error('Draft changed');
+          const result = { kind: request.kind, entityId: request.entityId, fields: structuredClone(request.fields), revision: (previous?.revision ?? 0) + 1, stale: false, updatedAt: new Date().toISOString() };
+          uiDrafts.set(key, result); persist(); return structuredClone(result);
+        }
+        if (command === 'delete_ui_draft') { uiDrafts.delete(`${args.kind}:${args.entityId}`); persist(); return; }
+        if (command === 'get_card_edit_state' || command === 'save_card_edit') {
+          const card = snapshot.cards.find(item => item.id === (args.cardId ?? args.request.id));
+          if (!card) throw new Error('Phrase not found');
+          const revision = () => comparable([card.term, card.meaning, card.example, card.translation, card.explanation]);
+          if (command === 'save_card_edit') {
+            if (args.expectedRevision !== revision()) throw new Error('Phrase changed');
+            if (!args.request.term.trim()) throw new Error('Enter a phrase');
+            Object.assign(card, structuredClone(args.request)); persist();
+          }
+          return { card: structuredClone(card), revision: revision() };
+        }
         if (command === 'get_ai_runtime') return null;
         if (command === 'list_segments') return structuredClone(segments.filter(cue => !args.mediaId || cue.mediaId === args.mediaId));
         if (['list_vocabulary_candidates', 'list_draft_selections', 'list_download_jobs', 'list_operation_progress', 'scan_external_tools', 'list_transcript_issues'].includes(command)) return [];
@@ -263,9 +321,15 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
     contentType: 'application/javascript', body: 'export const nativeAvailable = () => true; export const call = (command, args) => window.__learningFixture.call(command, args);',
   }));
   await page.route(/\/src\/shared\/native\/events\.ts(?:\?|$)/, route => route.fulfill({
-    contentType: 'application/javascript', body: 'export const subscribeNative = (event, callback) => window.__learningFixture.subscribe(event, callback);',
+    contentType: 'application/javascript', body: 'export const subscribeNative = (event, callback, error, ready) => { const stop = window.__learningFixture.subscribe(event, callback); queueMicrotask(() => ready?.()); return stop; };',
   }));
   await page.route(/\/src\/shared\/native\/window\.ts(?:\?|$)/, route => route.fulfill({
-    contentType: 'application/javascript', body: 'export const subscribeWindowClose = callback => window.__learningFixture.subscribeClose(callback); export const closeWindow = () => window.__learningFixture.close();',
+    contentType: 'application/javascript', body: `const tasks = new Set();
+      export const registerCloseTask = (task, pending = () => false) => { const entry = {task,pending}; tasks.add(entry); return () => tasks.delete(entry); };
+      export const hasPendingCloseTasks = () => [...tasks].some(entry => entry.pending());
+      export const flushCloseTasks = () => Promise.all([...tasks].map(entry => entry.task()));
+      export const subscribeWindowClose = callback => window.__learningFixture.subscribeClose(callback);
+      export const closeWindow = async () => { await flushCloseTasks(); return window.__learningFixture.close(); };
+      export const requestWindowClose = () => window.__learningFixture.requestClose();`,
   }));
 }

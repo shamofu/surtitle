@@ -42,7 +42,6 @@ export function TranscriptReviewDialog({
   const [busy, setBusy] = useState(false);
   const [boundaryId, setBoundaryId] = useState('');
   const [rangeOrdinal, setRangeOrdinal] = useState<number>();
-  const [acknowledged, setAcknowledged] = useState(false);
   const [repairQuote, setRepairQuote] = useState<AiQuote>();
   const exit = useModalExit();
   const repairExit = useModalExit(!!repairQuote);
@@ -66,7 +65,6 @@ export function TranscriptReviewDialog({
     const result = await report(operation);
     if (result) {
       setView(result);
-      setAcknowledged(false);
       setLoadFailed(false);
     }
     setBusy(false);
@@ -456,29 +454,14 @@ export function TranscriptReviewDialog({
               {view.blockedReason}
             </p>
           )}
-          {!view.applied && (
-            <label className="check-field">
-              <input
-                type="checkbox"
-                checked={acknowledged}
-                disabled={!view.canApply || busy}
-                onChange={(event) => setAcknowledged(event.target.checked)}
-              />
-              <span>
-                {t(
-                  '原音と境界を確認しました。この範囲の字幕をプレビューの内容で置き換えます。',
-                  'I reviewed the audio and boundaries. Replace subtitles in this range with the preview.',
-                )}
-              </span>
-            </label>
-          )}
+          {!view.applied && <p className="helper-text">{t('この範囲をプレビューの字幕に切り替えます。現在の字幕は旧版として復元できます。', 'Switch this range to the preview. The previous subtitles remain available as a saved version.')}</p>}
           <footer className="modal-footer">
             <Button disabled={busy} onClick={close}>
               {t('閉じる', 'Close')}
             </Button>
             <Button
               variant="primary"
-              disabled={busy || view.applied || !view.canApply || !acknowledged}
+              disabled={busy || view.applied || !view.canApply}
               onClick={() =>
                 void update(() =>
                   mutate(
@@ -522,8 +505,7 @@ export function TranscriptReviewDialog({
                 if (result) {
                   setView(result);
                   void repairExit.close(() => setRepairQuote(undefined));
-                  setAcknowledged(false);
-                }
+                            }
                 setBusy(false);
               });
             }}

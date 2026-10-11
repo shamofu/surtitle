@@ -4,7 +4,7 @@ import { installLearningFixture } from './learning-fixture';
 import { observeDrawer, expectSafeFrames, recordFrames } from './drawer-motion-fixture';
 test.use({ video: { mode: 'on', size: { width: 1440, height: 900 } } });
 for (const width of [1440, 800]) {
-  test(`captures real intermediate drawer frames at ${width}px`, async ({ page }, info) => {
+  test(`captures actual immediate panel layout frames at ${width}px`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 });
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await installLearningFixture(page, 'ja', 'light');

@@ -12,6 +12,7 @@ struct SurfaceInput {
     original: WNDPROC,
     click: Arc<dyn Fn() + Send + Sync>,
     pressed: Cell<Option<(i32, i32)>>,
+    blocked: Cell<bool>,
 }
 
 /// Only our GUI-thread host is subclassed. In wid mode mpv creates a disabled
@@ -28,6 +29,7 @@ pub(super) fn install(hwnd: HWND, click: Arc<dyn Fn() + Send + Sync>) -> Result<
             original: std::mem::transmute::<isize, WNDPROC>(original),
             click,
             pressed: Cell::new(None),
+            blocked: Cell::new(false),
         }));
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, input as isize);
         if GetWindowLongPtrW(hwnd, GWLP_USERDATA) != input as isize {
@@ -41,6 +43,22 @@ pub(super) fn install(hwnd: HWND, click: Arc<dyn Fn() + Send + Sync>) -> Result<
         }
     }
     Ok(())
+}
+
+pub(super) fn set_blocked(hwnd: HWND, blocked: bool) {
+    unsafe {
+        let input = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const SurfaceInput;
+        if input.is_null() {
+            return;
+        }
+        (*input).blocked.set(blocked);
+        if blocked {
+            (*input).pressed.set(None);
+            if GetCapture() == hwnd {
+                ReleaseCapture();
+            }
+        }
+    }
 }
 
 fn point(value: LPARAM) -> (i32, i32) {
@@ -78,10 +96,16 @@ unsafe extern "system" fn surface_proc(
         match message {
             // STATIC otherwise returns HTTRANSPARENT and passes clicks through
             // the video to a sibling webview. No parent STN_CLICKED is needed.
-            WM_NCHITTEST => return HTCLIENT as LRESULT,
+            WM_NCHITTEST => {
+                return if (*input).blocked.get() {
+                    HTTRANSPARENT as LRESULT
+                } else {
+                    HTCLIENT as LRESULT
+                };
+            }
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
                 let position = point(lparam);
-                if IsWindowVisible(hwnd) != 0 && inside(hwnd, position) {
+                if !(*input).blocked.get() && IsWindowVisible(hwnd) != 0 && inside(hwnd, position) {
                     (*input).pressed.set(Some(position));
                     SetCapture(hwnd);
                 }
@@ -100,7 +124,8 @@ unsafe extern "system" fn surface_proc(
                     .pressed
                     .take()
                     .filter(|start| {
-                        IsWindowVisible(hwnd) != 0
+                        !(*input).blocked.get()
+                            && IsWindowVisible(hwnd) != 0
                             && inside(hwnd, point(lparam))
                             && !moved(*start, point(lparam))
                     })
@@ -219,6 +244,24 @@ mod tests {
             send(host.0, WM_LBUTTONUP, 10, 10);
         }
         assert_eq!(clicks.load(Ordering::Relaxed), 2);
+        send(host.0, WM_LBUTTONDOWN, 10, 10);
+        set_blocked(host.0, true);
+        send(host.0, WM_LBUTTONUP, 10, 10);
+        send(host.0, WM_LBUTTONDOWN, 10, 10);
+        send(host.0, WM_LBUTTONUP, 10, 10);
+        assert_eq!(clicks.load(Ordering::Relaxed), 2);
+        unsafe {
+            assert_eq!(
+                SendMessageW(host.0, WM_NCHITTEST, 0, 0),
+                HTTRANSPARENT as isize
+            );
+            assert_ne!(
+                IsWindowVisible(host.0),
+                0,
+                "modal input blocking must not hide video"
+            );
+        }
+        set_blocked(host.0, false);
         for target in [sibling.0, parent.0] {
             send(target, WM_LBUTTONDOWN, 10, 10);
             send(target, WM_LBUTTONUP, 10, 10);

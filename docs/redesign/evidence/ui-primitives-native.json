@@ -1,0 +1,558 @@
+{
+  "capturedAt": "2026-10-11T14:35:46.112Z",
+  "environment": {
+    "nativeHost": "Tauri/WebView2 + child HWND mpv",
+    "binarySha256": "3f572a00ecdc6a2d1dfab5e241c968917b7c4a0735a393c231e6f3059d0fab31",
+    "browser": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "location": "http://tauri.localhost/native.html",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0"
+    },
+    "hardwareRequested": true,
+    "sharedAdapter": "production SurfaceProvider and NativePlayer with equal opaque rectangles and focus restoration after native ACK",
+    "syntheticImeOnly": true,
+    "limits": [
+      "Evaluation frontend uses actual native playback and save_card IPC; it is not a complete production route migration.",
+      "Synthetic composition/Unicode input is not actual Windows IME evidence.",
+      "Four candidates share one bundle; reuse the separate browser bundle measurements, not this combined size."
+    ]
+  },
+  "results": [
+    {
+      "candidate": "current",
+      "playbackAdvances": true,
+      "viewport": {
+        "height": 430,
+        "width": 1100,
+        "x": 20,
+        "y": 119.59375
+      },
+      "focusAfterOpen": {
+        "dialog": true,
+        "hasFocus": true,
+        "label": "Close",
+        "tag": "BUTTON"
+      },
+      "immediateEscapeCloses": true,
+      "immediateEscapeRestoresTrigger": true,
+      "regionRectangles": [
+        {
+          "Left": 0,
+          "Top": 0,
+          "Right": 1100,
+          "Bottom": 10
+        },
+        {
+          "Left": 0,
+          "Top": 10,
+          "Right": 440,
+          "Bottom": 429
+        },
+        {
+          "Left": 960,
+          "Top": 10,
+          "Right": 1100,
+          "Bottom": 429
+        }
+      ],
+      "pausedOnSelection": true,
+      "playbackBehindDialog": true,
+      "unicodeInputRetained": true,
+      "arrowTabsSelect": true,
+      "tabFocusContained": false,
+      "focusTargets": [
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": false,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BODY"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": "Close",
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": "Phrase",
+          "tag": "INPUT"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": "Meaning",
+          "tag": "INPUT"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": "Close",
+          "tag": "BUTTON"
+        }
+      ],
+      "syntheticImeEscapeRetainsDialog": true,
+      "savedCard": {
+        "id": "f64644b6-ae12-49b2-928c-538f40e953cc",
+        "meaning": "くつろいで学ぶ current",
+        "audioPath": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\work\\ui-evaluation\\native\\profile\\card-audio\\d25d934d-d027-4772-894e-65a98468753b.wav",
+        "audioSha256": "43f5940f122d519a31c23e2e303505f3b8b0e27afe2960d6b9ed7a0b53cbd982"
+      },
+      "resumeAdvances": true,
+      "failure": "AssertionError [ERR_ASSERTION]: Tab escaped active modal",
+      "focusOnFailure": {
+        "dialog": false,
+        "hasFocus": true,
+        "label": null,
+        "tag": "BUTTON"
+      }
+    },
+    {
+      "candidate": "base",
+      "playbackAdvances": true,
+      "viewport": {
+        "height": 430,
+        "width": 1100,
+        "x": 20,
+        "y": 119.59375
+      },
+      "focusAfterOpen": {
+        "dialog": true,
+        "hasFocus": true,
+        "label": null,
+        "tag": "DIV"
+      },
+      "immediateEscapeCloses": true,
+      "immediateEscapeRestoresTrigger": true,
+      "regionRectangles": [
+        {
+          "Left": 0,
+          "Top": 0,
+          "Right": 1100,
+          "Bottom": 10
+        },
+        {
+          "Left": 0,
+          "Top": 10,
+          "Right": 440,
+          "Bottom": 429
+        },
+        {
+          "Left": 960,
+          "Top": 10,
+          "Right": 1100,
+          "Bottom": 429
+        }
+      ],
+      "pausedOnSelection": true,
+      "playbackBehindDialog": true,
+      "unicodeInputRetained": true,
+      "arrowTabsSelect": true,
+      "tabFocusContained": true,
+      "focusTargets": [
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "DIV"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": "Phrase",
+          "tag": "INPUT"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": "Meaning",
+          "tag": "INPUT"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "DIV"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": "Phrase",
+          "tag": "INPUT"
+        }
+      ],
+      "syntheticImeEscapeRetainsDialog": true,
+      "savedCard": {
+        "id": "ef28d61e-5f45-4a4e-ab00-ea3e814e8243",
+        "meaning": "くつろいで学ぶ base",
+        "audioPath": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\work\\ui-evaluation\\native\\profile\\card-audio\\3455f4bb-5fee-4727-863c-b6d6671a882e.wav",
+        "audioSha256": "43f5940f122d519a31c23e2e303505f3b8b0e27afe2960d6b9ed7a0b53cbd982"
+      },
+      "resumeAdvances": true
+    },
+    {
+      "candidate": "aria",
+      "playbackAdvances": true,
+      "viewport": {
+        "height": 430,
+        "width": 1100,
+        "x": 20,
+        "y": 119.59375
+      },
+      "focusAfterOpen": {
+        "dialog": true,
+        "hasFocus": true,
+        "label": null,
+        "tag": "SECTION"
+      },
+      "immediateEscapeCloses": true,
+      "immediateEscapeRestoresTrigger": true,
+      "regionRectangles": [
+        {
+          "Left": 0,
+          "Top": 0,
+          "Right": 1100,
+          "Bottom": 10
+        },
+        {
+          "Left": 0,
+          "Top": 10,
+          "Right": 440,
+          "Bottom": 429
+        },
+        {
+          "Left": 960,
+          "Top": 10,
+          "Right": 1100,
+          "Bottom": 429
+        }
+      ],
+      "pausedOnSelection": true,
+      "playbackBehindDialog": true,
+      "unicodeInputRetained": true,
+      "arrowTabsSelect": true,
+      "tabFocusContained": true,
+      "focusTargets": [
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "DIV"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": "Phrase",
+          "tag": "INPUT"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": "Meaning",
+          "tag": "INPUT"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "DIV"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "DIV"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": "Phrase",
+          "tag": "INPUT"
+        }
+      ],
+      "syntheticImeEscapeRetainsDialog": true,
+      "savedCard": {
+        "id": "81267548-ed01-438c-85ea-ccf64af058d5",
+        "meaning": "くつろいで学ぶ aria",
+        "audioPath": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\work\\ui-evaluation\\native\\profile\\card-audio\\5926aeea-7d89-469f-abe3-6ac2c740669b.wav",
+        "audioSha256": "43f5940f122d519a31c23e2e303505f3b8b0e27afe2960d6b9ed7a0b53cbd982"
+      },
+      "resumeAdvances": true
+    },
+    {
+      "candidate": "radix",
+      "playbackAdvances": true,
+      "viewport": {
+        "height": 430,
+        "width": 1100,
+        "x": 20,
+        "y": 119.59375
+      },
+      "focusAfterOpen": {
+        "dialog": true,
+        "hasFocus": true,
+        "label": null,
+        "tag": "DIV"
+      },
+      "immediateEscapeCloses": true,
+      "immediateEscapeRestoresTrigger": true,
+      "regionRectangles": [
+        {
+          "Left": 0,
+          "Top": 0,
+          "Right": 1100,
+          "Bottom": 10
+        },
+        {
+          "Left": 0,
+          "Top": 10,
+          "Right": 440,
+          "Bottom": 429
+        },
+        {
+          "Left": 960,
+          "Top": 10,
+          "Right": 1100,
+          "Bottom": 429
+        }
+      ],
+      "pausedOnSelection": true,
+      "playbackBehindDialog": true,
+      "unicodeInputRetained": true,
+      "arrowTabsSelect": true,
+      "tabFocusContained": true,
+      "focusTargets": [
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "DIV"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": "Phrase",
+          "tag": "INPUT"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": "Meaning",
+          "tag": "INPUT"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "DIV"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": null,
+          "tag": "BUTTON"
+        },
+        {
+          "dialog": true,
+          "hasFocus": true,
+          "label": "Phrase",
+          "tag": "INPUT"
+        }
+      ],
+      "syntheticImeEscapeRetainsDialog": false,
+      "savedCard": {
+        "id": "792d5c6a-a583-4221-af2b-d448e8fc87ed",
+        "meaning": "くつろいで学ぶ radix",
+        "audioPath": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\work\\ui-evaluation\\native\\profile\\card-audio\\c5f1a7ad-241f-4b8c-bce5-cefcc972dc40.wav",
+        "audioSha256": "43f5940f122d519a31c23e2e303505f3b8b0e27afe2960d6b9ed7a0b53cbd982"
+      },
+      "resumeAdvances": true,
+      "failure": "AssertionError [ERR_ASSERTION]: Synthetic composing Escape closed modal",
+      "focusOnFailure": {
+        "dialog": false,
+        "hasFocus": true,
+        "label": null,
+        "tag": "BUTTON"
+      }
+    }
+  ],
+  "buildIdentity": {
+    "files": [
+      {
+        "bytes": 39097856,
+        "sha256": "3f572a00ecdc6a2d1dfab5e241c968917b7c4a0735a393c231e6f3059d0fab31",
+        "path": "work/ui-evaluation/native/bin/surtitle.exe"
+      },
+      {
+        "bytes": 317,
+        "sha256": "819fe260233317558739a56765b8edd449fdfffba46b606545ba38c43a38c369",
+        "path": "work/ui-evaluation/native/dist/native.html"
+      },
+      {
+        "bytes": 647765,
+        "sha256": "dad2a70a377fe64bcb5170430dcb4059354ab75fa15d6e2229e7c0b3d3685c74",
+        "path": "work/ui-evaluation/native/dist/assets/native-CGV6F3DQ.js"
+      },
+      {
+        "bytes": 61850,
+        "sha256": "6d02a1f484ab1074e46e7a51abfdf77c9cba8e93ca4f0cbb2aeeacfa561d8c5f",
+        "path": "work/ui-evaluation/native/dist/assets/native-BOxvV6Bb.css"
+      },
+      {
+        "bytes": 54273939,
+        "sha256": "17409eefce3e4916c51fa6abaa5332fe0dc1550a1dd355afd31a918547297fad",
+        "path": "src-tauri/resources/native/mpv-2.dll"
+      },
+      {
+        "bytes": 9613,
+        "sha256": "40fca053e27b99a816b3e8502bdc8bda4185fa67d28648e3730dc5ebca4ebc0b",
+        "path": "e2e/evaluation/ui-primitives/native.tsx"
+      },
+      {
+        "bytes": 31641,
+        "sha256": "1f8f8ab73a1ca7ef39180ba242e61ef33e3f48adfa38beddecb9b3faa9169608",
+        "path": "src/features/study/playback/NativePlayer.tsx"
+      }
+    ],
+    "capturedAt": "2026-10-11T14:35:40.7665655Z"
+  },
+  "sourceReports": [
+    {
+      "path": "work/ui-evaluation/native/results/results.json",
+      "sha256": "71908823b30b3d2823645027aaf0d38fb812f8b34644d9f442eeafcc3bcfdf2c"
+    },
+    {
+      "path": "work/ui-evaluation/native/build-identity.json",
+      "sha256": "e39052cf719f2a48b9d88f42f212ad8b9bb2d53a7e78ebffceb2fddd510ca462"
+    }
+  ],
+  "interpretation": {
+    "completeNativeSaveResumeWorkflows": 4,
+    "allAssertionsPassCandidates": [
+      "base",
+      "aria"
+    ],
+    "observedDifferences": {
+      "current": "BODY received one of ten Tab focus samples; this does not establish access to background controls.",
+      "radix": "Synthetic composing Escape closed the dialog. Real Windows IME was measured separately and did not close it."
+    },
+    "fixture": "Generated local 12-second MPEG-4 Part 2/AAC media; hardware video rendering was requested with WARP forbidden, but hardware decoding is not established for this codec.",
+    "bounds": "1440x900 CSS client area at devicePixelRatio1; viewport1100x430 in all four cases.",
+    "limits": [
+      "The retained-tab fixture checks selection, not equal panel visibility or lifecycle; both forced React Aria panels are visible in this stylesheet.",
+      "This is an isolated debug Tauri host with the e2e-test profile feature and real IPC; it is not four production installations.",
+      "Audio extraction used the verified external FFmpeg provider in the isolated profile; mpv uses adopted FFmpeg9.0.2."
+    ]
+  }
+}

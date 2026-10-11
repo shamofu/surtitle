@@ -2,6 +2,7 @@ mod application;
 mod commands;
 mod player;
 mod restore_snapshot;
+mod window_fit;
 
 use application::Services;
 use tauri::{Emitter, Manager};
@@ -15,6 +16,10 @@ pub fn run() {
                 .map(std::path::PathBuf::from)
                 .unwrap_or(root);
             let services = Services::open(root)?;
+            let changes_handle = app.handle().clone();
+            services.changes.install(move |change| {
+                let _ = changes_handle.emit("data-changed", change);
+            })?;
             let progress_handle = app.handle().clone();
             application::ai::runtime::install_publisher(&services, move |snapshot| {
                 let _ = progress_handle.emit("ai-runtime", snapshot);
@@ -26,6 +31,7 @@ pub fn run() {
             let window = app
                 .get_webview_window("main")
                 .ok_or("main window missing")?;
+            window_fit::install(&window)?;
             #[cfg(windows)]
             let parent = window.hwnd()?.0 as isize;
             #[cfg(not(windows))]
@@ -69,16 +75,16 @@ pub fn run() {
                         if let Ok(state) = services.playback_tick(ticks.is_multiple_of(10)) {
                             let _ = handle.emit("player-state", &state);
                         }
-                        if ticks.is_multiple_of(50) {
-                            let _ = handle.emit("app-changed", ());
-                        }
                         ticks += 1;
                         std::thread::sleep(std::time::Duration::from_millis(100));
                     }
                 })?;
+            window.show()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::synchronization::get_change_checkpoint,
+            commands::synchronization::get_snapshot_patch,
             commands::continuations::save_ai_continuation,
             commands::continuations::list_ai_continuations,
             commands::continuations::discard_ai_continuation,
@@ -88,6 +94,11 @@ pub fn run() {
             commands::editor_drafts::rebind_editor_draft,
             commands::editor_drafts::commit_subtitle_editor_draft,
             commands::editor_drafts::save_phrase_editor_draft,
+            commands::ui_drafts::get_ui_draft,
+            commands::ui_drafts::list_ui_drafts,
+            commands::ui_drafts::archive_ui_draft,
+            commands::ui_drafts::save_ui_draft,
+            commands::ui_drafts::delete_ui_draft,
             commands::transfer::reveal_export_file,
             commands::ai::get_app_snapshot,
             commands::ai::get_ai_runtime,
@@ -144,6 +155,8 @@ pub fn run() {
             commands::subtitles::edit_segment,
             commands::cards::save_card,
             commands::cards::edit_card,
+            commands::cards::get_card_edit_state,
+            commands::cards::save_card_edit,
             commands::cards::suspend_card,
             commands::cards::delete_card,
             commands::library::remove_media,
@@ -153,6 +166,8 @@ pub fn run() {
             commands::cards::rate_card,
             commands::playback::play_card_audio,
             commands::models::update_settings,
+            commands::models::get_settings_state,
+            commands::models::update_settings_patch,
             commands::transfer::export_learning,
             commands::transfer::preview_restore,
             commands::transfer::discard_restore_preview,

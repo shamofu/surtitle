@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-11T15:00:08.756601+00:00",
+  "scope": "Frozen final source after adaptive pacing, compact height, stale-query synchronization and restore-result fixes. Native installer and physical DPI are separate evidence.",
+  "ui": {
+    "total": 479,
+    "passed": 479,
+    "failed": 0,
+    "skipped": 0,
+    "success": true,
+    "report": "artifacts/redesign-final-d/full-ui.json"
+  },
+  "scripts": {
+    "total": 125,
+    "passed": 125,
+    "failed": 0,
+    "skipped": 0,
+    "success": true,
+    "report": "artifacts/redesign-final-d/full-scripts.json"
+  },
+  "browser": {
+    "command": "SURTITLE_PERFORMANCE=final-frozen-source pnpm exec playwright test --workers=1",
+    "startedAt": "2026-10-11T14:49:24.450000+00:00",
+    "durationMs": 457033.627,
+    "workers": 1,
+    "stats": {
+      "total": 192,
+      "expected": 192,
+      "unexpected": 0,
+      "flaky": 0,
+      "skipped": 0,
+      "ok": true
+    },
+    "errors": [],
+    "report": "artifacts/redesign-final-d/browser-report.json"
+  },
+  "rust": {
+    "passed": 555,
+    "failed": 0,
+    "ignored": 12,
+    "breakdown": {
+      "application": 182,
+      "ai": 246,
+      "validation": 19,
+      "core": 86,
+      "tools": 22
+    },
+    "evidence": "restore-boundary-2026-10-11.json"
+  },
+  "otherChecks": [
+    "TypeScript passed",
+    "101 generated IPC commands checked",
+    "Rust format passed",
+    "All-workspace strict Clippy passed"
+  ],
+  "limits": [
+    "Browser fixtures do not prove native playback performance.",
+    "Some ignored Rust tests are subprocess helpers invoked by parent tests; named native integration results are separate.",
+    "Controlled before/after performance results remain in performance.md."
+  ]
+}

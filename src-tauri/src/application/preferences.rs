@@ -13,6 +13,10 @@ use surtitle_tools::ToolSelections;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Preferences {
+    #[serde(
+        serialize_with = "serialize_settings",
+        deserialize_with = "deserialize_settings"
+    )]
     pub settings: AppSettings,
     #[serde(default)]
     pub playback: PlaybackPreferences,
@@ -28,6 +32,32 @@ pub struct Preferences {
     pub update_checks: HashMap<String, UpdateCheck>,
     #[serde(default)]
     pub ai_continuations: HashMap<String, super::continuations::AiContinuation>,
+}
+
+fn serialize_settings<S: serde::Serializer>(
+    settings: &AppSettings,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut value = serde_json::to_value(settings).map_err(serde::ser::Error::custom)?;
+    let fields = value.as_object_mut().expect("AppSettings is an object");
+    for key in ["dailyBudgetUsd", "monthlyBudgetUsd", "perJobBudgetUsd"] {
+        fields.remove(key);
+    }
+    value.serialize(serializer)
+}
+fn deserialize_settings<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<AppSettings, D::Error> {
+    let mut value = serde_json::Value::deserialize(deserializer)?;
+    let fields = value
+        .as_object_mut()
+        .ok_or_else(|| serde::de::Error::custom("Invalid settings"))?;
+    // Legacy duplicate caps are ignored. charges.sqlite has always been the
+    // displayed/enforced authority and must not be raised by a JSON migration.
+    fields.insert("dailyBudgetUsd".into(), serde_json::json!(0));
+    fields.remove("monthlyBudgetUsd");
+    fields.remove("perJobBudgetUsd");
+    serde_json::from_value(value).map_err(serde::de::Error::custom)
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaybackPreferences {

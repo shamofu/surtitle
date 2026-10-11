@@ -49,7 +49,6 @@ const media: Media = { id: 'video', title: 'Full media', path: 'C:/video.mkv', k
 const mediaSignature = JSON.stringify([media.path, media.audioStreamIndex, media.learningLanguage, media.explanationLanguage]);
 const preparation: TranscriptionPreparation = { id: 'prepared', mediaId: media.id, startMs: 0, endMs: media.durationMs, coreDurationMs: media.durationMs, sendDurationMs: media.durationMs + 2000, chunkCount: 8, wholeMedia: true };
 const quote: AiQuote = { id: 'quote', mediaId: media.id, kind: 'transcribe', startMs: 0, endMs: media.durationMs, model: model.modelId, estimatedUsd: 0.1, maximumUsd: 0.2, inputTokens: 100, maxOutputTokens: model.maxOutputTokens, expiresAt: '2099-01-01T00:00:00Z', warnings: [], canApprove: true, applyPolicy: 'auto' };
-const estimate = () => screen.getByRole('button', { name: 'Prepare and review the complete estimate' });
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   HTMLDialogElement.prototype.close = function () { this.open = false; };
@@ -68,16 +67,15 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
-it('uses the exact complete video despite a selected cue and prepares then estimates in one action', async () => {
+it('uses the exact complete video despite a selected cue and automatically prepares its inline estimate', async () => {
   let finish!: (value: TranscriptionPreparation) => void;
   vi.mocked(aiApi.prepareTranscription).mockReturnValue(new Promise(resolve => { finish = resolve; }));
   const close = vi.fn();
   render(<AiDialog media={media} initialRange={{ startMs: 1234, endMs: 3456 }} sourceContext={{ sourceCueIds: ['a', 'b'], sourceRevision: 'frozen source' }} onClose={close} />);
   expect(screen.queryByLabelText(/^From/)).not.toBeInTheDocument();
-  fireEvent.click(estimate());
   await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith(media.id, 0, 2161234, true, expect.any(String)));
   expect(aiApi.createTranscriptionQuote).not.toHaveBeenCalled();
-  expect(estimate()).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Start transcription' })).not.toBeInTheDocument();
   await act(async () => finish(preparation));
   await screen.findByText('Apply subtitles automatically');
   expect(aiApi.createTranscriptionQuote).toHaveBeenCalledExactlyOnceWith('prepared', model);
@@ -124,11 +122,9 @@ it('keeps the model input DOM when a typed phrase changes the AI purpose', () =>
 it('waits for a real duration and then uses its exact milliseconds without a guessed first minute', async () => {
   const view = render(<AiDialog media={{ ...media, durationMs: 0 }} initialRange={{ startMs: 1234, endMs: 3456 }} onClose={() => {}} />);
   expect(screen.getByText('Waiting for the video duration before estimating.')).toBeVisible();
-  expect(estimate()).toBeDisabled();
-  fireEvent.click(estimate());
+  expect(screen.queryByRole('button', { name: 'Start transcription' })).not.toBeInTheDocument();
   expect(aiApi.prepareTranscription).not.toHaveBeenCalled();
   view.rerender(<AiDialog media={{ ...media, durationMs: 7200123 }} initialRange={{ startMs: 1234, endMs: 3456 }} onClose={() => {}} />);
-  fireEvent.click(estimate());
   await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith(media.id, 0, 7200123, true, expect.any(String)));
 });
 
@@ -138,15 +134,13 @@ it('uses the selected cue only after explicitly choosing a range', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Choose a range' }));
   expect(screen.getByLabelText(/^From/)).toHaveValue('0:01.234');
   expect(screen.getByLabelText(/^To/)).toHaveValue('0:03.456');
-  fireEvent.click(estimate());
   await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith(media.id, 1234, 3456, false, expect.any(String)));
 });
 
 it('does not create a quote or send a job after local preparation fails', async () => {
   vi.mocked(aiApi.prepareTranscription).mockRejectedValue(new Error('Audio extraction failed'));
   render(<AiDialog media={media} onClose={() => {}} />);
-  fireEvent.click(estimate());
-  await waitFor(() => expect(estimate()).toBeEnabled());
+  await screen.findByRole('button', { name: 'Retry estimate' });
   expect(fixture.errors).toHaveLength(1);
   expect(aiApi.createTranscriptionQuote).not.toHaveBeenCalled();
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
@@ -156,13 +150,11 @@ it('reuses completed preparation after reopening without approving or preparing 
   let finish!: (value: TranscriptionPreparation) => void;
   vi.mocked(aiApi.prepareTranscription).mockReturnValue(new Promise(resolve => { finish = resolve; }));
   const view = render(<AiDialog media={media} onClose={() => {}} />);
-  fireEvent.click(estimate());
   await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledOnce());
   view.rerender(<p>Another page</p>);
   await act(async () => finish(preparation));
   expect(aiApi.createTranscriptionQuote).not.toHaveBeenCalled();
   view.rerender(<AiDialog media={media} onClose={() => {}} />);
-  fireEvent.click(estimate());
   await screen.findByRole('button', { name: 'Start transcription' });
   expect(aiApi.prepareTranscription).toHaveBeenCalledOnce();
   expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
@@ -173,13 +165,11 @@ it('ignores a preparation completed after its audio source changed', async () =>
   let finish!: (value: TranscriptionPreparation) => void;
   vi.mocked(aiApi.prepareTranscription).mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockResolvedValue(preparation);
   const view = render(<AiDialog media={media} onClose={() => {}} />);
-  fireEvent.click(estimate());
   await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledOnce());
   view.rerender(<AiDialog media={{ ...media, audioStreamIndex: 4 }} onClose={() => {}} />);
   await act(async () => finish(preparation));
   expect(aiApi.createTranscriptionQuote).not.toHaveBeenCalled();
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
-  fireEvent.click(estimate());
   await screen.findByRole('button', { name: 'Start transcription' });
   expect(aiApi.prepareTranscription).toHaveBeenCalledTimes(2);
 });
@@ -188,7 +178,6 @@ it('continues the first estimate when the preparation confirms its automatic aud
   let finish!: (value: TranscriptionPreparation) => void;
   vi.mocked(aiApi.prepareTranscription).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
   const view = render(<AiDialog media={media} onClose={() => {}} />);
-  fireEvent.click(estimate());
   await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledOnce());
   view.rerender(<AiDialog media={{ ...media, audioStreamIndex: 2 }} onClose={() => {}} />);
   await act(async () => finish({ ...preparation, audioStreamIndex: 2 }));
@@ -203,7 +192,6 @@ it('finishes successful approval even if cleaning up the saved request fails', a
   const close = vi.fn();
   vi.mocked(continuationApi.discard).mockRejectedValueOnce(new Error('Local cleanup failed'));
   render(<AiDialog media={media} onClose={close} />);
-  fireEvent.click(estimate());
   await screen.findByRole('button', { name: 'Start transcription' });
   fireEvent.click(screen.getByRole('button', { name: 'Start transcription' }));
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
@@ -211,16 +199,14 @@ it('finishes successful approval even if cleaning up the saved request fails', a
   expect(fixture.errors).toHaveLength(1);
 });
 
-it('discards the visible approval on restore and requires a fresh explicit estimate', async () => {
+it('discards the visible approval on restore and prepares a fresh estimate without starting', async () => {
   render(<><AiDialog media={media} onClose={() => {}} /><RestoreData /></>);
-  fireEvent.click(estimate());
   await screen.findByRole('button', { name: 'Start transcription' });
-  fireEvent.click(screen.getByRole('button', { name: 'Restore data' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Restore data', hidden: true }));
   expect(screen.queryByRole('button', { name: 'Start transcription' })).not.toBeInTheDocument();
   expect(screen.getByText('Data was restored. Check the source and prepare a new estimate.')).toBeVisible();
   expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
-  fireEvent.click(estimate());
   await screen.findByRole('button', { name: 'Start transcription' });
   expect(aiApi.prepareTranscription).toHaveBeenCalledTimes(2);
 });
@@ -263,7 +249,7 @@ it('keeps stale-source input and prevents estimating until subtitles are explici
     sourceCueIds: ['gone'], sourceRevision: 'old source' };
   render(<AiDialog media={media} continuation={continuation} sourceInvalid onReselectSource={reselect} onClose={() => {}} />);
   fireEvent.change(screen.getByLabelText(/A specific phrase to explain/), { target: { value: 'kept edited phrase' } });
-  expect(screen.getByRole('button', { name: 'Review estimate' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Start explanation' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Select subtitles again' }));
   await waitFor(() => expect(reselect).toHaveBeenCalledOnce());
   expect(reselect.mock.calls[0][0]).toMatchObject({ ...continuation, focusTerm: 'kept edited phrase' });
@@ -271,14 +257,14 @@ it('keeps stale-source input and prevents estimating until subtitles are explici
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
 });
 
-it('blocks even a previously acknowledged quote when its restored source becomes invalid', async () => {
+it('blocks even a previously displayed quote when its restored source becomes invalid', async () => {
   const textQuote = { ...quote, kind: 'vocabulary' as const, applyPolicy: 'manual' as const };
   vi.mocked(aiApi.reviewAiJob).mockResolvedValue(textQuote);
   const continuation = { id: 'resume', mediaId: media.id, kind: 'vocabulary' as const, start: '0:00', end: '0:01',
     wholeMedia: false, focusTerm: 'phrase', models: {}, quoteId: quote.id, sourceMediaSignature: mediaSignature };
   const view = render(<AiDialog media={media} continuation={continuation} onClose={() => {}} />);
-  const approve = await screen.findByRole('button', { name: 'Approve this job' });
-  fireEvent.click(screen.getByRole('checkbox'));
+  const approve = await screen.findByRole('button', { name: 'Find expressions' });
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(approve).toBeEnabled();
   view.rerender(<AiDialog media={media} continuation={continuation} sourceInvalid onClose={() => {}} />);
   expect(approve).toBeDisabled();
@@ -309,7 +295,6 @@ it.each([undefined, '["C:/old-video.mkv",2,"fr","de"]'])('invalidates old whole-
   expect(screen.getByRole('alert')).toHaveTextContent('en → ja');
   expect(aiApi.reviewAiJob).not.toHaveBeenCalled();
   expect(aiApi.prepareTranscription).not.toHaveBeenCalled();
-  fireEvent.click(estimate());
   await screen.findByRole('button', { name: 'Start transcription' });
   expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith(media.id, 0, media.durationMs, true, expect.any(String));
   expect(continuationApi.save).toHaveBeenCalledWith(expect.objectContaining({ sourceMediaSignature: mediaSignature, quoteId: quote.id }));

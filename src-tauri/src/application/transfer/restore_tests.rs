@@ -59,6 +59,68 @@ fn seed(state: &AppState, source: &Path) -> LearningArchive {
 }
 
 #[test]
+fn committed_restore_remains_successful_when_preferences_cleanup_cannot_be_saved() {
+    let temporary = tempfile::tempdir().unwrap();
+    let state = Services::open(temporary.path().to_path_buf()).unwrap();
+    let source = temporary.path().join("source.wav");
+    std::fs::write(&source, b"isolated fixture").unwrap();
+    let archive = seed(&state, &source);
+    let before_generation = lock(&state.db).unwrap().learning_generation().unwrap();
+    {
+        let db = lock(&state.db).unwrap();
+        let mut media = db.media("restore-media").unwrap();
+        media.last_position_ms = 2300;
+        db.put_media(&media).unwrap();
+    }
+    // An owned temporary directory at the preferences destination reliably
+    // rejects atomic file replacement on Windows, without changing any ACL.
+    let preferences_path = state.root.join("preferences.json");
+    if preferences_path.is_file() {
+        std::fs::remove_file(&preferences_path).unwrap();
+    }
+    std::fs::create_dir(&preferences_path).unwrap();
+    let result = restore_learning_archive(&state, &archive);
+    assert_eq!(
+        lock(&state.db)
+            .unwrap()
+            .media("restore-media")
+            .unwrap()
+            .last_position_ms,
+        600
+    );
+    assert_ne!(
+        lock(&state.db).unwrap().learning_generation().unwrap(),
+        before_generation
+    );
+    assert!(
+        result.is_ok(),
+        "Database replacement committed, but returned {result:?}"
+    );
+    let result = result.unwrap();
+    assert_eq!(result.warnings.len(), 1);
+    assert!(result.warnings[0].contains("Could not clear old AI continuation settings"));
+    let checkpoint = state.changes.checkpoint().unwrap();
+    assert_eq!(checkpoint.revision, 1);
+    assert_eq!(
+        checkpoint.domains[0].domain,
+        super::super::changes::ChangeDomain::Restore
+    );
+}
+
+#[test]
+fn restore_result_wire_reports_explicit_post_commit_warnings() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../../fixtures/command-results.json")).unwrap();
+    assert_eq!(
+        serde_json::to_value(RestoreResult {
+            warnings: vec!["cleanup failed".into()]
+        })
+        .unwrap(),
+        fixture["restore_learning"]
+    );
+}
+
+#[test]
 fn restore_preserves_operational_files_and_backs_up_replaced_learning() {
     let temporary = tempfile::tempdir().unwrap();
     let state = Services::open(temporary.path().to_path_buf()).unwrap();

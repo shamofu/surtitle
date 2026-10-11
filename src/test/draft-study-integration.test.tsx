@@ -79,7 +79,7 @@ vi.mock('../features/study/editor-drafts/api', () => ({
   },
 }));
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
-vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, closeWindow: vi.fn() }));
+vi.mock('../shared/native/window', () => ({ registerCloseTask: () => () => {}, subscribeWindowClose: () => () => {}, closeWindow: vi.fn() }));
 vi.mock('../features/study/drafts/api', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../features/study/drafts/api')>();
@@ -426,12 +426,12 @@ describe('draft study in the real study page', () => {
     });
   });
 
-  it('propagates source-playback rejection to the draft confirmation gate', async () => {
+  it('reports source-playback rejection without executing learning actions', async () => {
     mount();
     await waitFor(() =>
       expect(
         screen.getByRole('button', {
-          name: 'Inspect this subtitle',
+          name: 'Explore meaning',
         }),
       ).toBeEnabled(),
     );
@@ -460,10 +460,7 @@ describe('draft study in the real study page', () => {
         'error',
       ),
     );
-    expect(editor.getByRole('checkbox')).toBeDisabled();
-    expect(
-      editor.getByRole('button', { name: 'Confirm this text and audio' }),
-    ).toBeDisabled();
+    expect(editor.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Repeat selected segment' }),
     ).not.toBeInTheDocument();
@@ -474,7 +471,7 @@ describe('draft study in the real study page', () => {
     fireEvent.click(
       editor.getByRole('button', { name: 'Play audio for this text' }),
     );
-    await waitFor(() => expect(editor.getByRole('checkbox')).toBeEnabled());
+    await waitFor(() => expect(editor.getByRole('button', { name: 'Play audio for this text' })).toBeEnabled());
     expect(playerApi.player).toHaveBeenCalledWith({
       action: 'source-seek',
       startMs: 3000,

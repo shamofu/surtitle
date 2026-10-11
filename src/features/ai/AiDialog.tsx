@@ -6,10 +6,8 @@ import { continuationApi, type AiContinuation } from './continuations';
 
 import {
   ArrowRight,
-  CircleDollarSign,
   Languages,
   Mic2,
-  ShieldCheck,
   Sparkles,
 } from 'lucide-react';
 import { aiApi } from './api';
@@ -33,7 +31,7 @@ import { useActivities } from '../../app/providers/Activities';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { preparedSourceMatches, usePreparationSession } from './PreparationSessions';
 import { PreparationProgress } from './PreparationProgress';
-import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
+import { AnimatedValue, MotionRegion } from '../../shared/motion';
 
 export function AiDialog({
   media,
@@ -106,6 +104,8 @@ export function AiDialog({
     continuation?.end ?? timestamp(initialRange?.endMs ?? media.durationMs, true),
   );
   const [quote, setQuote] = useState<AiQuote | null>(null);
+  const [quoteKey, setQuoteKey] = useState('');
+  const lastAttempt = useRef('');
   const [busy, setBusy] = useState(false);
   const [preparePending, setPreparing] = useState(false);
   const [busyPhase, setBusyPhase] = useState('estimating');
@@ -152,6 +152,19 @@ export function AiDialog({
   useEffect(() => {
     if (preparationSession.session?.result && kind === 'transcribe') setPreparation(preparationSession.session.result);
   }, [preparationSession.session?.result, kind]);
+  const requestKey = JSON.stringify([revision, kind, startMs, endMs, wholeMedia, focusTerm.trim(), selectedModel, data?.settings.vertexLocation]);
+  const inputKey = JSON.stringify([mediaSignature, requestKey]);
+  const currentRequestKey = useRef(requestKey); currentRequestKey.current = requestKey;
+  const currentInputKey = useRef(inputKey);
+  currentInputKey.current = inputKey;
+  const estimateAction = useRef(() => {});
+  const configured = !!data?.settings.credentialConfigured && !!data?.settings.vertexProject;
+  useEffect(() => {
+    if (quoteKey !== inputKey) setQuote(null);
+    if (!valid || !modelValid || invalidSource || !configured || busy || preparing || lastAttempt.current === inputKey) return;
+    const timer = window.setTimeout(() => { lastAttempt.current = inputKey; estimateAction.current(); }, 350);
+    return () => window.clearTimeout(timer);
+  }, [inputKey, quoteKey, valid, modelValid, invalidSource, configured, busy, preparing]);
   async function prepare() {
     if (!valid || exit.exiting) return;
     setPreparing(true);
@@ -175,7 +188,7 @@ export function AiDialog({
   async function estimate() {
     if (!valid || !modelValid || invalidSource || pending.current || busy || preparing || exit.exiting || !data?.settings.credentialConfigured)
       return;
-    pending.current = true; setBusy(true); setBusyPhase('estimating'); setRestored(false);
+    pending.current = true; setBusy(true); setBusyPhase('estimating'); setRestored(false); setQuote(null);
     try {
       if (kind === 'transcribe') setBoundMediaSignature(mediaSignature);
       await report(() => saveContinuation());
@@ -196,21 +209,22 @@ export function AiDialog({
       });
       if (result && currentSignature.current === preparedSignature && currentRevision.current === revision) {
         await report(() => saveContinuation(result.id, prepared?.id, preparedSignature));
-        if (mounted.current && currentRevision.current === revision) setQuote(result);
+        if (mounted.current && currentRevision.current === revision && currentRequestKey.current === requestKey) { const acceptedKey = JSON.stringify([preparedSignature, requestKey]); lastAttempt.current = acceptedKey; setQuote(result); setQuoteKey(acceptedKey); }
       }
     } finally {
       if (currentRevision.current === revision) { pending.current = false; if (mounted.current) setBusy(false); }
     }
   }
+  estimateAction.current = () => { void estimate(); };
   async function approve() {
-    if (!quote || invalidSource || busy || exit.exiting || revision !== boundRevision) return;
+    if (!quote || quoteKey !== inputKey || invalidSource || busy || exit.exiting || revision !== boundRevision) return;
     setBusy(true); setBusyPhase('starting');
     const result = await report(
       async () => {
         await mutate(() => quote.isRetry ? aiApi.reapproveQuote(quote) : aiApi.approveQuote(quote), { kind: 'snapshot' });
         return true;
       },
-      t('承認した処理を開始しました。', 'Your approved job has started.'),
+      t('処理を開始しました。', 'Job started.'),
     );
     if (result) { preparationSession.forgetEstimate(); onApproved?.(kind, focusTerm.trim()); await report(() => continuationApi.discard(continuationId)); await exit.close(onClose); }
     setBusy(false);
@@ -231,7 +245,8 @@ export function AiDialog({
   useEffect(() => {
     if (!continuation?.quoteId || continuationMediaChanged || !nativeAvailable() || revision !== initialRevision.current) return;
     let active = true;
-    void report(() => runTracked({ kind: 'estimate', label: media.title, phase: 'estimating', mediaId: media.id }, () => aiApi.reviewAiJob(continuation.quoteId!))).then(result => { if (active && result) setQuote(result); });
+    lastAttempt.current = inputKey;
+    void report(() => runTracked({ kind: 'estimate', label: media.title, phase: 'estimating', mediaId: media.id }, () => aiApi.reviewAiJob(continuation.quoteId!))).then(result => { if (active && result && currentInputKey.current === inputKey) { setQuote(result); setQuoteKey(inputKey); } });
     return () => { active = false; };
   }, [continuation?.quoteId, continuationMediaChanged, report, runTracked, revision]);
   async function reselectSource() {
@@ -259,8 +274,7 @@ export function AiDialog({
         <p>{t('出典の字幕が変わったか見つかりません。入力は保持しています。字幕を選び直してから見積もりを確認してください。', 'The source subtitles changed or are missing. Your input is kept. Select the subtitles again before reviewing an estimate.')}</p>
         {onReselectSource && <Button disabled={busy || preparing} onClick={() => void reselectSource()}>{t('字幕を選び直す', 'Select subtitles again')}</Button>}
       </div></MotionRegion>
-      <MotionSwap stateKey={quote ? `quote:${quote.id}` : 'form'}>{!quote ? (
-        <>
+      <>
           <div className="ai-kind-list">
             {[
               {
@@ -429,8 +443,8 @@ export function AiDialog({
             <div className="local-preparation">
               <p className="notice warning">
                 {t(
-                  'まず音声をローカルで準備します。送信するモデルと範囲は、準備後の承認画面で確認できます。',
-                  'Prepare audio locally first, then review the model and scope before approving cloud requests.',
+                  '音声を準備し、この画面に料金を表示します。開始を押すと送信します。',
+                  'Audio preparation and the estimate appear here. Press Start to send this scope.',
                 )}
               </p>
               <MotionRegion mode="status" open={!!preparation}>{preparation && (
@@ -470,15 +484,6 @@ export function AiDialog({
               }
             />
           </AnimatedDetails>
-          <div className="notice">
-            <ShieldCheck size={18} />
-            <span>
-              {t(
-                '全体の見積もりを確認してから実行します。予算0は上限なしです。',
-                'Review the complete estimate before running. A budget of zero means unlimited.',
-              )}
-            </span>
-          </div>
           <MotionRegion mode="status" open={!data?.settings.credentialConfigured && !preparing}>
             <p className="helper-text">
               {t(
@@ -488,44 +493,14 @@ export function AiDialog({
               <Button onClick={() => void openSettings()}>{t('設定を開く', 'Open settings')} →</Button>
             </p>
           </MotionRegion>
-          <footer className="modal-footer">
-            <Button onClick={() => void exit.close(onClose)} disabled={busy || preparing || exit.exiting}>
-              {t('キャンセル', 'Cancel')}
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => void estimate()}
-              busy={busy}
-              disabled={
-                !valid ||
-                !modelValid ||
-                invalidSource ||
-                preparing ||
-                !data?.settings.credentialConfigured || !data?.settings.vertexProject
-              }
-            >
-              <CircleDollarSign size={16} />
-              {kind === 'transcribe' ? t('準備して全体の見積もりを確認', 'Prepare and review the complete estimate') : t('見積もりを確認', 'Review estimate')}
-            </Button>
-          </footer>
-        </>
-      ) : (
-        <>
-          <button
-            className="text-button"
-            onClick={() => setQuote(null)}
-            disabled={busy}
-          >
-            ← {t('範囲を変更・再見積もり', 'Change range or re-estimate')}
-          </button>
-          <QuoteApproval
+          {quote && quoteKey === inputKey && <QuoteApproval
             quote={invalidSource ? { ...quote, canApprove: false, blockedReason: t('字幕を選び直してください。', 'Select the subtitles again.') } : quote}
             busy={busy}
             onApprove={() => void approve()}
             onRefresh={invalidSource ? undefined : () => void estimate()}
-          />
-        </>
-      )}</MotionSwap>
+          />}
+          {!quote && !busy && !preparing && configured && valid && modelValid && !invalidSource && lastAttempt.current === inputKey && <Button onClick={() => void estimate()}>{t('見積もりを再試行', 'Retry estimate')}</Button>}
+      </>
       <MotionRegion mode="status" open={busy && !preparing}><ProgressStatus label={media.title} phase={busyPhase} status="running" /></MotionRegion>
     </Modal>
   );

@@ -65,6 +65,28 @@ pub struct Bounds {
     pub width: f64,
     pub height: f64,
     pub scale_factor: f64,
+    #[serde(default)]
+    pub clip: Option<SurfaceRect>,
+    #[serde(default)]
+    pub occlusions: Vec<SurfaceRect>,
+    #[serde(default)]
+    pub input_blocked: bool,
+}
+#[derive(Debug, Clone, Deserialize)]
+pub struct SurfaceRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+impl SurfaceRect {
+    fn valid(&self) -> bool {
+        [self.x, self.y, self.width, self.height]
+            .iter()
+            .all(|v| v.is_finite() && v.abs() <= 1_000_000.)
+            && self.width >= 0.
+            && self.height >= 0.
+    }
 }
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -448,11 +470,17 @@ impl Player {
                 ensure!(
                     [b.x, b.y, b.width, b.height, b.scale_factor]
                         .iter()
-                        .all(|v| v.is_finite())
+                        .all(|v| v.is_finite() && v.abs() <= 1_000_000.)
                         && b.width >= 0.
                         && b.height >= 0.
                         && (0.5..=8.).contains(&b.scale_factor),
                     "invalid player bounds"
+                );
+                ensure!(
+                    b.occlusions.len() <= 64
+                        && b.occlusions.iter().all(SurfaceRect::valid)
+                        && b.clip.as_ref().is_none_or(SurfaceRect::valid),
+                    "invalid player occlusions"
                 );
                 #[cfg(windows)]
                 self.native.bounds(b)?;
@@ -1294,6 +1322,9 @@ mod subtitle_tests {
                     width: 32.,
                     height: 32.,
                     scale_factor: 1.,
+                    clip: None,
+                    occlusions: vec![],
+                    input_blocked: false,
                 })
                 .unwrap();
             let host = player.native.surface_window();

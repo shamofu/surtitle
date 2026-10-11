@@ -52,11 +52,11 @@
     ]
   },
   "rust": {
-    "version": "1.98.0",
+    "version": "1.99.0",
     "sourceArchive": {
-      "file": "rust-src-1.98.0.tar.xz",
-      "url": "https://static.rust-lang.org/dist/2026-08-20/rust-src-1.98.0.tar.xz",
-      "sha256": "0e977492aed5ff137815bf9b4b796e8a85b80fb2367ed64e82d5c5839870f2bf"
+      "file": "rust-src-1.99.0.tar.xz",
+      "url": "https://static.rust-lang.org/dist/2026-10-01/rust-src-1.99.0.tar.xz",
+      "sha256": "3f1f9b7ed48f4596fc87889b7b3c61747336a55c9c22db1ab0c697e0aadb77aa"
     },
     "notices": [
       {

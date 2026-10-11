@@ -1,0 +1,87 @@
+{
+  "adapter": "NVIDIA GeForce RTX 5070 Ti",
+  "decoderCopyBack": true,
+  "finalSize": [
+    1024,
+    700
+  ],
+  "framesPresented": 953,
+  "glVersion": "4.6.0 NVIDIA 616.92",
+  "gpuTextureCopyPerFrame": true,
+  "limitations": [
+    "WGL NV extension route; other vendors untested",
+    "Prototype only; no Tauri integration",
+    "No device-loss recovery yet"
+  ],
+  "nativeReceipts": [
+    {
+      "action": "play",
+      "paused": "no",
+      "position": 2.4,
+      "saved": false
+    },
+    {
+      "action": "select",
+      "paused": "yes",
+      "position": 2.0,
+      "saved": false
+    },
+    {
+      "action": "meaning",
+      "paused": "yes",
+      "position": 2.0,
+      "saved": false
+    },
+    {
+      "action": "save",
+      "paused": "yes",
+      "position": 2.0,
+      "saved": true
+    },
+    {
+      "action": "resume",
+      "paused": "no",
+      "position": 2.0,
+      "saved": true
+    },
+    {
+      "action": "state",
+      "paused": "no",
+      "position": 2.066667,
+      "saved": true
+    },
+    {
+      "action": "state",
+      "paused": "no",
+      "position": 3.3,
+      "saved": true
+    }
+  ],
+  "optionalOwnedWindowCapture": true,
+  "optionalTargetDiagnostic": null,
+  "perFrameJsIpc": false,
+  "properties": {
+    "decoder-frame-drop-count": "0",
+    "frame-drop-count": "0",
+    "hwdec-current": "d3d11va-copy",
+    "time-pos": "5.366667",
+    "video-params/h": "1080",
+    "video-params/w": "1920",
+    "vo-delayed-frame-count": "0"
+  },
+  "renderedTargetCpuReadback": false,
+  "renderer": "NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2",
+  "resizes": 1,
+  "route": "WGL_NV_DX_interop2 stable D3D11 texture + GPU CopyResource + composition swapchain + WebView2 visual host",
+  "seconds": 30.004085,
+  "webMessages": [
+    "{\"ready\":true,\"ratio\":1}",
+    "{\"action\":\"play\"}",
+    "{\"action\":\"select\"}",
+    "{\"action\":\"meaning\"}",
+    "{\"action\":\"save\",\"term\":\"Keep learning.\",\"meaning\":\"繰り返して学ぶ\"}",
+    "{\"action\":\"resume\"}",
+    "{\"action\":\"state\"}",
+    "{\"action\":\"state\"}"
+  ]
+}

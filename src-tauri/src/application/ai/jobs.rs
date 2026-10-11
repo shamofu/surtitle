@@ -182,18 +182,27 @@ async fn run_approved_with<E: JobExecutor>(
     make_executor: impl FnOnce(&AppState) -> Result<E>,
 ) -> Result<()> {
     let ApprovedExecution { plan, approval_id } = approved;
+    let Some(_worker) = state.ai_session.dispatch.worker(&approval_id) else {
+        return Ok(());
+    };
+    let interactive = plan.requests.len() == 1
+        && !matches!(
+            plan.requests.first(),
+            Some(RequestTask::AudioTranscription { .. } | RequestTask::TranscribePreview { .. })
+        );
+    let has_audio = plan.requests.iter().any(|task| {
+        matches!(
+            task,
+            RequestTask::AudioTranscription { .. } | RequestTask::TranscribePreview { .. }
+        )
+    });
     let mut phase = "source";
     let mut superseded_or_busy = false;
     let execution = async {
         if !state.ai.approval_is_current(&quote_id, &approval_id)? {
             return Ok(());
         }
-        if plan.requests.iter().any(|task| {
-            matches!(
-                task,
-                RequestTask::AudioTranscription { .. } | RequestTask::TranscribePreview { .. }
-            )
-        }) {
+        if has_audio {
             let verify_state = state.clone();
             let verify_plan = plan.clone();
             tauri::async_runtime::spawn_blocking(move || {
@@ -233,12 +242,64 @@ async fn run_approved_with<E: JobExecutor>(
                 return Err(error);
             }
             phase = "execute";
+            let ticket = state.ai_session.dispatch.enqueue(&quote_id, interactive);
+            state.changes.publish(
+                crate::application::changes::ChangeDomain::Jobs,
+                Some(quote_id.clone()),
+            );
+            let mut waited = false;
+            let permit = loop {
+                if !state.ai.approval_is_current(&quote_id, &approval_id)?
+                    || state.ai.quote(&quote_id)?.state != "approved"
+                {
+                    return Ok(());
+                }
+                if let Some(permit) = ticket.try_acquire() {
+                    break permit;
+                }
+                waited = true;
+                ticket.changed().await;
+            };
+            drop(ticket);
+            if waited && has_audio {
+                // The source may have been replaced at the same path while this
+                // request waited behind another job. Prepared attachments stay
+                // immutable, but their original media must still match too.
+                phase = "source";
+                let verify_state = state.clone();
+                let verify_plan = plan.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    crate::application::transcript::storage::verify_audio_source_content(
+                        &verify_state,
+                        &verify_plan,
+                    )
+                })
+                .await??;
+            }
+            // Hashing is asynchronous. A pause, cancel, or new approval must not
+            // acquire a reservation after it; unwinding also releases the lane.
+            if !state.ai.approval_is_current(&quote_id, &approval_id)?
+                || state.ai.quote(&quote_id)?.state != "approved"
+            {
+                return Ok(());
+            }
+            phase = "execute";
             let result = service
                 .execute_next_with_guard(&quote_id, &approval_id, || {
                     verify_current_binding(&state, &plan)
                         .map_err(|e| AiError::Invalid(e.to_string()))
                 })
                 .await;
+            // Settlement has finished. Local application and pacing must not
+            // hold the dispatch lane needed by an interactive phrase request.
+            drop(permit);
+            state.changes.publish(
+                crate::application::changes::ChangeDomain::Jobs,
+                Some(quote_id.clone()),
+            );
+            state
+                .changes
+                .publish(crate::application::changes::ChangeDomain::Budget, None);
             let result = match result {
                 Ok(Some(result)) => result,
                 Ok(None) => break,
@@ -287,6 +348,19 @@ async fn run_approved_with<E: JobExecutor>(
                     .await??;
                     continue;
                 }
+                Err(AiError::InFlight) => {
+                    if !wait_for_dispatch(
+                        &state,
+                        &quote_id,
+                        &approval_id,
+                        chrono::Utc::now().timestamp_millis() + 250,
+                    )
+                    .await?
+                    {
+                        return Ok(());
+                    }
+                    continue;
+                }
                 Err(error) => return Err(error.into()),
             };
             if !state.ai.approval_is_current(&quote_id, &approval_id)? {
@@ -303,10 +377,34 @@ async fn run_approved_with<E: JobExecutor>(
                 )?;
                 return Err(error);
             }
+            state.changes.publish(
+                crate::application::changes::ChangeDomain::Review,
+                Some(quote_id.clone()),
+            );
+            state.changes.publish(
+                crate::application::changes::ChangeDomain::Subtitles,
+                Some(plan.binding.media_id.clone()),
+            );
+            state.changes.publish(
+                crate::application::changes::ChangeDomain::Media,
+                Some(plan.binding.media_id.clone()),
+            );
         }
         phase = "apply";
         if state.ai.approval_is_current(&quote_id, &approval_id)? {
             crate::application::transcript::automatic::apply_completed(&state, &quote_id)?;
+            state.changes.publish(
+                crate::application::changes::ChangeDomain::Review,
+                Some(quote_id.clone()),
+            );
+            state.changes.publish(
+                crate::application::changes::ChangeDomain::Subtitles,
+                Some(plan.binding.media_id.clone()),
+            );
+            state.changes.publish(
+                crate::application::changes::ChangeDomain::Media,
+                Some(plan.binding.media_id.clone()),
+            );
         }
         Ok(())
     }
@@ -350,6 +448,13 @@ async fn run_approved_with<E: JobExecutor>(
         "completed"
     };
     let _ = super::runtime::finish(&state, &quote_id, &approval_id, outcome);
+    state.changes.publish(
+        crate::application::changes::ChangeDomain::Jobs,
+        Some(quote_id.clone()),
+    );
+    state
+        .changes
+        .publish(crate::application::changes::ChangeDomain::Budget, None);
     execution
 }
 
@@ -395,9 +500,8 @@ fn failure_issue(phase: &str, error: &anyhow::Error) -> (&'static str, Option<u1
         Some(AiError::BudgetDisabled | AiError::BudgetExceeded(_)) => ("budget", None, "settings"),
         Some(AiError::Provider(429)) => ("provider", Some(429), "resume"),
         Some(AiError::Provider(status)) => ("provider", Some(*status), "settings"),
-        Some(AiError::UnknownOutcome | AiError::InFlight) => {
-            ("unknown_outcome", None, "review_unknown")
-        }
+        Some(AiError::UnknownOutcome) => ("unknown_outcome", None, "review_unknown"),
+        Some(AiError::InFlight | AiError::WorkerBusy) => ("waiting", None, "resume"),
         Some(AiError::PreparationChanged) => ("source_changed", None, "prepare_again"),
         Some(AiError::OutputRejected(reason)) => (reason.code(), None, "resume"),
         _ if phase == "apply" => ("local_apply", None, "retry_local"),

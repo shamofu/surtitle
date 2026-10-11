@@ -13,7 +13,7 @@ function geometry(ratio = 1) {
   return { native: [root, renderer, surface], dom: { innerWidth: 1440, innerHeight: 900, devicePixelRatio: ratio, viewport } };
 }
 
-test('compares real native video pixels at 100%, 150% and 200% DPI', () => {
+test('validates the native geometry model at 100%, 150% and 200% DPI', () => {
   for (const ratio of [1, 1.5, 2]) {
     const { native, dom } = geometry(ratio);
     verifyNativeGeometry(native, dom);

@@ -2,11 +2,12 @@
 import { useMounted } from './lifecycle';
 
 import { useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../../../shared/query/keys';
 
 import { studyApi } from '../api';
 import { nativeAvailable } from '../../../shared/native/transport';
 import type { Media } from '../../../shared/contracts/media';
-import type { TranscriptReview } from '../../../shared/contracts/transcript';
 import { useSnapshot, useNotifications } from '../../../app/runtime';
 import { draftStudyApi } from './api';
 import { savedDraftText } from './saved-text';
@@ -21,6 +22,7 @@ export function useDraftStudy(media: Media) {
   const { data } = useSnapshot();
   const { report } = useNotifications();
   const mounted = useMounted();
+  const client = useQueryClient();
   const jobs =
     data?.jobs.filter(
       (job) => job.mediaId === media.id && job.transcriptReview,
@@ -31,17 +33,16 @@ export function useDraftStudy(media: Media) {
     : jobs[0]?.id;
   const identity = useRef(jobId);
   identity.current = jobId;
-  const [loaded, setLoaded] = useState<{
-    jobId: string;
-    view: TranscriptReview;
-  }>();
-  const view = loaded && loaded.jobId === jobId ? loaded.view : undefined;
-  const [bookmarks, setBookmarks] = useState<DraftSelection[]>([]);
+  const selectionsKey = [...queryKeys.drafts(media.id), 'selections'];
+  const selections = useQuery({ queryKey: selectionsKey, queryFn: () => draftStudyApi.list(media.id), enabled: regionActive && nativeAvailable() });
+  const review = useQuery({ queryKey: queryKeys.review(jobId ?? ''), queryFn: () => studyApi.transcriptReview(jobId!), enabled: regionActive && nativeAvailable() && !!jobId });
+  const view = jobId ? review.data : undefined;
+  const bookmarks = selections.data ?? [];
+  const setBookmarks = (update: (items: DraftSelection[]) => DraftSelection[]) => client.setQueryData<DraftSelection[]>(selectionsKey, items => update(items ?? []));
   const [active, setActive] = useState<DraftSelection>();
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const error = selections.error?.message ?? review.error?.message ?? '';
+  const loading = regionActive && nativeAvailable() && (selections.isLoading || (!!jobId && review.isLoading));
   const [busy, setBusy] = useState(false);
-  const mutation = useRef(0);
   const preparing = useRef(false);
   const [refresh, setRefresh] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -61,46 +62,10 @@ export function useDraftStudy(media: Media) {
   }, [jobId]);
 
   useEffect(() => {
-    if (!regionActive) return;
-    if (!nativeAvailable()) {
-      setLoading(false);
-      return;
-    }
-    let disposed = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    async function poll() {
-      const revision = mutation.current;
-      const results = await Promise.allSettled([
-        draftStudyApi.list(media.id),
-        jobId ? studyApi.transcriptReview(jobId) : Promise.resolve(undefined),
-      ]);
-      if (disposed || identity.current !== jobId) return;
-      if (revision === mutation.current) {
-        const [selections, review] = results;
-        if (selections.status === 'fulfilled') setBookmarks(selections.value);
-        if (review.status === 'fulfilled' && review.value && jobId)
-          setLoaded({ jobId, view: review.value });
-        const failed = results.find((result) => result.status === 'rejected');
-        setError(
-          failed?.status === 'rejected'
-            ? String(
-                failed.reason instanceof Error
-                  ? failed.reason.message
-                  : failed.reason,
-              )
-            : '',
-        );
-      }
-      setLoading(false);
-      // Schedule only after completion, so a slow native read cannot overlap the next poll.
-      timer = setTimeout(() => void poll(), 2000);
-    }
-    void poll();
-    return () => {
-      disposed = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [jobId, media.id, refresh, regionActive]);
+    if (!refresh || !regionActive || !nativeAvailable()) return;
+    void selections.refetch();
+    if (jobId) void review.refetch();
+  }, [refresh]);
 
   async function prepare(request: {
     jobId: string;
@@ -110,12 +75,11 @@ export function useDraftStudy(media: Media) {
     if (!regionActive || preparing.current) return;
     preparing.current = true;
     setBusy(true);
-    mutation.current++;
+    await client.cancelQueries({ queryKey: selectionsKey });
     const selected = await report(() => draftStudyApi.prepare(request));
     if (!mounted.current) return;
     preparing.current = false;
     setBusy(false);
-    mutation.current++;
     if (selected) {
       setBookmarks((items) => [
         selected,
@@ -140,7 +104,7 @@ export function useDraftStudy(media: Media) {
       }));
   }
   function saved(selection: DraftSelection) {
-    mutation.current++;
+    void client.cancelQueries({ queryKey: selectionsKey });
     setBookmarks((items) => [
       selection,
       ...items.filter((item) => item.id !== selection.id),
@@ -165,7 +129,7 @@ export function useDraftStudy(media: Media) {
     Math.max(0, Math.ceil(chunks.length / BLOCK_PAGE_SIZE) - 1),
   );
   function removeActive() {
-    mutation.current++;
+    void client.cancelQueries({ queryKey: selectionsKey });
     setBookmarks((items) => items.filter((item) => item.id !== active?.id));
     setActive(undefined);
   }

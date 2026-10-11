@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useId, useState } from 'react';
 
-import { Check, CircleDollarSign, ShieldCheck } from 'lucide-react';
+import { Play, CircleDollarSign } from 'lucide-react';
 
 import type { AiQuote } from '../../shared/contracts/ai';
 
@@ -24,14 +24,7 @@ export function QuoteApproval({
   transcription?: boolean;
 }) {
   const { t } = useAppearance();
-  // Consent follows the operation, including quotes opened from history or Settings.
   const transcription = quote.kind === 'transcribe';
-  const [acknowledgedQuote, setAcknowledgedQuote] = useState<string | null>(
-    null,
-  );
-  const approvalIdentity = JSON.stringify([quote.id, quote.digest, quote.expiresAt, quote.retryPolicy,
-    quote.maximumRequestCount, quote.maximumSendDurationMs, quote.maximumTotalOutputTokens]);
-  const acknowledged = acknowledgedQuote === approvalIdentity;
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
@@ -40,9 +33,7 @@ export function QuoteApproval({
   const expired = new Date(quote.expiresAt).getTime() <= now;
   const blockReasonId = useId();
   const approvalBlocked = !quote.canApprove || expired;
-  const acknowledgementDisabled = approvalBlocked || busy;
   const unpriced = quote.unpriced === true || quote.maximumUsd == null;
-  const requiresAcknowledgement = !transcription;
   const automaticRetries = (quote.retryPolicy?.maxRetries ?? 0) > 0;
   return (
     <div className="quote-review">
@@ -61,7 +52,7 @@ export function QuoteApproval({
             t('金額上限は保証できません', 'A dollar limit cannot be guaranteed')
           ) : (
             <>
-              {t('承認する予約額', 'Approved reservation')}{' '}
+              {t('今回の予約上限', 'Reservation for this run')}{' '}
               <b><AnimatedValue value={money(quote.maximumUsd)} /></b>
             </>
           )}
@@ -81,17 +72,16 @@ export function QuoteApproval({
             <AnimatedValue value={`${timestamp(quote.startMs, true)} — ${timestamp(quote.endMs, true)}`} />
           </dd>
         </div>
-        {!transcription && <div>
+        <div>
           <dt>{t('モデル', 'Model')}</dt>
           <dd>
             {quote.model} · {quote.location || 'global'}
           </dd>
-        </div>}
+        </div>
       </dl>
-      <AnimatedDetails open={!transcription}>
+      <AnimatedDetails>
         <summary>{t('料金・送信の詳細', 'Cost and request details')}</summary>
         <dl className="details-list">
-        {transcription && <div><dt>{t('モデル', 'Model')}</dt><dd>{quote.model} · {quote.location || 'global'}</dd></div>}
         {transcription && quote.applyPolicy === 'auto' && <div><dt>{t('受信後', 'As results arrive')}</dt><dd>{t('字幕を自動表示', 'Apply subtitles automatically')}</dd></div>}
         <div>
           <dt>{automaticRetries ? t('処理区間数 / 同時送信', 'Audio ranges / concurrency') : t('要求数 / 同時送信', 'Requests / concurrency')}</dt>
@@ -139,7 +129,7 @@ export function QuoteApproval({
           `混雑時（HTTP 429）は各区間を最大${quote.retryPolicy?.maxRetries ?? 0}回再試行します（最大${quote.maximumRequestCount}回送信）。通信結果が不明な場合は停止します。`,
           `If the service is busy (HTTP 429), each range may be retried up to ${quote.retryPolicy?.maxRetries ?? 0} times (${quote.maximumRequestCount} requests maximum). An unknown outcome stops the job.`,
         )}</p>}
-        <p className="helper-text" data-testid="transcription-pacing-policy">{t('音声は順に送信し、送信開始の間隔を10秒以上空けます。混雑時は間隔を延ばします。', 'Audio is sent one range at a time, with at least 10 seconds between request starts. Congestion increases the interval.')}</p>
+        <p className="helper-text" data-testid="transcription-pacing-policy">{t('音声は順に送信します。混雑時はサーバーの案内に従って待機し、受信済みの字幕で学習を続けられます。', 'Audio is sent one range at a time. When the service is busy, Surtitle waits as directed; received subtitles remain available for learning.')}</p>
       </>}
       </AnimatedDetails>
       {!transcription && <MotionSwap disabled stateKey={quote.warnings.join('|')}>{quote.warnings.map((warning, index) => (
@@ -164,54 +154,26 @@ export function QuoteApproval({
           {t('見積もりを更新', 'Refresh estimate')}
         </Button>}
       </MotionSwap></MotionRegion>
-      {requiresAcknowledgement && <label className="check-field" data-disabled={acknowledgementDisabled}>
-        <input
-          type="checkbox"
-          checked={acknowledged}
-          onChange={(event) =>
-            setAcknowledgedQuote(event.target.checked ? approvalIdentity : null)
-          }
-          disabled={acknowledgementDisabled}
-          aria-describedby={approvalBlocked ? blockReasonId : undefined}
-        />
-        <span>
-          {unpriced
-            ? t(
-                '料金と品質が未確認であることを理解し、この範囲・要求数・音声時間・出力設定で今回の実行を承認します。',
-                'I understand that pricing and quality are unverified and approve this job for the displayed scope, request count, audio duration, and output settings.',
-              )
-            : t(
-                'この区間と予約額を確認し、モデルの出力を確認して利用することを了承して、今回のAI実行を承認します。',
-                'I approve this AI job for the displayed scope and reservation, and will review the model output before use.',
-              )}
-        </span>
-      </label>}
       <MotionRegion mode="status" open={automaticRetries && !transcription}><p className="notice" data-testid="automatic-retry-policy">
         {t(
           `サービスが混雑した場合（HTTP 429）だけ、各区間を最大${quote.retryPolicy?.maxRetries ?? 0}回、自動で再試行します（最大${quote.maximumRequestCount}回の送信）。${unpriced ? '表示した送信上限には再試行を含みます。' : '予約額と送信上限は再試行を含みます。'}通信結果が不明な場合は停止します。`,
           `Only when the service is busy (HTTP 429), each audio range may be retried automatically up to ${quote.retryPolicy?.maxRetries ?? 0} times (${quote.maximumRequestCount} requests maximum). ${unpriced ? 'The displayed sending limits include retries.' : 'The reservation and maximum sending limits include retries.'} An unknown outcome stops the job.`,
         )}
       </p></MotionRegion>
-      <MotionRegion mode="status" open={transcription && unpriced}><p className="helper-text">
+      <MotionRegion mode="status" open={unpriced}><p className="helper-text">
         {t('開始すると、料金不明のまま表示した範囲の実行を承認します。', 'Starting approves this scope with an unknown price.')}
       </p></MotionRegion>
       <Button
         variant="primary"
         className="full-width"
         busy={busy}
-        disabled={!quoteCanBeApproved(quote, !requiresAcknowledgement || acknowledged, now)}
+        disabled={!quoteCanBeApproved(quote, now)}
+        aria-describedby={approvalBlocked ? blockReasonId : undefined}
         onClick={onApprove}
       >
-        <Check size={16} />
-        {transcription ? t('この内容で文字起こしを開始', 'Start transcription') : t('この実行を承認する', 'Approve this job')}
+        <Play size={16} />
+        {transcription ? t('文字起こしを開始', 'Start transcription') : quote.kind === 'translate' ? t('翻訳を開始', 'Start translation') : quote.focusTerm ? t('解説を開始', 'Start explanation') : t('表現の提案を開始', 'Find expressions')}
       </Button>
-      <MotionRegion mode="status" open={!transcription}><p className="helper-text centered">
-        <ShieldCheck size={13} />
-        {t(
-          '以後の実行や結果不明の再試行を、自動で承認することはありません。',
-          'This does not authorize future jobs or retries with an unknown result.',
-        )}
-      </p></MotionRegion>
     </div>
   );
 }

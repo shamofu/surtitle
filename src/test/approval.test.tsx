@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { QuoteApproval } from '../features/ai/QuoteApproval';
@@ -34,127 +33,68 @@ const fixture: AiQuote = {
   canApprove: true,
 };
 afterEach(() => { cleanup(); vi.useRealTimers(); });
-describe('one-job approval UI', () => {
-  it('never approves merely by rendering an estimate; requires its checkbox', () => {
+describe('one-job Start action', () => {
+  it.each([
+    ['vocabulary', undefined, 'Find expressions'],
+    ['vocabulary', 'hold on', 'Start explanation'],
+    ['translate', undefined, 'Start translation'],
+    ['transcribe', undefined, 'Start transcription'],
+  ] as const)('never sends %s on render and uses one Start with scope and price visible', (kind, focusTerm, label) => {
     const approve = vi.fn();
-    render(<QuoteApproval quote={fixture} busy={false} onApprove={approve} />);
-    const button = screen.getByRole('button', { name: 'Approve this job' });
+    render(<QuoteApproval quote={{ ...fixture, kind, focusTerm }} busy={false} onApprove={approve} />);
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.getByText('Selected range')).toBeVisible();
+    expect(screen.getByText('Model')).toBeVisible();
+    expect(screen.getAllByText('test-model · global')).toHaveLength(1);
+    expect(screen.getByText('test-model · global')).toBeVisible();
+    expect(screen.getByText('$0.01')).toBeVisible();
+    expect(approve).not.toHaveBeenCalled();
+    const button = screen.getByRole('button', { name: label });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(approve).toHaveBeenCalledOnce();
+  });
+  it.each([
+    { ...fixture, canApprove: false, blockedReason: 'Budget exceeded' },
+    { ...fixture, expiresAt: '2020-01-01T00:00:00Z' },
+  ])('blocks a disallowed or expired quote', quote => {
+    const approve = vi.fn();
+    render(<QuoteApproval quote={quote} busy={false} onApprove={approve} />);
+    const button = screen.getByRole('button', { name: 'Find expressions' });
     expect(button).toBeDisabled();
     fireEvent.click(button);
     expect(approve).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('checkbox'));
-    expect(button).toBeEnabled();
-    fireEvent.click(button);
-    expect(approve).toHaveBeenCalledTimes(1);
   });
-  it.each([
-    { ...fixture, canApprove: false, blockedReason: 'Budget is zero' },
-    { ...fixture, expiresAt: '2020-01-01T00:00:00Z' },
-  ])('blocks a disallowed or expired quote', (quote) => {
-    render(<QuoteApproval quote={quote} busy={false} onApprove={vi.fn()} />);
-    expect(screen.getByRole('checkbox')).toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: 'Approve this job' }),
-    ).toBeDisabled();
+  it('prevents duplicate starts while a request is in flight', () => {
+    render(<QuoteApproval quote={fixture} busy onApprove={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Find expressions' })).toBeDisabled();
   });
-  it('prevents duplicate approval while a request is in flight', () => {
-    const { rerender } = render(
-      <QuoteApproval quote={fixture} busy={false} onApprove={vi.fn()} />,
-    );
-    fireEvent.click(screen.getByRole('checkbox'));
-    rerender(<QuoteApproval quote={fixture} busy onApprove={vi.fn()} />);
-    expect(
-      screen.getByRole('button', { name: 'Approve this job' }),
-    ).toBeDisabled();
-  });
-  it('allows explicit scope approval without inventing a zero dollar estimate', () => {
+  it('discloses unknown price inline and requires only the explicit Start', () => {
     const approve = vi.fn();
-    render(
-      <QuoteApproval
-        quote={{
-          ...fixture,
-          unpriced: true,
-          estimatedUsd: null,
-          maximumUsd: null,
-          requestCount: 3,
-          sendDurationMs: 126000,
-          totalOutputTokens: 600,
-        }}
-        busy={false}
-        onApprove={approve}
-      />,
-    );
-    expect(screen.getByText('Price unknown')).toBeInTheDocument();
-    expect(
-      screen.getByText('A dollar limit cannot be guaranteed'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('3 / 1')).toBeInTheDocument();
+    render(<QuoteApproval quote={{ ...fixture, unpriced: true, estimatedUsd: null, maximumUsd: null }} busy={false} onApprove={approve} />);
+    expect(screen.getByText('Price unknown')).toBeVisible();
+    expect(screen.getByText('A dollar limit cannot be guaranteed')).toBeVisible();
+    expect(screen.getByText('Starting approves this scope with an unknown price.')).toBeVisible();
     expect(screen.queryByText(/\$0/)).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Approve this job' }),
-    ).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'Approve this job' }));
+    expect(approve).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Find expressions' }));
     expect(approve).toHaveBeenCalledOnce();
   });
-  it('does not carry acknowledgement across a changed quote digest', () => {
-    const { rerender } = render(
-      <QuoteApproval
-        quote={{ ...fixture, digest: 'first' }}
-        busy={false}
-        onApprove={vi.fn()}
-      />,
-    );
-    fireEvent.click(screen.getByRole('checkbox'));
-    rerender(
-      <QuoteApproval
-        quote={{ ...fixture, digest: 'changed' }}
-        busy={false}
-        onApprove={vi.fn()}
-      />,
-    );
-    expect(screen.getByRole('checkbox')).not.toBeChecked();
-    expect(
-      screen.getByRole('button', { name: 'Approve this job' }),
-    ).toBeDisabled();
-  });
-  it('requires acknowledgement again when a same-id same-digest quote gets a new expiry', () => {
-    const approve = vi.fn();
-    const { rerender } = render(<QuoteApproval quote={{ ...fixture, digest: 'unchanged' }} busy={false} onApprove={approve} />);
-    fireEvent.click(screen.getByRole('checkbox'));
-    expect(screen.getByRole('button', { name: 'Approve this job' })).toBeEnabled();
-    rerender(<QuoteApproval quote={{ ...fixture, digest: 'unchanged', expiresAt: '2099-01-02T00:00:00Z' }} busy={false} onApprove={approve} />);
-    expect(screen.getByRole('checkbox')).not.toBeChecked();
-    expect(screen.getByRole('button', { name: 'Approve this job' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve this job' }));
-    expect(approve).not.toHaveBeenCalled();
-  });
-  it('explains an expired disabled checkbox and refreshes without carrying consent or starting a request', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-10-11T00:00:00Z'));
+  it('refreshes expiration without sending and uses the newly displayed scope', () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-11T00:00:00Z'));
     const approve = vi.fn(), refresh = vi.fn();
-    const quote = { ...fixture, digest: 'unchanged', unpriced: true, estimatedUsd: null, maximumUsd: null,
-      expiresAt: '2026-10-11T00:00:01Z' };
-    const { rerender } = render(<QuoteApproval quote={quote} busy={false} onApprove={approve} onRefresh={refresh} />);
-    fireEvent.click(screen.getByRole('checkbox'));
-    expect(screen.getByRole('checkbox')).toBeChecked();
+    const quote = { ...fixture, expiresAt: '2026-10-11T00:00:01Z' };
+    const view = render(<QuoteApproval quote={quote} busy={false} onApprove={approve} onRefresh={refresh} />);
     act(() => { vi.advanceTimersByTime(1000); });
-    const checkbox = screen.getByRole('checkbox');
-    expect(checkbox).toBeDisabled();
-    expect(checkbox.closest('label')).toHaveAttribute('data-disabled', 'true');
-    expect(checkbox).toHaveAccessibleDescription('This quote has expired, so approval is disabled. Refresh the estimate to continue.');
-    fireEvent.click(checkbox);
-    fireEvent.click(screen.getByRole('button', { name: 'Approve this job' }));
-    expect(approve).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Find expressions' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Refresh estimate' }));
     expect(refresh).toHaveBeenCalledOnce();
     expect(approve).not.toHaveBeenCalled();
-    rerender(<QuoteApproval quote={{ ...quote, expiresAt: '2026-10-11T00:30:01Z' }} busy={false} onApprove={approve} onRefresh={refresh} />);
-    expect(screen.getByRole('checkbox')).toBeEnabled();
-    expect(screen.getByRole('checkbox')).not.toBeChecked();
-    expect(screen.getByRole('button', { name: 'Approve this job' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'Approve this job' }));
+    view.rerender(<QuoteApproval quote={{ ...quote, digest: 'new', endMs: 120000, expiresAt: '2026-10-11T00:30:01Z' }} busy={false} onApprove={approve} />);
+    expect(screen.getByRole('button', { name: 'Find expressions' })).toBeEnabled();
+    expect(screen.getByText('Selected range').parentElement).toHaveTextContent('2:00');
+    expect(approve).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Find expressions' }));
     expect(approve).toHaveBeenCalledOnce();
   });
   it('shows the automatic retry scope before approval and separates base ranges from maximum sends', () => {
@@ -170,7 +110,8 @@ describe('one-job approval UI', () => {
     expect(policy).toHaveTextContent('up to 2 times (9 requests maximum)');
     expect(policy).toHaveTextContent('An unknown outcome stops the job');
     expect(screen.getByTestId('transcription-pacing-policy')).toBeVisible();
-    expect(screen.getByTestId('transcription-pacing-policy')).toHaveTextContent('at least 10 seconds between request starts');
+    expect(screen.getByTestId('transcription-pacing-policy')).toHaveTextContent('Audio is sent one range at a time.');
+    expect(screen.getByTestId('transcription-pacing-policy')).not.toHaveTextContent('10 seconds');
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(approve).not.toHaveBeenCalled();
     expect(screen.getByText('Audio ranges / concurrency').parentElement).toHaveTextContent('3 / 1');

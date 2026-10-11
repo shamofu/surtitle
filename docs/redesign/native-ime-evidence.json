@@ -1,0 +1,67 @@
+{
+  "compositionUpdates": 10,
+  "candidatePopupObserved": true,
+  "keys": [
+    "Alt+grave",
+    "n",
+    "i",
+    "h",
+    "o",
+    "n",
+    "Space",
+    "Space",
+    "Escape",
+    "Space",
+    "Return",
+    "Alt+grave"
+  ],
+  "candidateExamples": [
+    "日本",
+    "二本",
+    "二品"
+  ],
+  "limits": [
+    "Playback was paused during this IME test",
+    "IME tested in adjacent phrase input, not every modal field",
+    "Mixed-DPI moves untested; both attached monitors use DPI 96"
+  ],
+  "compositionStarts": 1,
+  "committedValue": "日本",
+  "compositionEnds": 1,
+  "candidateEscapeKeptLearningPanel": true,
+  "nativeVideoRemainedVisible": true,
+  "input": "OS SendInput physical romaji keys via computer-use",
+  "application": "app.surtitle.evaluation.redesign20261011",
+  "testedAt": "2026-10-11T12:14:16.6557096Z",
+  "featureSet": "default",
+  "environment": {
+    "monitors": [
+      {
+        "rect": {
+          "Left": 0,
+          "Top": 0,
+          "Right": 2560,
+          "Bottom": 1440
+        },
+        "dpiX": 96,
+        "dpiY": 96,
+        "result": 0
+      },
+      {
+        "rect": {
+          "Left": -1920,
+          "Top": 0,
+          "Right": 0,
+          "Bottom": 1080
+        },
+        "dpiX": 96,
+        "dpiY": 96,
+        "result": 0
+      }
+    ],
+    "keyboardLayouts": [
+      "4110411",
+      "4090409"
+    ]
+  }
+}

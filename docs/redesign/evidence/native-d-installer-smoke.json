@@ -1,0 +1,23 @@
+{
+  "renderingAcceptancePassed": true,
+  "payloadSha256": {
+    "surtitle.exe": "34af843982fe59203c57b54696c68b934657ff4f5289e885d79d3564149f5a65",
+    "native/mpv-2.dll": "17409eefce3e4916c51fa6abaa5332fe0dc1550a1dd355afd31a918547297fad",
+    "native/onnxruntime.dll": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471",
+    "native/onnxruntime_providers_shared.dll": "87f6878cdc1f80b3a9afa5b0c84663315030b4957f5bbb6b66470557cb2f48d8"
+  },
+  "nonAsciiSpaceAmpersandInstallPath": true,
+  "overwriteInstallPassed": true,
+  "freshInstallPassed": true,
+  "learningContinuityPassed": true,
+  "defaultDataRetentionPassed": true,
+  "isolatedIdentity": true,
+  "testedAt": "2026-10-11T15:04:15.2475367Z",
+  "uninstallPassed": true,
+  "schemaVersion": 1,
+  "startupPassed": true,
+  "retainedFileCount": 10,
+  "retainedDataRemoved": false,
+  "applicationIdentifier": "app.surtitle.evaluation.redesignfinal20261011d",
+  "sha": null
+}

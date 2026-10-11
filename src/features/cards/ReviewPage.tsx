@@ -120,7 +120,7 @@ export function ReviewCard({
             </Button>
           )}
         </div>
-        <MotionSwap stateKey={revealed ? 'revealed' : 'concealed'}>
+        <MotionSwap className="review-answer-region" stateKey={revealed ? 'revealed' : 'concealed'}>
         {revealed ? (
           <div className="review-answer">
             <span className="review-answer-label">{t('意味', 'Meaning')}</span>

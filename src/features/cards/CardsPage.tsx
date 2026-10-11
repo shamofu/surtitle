@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { Link } from '@tanstack/react-router';
 import {
   ArrowDownToLine,
@@ -54,6 +55,9 @@ export function CardsPage() {
   const [openMenu, setOpenMenu] = useState<string>();
   const activeMenu = useRef<HTMLDetailsElement | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+  const [focusedCard, setFocusedCard] = useState<string>();
   useEffect(() => {
     if (!openMenu) return;
     const dismiss = (event: PointerEvent) => {
@@ -87,6 +91,32 @@ export function CardsPage() {
         .includes(search.trim().toLocaleLowerCase()),
   );
   const due = dueCards(cards);
+  const dueIds = new Set(due.map(card => card.id));
+  const mediaById = useMemo(() => new Map(data?.media.map(media => [media.id, media])), [data?.media]);
+  const virtualized = filtered.length > 40;
+  const virtual = useVirtualizer({
+    useFlushSync: false,
+    enabled: virtualized,
+    count: filtered.length,
+    getScrollElement: () => list.current?.closest<HTMLElement>('.page-content') ?? null,
+    getItemKey: index => filtered[index].id,
+    estimateSize: () => 240,
+    overscan: 4,
+    gap: 12,
+    scrollMargin,
+    rangeExtractor: range => [...new Set([...defaultRangeExtractor(range), ...[focusedCard, openMenu, edit?.id, deleting?.id]
+      .map(id => filtered.findIndex(card => card.id === id)).filter(index => index >= 0)])].sort((a, b) => a - b),
+  });
+  useLayoutEffect(() => {
+    const element = list.current, scroller = element?.closest<HTMLElement>('.page-content');
+    if (!element || !scroller || !virtualized) return;
+    const measure = () => setScrollMargin(element.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop);
+    measure();
+    const observer = new ResizeObserver(measure); observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [virtualized]);
+  useLayoutEffect(() => { list.current?.closest<HTMLElement>('.page-content')?.scrollTo({ top: 0 }); }, [search, language]);
+  const visible = virtualized ? virtual.getVirtualItems().map(item => ({ card: filtered[item.index], item })) : filtered.map(card => ({ card, item: undefined }));
   return (
     <div className="phrases-page page-enter">
       <PageTitle
@@ -174,15 +204,22 @@ export function CardsPage() {
           </EmptyState>
         </div>
       ) : (
-        <div className="phrase-list">
-          {filtered.map((card) => {
-            const media = data?.media.find((item) => item.id === card.mediaId);
-            const isDue = due.some((item) => item.id === card.id);
+        <div ref={list} className="phrase-list" style={virtualized ? { position: 'relative', height: virtual.getTotalSize(), display: 'block' } : undefined}>
+          {visible.map(({ card, item }) => {
+            const media = mediaById.get(card.mediaId);
+            const isDue = dueIds.has(card.id);
             return (
-              <article className="phrase-card" key={card.id}>
+              <article className="phrase-card" key={card.id} data-index={item?.index}
+                ref={item ? virtual.measureElement : undefined}
+                style={item ? { position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${item.start - scrollMargin}px)` } : undefined}
+                onFocusCapture={() => setFocusedCard(card.id)}
+                onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocusedCard(undefined); }}>
                 <header>
                   <h3><MotionSwap disabled as="span" stateKey={card.term}>{card.term}</MotionSwap></h3>
                   <div className="phrase-controls">
+                    <Button variant="ghost" aria-label={t('フレーズを編集', 'Edit phrase')} onClick={() => setEdit(card)}>
+                      {t('編集', 'Edit')}
+                    </Button>
                     <Button
                       variant="ghost"
                       disabled={!card.audioPath}
@@ -215,12 +252,6 @@ export function CardsPage() {
                         <MoreHorizontal size={20} />
                       </summary>
                       <div className="phrase-options-panel">
-                        <Button onClick={(event) => {
-                          closeMenu(event.currentTarget);
-                          setEdit(card);
-                        }}>
-                          {t('編集', 'Edit')}
-                        </Button>
                         <Button
                           busy={busyCard === card.id}
                           onClick={(event) => { closeMenu(event.currentTarget); void suspend(card); }}

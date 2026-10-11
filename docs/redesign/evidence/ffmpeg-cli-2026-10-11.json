@@ -1,0 +1,328 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-10-11T13:10:10.390752Z",
+  "cloudCalls": 0,
+  "sourceSha256": "eb20b9ff030b1ece8a3fe9a047fff6454dc20a8d5226acb4cce10f024124be00",
+  "modelSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+  "runtimeSha256": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471",
+  "preparationExecutableSha256": "ef3c1d42dd783c30731cd8c4854330bf0acc97f5dc136bc60861a50e01e9ffdc",
+  "appTestExecutableSha256": "1a0dba41be2985d033d1b7a7b15dc26417ec3f8c090803090c03a1cdd8cb4b5c",
+  "toolsTestExecutableSha256": "c829a6968f032107b741cab29af825fa378c43c018cfd2bf98e533cc15c59730",
+  "chunksIdentical": true,
+  "vadIdentical": true,
+  "sourceBindingIdentical": true,
+  "decodedPcmIdentical": true,
+  "toolSnapshotChanged": true,
+  "preparationSettingsDigestChanged": true,
+  "flacFilesIdentical": false,
+  "reports": {
+    "baseline": {
+      "executableSha256": "89cc7bef94d7cd46033b0c0b1b21098ba41b5a7c9e0089bc62d5d6078416bc28",
+      "ffprobeSha256": "b84de611ef6cd46b30e55f18ee16f20d6b363914c5c9fb3ef4dd39b22d44a438",
+      "executableBytes": 117566464,
+      "version": "ffmpeg version n9.0.1-ffmpeg-windows-build-helpers Copyright (c) 2000-2026 the FFmpeg developers",
+      "configuration": "configuration: --pkg-config=pkg-config --pkg-config-flags=--static --extra-version=ffmpeg-windows-build-helpers --enable-version3 --disable-debug --disable-w32threads --arch=x86_64 --target-os=mingw32 --cross-prefix=/workspaces/ffmpeg-windows-build-helpers/sandbox/cross_compilers/mingw-w64-x86_64/bin/x86_64-w64-mingw32- --enable-libcaca --enable-gray --enable-libtesseract --enable-fontconfig --enable-gmp --enable-libass --enable-libbluray --enable-libbs2b --enable-libflite --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-filter=drawtext --enable-libgme --enable-libgsm --enable-libilbc --enable-libmodplug --enable-libmp3lame --enable-libopencore-amrnb --enable-libopencore-amrwb --enable-libopus --enable-libsnappy --enable-libsoxr --enable-libspeex --enable-libtheora --enable-libtwolame --enable-libvo-amrwbenc --enable-libvorbis --enable-libwebp --enable-libzimg --enable-libzvbi --enable-libmysofa --enable-libopenjpeg --enable-libopenh264 --enable-libvmaf --enable-libsrt --enable-libxml2 --enable-opengl --enable-libdav1d --enable-gnutls --enable-vulkan --enable-libsvtav1 --enable-libvpx --enable-libaom --enable-nvenc --enable-nvdec --extra-libs=-lz --extra-libs=-lpng --extra-libs=-lm --extra-libs=-lfreetype --extra-libs=-lshlwapi --extra-libs=-lmpg123 --extra-libs=-lpthread --extra-cflags=-DLIBTWOLAME_STATIC --extra-cflags=-DMODPLUG_STATIC --extra-cflags=-DCACA_STATIC --enable-amf --enable-libmfx --enable-libaribcaption --enable-gpl --enable-frei0r --enable-librubberband --enable-libvidstab --enable-libx264 --enable-libx265 --enable-avisynth --enable-libaribb24 --enable-libxvid --enable-libdavs2 --enable-libxavs2 --enable-libxavs --extra-cflags='-mtune=generic' --extra-cflags=-O3 --enable-static --disable-shared --prefix=/workspaces/ffmpeg-windows-build-helpers/sandbox/cross_compilers/mingw-w64-x86_64/x86_64-w64-mingw32 --enable-nonfree --enable-libfdk-aac --enable-decklink",
+      "companionVersion": "ffprobe version n9.0.1-ffmpeg-windows-build-helpers Copyright (c) 2007-2026 the FFmpeg developers",
+      "preparation": {
+        "cancellationCleanupPassed": true,
+        "cloudCalls": 0,
+        "fixture": "360-second Windows speech synthesis loop, mono16kHz FLAC",
+        "limits": "Same-host debug builds, alternating order; no recognition-quality comparison. First FLAC timing is when progress observes a completed worker. Quote requires all immutable requests and final source/tool verification.",
+        "maximumEncoderWorkers": 2,
+        "runs": [
+          {
+            "baselineFirstFlacSeconds": 7.8668862,
+            "baselineQuoteReadySeconds": 17.0725097,
+            "bindingIdentical": true,
+            "boundariesIdentical": true,
+            "flacBytesIdentical": true,
+            "requestCount": 3,
+            "round": 0,
+            "sentSamples": 5952000,
+            "stagedFirstFlacSeconds": 7.8190562,
+            "stagedQuoteReadySeconds": 13.4858322
+          },
+          {
+            "baselineFirstFlacSeconds": 7.9622747,
+            "baselineQuoteReadySeconds": 16.9384414,
+            "bindingIdentical": true,
+            "boundariesIdentical": true,
+            "flacBytesIdentical": true,
+            "requestCount": 3,
+            "round": 1,
+            "sentSamples": 5952000,
+            "stagedFirstFlacSeconds": 7.7416415,
+            "stagedQuoteReadySeconds": 13.2707909
+          },
+          {
+            "baselineFirstFlacSeconds": 7.621196,
+            "baselineQuoteReadySeconds": 16.7137208,
+            "bindingIdentical": true,
+            "boundariesIdentical": true,
+            "flacBytesIdentical": true,
+            "requestCount": 3,
+            "round": 2,
+            "sentSamples": 5952000,
+            "stagedFirstFlacSeconds": 7.6041971,
+            "stagedQuoteReadySeconds": 13.3431885
+          }
+        ],
+        "sourceChangeCleanupPassed": true,
+        "sourceSha256": "eb20b9ff030b1ece8a3fe9a047fff6454dc20a8d5226acb4cce10f024124be00",
+        "vadModelSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"
+      },
+      "chunks": [
+        {
+          "index": 0,
+          "sample_rate": 16000,
+          "core_start_sample": 0,
+          "core_end_sample": 1936640,
+          "request_start_sample": 0,
+          "request_end_sample": 1984640,
+          "boundary": "strong_pause"
+        },
+        {
+          "index": 1,
+          "sample_rate": 16000,
+          "core_start_sample": 1936640,
+          "core_end_sample": 3868928,
+          "request_start_sample": 1888640,
+          "request_end_sample": 3916928,
+          "boundary": "strong_pause"
+        },
+        {
+          "index": 2,
+          "sample_rate": 16000,
+          "core_start_sample": 3868928,
+          "core_end_sample": 5760000,
+          "request_start_sample": 3820928,
+          "request_end_sample": 5760000,
+          "boundary": "end_of_selection"
+        }
+      ],
+      "vadPauseEvidence": {
+        "policy": "silero-low-posterior-0.35-2s-250ms-v1",
+        "modelSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+        "sampleRate": 16000,
+        "sourceStartSample": 0,
+        "sourceEndSample": 5760000,
+        "minimumPauseMs": 2000,
+        "boundaryGuardMs": 250,
+        "pauses": []
+      },
+      "binding": {
+        "media_id": "evaluation",
+        "transcript_revision": "fixture",
+        "source_sha256": "eb20b9ff030b1ece8a3fe9a047fff6454dc20a8d5226acb4cce10f024124be00",
+        "settings_sha256": "3e45a2e0f5b12196082e145b837ed56b9e12c382f6f970f48d8df6be4a6e6072"
+      },
+      "audio": [
+        {
+          "flacSha256": "ccadceb4c5b7b914b9c273e68e55cd1753b5982248000b2c01aa49a0655b647e",
+          "pcmSha256": "c87f59b1b97d4fcb8321d2562be28fb6ed639daea9ff3eeae10bf807cea9cbbc",
+          "pcmBytes": 3969280,
+          "durationMs": 124040
+        },
+        {
+          "flacSha256": "65cab4a6a04128bdf129df994852723f0831edc1505190b21790a1dafe879a11",
+          "pcmSha256": "36c0fc7ea4f094b0c7a4a6b8502829edd70dbe943162b500cc8e842b45703487",
+          "pcmBytes": 4056576,
+          "durationMs": 126768
+        },
+        {
+          "flacSha256": "0f551395fee830220da201685cc27f25029af2a31b4b79048141114c00aab363",
+          "pcmSha256": "695ca9cb3309621c4a08848dfc7bd1b0bb6c914b96953596089d45db5f46b722",
+          "pcmBytes": 3878144,
+          "durationMs": 121192
+        }
+      ],
+      "tests": [
+        {
+          "name": "installed_ffmpeg_preserves_native_rate_wav_tail_without_padding",
+          "passed": true,
+          "seconds": 11.4414595
+        },
+        {
+          "name": "installed_ffmpeg_preserves_source_clock_and_cleans_failed_outputs",
+          "passed": true,
+          "seconds": 122.3658114
+        },
+        {
+          "name": "command::tests::multitrack_extraction_preserves_selected_stream",
+          "passed": true,
+          "seconds": 10.7200578
+        }
+      ]
+    },
+    "candidate": {
+      "executableSha256": "3256173f3f8bffd7df12227c68adf68025edb1832273a9530688a7bb1ed8edec",
+      "ffprobeSha256": "f0d36ecbbdd3bcfac3efa078c96c7271c2e68b3810595552ac3b7f17e9a65c52",
+      "executableBytes": 105423872,
+      "version": "ffmpeg version 9.0.2-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+      "configuration": "configuration: --enable-gpl --enable-version3 --enable-static --disable-w32threads --disable-autodetect --enable-cairo --enable-fontconfig --enable-iconv --enable-gnutls --enable-libxml2 --enable-gmp --enable-bzlib --enable-lzma --enable-zlib --enable-libsrt --enable-libssh --enable-libzmq --enable-avisynth --enable-sdl2 --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxvid --enable-libaom --enable-libopenjpeg --enable-libvpx --enable-mediafoundation --enable-libass --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-libvidstab --enable-libvmaf --enable-libzimg --enable-amf --enable-cuda-llvm --enable-cuvid --enable-dxva2 --enable-d3d11va --enable-d3d12va --enable-ffnvcodec --enable-libvpl --enable-nvdec --enable-nvenc --enable-vaapi --enable-openal --enable-libgme --enable-libopenmpt --enable-libopencore-amrwb --enable-libmp3lame --enable-libtheora --enable-libvo-amrwbenc --enable-libgsm --enable-libopencore-amrnb --enable-libopus --enable-libspeex --enable-libvorbis --enable-librubberband",
+      "companionVersion": "ffprobe version 9.0.2-essentials_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "preparation": {
+        "cancellationCleanupPassed": true,
+        "cloudCalls": 0,
+        "fixture": "360-second Windows speech synthesis loop, mono16kHz FLAC",
+        "limits": "Same-host debug builds, alternating order; no recognition-quality comparison. First FLAC timing is when progress observes a completed worker. Quote requires all immutable requests and final source/tool verification.",
+        "maximumEncoderWorkers": 2,
+        "runs": [
+          {
+            "baselineFirstFlacSeconds": 6.7257992,
+            "baselineQuoteReadySeconds": 14.2861137,
+            "bindingIdentical": true,
+            "boundariesIdentical": true,
+            "flacBytesIdentical": true,
+            "requestCount": 3,
+            "round": 0,
+            "sentSamples": 5952000,
+            "stagedFirstFlacSeconds": 6.3570825,
+            "stagedQuoteReadySeconds": 10.9894979
+          },
+          {
+            "baselineFirstFlacSeconds": 6.5379506,
+            "baselineQuoteReadySeconds": 14.2416501,
+            "bindingIdentical": true,
+            "boundariesIdentical": true,
+            "flacBytesIdentical": true,
+            "requestCount": 3,
+            "round": 1,
+            "sentSamples": 5952000,
+            "stagedFirstFlacSeconds": 6.4426006000000005,
+            "stagedQuoteReadySeconds": 11.0271213
+          },
+          {
+            "baselineFirstFlacSeconds": 6.6616766,
+            "baselineQuoteReadySeconds": 14.3218057,
+            "bindingIdentical": true,
+            "boundariesIdentical": true,
+            "flacBytesIdentical": true,
+            "requestCount": 3,
+            "round": 2,
+            "sentSamples": 5952000,
+            "stagedFirstFlacSeconds": 6.4436836,
+            "stagedQuoteReadySeconds": 11.0054177
+          }
+        ],
+        "sourceChangeCleanupPassed": true,
+        "sourceSha256": "eb20b9ff030b1ece8a3fe9a047fff6454dc20a8d5226acb4cce10f024124be00",
+        "vadModelSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"
+      },
+      "chunks": [
+        {
+          "index": 0,
+          "sample_rate": 16000,
+          "core_start_sample": 0,
+          "core_end_sample": 1936640,
+          "request_start_sample": 0,
+          "request_end_sample": 1984640,
+          "boundary": "strong_pause"
+        },
+        {
+          "index": 1,
+          "sample_rate": 16000,
+          "core_start_sample": 1936640,
+          "core_end_sample": 3868928,
+          "request_start_sample": 1888640,
+          "request_end_sample": 3916928,
+          "boundary": "strong_pause"
+        },
+        {
+          "index": 2,
+          "sample_rate": 16000,
+          "core_start_sample": 3868928,
+          "core_end_sample": 5760000,
+          "request_start_sample": 3820928,
+          "request_end_sample": 5760000,
+          "boundary": "end_of_selection"
+        }
+      ],
+      "vadPauseEvidence": {
+        "policy": "silero-low-posterior-0.35-2s-250ms-v1",
+        "modelSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+        "sampleRate": 16000,
+        "sourceStartSample": 0,
+        "sourceEndSample": 5760000,
+        "minimumPauseMs": 2000,
+        "boundaryGuardMs": 250,
+        "pauses": []
+      },
+      "binding": {
+        "media_id": "evaluation",
+        "transcript_revision": "fixture",
+        "source_sha256": "eb20b9ff030b1ece8a3fe9a047fff6454dc20a8d5226acb4cce10f024124be00",
+        "settings_sha256": "682515d5132a019d7b844120e124d668b5d130414bbf067b4496b41e9d94e079"
+      },
+      "audio": [
+        {
+          "flacSha256": "1b5c43f2dd074ed871d782eb0924f0d4af4ec4d6ffe3983ccf6d31c63b3e5817",
+          "pcmSha256": "c87f59b1b97d4fcb8321d2562be28fb6ed639daea9ff3eeae10bf807cea9cbbc",
+          "pcmBytes": 3969280,
+          "durationMs": 124040
+        },
+        {
+          "flacSha256": "1bb6073775d3270c9523e6a738c7fc00ef7dcae3cecf422b0638df1d031483a9",
+          "pcmSha256": "36c0fc7ea4f094b0c7a4a6b8502829edd70dbe943162b500cc8e842b45703487",
+          "pcmBytes": 4056576,
+          "durationMs": 126768
+        },
+        {
+          "flacSha256": "7cc1f78d38390a02e06f7675c161e42a3d407f5f1d51343f8a531bf9e23478cb",
+          "pcmSha256": "695ca9cb3309621c4a08848dfc7bd1b0bb6c914b96953596089d45db5f46b722",
+          "pcmBytes": 3878144,
+          "durationMs": 121192
+        }
+      ],
+      "tests": [
+        {
+          "name": "installed_ffmpeg_preserves_native_rate_wav_tail_without_padding",
+          "passed": true,
+          "seconds": 9.6742012
+        },
+        {
+          "name": "installed_ffmpeg_preserves_source_clock_and_cleans_failed_outputs",
+          "passed": true,
+          "seconds": 109.0185839
+        },
+        {
+          "name": "command::tests::multitrack_extraction_preserves_selected_stream",
+          "passed": true,
+          "seconds": 9.8283322
+        }
+      ]
+    }
+  },
+  "limitations": "One synthesized English six-minute fixture. Each CLI ran the same existing production preparation evaluator with three alternating serial/staged pairs and cancellation/source-mutation cleanup. CLI versions were measured in baseline-then-candidate order; compiler, configuration, file size and host load also differ. Card tests verify source timing and cleanup, not general recognition quality. No production CLI/profile was changed.",
+  "date": "2026-10-11",
+  "rustToolchain": "1.99.0",
+  "provenance": {
+    "officialDownloadPage": "https://ffmpeg.org/download.html",
+    "upstreamStableVersion": "9.0.2",
+    "upstreamReleased": "2026-09-18",
+    "provider": "Gyan (third-party Windows builder linked from ffmpeg.org)",
+    "providerPage": "https://www.gyan.dev/ffmpeg/builds/",
+    "providerBuilt": "2026-09-19",
+    "releaseVersionUrl": "https://www.gyan.dev/ffmpeg/builds/release-version",
+    "archiveUrl": "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip",
+    "checksumUrl": "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip.sha256",
+    "archiveSha256": "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba",
+    "archiveBytes": 114768076,
+    "verification": "Published SHA-256 retrieved over HTTPS from the same provider; not an independent publisher signature. Matches existing managed-download semantics.",
+    "sourceCommitUrl": "https://github.com/FFmpeg/FFmpeg/commit/946fcce07b",
+    "declaredLicense": "GPL v3 per package README/LICENSE",
+    "licenseSha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "readmeSha256": "0342de6bb39dd421cbec2c00d89ad274b640d75ad3f2cab09ffd647ce2d8f949"
+  },
+  "meanStagedSeconds": {
+    "baseline": 13.366603866666665,
+    "candidate": 11.007345633333335
+  },
+  "candidateMeanChangePercent": -17.65039389860872,
+  "flacEncoderMetadata": {
+    "baseline": "Lavf63.1.101",
+    "candidate": "Lavf63.1.102"
+  },
+  "decision": "Gyan 9.0.2 is compatible with the tested production preparation/card workflows and showed lower measured latency for this fixture. Keep the existing managed latest-release resolver, which already selects this candidate. No production binary, dependency manifest, or installed profile was changed.",
+  "immutableReceiptSemantics": "Source identity is unchanged; preparation settings digest intentionally changes because it includes the exact FFmpeg ToolSnapshot. FLAC container hashes also differ, while decoded samples match. Do not reuse a prior tool-bound receipt or approval for the new binary."
+}

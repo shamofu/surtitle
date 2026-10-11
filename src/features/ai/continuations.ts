@@ -18,7 +18,7 @@ export interface AiContinuation {
   updatedAtMs?: number;
 }
 export const continuationApi = {
-  save: (continuation: AiContinuation) => call<AiContinuation>('save_ai_continuation', { continuation }),
-  list: () => call<AiContinuation[]>('list_ai_continuations'),
-  discard: (id: string) => call<void>('discard_ai_continuation', { id }),
+  save: (continuation: AiContinuation) => call('save_ai_continuation', { continuation }),
+  list: () => call('list_ai_continuations'),
+  discard: (id: string) => call('discard_ai_continuation', { id }),
 };

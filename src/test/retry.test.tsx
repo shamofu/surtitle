@@ -78,7 +78,7 @@ describe('fresh approval for remaining AI work', () => {
     progress: 0.5,
     createdAt: '2026-09-08T00:00:00Z',
   };
-  it('only requests a quote at first, then requires its explicit checkbox to retry', async () => {
+  it('only requests a quote at first, then waits for the single explicit Start action to retry', async () => {
     vi.mocked(aiApi.createRetryQuote).mockResolvedValue(quote);
     render(<JobActions job={job} />);
     fireEvent.click(
@@ -88,10 +88,10 @@ describe('fresh approval for remaining AI work', () => {
     expect(aiApi.createRetryQuote).toHaveBeenCalledWith('paused-job');
     expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
     expect(
-      screen.getByRole('button', { name: 'Approve this job' }),
-    ).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'Approve this job' }));
+      screen.getByRole('button', { name: 'Start translation' }),
+    ).toBeEnabled();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Start translation' }));
     await waitFor(() =>
       expect(aiApi.reapproveQuote).toHaveBeenCalledWith(quote),
     );
@@ -109,7 +109,7 @@ describe('fresh approval for remaining AI work', () => {
     render(<JobActions job={{ ...job, kind: 'vocabulary', status: 'failed', progress: 1, executionOutcome: 'partial',
       requestCounts: { total: 3, succeeded: 2, rejected: 1, pending: 0, inFlight: 0 } }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Estimate remaining work' }));
-    await screen.findByRole('button', { name: 'Approve this job' });
+    await screen.findByRole('button', { name: 'Find expressions' });
     expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
   });
   it('offers only local application when every response has already arrived', async () => {

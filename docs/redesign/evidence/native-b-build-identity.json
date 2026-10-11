@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "builtAt": "2026-10-11T14:11:30.0830620Z",
+  "applicationIdentifier": "app.surtitle.evaluation.redesignfinal20261011b",
+  "rust": "1.99.0",
+  "normalFeatures": true,
+  "e2eTestFeature": false,
+  "command": "node node_modules/@tauri-apps/cli/tauri.js build --config work/rendering-evaluation/tauri-final-b.json --bundles nsis -- --locked --target-dir target/redesign-production",
+  "cargoReleaseSeconds": 261,
+  "files": [
+    {
+      "path": "src-tauri/target/redesign-production/release/surtitle.exe",
+      "bytes": 26569728,
+      "sha256": "7b638ebe03f889784c76d9bd0aa542eb59e51e17cb7003d30d79a8951c0b1b6f"
+    },
+    {
+      "path": "src-tauri/target/redesign-production/release/bundle/nsis/Surtitle Evaluation RedesignFinal20261011b_0.1.5_x64-setup.exe",
+      "bytes": 27224625,
+      "sha256": "60890e3d7e27327e3271048576c6c705f8efe0257b3a935143afc9eac188fa23"
+    },
+    {
+      "path": "dist/assets/index-DKyxmnmA.js",
+      "bytes": 884231,
+      "sha256": "5d0c71375e4d089579db7be5e993bfda22dd9624fa8c12b29e45aeb7bcdf9adb"
+    },
+    {
+      "path": "dist/assets/index-C-diTHt-.css",
+      "bytes": 74168,
+      "sha256": "0458c36e50c66e08612d82a2cde1887f56f8bcf02fb5b84cae816c62c8239581"
+    },
+    {
+      "path": "src-tauri/resources/native/mpv-2.dll",
+      "bytes": 54273939,
+      "sha256": "17409eefce3e4916c51fa6abaa5332fe0dc1550a1dd355afd31a918547297fad"
+    },
+    {
+      "path": "src-tauri/resources/native/onnxruntime.dll",
+      "bytes": 16149344,
+      "sha256": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471"
+    },
+    {
+      "path": "src-tauri/resources/native/onnxruntime_providers_shared.dll",
+      "bytes": 21856,
+      "sha256": "87f6878cdc1f80b3a9afa5b0c84663315030b4957f5bbb6b66470557cb2f48d8"
+    },
+    {
+      "path": "work/native-ci-artifact/libmpv-source.tar.gz",
+      "bytes": 87568769,
+      "sha256": "133a3701ac8e9be44946c9417b3f227f501ec2718f01f265a130352fbae6b63d"
+    }
+  ]
+}

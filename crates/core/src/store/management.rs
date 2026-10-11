@@ -1,31 +1,99 @@
 use super::*;
+use sha2::{Digest, Sha256};
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardEditState {
+    pub card: StudyCard,
+    pub revision: String,
+}
+
+fn edit_revision(card: &StudyCard, generation: &str) -> Result<String> {
+    Ok(format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&(
+            generation,
+            &card.id,
+            &card.term,
+            &card.meaning,
+            &card.example,
+            &card.translation,
+            &card.explanation,
+        ))?)
+    ))
+}
+
+fn apply_card_fields(card: &mut StudyCard, request: &EditCard) -> Result<()> {
+    ensure!(
+        !request.term.trim().is_empty() && request.term.len() < 4096,
+        "enter a term"
+    );
+    ensure!(
+        [
+            Some(&request.meaning),
+            Some(&request.example),
+            request.translation.as_ref(),
+            request.explanation.as_ref()
+        ]
+        .into_iter()
+        .flatten()
+        .all(|value| value.len() < 64 * 1024),
+        "card is too large"
+    );
+    card.term = request.term.trim().to_owned();
+    card.meaning = request.meaning.clone();
+    card.example = request.example.clone();
+    card.translation = request.translation.clone();
+    card.explanation = request.explanation.clone();
+    Ok(())
+}
 
 impl Store {
     pub fn edit_card(&self, request: &EditCard) -> Result<StudyCard> {
-        ensure!(
-            !request.term.trim().is_empty() && request.term.len() < 4096,
-            "enter a term"
-        );
-        ensure!(
-            [
-                Some(&request.meaning),
-                Some(&request.example),
-                request.translation.as_ref(),
-                request.explanation.as_ref()
-            ]
-            .into_iter()
-            .flatten()
-            .all(|s| s.len() < 64 * 1024),
-            "card is too large"
-        );
         let mut card = self.card(&request.id)?;
-        card.term = request.term.trim().to_owned();
-        card.meaning = request.meaning.clone();
-        card.example = request.example.clone();
-        card.translation = request.translation.clone();
-        card.explanation = request.explanation.clone();
+        apply_card_fields(&mut card, request)?;
         self.put_card(&card)?;
         Ok(card)
+    }
+    pub fn card_edit_state(&self, id: &str) -> Result<CardEditState> {
+        let card = self.card(id)?;
+        let revision = edit_revision(&card, &self.learning_generation()?)?;
+        Ok(CardEditState { card, revision })
+    }
+    /// Compare only editable fields, so a completed review never gets rolled
+    /// back by a slow editor. Restore changes the generation even for equal text.
+    pub fn edit_card_checked(
+        &mut self,
+        request: &EditCard,
+        expected_revision: &str,
+    ) -> Result<CardEditState> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let data: String = tx
+            .query_row("SELECT data FROM cards WHERE id=?", [&request.id], |row| {
+                row.get(0)
+            })
+            .optional()?
+            .context("Card no longer exists")?;
+        let mut card: StudyCard = serde_json::from_str(&data)?;
+        let generation: String = tx.query_row(
+            "SELECT value FROM learning_metadata WHERE key='generation'",
+            [],
+            |row| row.get(0),
+        )?;
+        ensure!(
+            edit_revision(&card, &generation)? == expected_revision,
+            "Card changed; reload before saving"
+        );
+        apply_card_fields(&mut card, request)?;
+        let revision = edit_revision(&card, &generation)?;
+        tx.execute(
+            "UPDATE cards SET data=? WHERE id=?",
+            params![serde_json::to_string(&card)?, request.id],
+        )?;
+        tx.commit()?;
+        Ok(CardEditState { card, revision })
     }
     pub fn suspend_card(&self, id: &str, suspended: bool) -> Result<()> {
         let mut card = self.card(id)?;
@@ -220,6 +288,58 @@ mod tests {
         crate::transfer::validate(&db.archive().unwrap()).unwrap();
         db.delete_card(&card.id).unwrap();
         assert!(db.list_reviews().unwrap().is_empty());
+        assert!(db.card(&card.id).is_err());
+    }
+    #[test]
+    fn autosave_compares_text_without_reverting_reviews_and_rejects_restore_or_deletion() {
+        let (temp, mut db, media, segment) = fixture();
+        let card = db
+            .save_card(
+                &SaveCard {
+                    source_range: None,
+                    media_id: media.id.clone(),
+                    segment_id: segment.id,
+                    source_cue_ids: vec![],
+                    term: "first".into(),
+                    meaning: "meaning".into(),
+                    example: "example".into(),
+                    translation: None,
+                    explanation: None,
+                },
+                Some("preserved.wav".into()),
+            )
+            .unwrap();
+        let before = db.card_edit_state(&card.id).unwrap();
+        let rated = db
+            .rate_card(&card.id, "good", 0.9, chrono::Utc::now())
+            .unwrap();
+        let mut request = EditCard {
+            id: card.id.clone(),
+            term: "edited".into(),
+            meaning: "new".into(),
+            example: "context".into(),
+            translation: None,
+            explanation: None,
+        };
+        let saved = db.edit_card_checked(&request, &before.revision).unwrap();
+        assert_eq!(saved.card.due_at, rated.due_at);
+        assert_eq!(saved.card.review_count, rated.review_count);
+        assert_eq!(saved.card.audio_path, card.audio_path);
+        assert_eq!(db.list_reviews().unwrap().len(), 1);
+        assert!(db.edit_card_checked(&request, &before.revision).is_err());
+        let archive = db.archive().unwrap();
+        let generation = db.learning_generation().unwrap();
+        db.restore(&archive, &temp.path().join("before-restore.sqlite"))
+            .unwrap();
+        assert_ne!(db.learning_generation().unwrap(), generation);
+        assert!(db.edit_card_checked(&request, &saved.revision).is_err());
+        let current = db.card_edit_state(&card.id).unwrap();
+        request.term.clear();
+        assert!(db.edit_card_checked(&request, &current.revision).is_err());
+        assert_eq!(db.card(&card.id).unwrap().term, "edited");
+        db.delete_card(&card.id).unwrap();
+        request.term = "late write".into();
+        assert!(db.edit_card_checked(&request, &current.revision).is_err());
         assert!(db.card(&card.id).is_err());
     }
     #[test]

@@ -21,6 +21,7 @@ export function DraftCues({
   const { t } = useAppearance();
   const scroll = useRef<HTMLDivElement>(null);
   const virtual = useVirtualizer({
+    useFlushSync: false,
     count: cues.length,
     getScrollElement: () => scroll.current,
     estimateSize: () => 84,

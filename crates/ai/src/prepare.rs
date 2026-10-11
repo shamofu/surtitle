@@ -1,18 +1,22 @@
 //! Free, local audio preparation. This module never accesses Vertex or credentials.
 mod child;
+mod encoding;
+use encoding::{next_mature_chunk, Encoders};
 mod pause_evidence;
 use child::LocalChild;
 #[cfg(test)]
 mod spoken_pause_test;
 use crate::{
-    hash_file, plan_chunks, sha256_bytes, AiError, AudioAttachment, AudioChunk, ChunkOptions,
-    PreparationBinding, PreparedJob, RequestTask, Result, SileroVad, VadAssets,
+    hash_file, plan_chunks, sha256_bytes, AiError, AudioChunk, ChunkOptions, PreparationBinding,
+    PreparedJob, RequestTask, Result, SileroVad, VadAssets,
 };
 pub use pause_evidence::VadPauseEvidence;
 use serde::{Deserialize, Serialize};
 use std::{
+    cell::RefCell,
     io::{Read, Write},
     path::{Path, PathBuf},
+    rc::Rc,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -202,7 +206,53 @@ pub fn prepare_audio(
     assets: VadAssets,
     options: AudioPreparationOptions,
     cancel: Arc<AtomicBool>,
+    progress: impl FnMut(PreparationProgress),
+) -> Result<AudioPreparationReceipt> {
+    prepare_audio_inner(
+        source,
+        output_root,
+        ffmpeg,
+        assets,
+        options,
+        cancel,
+        progress,
+        true,
+    )
+}
+
+/// Retained only for reproducible local comparisons with the previous serial path.
+#[cfg(feature = "development-validation")]
+pub fn prepare_audio_serial(
+    source: &Path,
+    output_root: &Path,
+    ffmpeg: &ToolSnapshot,
+    assets: VadAssets,
+    options: AudioPreparationOptions,
+    cancel: Arc<AtomicBool>,
+    progress: impl FnMut(PreparationProgress),
+) -> Result<AudioPreparationReceipt> {
+    prepare_audio_inner(
+        source,
+        output_root,
+        ffmpeg,
+        assets,
+        options,
+        cancel,
+        progress,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_audio_inner(
+    source: &Path,
+    output_root: &Path,
+    ffmpeg: &ToolSnapshot,
+    assets: VadAssets,
+    options: AudioPreparationOptions,
+    cancel: Arc<AtomicBool>,
     mut progress: impl FnMut(PreparationProgress),
+    staged: bool,
 ) -> Result<AudioPreparationReceipt> {
     let audio_stream_index = options
         .audio_stream_index
@@ -290,27 +340,71 @@ pub fn prepare_audio(
         .write(true)
         .create_new(true)
         .open(&spool_path)?;
+    let writer = Rc::new(RefCell::new(std::io::BufWriter::with_capacity(
+        65536, spool_file,
+    )));
     let mut recording = RecordingReader {
         reader: reader.ok_or_else(|| local_error("PCM pipe missing"))?,
-        writer: std::io::BufWriter::with_capacity(65536, spool_file),
+        writer: SharedWriter(writer.clone()),
         written: 0,
         maximum: total_ms * 32 + 2048,
     };
-    let analysis = vad.analyze_pcm16(&mut recording, &cancel, |samples| {
+    let start_sample = options.start_ms * 16;
+    let mut encoded_chunks = Vec::<AudioChunk>::new();
+    // This is declared after the temp directory and decoder. Error unwinding
+    // cancels/joins every encoder before either can be removed.
+    let mut encoders = Encoders::new(cancel.clone(), if staged { 2 } else { 1 });
+    let analysis = vad.analyze_pcm16_staged(&mut recording, &cancel, |samples, pauses| {
+        encoders.reap_ready()?;
+        if staged {
+            let pauses = pauses
+                .iter()
+                .map(|p| crate::Pause {
+                    start_sample: p.start_sample + start_sample,
+                    end_sample: p.end_sample + start_sample,
+                })
+                .collect::<Vec<_>>();
+            loop {
+                let next = encoded_chunks
+                    .last()
+                    .map_or(start_sample, |c| c.core_end_sample);
+                let Some(chunk) = next_mature_chunk(
+                    start_sample,
+                    next,
+                    start_sample + samples,
+                    &pauses,
+                    options.chunks,
+                    encoded_chunks.len() as u32,
+                )?
+                else {
+                    break;
+                };
+                if encoded_chunks.len() >= 5000 {
+                    return Err(local_error(
+                        "selection exceeds 5000 bounded requests; prepare a smaller interval",
+                    ));
+                }
+                writer.borrow_mut().flush()?;
+                encoders.enqueue(&spool_path, temporary.path(), start_sample, &chunk, ffmpeg)?;
+                encoded_chunks.push(chunk);
+            }
+        }
         progress(PreparationProgress {
             phase: "detecting_speech".into(),
             processed_ms: samples * 1000 / 16000,
             total_ms,
-            completed_chunks: 0,
+            completed_chunks: encoders.completed(),
             total_chunks: 0,
-        })
+        });
+        Ok(())
     })?;
-    recording.writer.flush()?;
-    recording.writer.get_ref().sync_all()?;
+    writer.borrow_mut().flush()?;
+    writer.borrow().get_ref().sync_all()?;
     if recording.written != analysis.total_samples * 2 {
         return Err(local_error("decoded PCM sample count mismatch"));
     }
     drop(recording);
+    drop(writer);
     process.finish()?;
     // A selection beyond EOF may decode less than requested. Never invent samples.
     let selected_samples = total_ms * 16;
@@ -319,7 +413,6 @@ pub fn prepare_audio(
             "decoded duration exceeds the selected audio span",
         ));
     }
-    let start_sample = options.start_ms * 16;
     let vad_pause_evidence = VadPauseEvidence::from_analysis(
         &analysis.low_probability_pauses,
         start_sample,
@@ -346,69 +439,45 @@ pub fn prepare_audio(
             "selection exceeds 5000 bounded requests; prepare a smaller interval",
         ));
     }
-    let mut requests = Vec::with_capacity(chunks.len());
-    let mut spool = std::fs::File::open(&spool_path)?;
+    if !chunks.starts_with(&encoded_chunks) {
+        return Err(local_error(
+            "staged boundaries differ from final VAD analysis",
+        ));
+    }
     progress(PreparationProgress {
         phase: "extracting".into(),
         processed_ms: 0,
         total_ms,
-        completed_chunks: 0,
+        completed_chunks: encoders.completed(),
         total_chunks,
     });
-    for chunk in &chunks {
-        check_cancel(&cancel)?;
-        let path = temporary
-            .path()
-            .join(format!("chunk-{:05}.flac", chunk.index));
-        // The source is decoded once. Copy an exact sample range from the local
-        // spool instead of repeatedly decoding each increasingly long source prefix.
-        // A bounded temporary PCM file also avoids fractional FFmpeg seek rounding.
-        use std::io::{Seek, SeekFrom};
-        spool.seek(SeekFrom::Start(
-            (chunk.request_start_sample - start_sample) * 2,
-        ))?;
-        let byte_count = (chunk.request_end_sample - chunk.request_start_sample) * 2;
-        let mut chunk_pcm = tempfile::NamedTempFile::new_in(temporary.path())?;
-        let copied = std::io::copy(
-            &mut Read::by_ref(&mut spool).take(byte_count),
-            chunk_pcm.as_file_mut(),
-        )?;
-        if copied != byte_count {
-            return Err(local_error("decoded PCM ended before the prepared span"));
+    for chunk in chunks.iter().skip(encoded_chunks.len()) {
+        encoders.enqueue(&spool_path, temporary.path(), start_sample, chunk, ffmpeg)?;
+        if !staged {
+            encoders.wait_one()?;
+            progress(PreparationProgress {
+                phase: "extracting".into(),
+                processed_ms: chunk.core_end_ms().saturating_sub(options.start_ms),
+                total_ms,
+                completed_chunks: encoders.completed(),
+                total_chunks,
+            });
         }
-        chunk_pcm.flush()?;
-        let args = vec![
-            "-nostdin".into(),
-            "-hide_banner".into(),
-            "-loglevel".into(),
-            "error".into(),
-            "-n".into(),
-            "-f".into(),
-            "s16le".into(),
-            "-ar".into(),
-            "16000".into(),
-            "-ac".into(),
-            "1".into(),
-            "-i".into(),
-            chunk_pcm.path().as_os_str().to_owned(),
-            "-c:a".into(),
-            "flac".into(),
-            path.as_os_str().to_owned(),
-        ];
-        let (mut child, _) = LocalChild::start(
-            ffmpeg,
-            &args,
-            false,
-            cancel.clone(),
-            Duration::from_secs(600),
-        )?;
-        child.finish()?;
-        let audio = AudioAttachment::from_file(
-            path,
-            chunk.request_start_ms(),
-            chunk.request_duration_ms(),
-        )?;
-        requests.push(match options.provider {
+    }
+    let audio = encoders.finish(|completed_chunks| {
+        progress(PreparationProgress {
+            phase: "extracting".into(),
+            processed_ms: chunks[completed_chunks as usize - 1]
+                .core_end_ms()
+                .saturating_sub(options.start_ms),
+            total_ms,
+            completed_chunks,
+            total_chunks,
+        })
+    })?;
+    let requests = audio
+        .into_iter()
+        .map(|audio| match options.provider {
             AudioTranscriptionProvider::TranscribePreview => RequestTask::TranscribePreview {
                 language: options.language.clone(),
                 audio,
@@ -417,16 +486,8 @@ pub fn prepare_audio(
                 language: options.language.clone(),
                 audio,
             },
-        });
-        progress(PreparationProgress {
-            phase: "extracting".into(),
-            processed_ms: chunk.core_end_ms().saturating_sub(options.start_ms),
-            total_ms,
-            completed_chunks: chunk.index + 1,
-            total_chunks,
-        });
-    }
-    drop(spool);
+        })
+        .collect();
     std::fs::remove_file(&spool_path)?;
     check_cancel(&cancel)?;
     progress(PreparationProgress {
@@ -508,6 +569,16 @@ fn vad_no_speech_chunks(chunks: &[AudioChunk], pauses: &[crate::Pause]) -> Vec<u
 fn seconds(ms: u64) -> String {
     format!("{}.{:03}", ms / 1000, ms % 1000)
 }
+struct SharedWriter(Rc<RefCell<std::io::BufWriter<std::fs::File>>>);
+impl Write for SharedWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.borrow_mut().write(bytes)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.borrow_mut().flush()
+    }
+}
+
 struct RecordingReader<R, W> {
     reader: R,
     writer: W,

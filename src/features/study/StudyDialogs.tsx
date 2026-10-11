@@ -307,7 +307,6 @@ export function SaveCardForm({
         }
         return true;
       }),
-      t('マイフレーズに保存しました。', 'Saved to your phrases.'),
     );
     setBusy(false);
     pending.current = false;

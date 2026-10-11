@@ -1,0 +1,1705 @@
+{
+  "environment": {
+    "host": "Same isolated binary as ui-primitives-native.json",
+    "webview2": "154.0.4258.62",
+    "osScalePercent": 100,
+    "inputMethod": "Windows Japanese IME, physical key injection through supported Computer Use SendInput",
+    "fixtureProfile": "work/ui-evaluation/native/profile",
+    "scope": "No Unicode injection or synthetic events used as actual IME proof"
+  },
+  "sourceReports": [
+    {
+      "path": "work/ui-evaluation/native/ime/current-window-capture.json",
+      "sha256": "d7389c318b92bea7fb13f80b8860d0a26f38a5dc9c8e2a8d044972a3403d87fd"
+    },
+    {
+      "path": "work/ui-evaluation/native/ime/results.json",
+      "sha256": "2032bc26e76816f1971849c54076378a1b4d4c40355bf77c7b7945e2236bc130"
+    }
+  ],
+  "results": [
+    {
+      "candidate": "current",
+      "receipt": {
+        "token": "c2fa4fc3-a4ef-4a19-8c9c-e3eba8239a85",
+        "observedCandidatePopup": [
+          "日本",
+          "二本",
+          "二品"
+        ],
+        "physicalKeys": "Alt+grave,n,i,h,o,n,Space,Space,Escape,Space,Return,Alt+grave",
+        "committed": "日本",
+        "candidate": "current",
+        "afterEscape": "にほん; dialog retained",
+        "restoredImeMode": true
+      },
+      "observation": {
+        "devicePixelRatio": 1,
+        "dialogPresent": true,
+        "events": [
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "Alt",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": ""
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": ""
+          },
+          {
+            "code": null,
+            "data": "",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionstart",
+            "value": ""
+          },
+          {
+            "code": null,
+            "data": "ｎ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": ""
+          },
+          {
+            "code": null,
+            "data": "ｎ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "ｎ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "ｎ"
+          },
+          {
+            "code": null,
+            "data": "に",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "ｎ"
+          },
+          {
+            "code": null,
+            "data": "に",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "に"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "に"
+          },
+          {
+            "code": null,
+            "data": "にｈ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "に"
+          },
+          {
+            "code": null,
+            "data": "にｈ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にｈ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にｈ"
+          },
+          {
+            "code": null,
+            "data": "にほ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にｈ"
+          },
+          {
+            "code": null,
+            "data": "にほ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にほ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にほ"
+          },
+          {
+            "code": null,
+            "data": "にほｎ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にほ"
+          },
+          {
+            "code": null,
+            "data": "にほｎ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にほｎ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にほｎ"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にほｎ"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "二本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "二本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "二本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "二本"
+          },
+          {
+            "code": null,
+            "data": "にほん",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "二本"
+          },
+          {
+            "code": null,
+            "data": "にほん",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にほん"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にほん"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にほん"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": false,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionend",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "Alt",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          }
+        ],
+        "focus": "Meaning",
+        "value": "日本"
+      },
+      "surfaceVisible": true,
+      "paused": true,
+      "positionMs": 0,
+      "trustedCompositionEnd": false,
+      "evidenceSummary": {
+        "trustedStart": 1,
+        "trustedUpdates": 10,
+        "trustedPostEndNonComposingKeys": [
+          "Alt"
+        ]
+      },
+      "collectorRun": "prior current run (failed the then-stricter trusted-end assertion)"
+    },
+    {
+      "candidate": "base",
+      "receipt": {
+        "candidate": "base",
+        "observedCandidatePopup": [
+          "日本",
+          "二本",
+          "二品"
+        ],
+        "afterEscape": "にほん; dialog retained",
+        "token": "aece3a52-c633-4d82-bca5-4c1ef38cdca6",
+        "committed": "日本",
+        "physicalKeys": "Alt+grave,n,i,h,o,n,Space,Space,Escape,Space,Return,Left,Alt+grave",
+        "restoredImeMode": true
+      },
+      "observation": {
+        "devicePixelRatio": 1,
+        "dialogPresent": true,
+        "events": [
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "Alt",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": ""
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": ""
+          },
+          {
+            "code": null,
+            "data": "",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionstart",
+            "value": ""
+          },
+          {
+            "code": null,
+            "data": "ｎ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": ""
+          },
+          {
+            "code": null,
+            "data": "ｎ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "ｎ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "ｎ"
+          },
+          {
+            "code": null,
+            "data": "に",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "ｎ"
+          },
+          {
+            "code": null,
+            "data": "に",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "に"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "に"
+          },
+          {
+            "code": null,
+            "data": "にｈ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "に"
+          },
+          {
+            "code": null,
+            "data": "にｈ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にｈ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にｈ"
+          },
+          {
+            "code": null,
+            "data": "にほ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にｈ"
+          },
+          {
+            "code": null,
+            "data": "にほ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にほ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にほ"
+          },
+          {
+            "code": null,
+            "data": "にほｎ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にほ"
+          },
+          {
+            "code": null,
+            "data": "にほｎ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にほｎ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にほｎ"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にほｎ"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "二本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "二本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "二本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "二本"
+          },
+          {
+            "code": null,
+            "data": "にほん",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "二本"
+          },
+          {
+            "code": null,
+            "data": "にほん",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にほん"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にほん"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にほん"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": false,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionend",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "ArrowLeft",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "Alt",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          }
+        ],
+        "focus": "Meaning",
+        "value": "日本"
+      },
+      "trustedCompositionEnd": false,
+      "surfaceVisible": true,
+      "paused": true,
+      "positionMs": 0,
+      "evidenceSummary": {
+        "trustedStart": 1,
+        "trustedUpdates": 10,
+        "trustedPostEndNonComposingKeys": [
+          "ArrowLeft",
+          "Alt"
+        ]
+      },
+      "collectorRun": "resumed Base/RAC/Radix run (passed)"
+    },
+    {
+      "candidate": "aria",
+      "receipt": {
+        "physicalKeys": "Alt+grave,n,i,h,o,n,Space,Space,Escape,Space,Return,Left,Alt+grave",
+        "token": "7bed6c28-5b5f-4bf1-a196-7d82dabcb313",
+        "restoredImeMode": true,
+        "candidate": "aria",
+        "committed": "日本",
+        "observedCandidatePopup": [
+          "日本",
+          "二本",
+          "二品"
+        ],
+        "afterEscape": "にほん; dialog retained"
+      },
+      "observation": {
+        "devicePixelRatio": 1,
+        "dialogPresent": true,
+        "events": [
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "Alt",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": ""
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": ""
+          },
+          {
+            "code": null,
+            "data": "",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionstart",
+            "value": ""
+          },
+          {
+            "code": null,
+            "data": "ｎ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": ""
+          },
+          {
+            "code": null,
+            "data": "ｎ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "ｎ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "ｎ"
+          },
+          {
+            "code": null,
+            "data": "に",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "ｎ"
+          },
+          {
+            "code": null,
+            "data": "に",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "に"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "に"
+          },
+          {
+            "code": null,
+            "data": "にｈ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "に"
+          },
+          {
+            "code": null,
+            "data": "にｈ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にｈ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にｈ"
+          },
+          {
+            "code": null,
+            "data": "にほ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にｈ"
+          },
+          {
+            "code": null,
+            "data": "にほ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にほ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にほ"
+          },
+          {
+            "code": null,
+            "data": "にほｎ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にほ"
+          },
+          {
+            "code": null,
+            "data": "にほｎ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にほｎ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にほｎ"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にほｎ"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "二本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "二本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "二本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "二本"
+          },
+          {
+            "code": null,
+            "data": "にほん",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "二本"
+          },
+          {
+            "code": null,
+            "data": "にほん",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にほん"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にほん"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にほん"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": false,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionend",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "ArrowLeft",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "Alt",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          }
+        ],
+        "focus": "Meaning",
+        "value": "日本"
+      },
+      "trustedCompositionEnd": false,
+      "surfaceVisible": true,
+      "paused": true,
+      "positionMs": 0,
+      "evidenceSummary": {
+        "trustedStart": 1,
+        "trustedUpdates": 10,
+        "trustedPostEndNonComposingKeys": [
+          "ArrowLeft",
+          "Alt"
+        ]
+      },
+      "collectorRun": "resumed Base/RAC/Radix run (passed)"
+    },
+    {
+      "candidate": "radix",
+      "receipt": {
+        "candidate": "radix",
+        "afterEscape": "にほん; dialog retained",
+        "restoredImeMode": true,
+        "committed": "日本",
+        "token": "33ab762d-6738-4e1a-89a2-d3345289cd4d",
+        "physicalKeys": "Alt+grave,n,i,h,o,n,Space,Space,Escape,Space,Return,Left,Alt+grave",
+        "observedCandidatePopup": [
+          "日本",
+          "二本",
+          "二品"
+        ]
+      },
+      "observation": {
+        "devicePixelRatio": 1,
+        "dialogPresent": true,
+        "events": [
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "Alt",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": ""
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": ""
+          },
+          {
+            "code": null,
+            "data": "",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionstart",
+            "value": ""
+          },
+          {
+            "code": null,
+            "data": "ｎ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": ""
+          },
+          {
+            "code": null,
+            "data": "ｎ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "ｎ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "ｎ"
+          },
+          {
+            "code": null,
+            "data": "に",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "ｎ"
+          },
+          {
+            "code": null,
+            "data": "に",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "に"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "に"
+          },
+          {
+            "code": null,
+            "data": "にｈ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "に"
+          },
+          {
+            "code": null,
+            "data": "にｈ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にｈ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にｈ"
+          },
+          {
+            "code": null,
+            "data": "にほ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にｈ"
+          },
+          {
+            "code": null,
+            "data": "にほ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にほ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にほ"
+          },
+          {
+            "code": null,
+            "data": "にほｎ",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にほ"
+          },
+          {
+            "code": null,
+            "data": "にほｎ",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にほｎ"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にほｎ"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にほｎ"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "二本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "二本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "二本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "二本"
+          },
+          {
+            "code": null,
+            "data": "にほん",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "二本"
+          },
+          {
+            "code": null,
+            "data": "にほん",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "にほん"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "にほん"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "にほん"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": "Process",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionupdate",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": true,
+            "isTrusted": true,
+            "key": null,
+            "phase": "window-capture",
+            "type": "input",
+            "value": "日本"
+          },
+          {
+            "code": null,
+            "data": "日本",
+            "dialogPresent": true,
+            "isComposing": null,
+            "isTrusted": false,
+            "key": null,
+            "phase": "window-capture",
+            "type": "compositionend",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "ArrowLeft",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          },
+          {
+            "code": "",
+            "data": null,
+            "dialogPresent": true,
+            "isComposing": false,
+            "isTrusted": true,
+            "key": "Alt",
+            "phase": "window-capture",
+            "type": "keydown",
+            "value": "日本"
+          }
+        ],
+        "focus": "Meaning",
+        "value": "日本"
+      },
+      "trustedCompositionEnd": false,
+      "surfaceVisible": true,
+      "paused": true,
+      "positionMs": 0,
+      "evidenceSummary": {
+        "trustedStart": 1,
+        "trustedUpdates": 10,
+        "trustedPostEndNonComposingKeys": [
+          "ArrowLeft",
+          "Alt"
+        ]
+      },
+      "collectorRun": "resumed Base/RAC/Radix run (passed)"
+    }
+  ],
+  "limits": [
+    "Actual physical-key composition in this evaluation frontend; not a complete production migration.",
+    "compositionend trust is reported independently: trusted start/update, native candidate popup, committed value and subsequent non-composing keys establish the observed operation; an untrusted end event does not establish a native end event.",
+    "The four raw event sequences also pass an offline check requiring a trusted non-composing key after the observed end. This check does not turn the untrusted end into native proof.",
+    "The native candidate popup was visually observed through Computer Use for each candidate; saved final captures show committed text, not the popup.",
+    "Input mode was returned to Latin after each candidate. No OS display settings were changed by this comparison."
+  ]
+}

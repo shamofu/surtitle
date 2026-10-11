@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-11",
+  "suite": "windows-spoken",
+  "test": "prepare::spoken_pause_test::real_spoken_audio_and_interior_pause_require_only_local_warning_review",
+  "passed": 1,
+  "failed": 0,
+  "ignored": 0,
+  "seconds": 14.39,
+  "rustToolchain": "1.99.0 (b940084d7 2026-09-28)",
+  "fixtureAcquisition": {
+    "schemaVersion": 1,
+    "commit": "5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5",
+    "source": "MontrealCorpusTools/aligned-librispeech",
+    "dataset": "LibriSpeech test-clean",
+    "license": "CC-BY-4.0",
+    "licenseSource": "https://www.openslr.org/12",
+    "alignment": "Upstream automatic MFA alignment; not human timing ground truth",
+    "ffmpeg": {
+      "version": "ffmpeg version n9.0.1-ffmpeg-windows-build-helpers Copyright (c) 2000-2026 the FFmpeg developers",
+      "sha256": "89cc7bef94d7cd46033b0c0b1b21098ba41b5a7c9e0089bc62d5d6078416bc28"
+    },
+    "inputs": [
+      {
+        "stem": "1089-134686-0001",
+        "originals": [
+          {
+            "url": "https://raw.githubusercontent.com/MontrealCorpusTools/aligned-librispeech/5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5/librispeech_test_clean/1089/1089-134686-0001.wav",
+            "file": "1089-134686-0001.wav",
+            "sha256": "6b0b24796a1017a65007d392b9f8d6e64e030cdafbf82d8ffa4235fe4b371443",
+            "bytes": 104844
+          },
+          {
+            "url": "https://raw.githubusercontent.com/MontrealCorpusTools/aligned-librispeech/5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5/librispeech_test_clean/1089/1089-134686-0001.lab",
+            "file": "1089-134686-0001.lab",
+            "sha256": "0a82f678afe953b8ac316479bbe3548169e249817dfc236153c5aad966da92b3",
+            "bytes": 42
+          },
+          {
+            "url": "https://raw.githubusercontent.com/MontrealCorpusTools/aligned-librispeech/5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5/librispeech_aligned/1089/1089-134686-0001.TextGrid",
+            "file": "1089-134686-0001.TextGrid",
+            "sha256": "7af2a45d42e7ca8fcad6310fd2e2089adf883cf346873c138c1a0815ea1aa0e6",
+            "bytes": 4649
+          }
+        ],
+        "preparedFile": "1089-134686-0001-pcm16.wav",
+        "preparedSha256": "c65ee5ee7bd8acab3ac6b97a29100187f397cccc4d1b00ae4ec31f39f3f7d3ab",
+        "samples": 52400,
+        "pcmSha256": "b52828469c97b5867391d346c440d7afa635b42e6040eaabdbe6ddc8d7ad525b",
+        "pcmUnchanged": true,
+        "conversionArguments": [
+          "-nostdin",
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-i",
+          "1089-134686-0001.wav",
+          "-ac",
+          "1",
+          "-ar",
+          "16000",
+          "-c:a",
+          "pcm_s16le",
+          "-y",
+          "1089-134686-0001-pcm16.wav"
+        ]
+      },
+      {
+        "stem": "1089-134686-0003",
+        "originals": [
+          {
+            "url": "https://raw.githubusercontent.com/MontrealCorpusTools/aligned-librispeech/5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5/librispeech_test_clean/1089/1089-134686-0003.wav",
+            "file": "1089-134686-0003.wav",
+            "sha256": "2db232f2d626af81adb8b224bdcc72d71ed94e9f7180194a6279e532a08c9115",
+            "bytes": 85804
+          },
+          {
+            "url": "https://raw.githubusercontent.com/MontrealCorpusTools/aligned-librispeech/5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5/librispeech_test_clean/1089/1089-134686-0003.lab",
+            "file": "1089-134686-0003.lab",
+            "sha256": "47ad56a9f71a9af9df360a3825070def4355bc4bf65defe6a180237f1d90677e",
+            "bytes": 34
+          },
+          {
+            "url": "https://raw.githubusercontent.com/MontrealCorpusTools/aligned-librispeech/5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5/librispeech_aligned/1089/1089-134686-0003.TextGrid",
+            "file": "1089-134686-0003.TextGrid",
+            "sha256": "7b10f440fa9b2d662e0b3bf3bd330a4181eea3c57ef3a93d03041cb18cced9f3",
+            "bytes": 3953
+          }
+        ],
+        "preparedFile": "1089-134686-0003-pcm16.wav",
+        "preparedSha256": "6786f692cd28a02b4c26d5bb5683b778fb2c6ae09bb6243355f1bc30e66eb5e3",
+        "samples": 42880,
+        "pcmSha256": "8a5f532db44f46bbcc1a139475c0f1c9850f2379bd82f59e5e91e71421ae9075",
+        "pcmUnchanged": true,
+        "conversionArguments": [
+          "-nostdin",
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-i",
+          "1089-134686-0003.wav",
+          "-ac",
+          "1",
+          "-ar",
+          "16000",
+          "-c:a",
+          "pcm_s16le",
+          "-y",
+          "1089-134686-0003-pcm16.wav"
+        ]
+      }
+    ]
+  },
+  "testResults": {
+    "composition": {
+      "firstSpeechSamples": 52400,
+      "insertedPauseSamples": 64000,
+      "leadingSamples": 16000,
+      "pauseEndSample": 132400,
+      "pauseStartSample": 68400,
+      "secondSpeechSamples": 42880,
+      "selectedEndSample": 175280,
+      "selectedStartSample": 16000,
+      "trailingSamples": 16000
+    },
+    "sourceSha256": "45e75797e838f6dc07636a4b14cac31b58ee503838b78872fc699e8cc2283edc",
+    "selectedPcmSha256": "a400397def8e67c6afcc643cd0878caf74c71689841577769c66504e607d6f5f",
+    "preparedPcmSha256": "a400397def8e67c6afcc643cd0878caf74c71689841577769c66504e607d6f5f",
+    "vadPauseEvidence": {
+      "boundaryGuardMs": 250,
+      "minimumPauseMs": 2000,
+      "modelSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+      "pauses": [
+        {
+          "end_sample": 139904,
+          "start_sample": 62080
+        }
+      ],
+      "policy": "silero-low-posterior-0.35-2s-250ms-v1",
+      "sampleRate": 16000,
+      "sourceEndSample": 175280,
+      "sourceStartSample": 16000
+    },
+    "warnings": [
+      {
+        "acknowledged": false,
+        "endMs": 8494,
+        "id": "2ba58939d0ed3f757adcd2e98d729430f700ac0f8ccec02e4b992511b5057324",
+        "kind": "speech_in_vad_pause_range",
+        "ordinal": 0,
+        "startMs": 4130
+      }
+    ],
+    "rawResponse": [
+      {
+        "endMs": 3800,
+        "startMs": 1330,
+        "text": "STUFF IT INTO YOU HIS BELLY COUNSELLED HIM"
+      },
+      {
+        "endMs": 6500,
+        "startMs": 5500,
+        "text": "This subtitle was deliberately invented for the local test."
+      },
+      {
+        "endMs": 10735,
+        "startMs": 8705,
+        "text": "HELLO BERTIE ANY GOOD IN YOUR MIND"
+      }
+    ],
+    "pcmPreserved": true,
+    "sourceInputsUnchanged": true,
+    "networkRequests": 0,
+    "ledgerChanges": 0,
+    "adoptions": 0,
+    "modelQualified": false,
+    "limitations": [
+      "Two clean English utterances and constructed digital silence, not representative noisy/conversational audio.",
+      "This checks local warning plumbing and sample preservation; it does not evaluate cloud recognition or improve retained corpus scores."
+    ]
+  },
+  "segmentStatuses": [
+    "confirmed",
+    "provisional",
+    "confirmed"
+  ],
+  "adoptionAllowedBeforeWarningAcknowledgment": true,
+  "assets": {
+    "onnxRuntimeSha256": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471",
+    "sileroSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"
+  },
+  "rawEvidence": {
+    "report": "work/vad-spoken-pause-acceptance/spoken-pause-VAgCVX/report.json",
+    "reportSha256": "2547c19670c66f55230b12bcb3333c7376c337beb4e025ef65ff7cbe1f964308",
+    "acquisition": "work/spoken-fixture-acquisition/acquisition.json",
+    "acquisitionSha256": "02e0342256c4ec0df4c24f5e86e2c3db33fa9b56cd4ce4c146f5ed1784a79b8f",
+    "stdout": "work/required-rust-tests/redesign-windows-spoken/1-surtitle-ai.stdout.log",
+    "stderr": "work/required-rust-tests/redesign-windows-spoken/1-surtitle-ai.stderr.log"
+  }
+}

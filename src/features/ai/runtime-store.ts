@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import type { AiRuntimeSnapshot } from '../../shared/contracts/ai';
 import { nativeAvailable } from '../../shared/native/transport';
 import { subscribeNative } from '../../shared/native/events';
+import { subscribeRecovery } from '../../shared/native/recovery';
 import { aiApi } from './api';
 
 export function mergeAiRuntime(current: AiRuntimeSnapshot | null, incoming: AiRuntimeSnapshot) {
@@ -12,13 +13,16 @@ export function mergeAiRuntime(current: AiRuntimeSnapshot | null, incoming: AiRu
 interface RuntimeState { snapshot: AiRuntimeSnapshot | null; error: boolean }
 interface RuntimeSource {
   read: (jobId: string) => Promise<AiRuntimeSnapshot | null>;
-  listen: (receive: (snapshot: AiRuntimeSnapshot) => void) => () => void;
+  listen: (receive: (snapshot: AiRuntimeSnapshot) => void, ready: () => void) => () => void;
+  recover?: (refresh: () => void) => () => void;
 }
 
 /** One shared subscription/cache keeps all surfaces on the same attempt and revision. */
 export function createAiRuntimeStore(source: RuntimeSource) {
   const entries = new Map<string, { state: RuntimeState; listeners: Set<() => void>; pending?: Promise<void> }>();
   let stop: (() => void) | undefined;
+  let stopRecovery: (() => void) | undefined;
+  function refreshActive() { entries.forEach((value, jobId) => { if (value.listeners.size) void refresh(jobId); }); }
   function entry(jobId: string) {
     let value = entries.get(jobId);
     if (!value) {
@@ -53,11 +57,12 @@ export function createAiRuntimeStore(source: RuntimeSource) {
     subscribe(jobId: string, listener: () => void) {
       const value = entry(jobId);
       value.listeners.add(listener);
-      stop ??= source.listen(receive);
+      stop ??= source.listen(receive, refreshActive);
+      stopRecovery ??= source.recover?.(refreshActive);
       void refresh(jobId);
       return () => {
         value.listeners.delete(listener);
-        if (![...entries.values()].some(item => item.listeners.size)) { stop?.(); stop = undefined; }
+        if (![...entries.values()].some(item => item.listeners.size)) { stop?.(); stop = undefined; stopRecovery?.(); stopRecovery = undefined; }
       };
     },
   };
@@ -65,21 +70,14 @@ export function createAiRuntimeStore(source: RuntimeSource) {
 
 const store = createAiRuntimeStore({
   read: jobId => aiApi.runtime(jobId),
-  listen: receive => subscribeNative<AiRuntimeSnapshot>('ai-runtime', event => receive(event.payload)),
+  listen: (receive, ready) => subscribeNative('ai-runtime', event => receive(event.payload), () => {}, ready),
+  recover: subscribeRecovery,
 });
 const empty: RuntimeState = { snapshot: null, error: false };
-export function useAiRuntime(jobId: string, running: boolean) {
+export function useAiRuntime(jobId: string, _running: boolean) {
   const enabled = nativeAvailable();
   const subscribe = useCallback((listener: () => void) => enabled ? store.subscribe(jobId, listener) : () => {}, [jobId, enabled]);
   const snapshot = useCallback(() => enabled ? store.getSnapshot(jobId) : empty, [jobId, enabled]);
   const state = useSyncExternalStore(subscribe, snapshot, () => empty);
-  useEffect(() => {
-    if (!enabled) return;
-    void store.refresh(jobId);
-    if (!running) return;
-    // Catch an event missed during native listener registration or view navigation.
-    const timer = window.setInterval(() => { void store.refresh(jobId); }, 3000);
-    return () => window.clearInterval(timer);
-  }, [jobId, running, enabled]);
   return state;
 }

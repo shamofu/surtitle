@@ -1,7 +1,7 @@
 use crate::application::AppState;
 use tauri::State;
 type IpcResult<T> = std::result::Result<T, String>;
-use crate::application::transfer::RestorePreview;
+use crate::application::transfer::{RestorePreview, RestoreResult};
 
 #[tauri::command]
 pub async fn export_learning(
@@ -28,6 +28,6 @@ pub async fn restore_learning(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     token: String,
-) -> IpcResult<()> {
+) -> IpcResult<RestoreResult> {
     crate::application::transfer::restore_learning(app, state.inner().clone(), token).await
 }

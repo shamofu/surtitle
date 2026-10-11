@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useState } from 'react';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, expect, it } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { vi } from 'vitest';
 import { SurfaceProvider, useSurface } from '../app/providers/Surface';
@@ -13,10 +13,6 @@ vi.mock('../app/runtime', async () => ({
   useSurface: (await import('../app/providers/Surface')).useSurface,
   useAppearance: () => ({ t: (_ja: string, en: string) => en, locale: 'en' }),
 }));
-beforeEach(() => {
-  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
-  HTMLDialogElement.prototype.close = function () { this.open = false; };
-});
 afterEach(cleanup);
 
 function Harness() {
@@ -46,11 +42,11 @@ it('cancels only the nested modal and keeps the native surface hidden until the 
   fireEvent.click(screen.getByText('Open editor'));
   fireEvent.click(screen.getByText('Open confirmation'));
   const inner = screen.getByRole('dialog', { name: 'Confirmation' });
-  fireEvent(inner, new Event('cancel', { bubbles: false, cancelable: true }));
+  fireEvent.keyDown(inner, { key: 'Escape' });
   expect(screen.queryByRole('dialog', { name: 'Confirmation' })).not.toBeInTheDocument();
   expect(screen.getByRole('dialog', { name: 'Editor' })).toBeVisible();
   expect(screen.getByText('Video hidden')).toBeVisible();
-  fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
   expect(screen.getByText('Video visible')).toBeVisible();
 });
 
@@ -78,7 +74,7 @@ it('locks all modal dismissal routes while busy', () => {
   fireEvent.click(screen.getByLabelText('Lock editor'));
   const dialog = screen.getByRole('dialog');
   expect(within(dialog).getByRole('button', { name: 'Close' })).toBeDisabled();
-  fireEvent(dialog, new Event('cancel', { cancelable: true }));
+  fireEvent.keyDown(dialog, { key: 'Escape' });
   fireEvent.click(dialog);
   expect(dialog).toBeVisible();
   fireEvent.click(screen.getByLabelText('Lock editor'));

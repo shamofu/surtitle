@@ -143,6 +143,7 @@ export class EditorDraftSession {
     try { return await this.inFlight; } finally { this.inFlight = undefined; }
   }
   get ready() { return this.loadSucceeded; }
+  get pending() { return !this.invalidated && (!!this.inFlight || (!this.consumed && JSON.stringify(this.value) !== this.savedValue)); }
 }
 
 const sessions = new Map<string, { session: EditorDraftSession; users: number }>();
@@ -166,6 +167,7 @@ export function acquireEditorDraft(options: DraftSessionOptions) {
 export async function flushEditorDrafts() {
   await Promise.all([...sessions.values()].map(({ session }) => session.flush()));
 }
+export const pendingEditorDrafts = () => [...sessions.values()].some(({ session }) => session.pending);
 
 /** Call only after flushEditorDrafts and a successful restore. Never deletes imported drafts. */
 export function clearEditorDraftSessions() {

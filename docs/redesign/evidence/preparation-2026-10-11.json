@@ -1,0 +1,48 @@
+{
+  "cancellationCleanupPassed": true,
+  "cloudCalls": 0,
+  "fixture": "360-second Windows speech synthesis loop, mono16kHz FLAC",
+  "limits": "Same-host debug builds, alternating order; no recognition-quality comparison. First FLAC timing is when progress observes a completed worker. Quote requires all immutable requests and final source/tool verification.",
+  "maximumEncoderWorkers": 2,
+  "runs": [
+    {
+      "baselineFirstFlacSeconds": 17.5534827,
+      "baselineQuoteReadySeconds": 36.1729315,
+      "bindingIdentical": true,
+      "boundariesIdentical": true,
+      "flacBytesIdentical": true,
+      "requestCount": 3,
+      "round": 0,
+      "sentSamples": 5952000,
+      "stagedFirstFlacSeconds": 13.7773691,
+      "stagedQuoteReadySeconds": 21.3851302
+    },
+    {
+      "baselineFirstFlacSeconds": 9.0529319,
+      "baselineQuoteReadySeconds": 19.7841336,
+      "bindingIdentical": true,
+      "boundariesIdentical": true,
+      "flacBytesIdentical": true,
+      "requestCount": 3,
+      "round": 1,
+      "sentSamples": 5952000,
+      "stagedFirstFlacSeconds": 10.9267171,
+      "stagedQuoteReadySeconds": 18.0210229
+    },
+    {
+      "baselineFirstFlacSeconds": 10.0395348,
+      "baselineQuoteReadySeconds": 21.2098395,
+      "bindingIdentical": true,
+      "boundariesIdentical": true,
+      "flacBytesIdentical": true,
+      "requestCount": 3,
+      "round": 2,
+      "sentSamples": 5952000,
+      "stagedFirstFlacSeconds": 10.408951,
+      "stagedQuoteReadySeconds": 16.7719085
+    }
+  ],
+  "sourceChangeCleanupPassed": true,
+  "sourceSha256": "eb20b9ff030b1ece8a3fe9a047fff6454dc20a8d5226acb4cce10f024124be00",
+  "vadModelSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"
+}

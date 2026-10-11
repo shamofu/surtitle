@@ -52,7 +52,7 @@ async function expectFooterActions(footer: Locator, count: number) {
 
 for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
   const t = (ja: string, en: string) => locale === 'ja' ? ja : en;
-  const inspect = t('この字幕を確認', 'Inspect this subtitle');
+  const inspect = t('意味を調べる', 'Explore meaning');
   const captionName = t('いまの字幕', 'Current subtitle');
   const label = `${locale} ${theme} 1024x700`;
 
@@ -73,6 +73,7 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
           - paragraph: ${sentence}
         - button "${t('訳を表示', 'Show translation')}"
         - button "${inspect}"
+        - button "${t('保存', 'Save phrase')}"
         - group "${t('字幕の再生操作', 'Subtitle playback')}":
           - button "${t('前の字幕', 'Previous subtitle')}"
           - button "${t('この字幕をもう一度', 'Replay this subtitle')}"
@@ -96,12 +97,11 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
     await openStudy(page);
     await page.getByRole('button', { name: inspect, exact: true }).click();
     const panel = page.locator('.phrase-panel');
-    await expect(panel.getByRole('heading', { name: t('言葉を確認', 'Inspect phrase'), exact: true })).toBeVisible();
+    await expect(panel.getByRole('heading', { name: t('意味とフレーズ', 'Meaning and phrases'), exact: true })).toBeVisible();
     await expect(panel.locator('.context-sentence')).toHaveText(sentence);
-    await panel.getByRole('button', { name: t('意味を見る', 'Show meaning'), exact: true }).click();
     await expect(panel.getByRole('button', { name: t('意味を閉じる', 'Hide meaning'), exact: true })).toHaveAttribute('aria-expanded', 'true');
     await expect(panel.locator('.context-translation')).toHaveText(translation);
-    await panel.getByRole('button', { name: t('フレーズを確認・保存', 'Review and save phrase'), exact: true }).click();
+    await panel.getByRole('button', { name: t('フレーズを保存', 'Save phrase'), exact: true }).click();
     const form = panel.locator('.save-phrase-form');
     const term = form.getByRole('textbox', { name: t('語彙・フレーズ', 'Word or phrase'), exact: true });
     const meaning = form.getByRole('textbox', { name: t('意味', 'Meaning'), exact: true });
@@ -132,7 +132,6 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
     const selection = dialog.getByRole('region', { name: t('選択したファイル', 'Selected files'), exact: true });
     await expect(selection.getByRole('list').getByRole('listitem')).toHaveCount(3);
-    await dialog.getByRole('button', { name: t('2 件をライブラリに追加', 'Add 2 files to library'), exact: true }).click();
     const imported = selection.locator('.import-file-row.imported');
     const failed = selection.locator('.import-file-row.failed');
     const invalid = selection.locator('.import-file-row.invalid');
@@ -143,12 +142,11 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
     await expect(imported.locator('strong')).toHaveText('字幕付きの会話練習ファイル.mp4');
     await expect(imported.getByRole('link', { name: t('字幕付きの会話練習ファイル.mp4 を開く', 'Open 字幕付きの会話練習ファイル.mp4'), exact: true })).toHaveAttribute('href', '/study/imported-1');
     await expect(failed).toContainText(/Could not read lesson-2\.mp4\. Try again\./);
-    await expect(invalid).toContainText(t('対応していない形式です。動画・音声ファイルを選んでください。', 'Unsupported format. Choose a supported video or audio file.'));
-    await expect(dialog.locator('.import-results')).toHaveRole('status');
-    await expect(dialog.locator('.import-results')).toHaveText(t('追加 1 件・追加済み 0 件・失敗 1 件・対象外 1 件', '1 added · 0 already in library · 1 failed · 1 unsupported or unavailable'));
+    await expect(invalid).toContainText(t('読み込めないファイルです', 'This file cannot be imported'));
+    await expect(dialog.getByRole('button', { name: /Add 2 files|2 件をライブラリに追加/ })).toHaveCount(0);
     const footer = dialog.locator('.import-footer');
     await expect(footer).toMatchAriaSnapshot(`
-      - button "${t('ライブラリに戻る', 'Return to library')}"
+      - button "${t('閉じる', 'Close')}"
       - button "${t('失敗したファイルだけ再試行', 'Retry failed files')}"
     `);
     await expectFooterActions(footer, 2);
@@ -189,38 +187,23 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
     await expectNoOverflow(page, page.locator('.study-companion'), workspace);
   });
 
-  test(`phrase edit confirmation structure ${label}`, async ({ page }) => {
+  test(`phrase edit autosave structure ${label}`, async ({ page }) => {
     await installLearningFixture(page, locale, theme);
     await page.goto('/cards');
-    await page.getByLabel(t('take a little detourの操作', 'Actions for take a little detour'), { exact: true }).click();
-    await page.getByRole('button', { name: t('編集', 'Edit'), exact: true }).click();
+    await page.getByRole('button', { name: t('フレーズを編集', 'Edit phrase'), exact: true }).click();
     const editor = page.getByRole('dialog', { name: t('フレーズを編集', 'Edit phrase'), exact: true });
     const editedMeaning = '少し寄り道をする — take a short detour';
     await editor.getByRole('textbox', { name: t('意味', 'Meaning'), exact: true }).fill(editedMeaning);
-    await page.keyboard.press('Escape');
-    const title = t('変更を保存しますか？', 'Save your changes?');
-    const confirmation = page.getByRole('dialog', { name: title, exact: true });
-    await expect(page.locator('dialog[open]')).toHaveCount(2);
-    await expect(confirmation).toMatchAriaSnapshot(`
-      - dialog "${title}":
-        - banner:
-          - heading "${title}" [level=2]
-          - button "${t('閉じる', 'Close')}"
-        - paragraph: ${t('このフレーズには未保存の変更があります。', 'This phrase has unsaved changes.')}
-        - contentinfo:
-          - button "${t('編集を続ける', 'Keep editing')}"
-          - button "${t('保存せずに閉じる', 'Discard changes')}"
-          - button "${t('保存して閉じる', 'Save and close')}"
-    `);
-    expect(await confirmation.evaluate(element => element.contains(document.activeElement))).toBe(true);
-    await expectFooterActions(confirmation.locator('footer'), 3);
-    await expectSeparate(confirmation.locator('.modal-header'), confirmation.locator('.modal-body'));
-    await expectNoOverflow(page, confirmation);
+    expect(await editor.evaluate(element => element.contains(document.activeElement))).toBe(true);
+    await editor.locator('footer').scrollIntoViewIfNeeded();
+    await expectFooterActions(editor.locator('footer'), 1);
+    await expectNoOverflow(page, editor);
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-    // The top confirmation must own dismissal and preserve the editor beneath it.
-    await confirmation.getByRole('button', { name: t('編集を続ける', 'Keep editing'), exact: true }).click();
-    await expect(confirmation).toHaveCount(0);
-    await expect(page.locator('dialog[open]')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => (window as any).__learningFixture.snapshot.cards[0].meaning)).toBe(editedMeaning);
+    await page.reload();
+    await page.getByRole('button', { name: t('フレーズを編集', 'Edit phrase'), exact: true }).click();
     await expect(editor.getByRole('textbox', { name: t('意味', 'Meaning'), exact: true })).toHaveValue(editedMeaning);
   });
 }

@@ -1,0 +1,948 @@
+{
+  "expectedDpi": 144,
+  "mixed": true,
+  "passed": true,
+  "paidRequests": 0,
+  "observations": [
+    {
+      "phase": "primary",
+      "before": {
+        "native": [
+          {
+            "handle": 11667654,
+            "parent": 0,
+            "className": "Tauri Window",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 266,
+              "Top": 0,
+              "Right": 1824,
+              "Bottom": 1106
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 277,
+              "Y": 45
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 9765650,
+            "parent": 11667654,
+            "className": "Static",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 301,
+              "Top": 219,
+              "Right": 1711,
+              "Bottom": 735
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1410,
+              "Bottom": 516
+            },
+            "origin": {
+              "X": 301,
+              "Y": 219
+            },
+            "regionRectangles": [
+              {
+                "Left": 0,
+                "Top": 0,
+                "Right": 1410,
+                "Bottom": 515
+              }
+            ]
+          },
+          {
+            "handle": 27069246,
+            "parent": 9765650,
+            "className": "mpv",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 301,
+              "Top": 219,
+              "Right": 1711,
+              "Bottom": 735
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1410,
+              "Bottom": 516
+            },
+            "origin": {
+              "X": 301,
+              "Y": 219
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 16582958,
+            "parent": 11667654,
+            "className": "WRY_WEBVIEW",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 277,
+              "Top": 45,
+              "Right": 1813,
+              "Bottom": 1095
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 277,
+              "Y": 45
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 19138344,
+            "parent": 16582958,
+            "className": "Chrome_WidgetWin_0",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 277,
+              "Top": 45,
+              "Right": 1813,
+              "Bottom": 1095
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 277,
+              "Y": 45
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 2623640,
+            "parent": 19138344,
+            "className": "Chrome_WidgetWin_1",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 277,
+              "Top": 45,
+              "Right": 1813,
+              "Bottom": 1095
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 277,
+              "Y": 45
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 1769808,
+            "parent": 2623640,
+            "className": "Chrome_RenderWidgetHostHWND",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 277,
+              "Top": 45,
+              "Right": 1813,
+              "Bottom": 1095
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 277,
+              "Y": 45
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 9635662,
+            "parent": 2623640,
+            "className": "Intermediate D3D Window",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 277,
+              "Top": 45,
+              "Right": 2437,
+              "Bottom": 1455
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 2160,
+              "Bottom": 1410
+            },
+            "origin": {
+              "X": 277,
+              "Y": 45
+            },
+            "regionRectangles": null
+          }
+        ],
+        "dom": {
+          "devicePixelRatio": 1.5,
+          "innerHeight": 700,
+          "innerWidth": 1024,
+          "viewport": {
+            "height": 343.66668701171875,
+            "width": 940,
+            "x": 16,
+            "y": 116
+          }
+        }
+      },
+      "during": {
+        "native": [
+          {
+            "handle": 11667654,
+            "parent": 0,
+            "className": "Tauri Window",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 266,
+              "Top": 0,
+              "Right": 1824,
+              "Bottom": 1106
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 277,
+              "Y": 45
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 9765650,
+            "parent": 11667654,
+            "className": "Static",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 301,
+              "Top": 219,
+              "Right": 1711,
+              "Bottom": 735
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1410,
+              "Bottom": 516
+            },
+            "origin": {
+              "X": 301,
+              "Y": 219
+            },
+            "regionRectangles": [
+              {
+                "Left": 0,
+                "Top": 0,
+                "Right": 1410,
+                "Bottom": 73
+              },
+              {
+                "Left": 0,
+                "Top": 73,
+                "Right": 264,
+                "Bottom": 515
+              },
+              {
+                "Left": 1224,
+                "Top": 73,
+                "Right": 1410,
+                "Bottom": 515
+              }
+            ]
+          },
+          {
+            "handle": 27069246,
+            "parent": 9765650,
+            "className": "mpv",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 301,
+              "Top": 219,
+              "Right": 1711,
+              "Bottom": 735
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1410,
+              "Bottom": 516
+            },
+            "origin": {
+              "X": 301,
+              "Y": 219
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 16582958,
+            "parent": 11667654,
+            "className": "WRY_WEBVIEW",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 277,
+              "Top": 45,
+              "Right": 1813,
+              "Bottom": 1095
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 277,
+              "Y": 45
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 19138344,
+            "parent": 16582958,
+            "className": "Chrome_WidgetWin_0",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 277,
+              "Top": 45,
+              "Right": 1813,
+              "Bottom": 1095
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 277,
+              "Y": 45
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 2623640,
+            "parent": 19138344,
+            "className": "Chrome_WidgetWin_1",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 277,
+              "Top": 45,
+              "Right": 1813,
+              "Bottom": 1095
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 277,
+              "Y": 45
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 1769808,
+            "parent": 2623640,
+            "className": "Chrome_RenderWidgetHostHWND",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 277,
+              "Top": 45,
+              "Right": 1813,
+              "Bottom": 1095
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 277,
+              "Y": 45
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 9635662,
+            "parent": 2623640,
+            "className": "Intermediate D3D Window",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 277,
+              "Top": 45,
+              "Right": 1813,
+              "Bottom": 1095
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 277,
+              "Y": 45
+            },
+            "regionRectangles": null
+          }
+        ],
+        "dom": {
+          "devicePixelRatio": 1.5,
+          "innerHeight": 700,
+          "innerWidth": 1024,
+          "viewport": {
+            "height": 343.66668701171875,
+            "width": 940,
+            "x": 16,
+            "y": 116
+          }
+        }
+      },
+      "monitor": {
+        "handle": 65701,
+        "primary": true,
+        "bounds": {
+          "Left": 0,
+          "Top": 0,
+          "Right": 2560,
+          "Bottom": 1440
+        },
+        "workArea": {
+          "Left": 0,
+          "Top": 0,
+          "Right": 2560,
+          "Bottom": 1368
+        }
+      },
+      "outerFitsWorkArea": true
+    },
+    {
+      "phase": "secondary",
+      "geometry": {
+        "native": [
+          {
+            "handle": 11667654,
+            "parent": 0,
+            "className": "Tauri Window",
+            "visible": true,
+            "dpi": 96,
+            "screen": {
+              "Left": -1904,
+              "Top": 16,
+              "Right": -864,
+              "Bottom": 755
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1024,
+              "Bottom": 700
+            },
+            "origin": {
+              "X": -1896,
+              "Y": 47
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 9765650,
+            "parent": 11667654,
+            "className": "Static",
+            "visible": true,
+            "dpi": 96,
+            "screen": {
+              "Left": -1880,
+              "Top": 163,
+              "Right": -1260,
+              "Bottom": 466
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 620,
+              "Bottom": 303
+            },
+            "origin": {
+              "X": -1880,
+              "Y": 163
+            },
+            "regionRectangles": [
+              {
+                "Left": 0,
+                "Top": 0,
+                "Right": 620,
+                "Bottom": 303
+              }
+            ]
+          },
+          {
+            "handle": 27069246,
+            "parent": 9765650,
+            "className": "mpv",
+            "visible": true,
+            "dpi": 96,
+            "screen": {
+              "Left": -1880,
+              "Top": 163,
+              "Right": -1260,
+              "Bottom": 466
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 620,
+              "Bottom": 303
+            },
+            "origin": {
+              "X": -1880,
+              "Y": 163
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 16582958,
+            "parent": 11667654,
+            "className": "WRY_WEBVIEW",
+            "visible": true,
+            "dpi": 96,
+            "screen": {
+              "Left": -1896,
+              "Top": 47,
+              "Right": -872,
+              "Bottom": 747
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1024,
+              "Bottom": 700
+            },
+            "origin": {
+              "X": -1896,
+              "Y": 47
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 19138344,
+            "parent": 16582958,
+            "className": "Chrome_WidgetWin_0",
+            "visible": true,
+            "dpi": 96,
+            "screen": {
+              "Left": -1896,
+              "Top": 47,
+              "Right": -872,
+              "Bottom": 747
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1024,
+              "Bottom": 700
+            },
+            "origin": {
+              "X": -1896,
+              "Y": 47
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 2623640,
+            "parent": 19138344,
+            "className": "Chrome_WidgetWin_1",
+            "visible": true,
+            "dpi": 96,
+            "screen": {
+              "Left": -1896,
+              "Top": 47,
+              "Right": -872,
+              "Bottom": 747
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1024,
+              "Bottom": 700
+            },
+            "origin": {
+              "X": -1896,
+              "Y": 47
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 1769808,
+            "parent": 2623640,
+            "className": "Chrome_RenderWidgetHostHWND",
+            "visible": true,
+            "dpi": 96,
+            "screen": {
+              "Left": -1896,
+              "Top": 47,
+              "Right": -872,
+              "Bottom": 747
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1024,
+              "Bottom": 700
+            },
+            "origin": {
+              "X": -1896,
+              "Y": 47
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 9635662,
+            "parent": 2623640,
+            "className": "Intermediate D3D Window",
+            "visible": true,
+            "dpi": 96,
+            "screen": {
+              "Left": -1896,
+              "Top": 47,
+              "Right": -616,
+              "Bottom": 1071
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1280,
+              "Bottom": 1024
+            },
+            "origin": {
+              "X": -1896,
+              "Y": 47
+            },
+            "regionRectangles": null
+          }
+        ],
+        "dom": {
+          "devicePixelRatio": 1,
+          "innerHeight": 700,
+          "innerWidth": 1024,
+          "viewport": {
+            "height": 303,
+            "width": 620,
+            "x": 16,
+            "y": 116
+          }
+        }
+      },
+      "monitor": {
+        "handle": 131073,
+        "primary": false,
+        "bounds": {
+          "Left": -1920,
+          "Top": 0,
+          "Right": 0,
+          "Bottom": 1080
+        },
+        "workArea": {
+          "Left": -1920,
+          "Top": 0,
+          "Right": 0,
+          "Bottom": 1032
+        }
+      },
+      "input": {
+        "end": 9,
+        "focused": true,
+        "start": 4,
+        "value": "日本語 mixed monitor phrase"
+      },
+      "outerFitsWorkArea": true
+    },
+    {
+      "phase": "primary-return",
+      "geometry": {
+        "native": [
+          {
+            "handle": 11667654,
+            "parent": 0,
+            "className": "Tauri Window",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 16,
+              "Top": 16,
+              "Right": 1574,
+              "Bottom": 1122
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 27,
+              "Y": 61
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 9765650,
+            "parent": 11667654,
+            "className": "Static",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 51,
+              "Top": 235,
+              "Right": 981,
+              "Bottom": 691
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 930,
+              "Bottom": 456
+            },
+            "origin": {
+              "X": 51,
+              "Y": 235
+            },
+            "regionRectangles": [
+              {
+                "Left": 0,
+                "Top": 0,
+                "Right": 930,
+                "Bottom": 455
+              }
+            ]
+          },
+          {
+            "handle": 27069246,
+            "parent": 9765650,
+            "className": "mpv",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 51,
+              "Top": 235,
+              "Right": 981,
+              "Bottom": 691
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 930,
+              "Bottom": 456
+            },
+            "origin": {
+              "X": 51,
+              "Y": 235
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 16582958,
+            "parent": 11667654,
+            "className": "WRY_WEBVIEW",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 27,
+              "Top": 61,
+              "Right": 1563,
+              "Bottom": 1111
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 27,
+              "Y": 61
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 19138344,
+            "parent": 16582958,
+            "className": "Chrome_WidgetWin_0",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 27,
+              "Top": 61,
+              "Right": 1563,
+              "Bottom": 1111
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 27,
+              "Y": 61
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 2623640,
+            "parent": 19138344,
+            "className": "Chrome_WidgetWin_1",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 27,
+              "Top": 61,
+              "Right": 1563,
+              "Bottom": 1111
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 27,
+              "Y": 61
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 1769808,
+            "parent": 2623640,
+            "className": "Chrome_RenderWidgetHostHWND",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 27,
+              "Top": 61,
+              "Right": 1563,
+              "Bottom": 1111
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1536,
+              "Bottom": 1050
+            },
+            "origin": {
+              "X": 27,
+              "Y": 61
+            },
+            "regionRectangles": null
+          },
+          {
+            "handle": 9635662,
+            "parent": 2623640,
+            "className": "Intermediate D3D Window",
+            "visible": true,
+            "dpi": 144,
+            "screen": {
+              "Left": 27,
+              "Top": 61,
+              "Right": 1565,
+              "Bottom": 1114
+            },
+            "client": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 1538,
+              "Bottom": 1053
+            },
+            "origin": {
+              "X": 27,
+              "Y": 61
+            },
+            "regionRectangles": null
+          }
+        ],
+        "dom": {
+          "devicePixelRatio": 1.5,
+          "innerHeight": 700,
+          "innerWidth": 1024,
+          "viewport": {
+            "height": 303.66668701171875,
+            "width": 620,
+            "x": 16,
+            "y": 116
+          }
+        }
+      },
+      "monitor": {
+        "handle": 65701,
+        "primary": true,
+        "bounds": {
+          "Left": 0,
+          "Top": 0,
+          "Right": 2560,
+          "Bottom": 1440
+        },
+        "workArea": {
+          "Left": 0,
+          "Top": 0,
+          "Right": 2560,
+          "Bottom": 1368
+        }
+      },
+      "input": {
+        "end": 9,
+        "focused": true,
+        "start": 4,
+        "value": "日本語 mixed monitor phrase"
+      },
+      "outerFitsWorkArea": true
+    }
+  ]
+}

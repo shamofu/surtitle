@@ -6,6 +6,7 @@ pub mod store;
 pub mod subtitles;
 mod transcript_issue;
 pub mod transfer;
+pub mod workspace;
 
 pub use editor_draft::*;
 pub use model::*;

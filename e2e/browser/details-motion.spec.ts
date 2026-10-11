@@ -37,7 +37,7 @@ test('disclosure animates actual height and following content, then reverses wit
     return frames;
   }, reverse);
   const opening = await observe();
-  const daily = page.getByRole('spinbutton', { name: 'Daily limit (USD)', exact: true });
+  const daily = page.getByRole('textbox', { name: 'Daily limit (USD)', exact: true });
   await daily.fill('12.5');
   // Editing a limit also updates a summary above this disclosure; let that independent change settle.
   await page.waitForTimeout(240);
@@ -82,7 +82,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     await page.goto('/settings');
     const details = page.locator('.budget-details');
     await details.locator('summary').click();
-    const daily = page.getByRole('spinbutton', { name: 'Daily limit (USD)', exact: true });
+    const daily = page.getByRole('textbox', { name: 'Daily limit (USD)', exact: true });
     await daily.fill('-1');
     const result = await details.evaluate(async element => {
       element.querySelector('summary')!.click();
@@ -126,5 +126,5 @@ test('choosing custom model output cancels a disclosure exit', async ({ page }) 
   expect(before).toBe('exiting');
   await expect(details).toHaveAttribute('data-motion-state', 'open');
   await page.waitForTimeout(obsoleteExitDeadline);
-  await expect(model.getByRole('spinbutton', { name: /^Maximum output tokens/ })).toBeVisible();
+  await expect(model.getByRole('textbox', { name: /^Maximum output tokens/ })).toBeVisible();
 });

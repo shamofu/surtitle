@@ -166,6 +166,7 @@ pub struct PreparationSummary {
 
 pub(crate) mod bindings;
 pub(crate) mod runtime;
+pub(crate) mod scheduler;
 pub(crate) mod snapshot;
 use bindings::*;
 pub(crate) mod quotes;

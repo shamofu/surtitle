@@ -5,7 +5,7 @@
   "components": [
     {
       "id": "libmpv",
-      "version": "0.41.0-surtitle-source-20260909",
+      "version": "0.41.0-surtitle-ffmpeg-9.0.2-20261011",
       "provider": "Surtitle source build in isolated Linux container (MinGW x64)",
       "archiveUrl": null,
       "archiveFile": null,

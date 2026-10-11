@@ -1,6 +1,93 @@
 use super::*;
 use crate::{AudioAttachment, BudgetLimits, JobQuote, ParsedOutput, ReservedRequest};
 
+fn legacy_pacing_schema(store: &AiStore) {
+    store.connect().unwrap().execute_batch(
+        "BEGIN IMMEDIATE;
+         ALTER TABLE ai_transcription_pacing RENAME TO current_pacing;
+         CREATE TABLE ai_transcription_pacing (
+            project_id TEXT NOT NULL, model_id TEXT NOT NULL, location TEXT NOT NULL,
+            interval_ms INTEGER NOT NULL CHECK(interval_ms BETWEEN 10000 AND 60000),
+            success_streak INTEGER NOT NULL DEFAULT 0 CHECK(success_streak BETWEEN 0 AND 2),
+            last_dispatch_ms INTEGER, cooldown_until_ms INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(project_id,model_id,location));
+         INSERT INTO ai_transcription_pacing SELECT project_id,model_id,location,MAX(10000,interval_ms),success_streak,last_dispatch_ms,cooldown_until_ms FROM current_pacing;
+         DROP TABLE current_pacing;
+         COMMIT;",
+    ).unwrap();
+}
+
+#[test]
+fn legacy_floor_migration_preserves_unknown_holds_and_observed_lane_history() {
+    let f = Fixture::new(1);
+    let sent = f.send();
+    f.store.mark_unknown(&sent.attempt_id).unwrap();
+    let before = serde_json::to_value(f.store.summary().unwrap()).unwrap();
+    let quote = serde_json::to_value(f.store.quote(&f.quote.id).unwrap()).unwrap();
+    let future = f.store.now_ms() + 90_000;
+    let conn = f.store.connect().unwrap();
+    conn.execute(
+        "INSERT INTO ai_transcription_pacing VALUES ('observed','m','global',20000,1,123,?,2)",
+        [future],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO ai_transcription_pacing VALUES ('recovered','m','global',10000,2,456,?,2)",
+        [future],
+    )
+    .unwrap();
+    drop(conn);
+    legacy_pacing_schema(&f.store);
+    for _ in 0..2 {
+        let reopened = AiStore::open(f.directory.path().join("ai.db")).unwrap();
+        assert_eq!(
+            serde_json::to_value(reopened.summary().unwrap()).unwrap(),
+            before
+        );
+        assert_eq!(
+            serde_json::to_value(reopened.quote(&f.quote.id).unwrap()).unwrap(),
+            quote
+        );
+        assert!(reopened
+            .reserve_next_scoped(&f.quote.id, &f.approval)
+            .is_err());
+        let conn = reopened.connect().unwrap();
+        let rows: Vec<(i64,i64,i64)> = conn.prepare("SELECT interval_ms,success_streak,cooldown_until_ms FROM ai_transcription_pacing ORDER BY project_id")
+            .unwrap().query_map([], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        assert!(rows.contains(&(0, 0, 0)));
+        assert!(rows.contains(&(20000, 1, future)));
+        assert!(rows.contains(&(10000, 2, future)));
+        assert_eq!(rows.len(), 3);
+    }
+    assert_eq!(f.counts().0, 1);
+}
+
+#[test]
+fn legacy_migration_keeps_future_retry_after_across_reopen_and_new_approval() {
+    let f = Fixture::new(1);
+    let sent = f.send();
+    let at = f.store.now_ms();
+    f.store.handle_429_at(&sent, Some("90"), at, 0).unwrap();
+    let before = f.counts();
+    legacy_pacing_schema(&f.store);
+    let reopened = AiStore::open(f.directory.path().join("ai.db")).unwrap();
+    reopened.recover_interrupted().unwrap();
+    assert!(
+        matches!(reopened.reapprove_scope_with_retry(&f.quote.id, &f.quote.digest, false, true, Some(1)), Err(AiError::RetryWaiting(until)) if until == at+90_000)
+    );
+    assert_eq!(f.counts(), before);
+    reopened.set_test_time(at + 90_000);
+    let approval = reopened
+        .reapprove_scope_with_retry(&f.quote.id, &f.quote.digest, false, true, Some(1))
+        .unwrap();
+    let reservation = reopened
+        .reserve_next_scoped(&f.quote.id, &approval)
+        .unwrap()
+        .unwrap();
+    reopened.validate_dispatch(&reservation).unwrap();
+    assert_eq!(f.counts().0, before.0 + 1);
+}
+
 struct Fixture {
     directory: tempfile::TempDir,
     store: AiStore,
@@ -135,36 +222,22 @@ impl Fixture {
 }
 
 #[test]
-fn normal_spacing_is_between_dispatch_starts_and_waiting_has_no_financial_effect() {
+fn settled_chunks_dispatch_without_an_artificial_floor_and_inflight_stays_exclusive() {
     let f = Fixture::new(2);
     let at = f.store.now_ms();
     let first = f.send();
-    assert!(
-        f.store.pacing_status(&f.quote.id).unwrap().is_none(),
-        "already sent is not waiting"
-    );
+    assert!(f
+        .store
+        .reserve_next_scoped(&f.quote.id, &f.approval)
+        .is_err());
+    assert_eq!(f.counts().0, 1);
     f.store.set_test_time(at + 2_000);
     f.settle(&first);
-    let before = serde_json::to_value(f.store.summary().unwrap()).unwrap();
-    let counts = f.counts();
-    let status = f.store.pacing_status(&f.quote.id).unwrap().unwrap();
-    assert_eq!(status.ordinal, 1);
-    assert_eq!(status.interval_ms, 10_000);
-    assert!(!status.slowed);
-    for now in [at + 2_000, at + 9_999] {
-        f.store.set_test_time(now);
-        assert!(
-            matches!(f.store.reserve_next_scoped(&f.quote.id,&f.approval),Err(AiError::PacingWaiting(next)) if next==at+10_000)
-        );
-        assert_eq!(f.counts(), counts);
-        assert_eq!(
-            serde_json::to_value(f.store.summary().unwrap()).unwrap(),
-            before
-        );
-    }
-    f.store.set_test_time(at + 10_000);
+    assert!(f.store.pacing_status(&f.quote.id).unwrap().is_none());
+    assert_eq!(f.lane().0, 0);
     let next = f.send();
     assert_eq!(next.ordinal, 1);
+    assert_eq!(f.store.now_ms(), at + 2_000);
     f.settle(&next);
     assert_eq!(f.store.quote(&f.quote.id).unwrap().completed_requests, 2);
     assert_eq!(f.store.summary().unwrap().daily_actual_charged_microusd, 2);
@@ -173,7 +246,7 @@ fn normal_spacing_is_between_dispatch_starts_and_waiting_has_no_financial_effect
 
 #[test]
 fn rejection_slows_subsequent_chunks_and_three_successes_recover_gradually() {
-    let f = Fixture::new(40);
+    let f = Fixture::new(45);
     for interval in [20_000, 40_000, 60_000, 60_000] {
         let first = f.send();
         let rejected_at = f.store.now_ms();
@@ -196,7 +269,7 @@ fn rejection_slows_subsequent_chunks_and_three_successes_recover_gradually() {
         );
         assert_eq!(f.lane().1, 1);
     }
-    for expected in (10_000..=55_000).rev().step_by(5_000) {
+    for expected in (0..=55_000).rev().step_by(5_000) {
         let needed = 3 - f.lane().1;
         for _ in 0..needed {
             let sent = f.send();
@@ -208,7 +281,7 @@ fn rejection_slows_subsequent_chunks_and_three_successes_recover_gradually() {
         let sent = f.send();
         f.settle(&sent);
     }
-    assert_eq!(f.lane().0, 10_000);
+    assert_eq!(f.lane().0, 0);
     assert_eq!(f.store.summary().unwrap().unknown_attempts.len(), 0);
     assert_eq!(
         f.store.summary().unwrap().daily_held_microusd,
@@ -226,11 +299,20 @@ fn shared_lane_survives_new_jobs_and_keys_but_other_projects_models_regions_are_
     ] {
         let f = Fixture::new(1);
         let first = f.send();
-        f.settle(&first);
+        f.store
+            .handle_429_at(&first, None, f.store.now_ms(), 0)
+            .unwrap();
+        let before = f.counts();
+        let budget_before = serde_json::to_value(f.store.summary().unwrap()).unwrap();
         let (quote, approval) = f.other_job(project, model, location);
         let reservation = f.store.reserve_next_scoped(&quote.id, &approval);
         if project.is_none() && model.is_none() && location.is_none() {
             assert!(matches!(reservation, Err(AiError::PacingWaiting(_))));
+            assert_eq!(f.counts(), before);
+            assert_eq!(
+                serde_json::to_value(f.store.summary().unwrap()).unwrap(),
+                budget_before
+            );
         } else {
             let reservation = reservation.unwrap().unwrap();
             f.store.validate_dispatch(&reservation).unwrap();
@@ -360,7 +442,7 @@ fn final_dispatch_gate_keeps_the_same_unsent_reservation_without_double_counting
     f.store.validate_dispatch(&reservation).unwrap();
     f.store.validate_dispatch(&reservation).unwrap();
     assert_eq!(f.counts(), before);
-    assert_eq!(f.lane().0, 10_000);
+    assert_eq!(f.lane().0, 0);
 }
 
 #[test]

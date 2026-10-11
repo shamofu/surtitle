@@ -49,9 +49,12 @@ struct RegistryState {
 }
 
 #[derive(Default, Clone)]
-pub(crate) struct OperationRegistry(Arc<Mutex<RegistryState>>);
+pub(crate) struct OperationRegistry(Arc<Mutex<RegistryState>>, super::changes::Changes);
 
 impl OperationRegistry {
+    pub fn with_changes(changes: super::changes::Changes) -> Self {
+        Self(Arc::default(), changes)
+    }
     pub fn start(
         &self,
         kind: &str,
@@ -89,6 +92,9 @@ impl OperationRegistry {
                 },
             ),
         );
+        drop(state);
+        self.1
+            .publish(super::changes::ChangeDomain::Operations, None);
         Ok(Operation {
             reporter: OperationReporter {
                 registry: self.clone(),
@@ -135,6 +141,16 @@ impl OperationRegistry {
         terminal.sort_by_key(|(_, order)| std::cmp::Reverse(*order));
         for (id, _) in terminal.into_iter().skip(20) {
             state.entries.remove(&id);
+        }
+        let tool_finished = state
+            .entries
+            .get(id)
+            .is_some_and(|(_, entry)| entry.kind == "tool" && entry.status != "running");
+        drop(state);
+        self.1
+            .publish(super::changes::ChangeDomain::Operations, None);
+        if tool_finished {
+            self.1.publish(super::changes::ChangeDomain::Tools, None);
         }
     }
 }

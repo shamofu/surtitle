@@ -13,6 +13,7 @@ pub(crate) mod draft_study;
 mod management;
 mod transcript_publication;
 mod transcript_ranges;
+pub use management::CardEditState;
 pub use transcript_publication::{TranscriptPublicationRange, TranscriptPublicationReport};
 pub use transcript_ranges::TranscriptRangeEdit;
 
@@ -44,9 +45,22 @@ impl Store {
         transcript_ranges::initialize(&conn)?;
         draft_study::initialize(&conn)?;
         editor_drafts::initialize(&conn)?;
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS learning_metadata (key TEXT PRIMARY KEY,value TEXT NOT NULL);")?;
+        conn.execute(
+            "INSERT OR IGNORE INTO learning_metadata(key,value) VALUES('generation',?)",
+            [id()],
+        )?;
         transcript_issues::initialize(&conn)?;
         transcript_publication::initialize(&conn)?;
         Ok(Self { conn, path })
+    }
+    /// Device-local identity changes atomically with a learning restore.
+    pub fn learning_generation(&self) -> Result<String> {
+        Ok(self.conn.query_row(
+            "SELECT value FROM learning_metadata WHERE key='generation'",
+            [],
+            |row| row.get(0),
+        )?)
     }
     fn all<T: DeserializeOwned>(&self, sql: &str) -> Result<Vec<T>> {
         let mut stmt = self.conn.prepare(sql)?;

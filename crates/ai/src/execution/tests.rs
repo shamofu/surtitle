@@ -84,8 +84,10 @@ fn no_model_is_selected_implicitly_and_arbitrary_safe_ids_need_no_catalog() {
     let estimate = &job.estimates().unwrap()[0];
     assert_eq!(estimate.output_tokens_reserved, 2048);
     assert_eq!(estimate.estimated_max_microusd, None);
-    assert_eq!(job.execution.endpoint("fixture-project").unwrap(),
-        "https://asia-northeast1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/asia-northeast1/publishers/google/models/gemini-unlisted-future-preview:generateContent");
+    assert_eq!(
+        job.execution.endpoint("fixture-project").unwrap(),
+        "https://asia-northeast1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/asia-northeast1/publishers/google/models/gemini-unlisted-future-preview:generateContent"
+    );
 }
 
 #[test]
@@ -138,6 +140,28 @@ fn endpoint_segments_and_mutually_exclusive_thinking_are_validated_without_model
             }
         }
     }
+}
+
+#[test]
+fn explicit_minimal_thinking_is_frozen_and_serialized_without_fallback() {
+    let mut execution = config();
+    execution.model_id = "gemini-3.1-flash-lite".into();
+    execution.thinking = ThinkingConfig::Level {
+        level: "MINIMAL".into(),
+    };
+    let minimal = job().with_execution(execution.clone()).unwrap();
+    let body = minimal.request_body_snapshot(0).unwrap();
+    assert_eq!(
+        body["generationConfig"]["thinkingConfig"],
+        json!({"thinkingLevel":"MINIMAL"})
+    );
+    let restored: PreparedJob =
+        serde_json::from_value(serde_json::to_value(&minimal).unwrap()).unwrap();
+    assert_eq!(restored.digest().unwrap(), minimal.digest().unwrap());
+    assert_eq!(restored.request_body_snapshot(0).unwrap(), body);
+    execution.thinking = ThinkingConfig::Omit;
+    let default = minimal.clone().with_execution(execution).unwrap();
+    assert_ne!(default.digest().unwrap(), minimal.digest().unwrap());
 }
 
 #[test]

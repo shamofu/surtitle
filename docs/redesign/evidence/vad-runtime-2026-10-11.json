@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "fixture": "Six-minute synthesized English speech, mono 16 kHz PCM16",
+  "pcmSha256": "aa09c5e14c3a6e73d2268305aec18366304742b48526240523b7b500563bcac7",
+  "modelSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+  "totalSamples": 5760000,
+  "chunkCount": 3,
+  "identicalEvidenceAndChunks": true,
+  "cloudCalls": 0,
+  "runs": [
+    {
+      "round": 0,
+      "kind": "baseline",
+      "initializationMs": 138.38039999999998,
+      "inferenceMs": 1357.4301,
+      "analysisSha256": "d9076beb16515a67ebdd2352725427f5df23e7ea3fea3d224b360c49952ec2cf",
+      "runtimeSha256": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471"
+    },
+    {
+      "round": 0,
+      "kind": "candidate",
+      "initializationMs": 202.31199999999998,
+      "inferenceMs": 1439.921,
+      "analysisSha256": "d9076beb16515a67ebdd2352725427f5df23e7ea3fea3d224b360c49952ec2cf",
+      "runtimeSha256": "0c42dc4e278f0968fdf9ebf1b1e54a74c657a9942e70803e453c91993451cf4c"
+    },
+    {
+      "round": 1,
+      "kind": "candidate",
+      "initializationMs": 140.6745,
+      "inferenceMs": 1347.9798,
+      "analysisSha256": "d9076beb16515a67ebdd2352725427f5df23e7ea3fea3d224b360c49952ec2cf",
+      "runtimeSha256": "0c42dc4e278f0968fdf9ebf1b1e54a74c657a9942e70803e453c91993451cf4c"
+    },
+    {
+      "round": 1,
+      "kind": "baseline",
+      "initializationMs": 131.4644,
+      "inferenceMs": 1313.5058,
+      "analysisSha256": "d9076beb16515a67ebdd2352725427f5df23e7ea3fea3d224b360c49952ec2cf",
+      "runtimeSha256": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471"
+    },
+    {
+      "round": 2,
+      "kind": "baseline",
+      "initializationMs": 133.13330000000002,
+      "inferenceMs": 1297.8138999999999,
+      "analysisSha256": "d9076beb16515a67ebdd2352725427f5df23e7ea3fea3d224b360c49952ec2cf",
+      "runtimeSha256": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471"
+    },
+    {
+      "round": 2,
+      "kind": "candidate",
+      "initializationMs": 136.38549999999998,
+      "inferenceMs": 1406.7364,
+      "analysisSha256": "d9076beb16515a67ebdd2352725427f5df23e7ea3fea3d224b360c49952ec2cf",
+      "runtimeSha256": "0c42dc4e278f0968fdf9ebf1b1e54a74c657a9942e70803e453c91993451cf4c"
+    }
+  ],
+  "scope": "Three alternating isolated-process pairs, production Silero streaming wrapper, one inference thread. Not a speech-quality evaluation.",
+  "date": "2026-10-11",
+  "baselineVersion": "1.29.0 (packaged source build)",
+  "candidateVersion": "1.31.0 (official Windows x64 CPU release)",
+  "candidateReleaseUrl": "https://github.com/microsoft/onnxruntime/releases/tag/v1.31.0",
+  "candidateRelease": {
+    "name": "onnxruntime-win-x64-1.31.0.zip",
+    "size": 82887349,
+    "digest": "sha256:3958d8a44984160692c1b4ffd0de3cb48f8c39f9d34bb31e433db06e30b82195",
+    "browser_download_url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-win-x64-1.31.0.zip"
+  },
+  "candidateArchiveSha256": "3958d8a44984160692c1b4ffd0de3cb48f8c39f9d34bb31e433db06e30b82195",
+  "candidateSourceCommit": "402979ac1bef89dcd55add41eaa7277c407599eb",
+  "candidateNoticeSha256": "c53a76501ef60db6f865f20599f220761201ac4057683acefdab37d861b86622",
+  "candidateLicenseSha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+  "sileroCurrentTag": "v6.2.3",
+  "sileroCurrentTagUrl": "https://github.com/snakers4/silero-vad/releases/tag/v6.2.3",
+  "sileroCurrentModelUrl": "https://raw.githubusercontent.com/snakers4/silero-vad/v6.2.3/src/silero_vad/data/silero_vad.onnx",
+  "sileroCurrentModelSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+  "sileroStreamingModelIdentical": true,
+  "meanInferenceMs": {
+    "baseline": 1322.9166,
+    "candidate": 1398.2124000000001
+  },
+  "candidateMeanChangePercent": 5.6916513104454225,
+  "decision": "Retain packaged1.29 runtime; candidate1.31 showed identical VAD/chunks and no material latency benefit. No packaged artifact replaced.",
+  "limitations": "Single synthesized English fixture; no speech-quality assessment. Runtime build provenance differs (packaged source build vs upstream prebuilt), host load and cold DLL loading affect timings. Not a general version-performance claim. All six processes used the same compiled wrapper binary."
+}

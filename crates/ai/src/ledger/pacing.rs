@@ -5,7 +5,8 @@ use crate::{AiError, PreparedJob, RequestTask, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-const MIN_INTERVAL_MS: i64 = 10_000;
+const MIN_INTERVAL_MS: i64 = 0;
+const FIRST_REJECTION_INTERVAL_MS: i64 = 20_000;
 const MAX_INTERVAL_MS: i64 = 60_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -19,14 +20,38 @@ pub struct PacingStatus {
 }
 
 pub(super) fn initialize(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS ai_transcription_pacing (
+    const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS ai_transcription_pacing (
             project_id TEXT NOT NULL, model_id TEXT NOT NULL, location TEXT NOT NULL,
-            interval_ms INTEGER NOT NULL CHECK(interval_ms BETWEEN 10000 AND 60000),
+            interval_ms INTEGER NOT NULL CHECK(interval_ms BETWEEN 0 AND 60000),
             success_streak INTEGER NOT NULL DEFAULT 0 CHECK(success_streak BETWEEN 0 AND 2),
             last_dispatch_ms INTEGER, cooldown_until_ms INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY(project_id,model_id,location));",
+            policy_version INTEGER NOT NULL DEFAULT 2 CHECK(policy_version=2),
+            PRIMARY KEY(project_id,model_id,location));";
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    tx.execute_batch(SCHEMA)?;
+    let current: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('ai_transcription_pacing') WHERE name='policy_version')",
+        [], |row| row.get(0),
     )?;
+    if !current {
+        // Remove only the old unconditional floor. A lane that has observed a
+        // rejection retains its interval and server cooldown, even after expiry.
+        // Approval retry floors, reservations, unknown holds and charges are in
+        // separate tables and are never rewritten by this atomic migration.
+        tx.execute_batch(
+            "ALTER TABLE ai_transcription_pacing RENAME TO ai_transcription_pacing_fixed_floor;",
+        )?;
+        tx.execute_batch(SCHEMA)?;
+        tx.execute_batch(
+            "INSERT INTO ai_transcription_pacing(project_id,model_id,location,interval_ms,success_streak,last_dispatch_ms,cooldown_until_ms)
+             SELECT project_id,model_id,location,
+                CASE WHEN interval_ms=10000 AND cooldown_until_ms=0 THEN 0 ELSE interval_ms END,
+                success_streak,last_dispatch_ms,cooldown_until_ms
+             FROM ai_transcription_pacing_fixed_floor;
+             DROP TABLE ai_transcription_pacing_fixed_floor;",
+        )?;
+    }
+    tx.commit()?;
     Ok(())
 }
 
@@ -121,7 +146,7 @@ impl AiStore {
             // The native numeric gate stays intact; the UI can show an indefinite wait.
             next_send_at: chrono::DateTime::from_timestamp_millis(next).map(|at| at.to_rfc3339()),
             interval_ms: lane.interval as u64,
-            slowed: lane.interval > MIN_INTERVAL_MS,
+            slowed: lane.interval > MIN_INTERVAL_MS || lane.cooldown > self.now_ms(),
         }))
     }
 
@@ -166,7 +191,7 @@ impl AiStore {
         if self.pacing_applies(plan, ordinal) {
             conn.execute(
                 "INSERT INTO ai_transcription_pacing(project_id,model_id,location,interval_ms,last_dispatch_ms)
-                 VALUES (?,?,?,10000,?) ON CONFLICT(project_id,model_id,location)
+                 VALUES (?,?,?,0,?) ON CONFLICT(project_id,model_id,location)
                  DO UPDATE SET last_dispatch_ms=excluded.last_dispatch_ms",
                 params![plan.project_id,plan.execution.model_id,plan.execution.location,at],
             )?;
@@ -187,7 +212,7 @@ impl AiStore {
             return Ok(None);
         }
         let lane = lane(conn, plan)?;
-        let interval = (lane.interval * 2).min(MAX_INTERVAL_MS);
+        let interval = (lane.interval * 2).clamp(FIRST_REJECTION_INTERVAL_MS, MAX_INTERVAL_MS);
         let jitter = i64::from(timing.jitter) % (interval / 5 + 1);
         let next = lane
             .cooldown
@@ -212,7 +237,7 @@ impl AiStore {
         if self.pacing_applies(plan, ordinal) {
             conn.execute(
                 "UPDATE ai_transcription_pacing SET
-                 interval_ms=CASE WHEN ? AND success_streak=2 THEN MAX(10000,interval_ms-5000) ELSE interval_ms END,
+                 interval_ms=CASE WHEN ? AND success_streak=2 THEN MAX(0,interval_ms-5000) ELSE interval_ms END,
                  success_streak=CASE WHEN ? THEN (success_streak+1)%3 ELSE 0 END
                  WHERE project_id=? AND model_id=? AND location=?",
                 params![success,success,plan.project_id,plan.execution.model_id,plan.execution.location],

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
-import { ChevronLeft, ChevronRight, Languages, RotateCcw } from 'lucide-react';
+import { BookmarkPlus, ChevronLeft, ChevronRight, Languages, RotateCcw } from 'lucide-react';
 import { useAppearance } from '../../app/runtime';
 import type { SubtitleSegment } from '../../shared/contracts/media';
 import { Button } from '../../shared/ui/index';
@@ -9,7 +9,7 @@ import { MotionRegion } from '../../shared/motion';
 
 export function CurrentCaption({
   active, language, loading, hasSubtitles, draftMode, enabled, error,
-  inspectButton, onInspect, onImport, onPrevious, onNext, onReplay,
+  inspectButton, onInspect, onSave, onImport, onPrevious, onNext, onReplay,
   hasPrevious, hasNext,
 }: {
   active?: SubtitleSegment;
@@ -21,6 +21,7 @@ export function CurrentCaption({
   error?: Error | null;
   inspectButton: RefObject<HTMLButtonElement | null>;
   onInspect: (source: SubtitleSegment, term?: string) => void;
+  onSave?: (source: SubtitleSegment) => void;
   onImport: () => void;
   onPrevious: () => void;
   onNext: () => void;
@@ -104,25 +105,31 @@ export function CurrentCaption({
       <div className="caption-controls">
         <div className="caption-actions">
           {source && !draftMode && <>
-            <Button variant="ghost" aria-pressed={showTranslation} onClick={() => setShowTranslation(value => !value)}>
+            <Button variant="ghost" aria-pressed={showTranslation} aria-label={showTranslation ? t('訳を隠す', 'Hide translation') : t('訳を表示', 'Show translation')} onClick={() => setShowTranslation(value => !value)}>
               <Languages size={17} />
-              {showTranslation ? t('訳を隠す', 'Hide translation') : t('訳を表示', 'Show translation')}
+              <span className="caption-toggle-copy caption-full-label" aria-hidden="true">
+                <span style={{ visibility: showTranslation ? 'hidden' : 'visible' }}>{t('訳を表示', 'Show translation')}</span>
+                <span style={{ visibility: showTranslation ? 'visible' : 'hidden' }}>{t('訳を隠す', 'Hide translation')}</span>
+              </span>
+              <span className="caption-short-label" aria-hidden="true">{t('訳', 'Translation')}</span>
             </Button>
-            <button ref={inspectButton} type="button" className="button secondary" disabled={!enabled} onClick={() => onInspect(source)}>
-              {t('この字幕を確認', 'Inspect this subtitle')}
+            <button ref={inspectButton} type="button" className="button secondary" aria-label={t('意味を調べる', 'Explore meaning')} disabled={!enabled} onClick={() => onInspect(source)}>
+              <span className="caption-full-label">{t('意味を調べる', 'Explore meaning')}</span>
+              <span className="caption-short-label" aria-hidden="true">{t('意味を調べる', 'Meaning')}</span>
             </button>
+            {onSave && <Button variant="ghost" aria-label={t('保存', 'Save phrase')} disabled={!enabled} onClick={() => onSave(source)}><BookmarkPlus size={16} /><span className="caption-full-label">{t('保存', 'Save phrase')}</span><span className="caption-short-label" aria-hidden="true">{t('保存', 'Save')}</span></Button>}
           </>}
         </div>
         <div className="caption-navigation-slot">
           <MotionRegion mode="status" open={hasSubtitles && !draftMode} className="caption-navigation" role="group" aria-label={t('字幕の再生操作', 'Subtitle playback')}>
-            <Button variant="ghost" disabled={!enabled || !hasPrevious} onClick={onPrevious}>
-              <ChevronLeft size={16} />{t('前の字幕', 'Previous subtitle')}
+            <Button variant="ghost" aria-label={t('前の字幕', 'Previous subtitle')} disabled={!enabled || !hasPrevious} onClick={onPrevious}>
+              <ChevronLeft size={16} /><span className="caption-full-label">{t('前の字幕', 'Previous subtitle')}</span><span className="caption-short-label" aria-hidden="true">{t('前の字幕', 'Previous')}</span>
             </Button>
-            <Button variant="secondary" disabled={!enabled || !active} onClick={onReplay}>
-              <RotateCcw size={16} />{t('この字幕をもう一度', 'Replay this subtitle')}
+            <Button variant="secondary" aria-label={t('この字幕をもう一度', 'Replay this subtitle')} disabled={!enabled || !active} onClick={onReplay}>
+              <RotateCcw size={16} /><span className="caption-full-label">{t('この字幕をもう一度', 'Replay this subtitle')}</span><span className="caption-short-label" aria-hidden="true">{t('もう一度', 'Replay')}</span>
             </Button>
-            <Button variant="ghost" disabled={!enabled || !hasNext} onClick={onNext}>
-              {t('次の字幕', 'Next subtitle')}<ChevronRight size={16} />
+            <Button variant="ghost" aria-label={t('次の字幕', 'Next subtitle')} disabled={!enabled || !hasNext} onClick={onNext}>
+              <span className="caption-full-label">{t('次の字幕', 'Next subtitle')}</span><span className="caption-short-label" aria-hidden="true">{t('次の字幕', 'Next')}</span><ChevronRight size={16} />
             </Button>
           </MotionRegion>
         </div>

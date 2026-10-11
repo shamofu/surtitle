@@ -79,6 +79,14 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
   const [boundRevision, setBoundRevision] = useState(revision);
   const configured = !!data?.settings.credentialConfigured && !!data.settings.vertexProject && !!model.modelId.trim() && model.maxOutputTokens > 0;
   const busy = !!phase;
+  const scopeKey = JSON.stringify([from, to, whole, model, data?.settings.vertexLocation]);
+  const initialScopeKey = useRef(scopeKey);
+  const previousScopeKey = useRef(scopeKey);
+  useEffect(() => {
+    if (previousScopeKey.current === scopeKey) return;
+    previousScopeKey.current = scopeKey;
+    setQuote(undefined); setAutomaticAttempted(false);
+  }, [scopeKey]);
   useEffect(() => {
     if (revision === boundRevision) return;
     setBoundRevision(revision); setQuote(undefined); setPreparation(undefined); setPhase(undefined);
@@ -115,14 +123,17 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
   }
   useEffect(() => {
     if (revision !== boundRevision || automaticAttempted || !configured || !valid || busy || pending.current) return;
+    const timer = window.setTimeout(() => {
     setAutomaticAttempted(true);
-    if (continuation?.quoteId && continuation.sourceMediaSignature === signature) {
+    if (continuation?.quoteId && continuation.sourceMediaSignature === signature && scopeKey === initialScopeKey.current) {
       setPhase('estimating'); pending.current = true;
       void runTracked({ kind: 'estimate', label: media.title, phase: 'estimating', mediaId: media.id }, () => aiApi.reviewAiJob(continuation.quoteId!)).then(result => { if (mounted.current && currentSignature.current === signature && currentRevision.current === revision) setQuote(result); })
         .catch(error => { if (mounted.current && currentRevision.current === revision) setProblem(String(error)); })
         .finally(() => { if (currentRevision.current === revision) { pending.current = false; if (mounted.current) setPhase(undefined); } });
     } else void estimate();
-  }, [automaticAttempted, configured, valid, busy, signature, revision, boundRevision]);
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [automaticAttempted, configured, valid, busy, signature, revision, boundRevision, from, to, whole, model]);
   async function startJob() {
     if (!quote || pending.current || revision !== boundRevision) return;
     pending.current = true; setPhase('starting'); setProblem('');
@@ -144,23 +155,23 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
     pending.current = false; if (mounted.current) setPhase(undefined);
     if (saved) void navigate({ to: '/settings', search: { resume: saved.id } });
   }
-  function changeScope(action: () => void) { action(); setQuote(undefined); setPreparation(undefined); }
+  function changeScope(action: () => void) { action(); setQuote(undefined); setPreparation(undefined); setAutomaticAttempted(false); }
   return <section className="transcription-setup" aria-label={t('文字起こしの設定', 'Transcription setup')}>
     <p className="transcription-source"><strong>{media.title}</strong><br />{media.path.split(/[\\/]/).pop()} · {audioLabel}</p>
     <MotionRegion mode="status" open={!quote}><p>{t('Transcribeの本文を使い、届いた部分から字幕を表示します。気になる箇所はあとから修正できます。', 'Use Transcribe text as subtitles as each part arrives. You can correct any passage later.')}</p>
-    <p className="transcription-scope"><strong><MotionSwap disabled as="span" stateKey={String(whole)}>{whole ? t('全編', 'Full media') : t('選択した区間', 'Selected range')}</MotionSwap></strong> · <AnimatedValue value={`${timestamp(from ?? 0)}–${timestamp(to ?? 0)}`} immediate={advanced} /> · {media.learningLanguage}</p></MotionRegion>
+    <p className="transcription-scope"><strong><MotionSwap disabled as="span" stateKey={String(whole)}>{whole ? t('全編', 'Full media') : t('選択した区間', 'Selected range')}</MotionSwap></strong> · <AnimatedValue value={`${timestamp(from ?? 0)}–${timestamp(to ?? 0)}`} immediate={advanced} /> · {media.learningLanguage}</p>
+    <p>{t('モデル', 'Model')}: {model.modelId || t('未選択', 'Not selected')} · {data?.settings.vertexLocation || 'global'}</p></MotionRegion>
     <MotionRegion mode="status" open={!configured}><div className="notice"><p>{t('最初に文字起こし用のモデルと認証を設定してください。戻るとこの範囲から続けられます。', 'Set up a transcription model and credentials. This scope will be kept when you return.')}</p><Button onClick={() => void setup()} busy={phase === 'setup'}>{t('設定して戻る', 'Set up and return')}</Button></div></MotionRegion>
     <AnimatedDetails open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)}>
       <summary>{t('範囲・モデルを変更', 'Change range or model')}</summary>
       <label className="check-field"><input type="checkbox" checked={whole} disabled={busy} onChange={event => changeScope(() => setWhole(event.target.checked))} />{t('全編を文字起こし', 'Transcribe the whole media')}</label>
       <MotionRegion open={!whole} keepMounted><div className="field-row"><Field label={t('開始', 'From')}><input value={start} disabled={busy} onChange={event => changeScope(() => setStart(event.target.value))} /></Field><Field label={t('終了', 'To')}><input value={end} disabled={busy} onChange={event => changeScope(() => setEnd(event.target.value))} /></Field></div></MotionRegion>
-      <ModelEditor purpose="transcription" value={model} location={data?.settings.vertexLocation || 'global'} disabled={busy} onChange={value => { setModel(value); setQuote(undefined); }} />
-      <Button disabled={busy || !configured || !valid} onClick={() => void estimate(true)}>{t('見積もりを更新', 'Update estimate')}</Button>
+      <ModelEditor purpose="transcription" value={model} location={data?.settings.vertexLocation || 'global'} disabled={busy} onChange={value => { setModel(value); setQuote(undefined); setAutomaticAttempted(false); }} />
     </AnimatedDetails>
     <MotionRegion mode="status" open={!valid}><p role="status">{media.durationMs ? t('作品内の開始・終了時刻を指定してください。', 'Choose a valid range within the media.') : t('作品の長さを確認しています…', 'Checking media duration…')}</p></MotionRegion>
     <MotionRegion mode="status" open={busy}><MotionSwap disabled stateKey={phase ?? 'idle'}>{phase === 'preparing' ? <PreparationProgress operationId={preparationSession.session?.operationId} label={media.title} /> : busy && <ProgressStatus label={media.title} phase={phase} status="running" />}</MotionSwap></MotionRegion>
     <MotionRegion mode="status" open={!!problem}>{problem && <p className="notice warning" role="alert">{problem}</p>}</MotionRegion>
-    <MotionRegion open={!!quote}>{quote && <QuoteApproval quote={quote} busy={busy} transcription onApprove={() => void startJob()} />}</MotionRegion>
+    <MotionRegion open={!!quote}>{quote && <QuoteApproval quote={quote} busy={busy} transcription onApprove={() => void startJob()} onRefresh={() => void estimate(true)} />}</MotionRegion>
     <MotionRegion mode="status" open={!quote && !busy && configured && valid && automaticAttempted}><Button onClick={() => void estimate()}><RefreshCw size={14} />{t('見積もりを準備', 'Prepare estimate')}</Button></MotionRegion>
     <MotionSwap disabled stateKey={phase === 'preparing' ? 'cancel' : 'close'}>{phase === 'preparing' ? <Button variant="ghost" disabled={!preparationSession.session?.operationId} onClick={() => void report(() => aiApi.cancelPreparation(preparationSession.session?.operationId))}>{t('準備を中止', 'Cancel preparation')}</Button> : <Button variant="ghost" disabled={busy} onClick={onDone}>{t('閉じる', 'Close')}</Button>}</MotionSwap>
   </section>;

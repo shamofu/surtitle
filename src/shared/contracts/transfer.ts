@@ -8,4 +8,8 @@ export interface RestorePreview {
   warnings: string[];
 }
 
+export interface RestoreResult {
+  warnings: string[];
+}
+
 export type ExportFormat = 'json' | 'csv' | 'tsv' | 'srt' | 'vtt' | 'zip';

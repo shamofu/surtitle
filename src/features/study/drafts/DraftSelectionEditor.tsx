@@ -4,9 +4,10 @@ import { DraftCardDialog, DraftAiDialog } from './DraftDialogs';
 import { useMounted } from './lifecycle';
 import type { PlayRange } from './lifecycle';
 import { useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { queryKeys } from '../../../shared/query/keys';
 import {
   BookmarkPlus,
-  Check,
   Download,
   Play,
   Sparkles,
@@ -47,16 +48,12 @@ export function DraftSelectionEditor({
   const [text, setText] = useState(selection.text);
   const [start, setStart] = useState(timestamp(selection.startMs, true));
   const [end, setEnd] = useState(timestamp(selection.endMs, true));
-  const [acknowledged, setAcknowledged] = useState(selection.confirmed);
-  const [listened, setListened] = useState(selection.confirmed);
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const locked = useRef(false);
-  const editRevision = useRef(0);
   const [dialog, setDialog] = useState<'card' | 'ai'>();
   const [candidate, setCandidate] = useState<VocabularyCandidate>();
-  const [candidates, setCandidates] = useState<VocabularyCandidate[]>([]);
-  const [candidateError, setCandidateError] = useState('');
+  useEffect(() => { setText(selection.text); setStart(timestamp(selection.startMs, true)); setEnd(timestamp(selection.endMs, true)); }, [selection.version]);
   const [format, setFormat] = useState<'json' | 'srt' | 'vtt'>('json');
   const startMs = parseTimestamp(start),
     endMs = parseTimestamp(end);
@@ -75,42 +72,15 @@ export function DraftSelectionEditor({
     startMs !== selection.startMs ||
     endMs !== selection.endMs;
   const confirmed = selection.confirmed && !dirty && !stale;
-  useEffect(() => {
-    if (!confirmed) {
-      setCandidates([]);
-      return;
-    }
-    let disposed = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    async function poll() {
-      try {
-        const result = await draftStudyApi.candidates({
-          id: selection.id,
-          version: selection.version,
-        });
-        if (!disposed) {
-          setCandidates(result);
-          setCandidateError('');
-        }
-      } catch (error) {
-        if (!disposed)
-          setCandidateError(
-            String(error instanceof Error ? error.message : error),
-          );
-      }
-      if (!disposed) timer = setTimeout(() => void poll(), 2000);
-    }
-    void poll();
-    return () => {
-      disposed = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [confirmed, selection.id, selection.version]);
+  const candidateQuery = useQuery({
+    queryKey: [...queryKeys.drafts(selection.mediaId), 'candidates', selection.id, selection.version],
+    queryFn: () => draftStudyApi.candidates({ id: selection.id, version: selection.version }),
+    enabled: confirmed,
+  });
+  const candidates = confirmed ? candidateQuery.data ?? [] : [];
+  const candidateError = candidateQuery.error?.message ?? '';
   function edit(action: () => void) {
     action();
-    editRevision.current++;
-    setAcknowledged(false);
-    setListened(false);
   }
   async function operate<T>(
     action: () => Promise<T>,
@@ -128,22 +98,20 @@ export function DraftSelectionEditor({
   }
   async function play() {
     if (!rangeValid || !playbackReady) return;
-    const revision = editRevision.current;
-    await operate(
-      async () => {
-        await onPlay({ startMs, endMs });
-        return true;
-      },
-      () => {
-        if (editRevision.current === revision) setListened(true);
-      },
-    );
+    await operate(async () => { await onPlay({ startMs, endMs }); return true; });
+  }
+  function continueWith(target: 'card' | 'ai') {
+    if (!valid || stale || !selection.canConfirm) return;
+    if (confirmed) { setDialog(target); return; }
+    void operate(() => draftStudyApi.update({ id: selection.id, version: selection.version, text, startMs: startMs!, endMs: endMs!, confirm: true }), result => {
+      onSaved(result); setCandidate(undefined); setDialog(target);
+    });
   }
   function save(confirm: boolean) {
     if (
       !rangeValid ||
       (confirm &&
-        (!valid || !acknowledged || !listened || !selection.canConfirm))
+        (!valid || !selection.canConfirm))
     )
       return;
     void operate(
@@ -169,7 +137,7 @@ export function DraftSelectionEditor({
         <Badge tone={confirmed ? 'accent' : 'warning'}>
           {confirmed
             ? t('学習用に確認済み', 'Checked for learning')
-            : t('確認前', 'Needs your check')}
+            : t('受信済み', 'Received')}
         </Badge>
       </div>
       <p className="helper-text">
@@ -187,14 +155,14 @@ export function DraftSelectionEditor({
       </p>
       <p className="helper-text">
         {t(
-          '原音を再生し、本文と再生範囲を確認してください。保存したカードには、この時点の内容と音声が残ります。',
-          'Play the audio and check the text and replay interval. A saved card keeps this version of the text and audio.',
+          '本文と再生範囲から表現を保存したり、意味を調べたりできます。',
+          'Save a phrase or explore its meaning using this text and replay interval.',
         )}
       </p>
       <p className="helper-text">
         {t(
-          'この確認は選んだ表現だけが対象です。元の下書きの競合や他の区間の状態は保持します。',
-          'This check covers only your excerpt. Original draft conflicts and the status of other ranges are retained.',
+          '元の字幕全体を切り替えずに、この表現から学習できます。',
+          'Study this excerpt while the rest of the transcript is still being prepared.',
         )}
       </p>
       {stale && (
@@ -263,28 +231,6 @@ export function DraftSelectionEditor({
         <Play size={14} />
         {t('この本文の原音を再生', 'Play audio for this text')}
       </Button>
-      <label className="check-field">
-        <input
-          type="checkbox"
-          checked={acknowledged}
-          disabled={busy || stale || !valid || !listened}
-          onChange={(event) => setAcknowledged(event.target.checked)}
-        />
-        <span>
-          {t(
-            '原音を聴き、この本文と再生範囲を学習に使うことを確認しました',
-            'I listened and checked this text and replay interval for learning',
-          )}
-        </span>
-      </label>
-      {!listened && (
-        <p className="helper-text">
-          {t(
-            '再生して確認すると、カード保存やAI解説へ進めます。',
-            'Play and check this version before saving a card or requesting AI help.',
-          )}
-        </p>
-      )}
       <div className="inline-actions">
         <Button
           disabled={busy || stale || !rangeValid}
@@ -293,35 +239,16 @@ export function DraftSelectionEditor({
           <BookmarkPlus size={14} />
           {t('未確認で保存・あとで続ける', 'Save unchecked for later')}
         </Button>
-        <Button
-          variant="primary"
-          disabled={
-            busy ||
-            stale ||
-            !valid ||
-            !acknowledged ||
-            !listened ||
-            confirmed ||
-            !selection.canConfirm
-          }
-          onClick={() => save(true)}
-        >
-          <Check size={14} />
-          {t('この本文と音声を確認済みにする', 'Confirm this text and audio')}
-        </Button>
       </div>
       <div className="inline-actions">
         <Button
-          disabled={busy || !confirmed}
-          onClick={() => {
-            setCandidate(undefined);
-            setDialog('card');
-          }}
+          disabled={busy || stale || !valid || !selection.canConfirm}
+          onClick={() => continueWith('card')}
         >
           <BookmarkPlus size={14} />
           {t('音声付きカードを作る', 'Create an audio card')}
         </Button>
-        <Button disabled={busy || !confirmed} onClick={() => setDialog('ai')}>
+        <Button disabled={busy || stale || !valid || !selection.canConfirm} onClick={() => continueWith('ai')}>
           <Sparkles size={14} />
           {t('この表現をAIに相談', 'AI help for this phrase')}
         </Button>

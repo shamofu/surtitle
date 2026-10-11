@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -50,9 +51,14 @@ vi.mock('../features/library/api', () => ({
 }));
 
 vi.mock('../features/cards/api', () => ({
-  cardsApi: { editCard: vi.fn(), deleteCard: vi.fn() },
+  cardsApi: { editCard: vi.fn(), editState: vi.fn(), saveEdit: vi.fn(), deleteCard: vi.fn() },
 }));
 
+vi.mock('../shared/editing/drafts', () => import('./editing-mocks'));
+vi.mock('../shared/editing/session', async importOriginal => {
+  const actual = await importOriginal<typeof import('../shared/editing/session')>();
+  return { ...actual, editingSession: (kind: 'card', id: string, adapter: import('../shared/editing/session').EditAdapter) => new actual.EditingSession(kind, id, adapter) };
+});
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
 const registerModal = () => () => {};
 vi.mock('../app/runtime', () => {
@@ -90,10 +96,11 @@ function mount(node: ReactNode) {
     <QueryClientProvider client={client}>{node}</QueryClientProvider>,
   );
 }
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  await act(async () => {});
   clients.splice(0).forEach((client) => client.clear());
-  vi.resetAllMocks();
+  vi.clearAllMocks();
   context.data = undefined;
 });
 const media: Media = {
@@ -125,6 +132,11 @@ const card: StudyCard = {
   audioStreamIndex: 4,
   suspended: false,
 };
+
+beforeEach(() => {
+  vi.mocked(cardsApi.editState).mockResolvedValue({ card, revision: '0' });
+  vi.mocked(cardsApi.saveEdit).mockImplementation(async request => ({ card: { ...card, ...request }, revision: '1' }));
+});
 
 describe('media and card management', () => {
   it('offers full transcription alongside the uniquely matching embedded subtitle without starting either', async () => {
@@ -173,7 +185,7 @@ describe('media and card management', () => {
     summary.focus();
     fireEvent.click(summary);
     expect(menu).toHaveAttribute('open');
-    const edit = screen.getByRole('button', { name: 'Edit' });
+    const edit = screen.getByRole('button', { name: 'Suspend reviews' });
     edit.focus();
     fireEvent.keyDown(edit, { key: 'Escape' });
     expect(menu).not.toHaveAttribute('open');
@@ -192,7 +204,7 @@ describe('media and card management', () => {
     expect(cardsApi.deleteCard).not.toHaveBeenCalled();
   });
 
-  it('requires a chosen text stream and explicit preservation before replacing edited subtitles', async () => {
+  it('replaces edited subtitles after source selection with automatic version preservation', async () => {
     vi.mocked(libraryApi.mediaStreams).mockResolvedValue([
       {
         index: 4,
@@ -229,8 +241,8 @@ describe('media and card management', () => {
     expect(libraryApi.extractEmbeddedSubtitles).not.toHaveBeenCalled();
     expect(
       screen.getByRole('button', { name: 'Use these subtitles' }),
-    ).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox'));
+    ).toBeEnabled();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', { name: 'Use these subtitles' }),
     );
@@ -241,7 +253,7 @@ describe('media and card management', () => {
     );
     expect(close).toHaveBeenCalledOnce();
   });
-  it('does not open the external subtitle picker before replacement acknowledgement', () => {
+  it('offers the external subtitle picker directly without a replacement acknowledgement', () => {
     mount(
       <SubtitleSourceDialog
         media={media}
@@ -249,17 +261,20 @@ describe('media and card management', () => {
         onClose={() => {}}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Choose file' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Choose file' })).toBeEnabled();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(libraryApi.importSubtitles).not.toHaveBeenCalled();
   });
   it('sends only editable card content and keeps source audio and scheduling out of the mutation', async () => {
     mount(<EditCardDialog card={card} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByLabelText('Meaning')).toBeEnabled());
     fireEvent.change(screen.getByLabelText('Meaning'), {
       target: { value: 'Corrected meaning' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(cardsApi.editCard).toHaveBeenCalledOnce());
-    expect(vi.mocked(cardsApi.editCard).mock.calls[0][0]).toEqual({
+    fireEvent.blur(screen.getByLabelText('Meaning'));
+    await waitFor(() => expect(cardsApi.saveEdit).toHaveBeenCalledOnce());
+    expect(vi.mocked(cardsApi.saveEdit).mock.calls[0][1]).toBe('0');
+    expect(vi.mocked(cardsApi.saveEdit).mock.calls[0][0]).toEqual({
       id: 'card',
       term: 'Original',
       meaning: 'Corrected meaning',

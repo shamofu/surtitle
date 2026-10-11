@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::application::*;
 use anyhow::{Context, Result, ensure};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use surtitle_ai::{
     CredentialMetadata, CredentialVault, ExecutionConfig, PriceSnapshot, ThinkingConfig,
     VertexDiscovery,
@@ -124,6 +124,7 @@ pub fn update_appearance(
     theme: Option<String>,
 ) -> std::result::Result<(), String> {
     (|| -> Result<()> {
+        let _transition = state.preferences.settings_transition()?;
         ensure!(
             locale.as_deref().is_none_or(|v| ["ja", "en"].contains(&v)),
             "Invalid interface language"
@@ -290,49 +291,202 @@ fn budget_limits(settings: &AppSettings) -> Result<surtitle_ai::BudgetLimits> {
     })
 }
 
-pub fn update_settings(state: AppState, mut settings: AppSettings) -> IpcResult<()> {
+fn validate_application_settings(settings: &AppSettings) -> Result<()> {
+    ensure!(
+        ["dark", "light", "system"].contains(&settings.theme.as_str())
+            && ["ja", "en"].contains(&settings.locale.as_str()),
+        "invalid settings"
+    );
+    ensure!(
+        (0.7..=0.97).contains(&settings.retention),
+        "invalid retention"
+    );
+    ensure!(
+        settings.replay_context_ms <= 1000,
+        "Playback context must be between 0 and 1000 ms"
+    );
+    ensure!(
+        !settings.learning_language.trim().is_empty()
+            && !settings.explanation_language.trim().is_empty(),
+        "language is required"
+    );
+    crate::application::models::validate_settings(settings)?;
+    ensure!(
+        ["nightly", "stable"].contains(&settings.yt_dlp_channel.as_str()),
+        "invalid yt-dlp channel"
+    );
+    Ok(())
+}
+
+fn save_application_settings(state: &AppState, mut settings: AppSettings) -> Result<()> {
+    // Monetary limits live only in charges.sqlite. Wire fields are filled
+    // from the ledger by Services::settings, never persisted as a second cap.
+    settings.daily_budget_usd = 0.;
+    settings.monthly_budget_usd = None;
+    settings.per_job_budget_usd = None;
+    state.preferences.update(|preferences| {
+        // Credential identity is owned by JSON import, never by a stale form.
+        settings.vertex_project = preferences.settings.vertex_project.clone();
+        settings.credential_configured = preferences.credential_id.is_some();
+        preferences.settings = settings;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+fn refresh_playback_settings(state: &AppState) -> Result<()> {
+    let mut playback = state.playback.operation()?;
+    let media_id = playback.current_media();
+    if let Some(media_id) = media_id {
+        let segments = lock(&state.db)?.list_segments(&media_id)?;
+        configure_sentence_pause(&mut playback, &segments, state.settings()?.sentence_pause)?;
+    }
+    Ok(())
+}
+
+/// Compatibility entrypoint for older clients. New autosave uses separate
+/// budget-only and preference-only patches, each with one durable authority.
+pub fn update_settings(state: AppState, settings: AppSettings) -> IpcResult<()> {
     (|| {
         let _transition = state.preferences.settings_transition()?;
-        ensure!(
-            ["dark", "light", "system"].contains(&settings.theme.as_str())
-                && ["ja", "en"].contains(&settings.locale.as_str()),
-            "invalid settings"
-        );
+        validate_application_settings(&settings)?;
         let limits = budget_limits(&settings)?;
-        ensure!(
-            (0.7..=0.97).contains(&settings.retention),
-            "invalid retention"
-        );
-        ensure!(
-            settings.replay_context_ms <= 1000,
-            "Playback context must be between 0 and 1000 ms"
-        );
-        ensure!(
-            !settings.learning_language.is_empty() && !settings.explanation_language.is_empty(),
-            "language is required"
-        );
-        crate::application::models::validate_settings(&settings)?;
-        ensure!(
-            ["nightly", "stable"].contains(&settings.yt_dlp_channel.as_str()),
-            "invalid yt-dlp channel"
-        );
-        // Preferences are saved before changing the independently durable ledger.
-        // The ledger remains the authority for every displayed/enforced budget.
-        state.preferences.update(|preferences| {
-            // Credential identity is owned by JSON import, never by a stale form.
-            settings.vertex_project = preferences.settings.vertex_project.clone();
-            settings.credential_configured = preferences.credential_id.is_some();
-            preferences.settings = settings;
-            Ok(())
-        })?;
+        save_application_settings(&state, settings)?;
         state.ai.set_budget(limits)?;
-        let mut playback = state.playback.operation()?;
-        let media_id = playback.current_media();
-        if let Some(media_id) = media_id {
-            let segments = lock(&state.db)?.list_segments(&media_id)?;
-            configure_sentence_pause(&mut playback, &segments, state.settings()?.sentence_pause)?;
+        refresh_playback_settings(&state)
+    })()
+    .map_err(err)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsState {
+    settings: AppSettings,
+    revision: String,
+}
+
+fn settings_state(state: &AppState) -> Result<SettingsState> {
+    let settings = state.settings()?;
+    let revision = surtitle_ai::sha256_bytes(&serde_json::to_vec(&settings)?);
+    Ok(SettingsState { settings, revision })
+}
+
+pub fn get_settings_state(state: AppState) -> IpcResult<SettingsState> {
+    (|| {
+        let _transition = state.preferences.settings_transition()?;
+        settings_state(&state)
+    })()
+    .map_err(err)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BudgetPatch {
+    daily_budget_usd: f64,
+    monthly_budget_usd: f64,
+    per_job_budget_usd: f64,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct SettingsPatch {
+    theme: Option<String>,
+    motion_preference: Option<String>,
+    locale: Option<String>,
+    learning_language: Option<String>,
+    explanation_language: Option<String>,
+    vertex_location: Option<String>,
+    retention: Option<f32>,
+    sentence_pause: Option<bool>,
+    replay_context_ms: Option<u16>,
+    proficiency: Option<String>,
+    yt_dlp_channel: Option<String>,
+    ai_models: Option<std::collections::BTreeMap<String, AiModelPreference>>,
+    budgets: Option<BudgetPatch>,
+}
+
+impl SettingsPatch {
+    fn has_preferences(&self) -> bool {
+        self.theme.is_some()
+            || self.motion_preference.is_some()
+            || self.locale.is_some()
+            || self.learning_language.is_some()
+            || self.explanation_language.is_some()
+            || self.vertex_location.is_some()
+            || self.retention.is_some()
+            || self.sentence_pause.is_some()
+            || self.replay_context_ms.is_some()
+            || self.proficiency.is_some()
+            || self.yt_dlp_channel.is_some()
+            || self.ai_models.is_some()
+    }
+    fn apply(self, settings: &mut AppSettings) {
+        let location_changed = self
+            .vertex_location
+            .as_ref()
+            .is_some_and(|value| value != &settings.vertex_location);
+        macro_rules! assign {
+            ($($name:ident),+ $(,)?) => { $(if let Some(value) = self.$name { settings.$name = value; })+ };
         }
-        Ok(())
+        assign!(
+            theme,
+            motion_preference,
+            locale,
+            learning_language,
+            explanation_language,
+            vertex_location,
+            retention,
+            sentence_pause,
+            replay_context_ms,
+            proficiency,
+            yt_dlp_channel
+        );
+        if let Some(models) = self.ai_models {
+            settings.ai_models.extend(models);
+        }
+        if location_changed {
+            for model in settings.ai_models.values_mut() {
+                model.price = None;
+            }
+        }
+    }
+}
+
+pub fn update_settings_patch(
+    state: AppState,
+    expected_revision: String,
+    patch: SettingsPatch,
+) -> IpcResult<SettingsState> {
+    (|| {
+        let _transition = state.preferences.settings_transition()?;
+        let current = settings_state(&state)?;
+        ensure!(
+            current.revision == expected_revision,
+            "Settings changed; reload before saving"
+        );
+        ensure!(
+            patch.budgets.is_none() || !patch.has_preferences(),
+            "Save budgets separately from other settings"
+        );
+        if let Some(budgets) = patch.budgets {
+            let mut settings = current.settings;
+            settings.daily_budget_usd = budgets.daily_budget_usd;
+            settings.monthly_budget_usd = Some(budgets.monthly_budget_usd);
+            settings.per_job_budget_usd = Some(budgets.per_job_budget_usd);
+            state.ai.set_budget(budget_limits(&settings)?)?;
+        } else if patch.has_preferences() {
+            let playback_changed = patch
+                .sentence_pause
+                .is_some_and(|value| value != current.settings.sentence_pause);
+            let mut settings = current.settings;
+            patch.apply(&mut settings);
+            validate_application_settings(&settings)?;
+            save_application_settings(&state, settings)?;
+            if playback_changed {
+                refresh_playback_settings(&state)?;
+            }
+        }
+        settings_state(&state)
     })()
     .map_err(err)
 }
@@ -364,6 +518,28 @@ fn import_credential_file(state: &AppState, file: Option<&std::path::Path>) -> R
 #[cfg(test)]
 mod settings_tests {
     use super::*;
+
+    #[test]
+    fn selected_minimal_thinking_survives_native_preference_conversion() {
+        let mut preference = preference_for(&fixture_execution(), false);
+        preference.model_id = "gemini-3.1-flash-lite".into();
+        preference.thinking_level = Some("MINIMAL".into());
+        let serialized = serde_json::to_value(&preference).unwrap();
+        assert_eq!(serialized["thinkingLevel"], "MINIMAL");
+        let selected = serde_json::from_value(serialized).unwrap();
+        let execution =
+            execution_for(&AppSettings::default(), "transcription", Some(selected)).unwrap();
+        assert_eq!(
+            execution.thinking,
+            ThinkingConfig::Level {
+                level: "MINIMAL".into()
+            }
+        );
+        assert_eq!(
+            preference_for(&execution, false).thinking_level.as_deref(),
+            Some("MINIMAL")
+        );
+    }
 
     #[test]
     fn new_ai_jobs_stream_except_synchronous_transcribe_without_switching_models() {
@@ -595,7 +771,7 @@ mod settings_tests {
         assert!(update_settings(state.clone(), settings).is_err());
         assert_eq!(
             state.preferences.read().unwrap().settings.daily_budget_usd,
-            10.
+            0.
         );
         assert_displayed_budget(&state, 0., 0., 0.);
         drop(state);
@@ -615,5 +791,146 @@ mod settings_tests {
         update_settings(reopened.clone(), settings).unwrap();
         assert_displayed_budget(&reopened, 2., 20., 0.5);
         assert_eq!(reopened.ai.budget().unwrap().daily_microusd, 2_000_000);
+    }
+    fn patch(json: serde_json::Value) -> SettingsPatch {
+        serde_json::from_value(json).unwrap()
+    }
+
+    #[test]
+    fn autosave_patch_has_one_authority_and_cannot_apply_a_stale_revision() {
+        let root = tempfile::tempdir().unwrap();
+        let state = Services::open(root.path().to_path_buf()).unwrap();
+        let initial = get_settings_state(state.clone()).unwrap();
+        let saved = update_settings_patch(
+            state.clone(),
+            initial.revision.clone(),
+            patch(serde_json::json!({"theme":"light"})),
+        )
+        .unwrap();
+        assert_eq!(saved.settings.theme, "light");
+        assert!(
+            update_settings_patch(
+                state.clone(),
+                initial.revision,
+                patch(serde_json::json!({"locale":"en"}))
+            )
+            .is_err()
+        );
+        assert!(
+            update_settings_patch(
+                state.clone(),
+                saved.revision.clone(),
+                patch(serde_json::json!({"retention":0.1}))
+            )
+            .is_err()
+        );
+        let next = update_settings_patch(
+            state.clone(),
+            saved.revision,
+            patch(serde_json::json!({"locale":"en"})),
+        )
+        .unwrap();
+        assert_eq!(next.settings.locale, "en");
+        assert_eq!(next.settings.theme, "light");
+        for field in [
+            "credentialConfigured",
+            "credentialId",
+            "vertexProject",
+            "privateKey",
+        ] {
+            assert!(
+                serde_json::from_value::<SettingsPatch>(serde_json::json!({field:"forbidden"}))
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn budgets_are_atomic_separate_and_never_written_to_preferences() {
+        let root = tempfile::tempdir().unwrap();
+        let state = Services::open(root.path().to_path_buf()).unwrap();
+        let initial = get_settings_state(state.clone()).unwrap();
+        let budgets =
+            serde_json::json!({"dailyBudgetUsd":1.,"monthlyBudgetUsd":5.,"perJobBudgetUsd":0.5});
+        assert!(
+            update_settings_patch(
+                state.clone(),
+                initial.revision.clone(),
+                patch(serde_json::json!({"budgets":budgets,"theme":"light"}))
+            )
+            .is_err()
+        );
+        let saved = update_settings_patch(
+            state.clone(),
+            initial.revision,
+            patch(serde_json::json!({"budgets":budgets})),
+        )
+        .unwrap();
+        assert_displayed_budget(&state, 1., 5., 0.5);
+        assert!(
+            !root.path().join("preferences.json").exists(),
+            "budget-only saves must not touch JSON"
+        );
+        update_settings_patch(
+            state.clone(),
+            saved.revision,
+            patch(serde_json::json!({"theme":"light"})),
+        )
+        .unwrap();
+        let disk: serde_json::Value = serde_json::from_reader(
+            std::fs::File::open(root.path().join("preferences.json")).unwrap(),
+        )
+        .unwrap();
+        for field in ["dailyBudgetUsd", "monthlyBudgetUsd", "perJobBudgetUsd"] {
+            assert!(disk["settings"].get(field).is_none());
+        }
+        drop(state);
+        let reopened = Services::open(root.path().to_path_buf()).unwrap();
+        assert_displayed_budget(&reopened, 1., 5., 0.5);
+    }
+
+    #[test]
+    fn failed_budget_patch_leaves_both_readback_and_revision_unchanged() {
+        let root = tempfile::tempdir().unwrap();
+        let state = Services::open(root.path().to_path_buf()).unwrap();
+        let initial = get_settings_state(state.clone()).unwrap();
+        let connection = rusqlite::Connection::open(root.path().join("charges.sqlite")).unwrap();
+        connection.execute_batch("CREATE TRIGGER reject_budget BEFORE UPDATE ON ai_settings BEGIN SELECT RAISE(ABORT,'fixture failure'); END;").unwrap();
+        assert!(update_settings_patch(state.clone(),initial.revision.clone(),patch(serde_json::json!({"budgets":{"dailyBudgetUsd":3.,"monthlyBudgetUsd":8.,"perJobBudgetUsd":1.}}))).is_err());
+        assert_eq!(
+            get_settings_state(state.clone()).unwrap().revision,
+            initial.revision
+        );
+        assert!(!root.path().join("preferences.json").exists());
+    }
+
+    #[test]
+    fn location_patch_invalidates_all_model_prices_without_changing_credential_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let state = Services::open(root.path().to_path_buf()).unwrap();
+        let mut model = preference_for(&fixture_execution(), false);
+        model.price = Some(AiPricePreference {
+            id: "price".into(),
+            source: "user".into(),
+            observed_at_ms: 1,
+            input_microusd_per_million: 1,
+            output_microusd_per_million: 1,
+        });
+        state
+            .preferences
+            .update(|p| {
+                p.settings.ai_models.insert("translation".into(), model);
+                Ok(())
+            })
+            .unwrap();
+        let before = get_settings_state(state.clone()).unwrap();
+        let next = update_settings_patch(
+            state.clone(),
+            before.revision,
+            patch(serde_json::json!({"vertexLocation":"us-central1"})),
+        )
+        .unwrap();
+        assert!(next.settings.ai_models["translation"].price.is_none());
+        assert!(!next.settings.credential_configured);
     }
 }

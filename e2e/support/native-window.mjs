@@ -21,13 +21,28 @@ async function nativeWindow(action, args = []) {
 }
 
 /** EdgeDriver's window rect command moves a nested Chromium HWND, not Tauri. */
-export async function resizeNativeWindow(width, height) {
+export async function requestNativeWindowSize(width, height) {
   validateNativeSize(width, height);
   if (process.platform !== 'win32') return browser.setWindowSize(width, height);
-  await nativeWindow('resize', ['-Width', String(width), '-Height', String(height)]);
+  return nativeWindow('resize', ['-Width', String(width), '-Height', String(height)]);
+}
+
+export async function resizeNativeWindow(width, height) {
+  await requestNativeWindowSize(width, height);
   await browser.waitUntil(async () => browser.execute((w, h) => innerWidth === w && innerHeight === h, width, height),
     { timeoutMsg: 'The top-level native resize did not reach the WebView viewport' });
   await assertNativeVideoBounds(false);
+}
+
+export async function inspectNativeMonitor() {
+  return nativeWindow('monitor');
+}
+
+export async function moveNativeWindowToMonitor(monitor) {
+  assert(Number.isSafeInteger(monitor) && monitor > 0, 'Invalid native monitor identity');
+  await nativeWindow('move-monitor', ['-Monitor', String(monitor)]);
+  await browser.waitUntil(async () => (await inspectNativeMonitor()).current === monitor,
+    { timeoutMsg: 'The owned application did not reach the selected monitor' });
 }
 
 export function verifyNativeGeometry(native, dom, video = true) {

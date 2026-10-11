@@ -1,0 +1,17 @@
+/* Equal opaque geometry is required by the selected child-HWND renderer. */
+.native-evaluation { height:100vh; padding:20px; overflow:auto; }
+.native-evaluation h1 { font-size:21px; }
+.native-evaluation nav { display:flex; gap:10px; margin:12px 0; }
+.native-evaluation button, .native-eval-card button, dialog.modal button { padding:9px 14px; }
+.native-evaluation-layout { display:grid; grid-template-columns:minmax(0,1fr) 280px; gap:20px; }
+.native-evaluation-layout .native-player-viewport { height:430px; min-height:430px; }
+.native-eval-backdrop { position:fixed; inset:0; background:transparent; z-index:100; }
+.native-eval-container { position:fixed; inset:0; display:grid; place-items:center; }
+.native-eval-card, dialog.modal { position:fixed; z-index:101; left:calc(50% - 260px); top:130px; width:520px; max-width:520px; padding:24px; margin:0; background:#182126; color:#fff; border:1px solid #859197; border-radius:0; box-shadow:none; transform:none; animation:none !important; }
+dialog.modal::backdrop { background:transparent; backdrop-filter:none; animation:none !important; }
+.native-eval-card label, dialog.modal label { display:block; margin:15px 0; }
+.native-eval-card input, dialog.modal input { display:block; width:100%; padding:10px; }
+.native-eval-card [role=tablist], dialog.modal [role=tablist] { display:flex; gap:10px; }
+.native-eval-card [role=tabpanel], dialog.modal [role=tabpanel] { padding:12px 0; }
+.native-eval-card output, dialog.modal output { display:block; min-height:24px; }
+.native-eval-card [hidden] { display:none !important; }

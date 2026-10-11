@@ -15,7 +15,7 @@ import { SettingsPage } from '../features/settings/SettingsPage';
 import type { AppSnapshot } from '../shared/contracts/snapshot';
 
 vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn(), useBlocker: () => ({ status: 'idle' }) }));
-vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, closeWindow: vi.fn() }));
+vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, registerCloseTask: () => () => {}, closeWindow: vi.fn() }));
 
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,
@@ -62,8 +62,17 @@ function mount(locale: 'ja' | 'en', check: () => Promise<void>) {
       },
     ],
   };
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, arguments_) => {
+    const args = arguments_ as Record<string, any> | undefined;
     if (command === 'get_app_snapshot') return structuredClone(data);
+    if (command === 'get_change_checkpoint') return { version: 1, epoch: 'fixture', revision: 0, domains: [] };
+    if (command === 'get_snapshot_patch') return Object.fromEntries(args!.domains.map((domain: keyof AppSnapshot) => [domain, structuredClone(data[domain])]));
+    if (command === 'get_settings_state') return { settings: structuredClone(data.settings), revision: JSON.stringify(data.settings) };
+    if (command === 'get_ui_draft') return null;
+    if (command === 'save_ui_draft') return { ...args!.request, revision: args!.request.expectedRevision + 1 };
+    if (command === 'delete_ui_draft') return;
+    if (command === 'update_settings_patch') { Object.assign(data.settings, args!.patch.budgets ?? args!.patch); return { settings: structuredClone(data.settings), revision: JSON.stringify(data.settings) }; }
+    if (command === 'list_download_jobs' || command === 'list_operation_progress') return [];
     if (command === 'scan_external_tools') return [];
     if (command === 'list_ai_continuations') return [];
     if (command === 'check_tool_updates') return check();

@@ -132,8 +132,8 @@ export function BoundaryEditor({
               />
               <span>
                 {t(
-                  'この境界の原音を聴き、発話がないことを確認した',
-                  'I listened to this boundary and confirmed there is no speech',
+                  'この境界には発話がない',
+                  'No speech in this boundary',
                 )}
               </span>
             </label>

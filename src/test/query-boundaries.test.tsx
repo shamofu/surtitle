@@ -8,7 +8,8 @@ import {
   QueryObserver,
 } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { mutateData, refreshLiveData } from '../shared/query/mutations';
+import { mutateData } from '../shared/query/mutations';
+import { changedDomainKey } from '../shared/query/synchronization';
 import { queryKeys } from '../shared/query/keys';
 import {
   NotificationsProvider,
@@ -115,7 +116,7 @@ describe('data mutation boundaries', () => {
       stop();
     }
   });
-  it('cancels a heartbeat read started during the mutation before refreshing committed state', async () => {
+  it('cancels an event-driven read started during the mutation before refreshing committed state', async () => {
     const cache = client();
     const write = deferred<void>();
     const staleRead = deferred<string>();
@@ -139,17 +140,17 @@ describe('data mutation boundaries', () => {
       { kind: 'subtitles', mediaId: 'a' },
     );
     await Promise.resolve();
-    const heartbeat = refreshLiveData(cache);
+    const eventRead = cache.invalidateQueries({ queryKey: queryKeys.segments('a') });
     await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
     write.resolve();
     await mutation;
     expect(cache.getQueryData(queryKeys.segments('a'))).toBe('committed');
     staleRead.resolve('stale before commit');
-    await heartbeat;
+    await eventRead;
     expect(cache.getQueryData(queryKeys.segments('a'))).toBe('committed');
     stop();
   });
-  it('refreshes live results on the native heartbeat without rereading static inspection/history', async () => {
+  it('refreshes only the notified domain without rereading the full snapshot', async () => {
     const cache = client();
     const keys = [
       queryKeys.snapshot,
@@ -161,15 +162,15 @@ describe('data mutation boundaries', () => {
       queryKeys.versions('a'),
     ];
     keys.forEach((key) => cache.setQueryData(key, []));
-    await refreshLiveData(cache);
+    await cache.invalidateQueries({ predicate: query => changedDomainKey('subtitles', 'a', query.queryKey) });
     expect(keys.map((key) => cache.getQueryState(key)?.isInvalidated)).toEqual([
-      true,
-      true,
-      true,
+      false,
+      false,
       true,
       true,
       false,
       false,
+      true,
     ]);
   });
   it('refreshes all persistent caches only for restore', async () => {

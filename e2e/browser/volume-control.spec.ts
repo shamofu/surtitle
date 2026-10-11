@@ -23,7 +23,11 @@ test('volume wheel uses five-percent boundaries, clamps, and only consumes enabl
     const spacer = document.createElement('div');
     spacer.style.height = '1000px';
     spacer.setAttribute('aria-hidden', 'true');
-    document.querySelector('.page-content')!.append(spacer);
+    // Study intentionally has no outer scroll now. Give this wheel propagation
+    // probe an explicit scrolling ancestor instead of depending on page layout.
+    const scrollHost = document.querySelector<HTMLElement>('.page-content')!;
+    scrollHost.style.overflowY = 'auto';
+    scrollHost.append(spacer);
     (window as any).__volumeWheels = [];
     document.querySelector('.volume-control')!.addEventListener('wheel', event => {
       (window as any).__volumeWheels.push(event.defaultPrevented);

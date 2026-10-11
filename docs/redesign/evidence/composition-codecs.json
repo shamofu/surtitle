@@ -1,0 +1,242 @@
+[
+  {
+    "fixture": "av1-1920x1080-multi",
+    "result": {
+      "adapter": "NVIDIA GeForce RTX 5070 Ti",
+      "decoderCopyBack": true,
+      "finalSize": [
+        1284,
+        751
+      ],
+      "framesPresented": 251,
+      "glVersion": "4.6.0 NVIDIA 616.92",
+      "gpuTextureCopyPerFrame": true,
+      "limitations": [
+        "WGL NV extension route; other vendors untested",
+        "Prototype only; no Tauri integration",
+        "No device-loss recovery yet"
+      ],
+      "nativeReceipts": [],
+      "optionalOwnedWindowCapture": false,
+      "optionalTargetDiagnostic": null,
+      "perFrameJsIpc": false,
+      "properties": {
+        "decoder-frame-drop-count": "0",
+        "frame-drop-count": "1",
+        "hwdec-current": "d3d11va-copy",
+        "time-pos": "0.000000",
+        "video-params/h": "1080",
+        "video-params/w": "1920",
+        "vo-delayed-frame-count": "0"
+      },
+      "renderedTargetCpuReadback": false,
+      "renderer": "NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2",
+      "resizes": 0,
+      "route": "WGL_NV_DX_interop2 stable D3D11 texture + GPU CopyResource + composition swapchain + WebView2 visual host",
+      "seconds": 8.2343257,
+      "webMessages": [
+        "{\"ready\":true,\"ratio\":1}"
+      ]
+    }
+  },
+  {
+    "fixture": "av1-3840x2160-multi",
+    "result": {
+      "adapter": "NVIDIA GeForce RTX 5070 Ti",
+      "decoderCopyBack": true,
+      "finalSize": [
+        1284,
+        751
+      ],
+      "framesPresented": 251,
+      "glVersion": "4.6.0 NVIDIA 616.92",
+      "gpuTextureCopyPerFrame": true,
+      "limitations": [
+        "WGL NV extension route; other vendors untested",
+        "Prototype only; no Tauri integration",
+        "No device-loss recovery yet"
+      ],
+      "nativeReceipts": [],
+      "optionalOwnedWindowCapture": false,
+      "optionalTargetDiagnostic": null,
+      "perFrameJsIpc": false,
+      "properties": {
+        "decoder-frame-drop-count": "0",
+        "frame-drop-count": "0",
+        "hwdec-current": "d3d11va-copy",
+        "time-pos": "0.000000",
+        "video-params/h": "2160",
+        "video-params/w": "3840",
+        "vo-delayed-frame-count": "0"
+      },
+      "renderedTargetCpuReadback": false,
+      "renderer": "NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2",
+      "resizes": 0,
+      "route": "WGL_NV_DX_interop2 stable D3D11 texture + GPU CopyResource + composition swapchain + WebView2 visual host",
+      "seconds": 8.0147763,
+      "webMessages": [
+        "{\"ready\":true,\"ratio\":1}"
+      ]
+    }
+  },
+  {
+    "fixture": "h264-1920x1080-multi",
+    "result": {
+      "adapter": "NVIDIA GeForce RTX 5070 Ti",
+      "decoderCopyBack": true,
+      "finalSize": [
+        1284,
+        751
+      ],
+      "framesPresented": 251,
+      "glVersion": "4.6.0 NVIDIA 616.92",
+      "gpuTextureCopyPerFrame": true,
+      "limitations": [
+        "WGL NV extension route; other vendors untested",
+        "Prototype only; no Tauri integration",
+        "No device-loss recovery yet"
+      ],
+      "nativeReceipts": [],
+      "optionalOwnedWindowCapture": false,
+      "optionalTargetDiagnostic": null,
+      "perFrameJsIpc": false,
+      "properties": {
+        "decoder-frame-drop-count": "0",
+        "frame-drop-count": "1",
+        "hwdec-current": "d3d11va-copy",
+        "time-pos": "0.000000",
+        "video-params/h": "1080",
+        "video-params/w": "1920",
+        "vo-delayed-frame-count": "0"
+      },
+      "renderedTargetCpuReadback": false,
+      "renderer": "NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2",
+      "resizes": 0,
+      "route": "WGL_NV_DX_interop2 stable D3D11 texture + GPU CopyResource + composition swapchain + WebView2 visual host",
+      "seconds": 8.2346319,
+      "webMessages": [
+        "{\"ready\":true,\"ratio\":1}"
+      ]
+    }
+  },
+  {
+    "fixture": "h264-3840x2160-multi",
+    "result": {
+      "adapter": "NVIDIA GeForce RTX 5070 Ti",
+      "decoderCopyBack": true,
+      "finalSize": [
+        1284,
+        751
+      ],
+      "framesPresented": 253,
+      "glVersion": "4.6.0 NVIDIA 616.92",
+      "gpuTextureCopyPerFrame": true,
+      "limitations": [
+        "WGL NV extension route; other vendors untested",
+        "Prototype only; no Tauri integration",
+        "No device-loss recovery yet"
+      ],
+      "nativeReceipts": [],
+      "optionalOwnedWindowCapture": false,
+      "optionalTargetDiagnostic": null,
+      "perFrameJsIpc": false,
+      "properties": {
+        "decoder-frame-drop-count": "0",
+        "frame-drop-count": "0",
+        "hwdec-current": "d3d11va-copy",
+        "time-pos": "0.000000",
+        "video-params/h": "2160",
+        "video-params/w": "3840",
+        "vo-delayed-frame-count": "0"
+      },
+      "renderedTargetCpuReadback": false,
+      "renderer": "NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2",
+      "resizes": 0,
+      "route": "WGL_NV_DX_interop2 stable D3D11 texture + GPU CopyResource + composition swapchain + WebView2 visual host",
+      "seconds": 8.0198916,
+      "webMessages": [
+        "{\"ready\":true,\"ratio\":1}"
+      ]
+    }
+  },
+  {
+    "fixture": "hevc-1920x1080-multi",
+    "result": {
+      "adapter": "NVIDIA GeForce RTX 5070 Ti",
+      "decoderCopyBack": true,
+      "finalSize": [
+        1284,
+        751
+      ],
+      "framesPresented": 249,
+      "glVersion": "4.6.0 NVIDIA 616.92",
+      "gpuTextureCopyPerFrame": true,
+      "limitations": [
+        "WGL NV extension route; other vendors untested",
+        "Prototype only; no Tauri integration",
+        "No device-loss recovery yet"
+      ],
+      "nativeReceipts": [],
+      "optionalOwnedWindowCapture": false,
+      "optionalTargetDiagnostic": null,
+      "perFrameJsIpc": false,
+      "properties": {
+        "decoder-frame-drop-count": "0",
+        "frame-drop-count": "2",
+        "hwdec-current": "d3d11va-copy",
+        "time-pos": "0.000000",
+        "video-params/h": "1080",
+        "video-params/w": "1920",
+        "vo-delayed-frame-count": "0"
+      },
+      "renderedTargetCpuReadback": false,
+      "renderer": "NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2",
+      "resizes": 0,
+      "route": "WGL_NV_DX_interop2 stable D3D11 texture + GPU CopyResource + composition swapchain + WebView2 visual host",
+      "seconds": 8.4418728,
+      "webMessages": [
+        "{\"ready\":true,\"ratio\":1}"
+      ]
+    }
+  },
+  {
+    "fixture": "hevc-3840x2160-multi",
+    "result": {
+      "adapter": "NVIDIA GeForce RTX 5070 Ti",
+      "decoderCopyBack": true,
+      "finalSize": [
+        1284,
+        751
+      ],
+      "framesPresented": 251,
+      "glVersion": "4.6.0 NVIDIA 616.92",
+      "gpuTextureCopyPerFrame": true,
+      "limitations": [
+        "WGL NV extension route; other vendors untested",
+        "Prototype only; no Tauri integration",
+        "No device-loss recovery yet"
+      ],
+      "nativeReceipts": [],
+      "optionalOwnedWindowCapture": false,
+      "optionalTargetDiagnostic": null,
+      "perFrameJsIpc": false,
+      "properties": {
+        "decoder-frame-drop-count": "0",
+        "frame-drop-count": "2",
+        "hwdec-current": "d3d11va-copy",
+        "time-pos": "0.000000",
+        "video-params/h": "2160",
+        "video-params/w": "3840",
+        "vo-delayed-frame-count": "0"
+      },
+      "renderedTargetCpuReadback": false,
+      "renderer": "NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2",
+      "resizes": 0,
+      "route": "WGL_NV_DX_interop2 stable D3D11 texture + GPU CopyResource + composition swapchain + WebView2 visual host",
+      "seconds": 8.4614081,
+      "webMessages": [
+        "{\"ready\":true,\"ratio\":1}"
+      ]
+    }
+  }
+]

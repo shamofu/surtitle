@@ -11,6 +11,11 @@ const invoke = (command, args = {}) => browser.execute(async (name, parameters) 
 const control = request => invoke('player_control', { request });
 const player = () => invoke('get_player_state');
 const navigate = path => browser.execute(next => { history.pushState({}, '', next); dispatchEvent(new PopStateEvent('popstate')); }, path);
+async function replaceValue(element, value) {
+  await element.click(); await browser.keys([Key.Control, 'a']); await browser.keys(Key.Backspace);
+  if (value) await element.addValue(value);
+  await expect(element).toHaveValue(value);
+}
 
 (process.platform === 'win32' ? describe : describe.skip)('watch, inspect, and return with the Windows native surface', () => {
   let originalSettings;
@@ -73,8 +78,8 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
     await control({ action: 'pause' });
     await control({ action: 'seek', value: 200 });
     await browser.waitUntil(async () => (await player()).positionMs < 500);
-    await $('button=Inspect this subtitle').waitForEnabled();
-    await $('button=Inspect this subtitle').click();
+    await $('button[aria-label="Explore meaning"]').waitForEnabled();
+    await $('button[aria-label="Explore meaning"]').click();
     await $('button=Resume from original position').waitForDisplayed();
     assert.equal((await player()).paused, true);
     const returnPosition = (await player()).positionMs;
@@ -101,7 +106,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
       await control({ action: 'pause' });
       await control({ action: 'seek', value: original.startMs });
       await browser.waitUntil(async () => (await $('.current-caption-text').getText()).startsWith('Sometimes a longer sentence'));
-      await $('button=Export and manage').click();
+      await $('button=Activity & tools').click();
       await browser.waitUntil(async () => (await player()).surfaceVisible);
       const inside = await browser.execute(() => {
         const page = document.querySelector('.page-content').getBoundingClientRect();
@@ -126,11 +131,11 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
     await control({ action: 'seek', value: 200 });
     const firstCue = (await invoke('list_segments', { mediaId }))[0];
     await browser.waitUntil(async () => (await $('.current-caption-text').getText()) === firstCue.text);
-    await $('button=Inspect this subtitle').waitForEnabled();
-    await $('button=Inspect this subtitle').click();
-    await $('button=Review and save phrase').waitForEnabled();
-    await $('button=Review and save phrase').click();
-    await expect($('dialog')).not.toExist();
+    await $('button[aria-label="Explore meaning"]').waitForEnabled();
+    await $('button[aria-label="Explore meaning"]').click();
+    await $('.phrase-save-toggle').waitForEnabled();
+    await $('.phrase-save-toggle').click();
+    await expect($('[role="dialog"]')).not.toExist();
     await $('.save-phrase-form input').setValue('native inline phrase');
     await $('.save-phrase-form textarea').setValue('Saved through the phrase panel');
     const save = $('.save-phrase-form').$('button=Save phrase');
@@ -150,19 +155,19 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
     await browser.waitUntil(async () => !(await player()).paused);
     await control({ action: 'pause' });
   });
-  it('hides native video for playback settings and restores focus without closing the background panel on Escape', async () => {
+  it('retains uncovered native video for playback settings and restores focus without closing the background panel on Escape', async () => {
     await control({ action: 'pause' });
     const transcript = $('.study-transcript-toggle');
     if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
     await $('.transcript-panel').waitForDisplayed();
     await $('button=Playback settings').click();
-    await $('dialog').waitForDisplayed();
-    await browser.waitUntil(async () => !(await player()).surfaceVisible);
-    await browser.execute(() => document.querySelector('dialog').focus());
+    await $('[role="dialog"]').waitForDisplayed();
+    await browser.waitUntil(async () => (await player()).surfaceVisible);
+    await browser.execute(() => document.querySelector('[role="dialog"]').focus());
     await browser.keys(Key.Space);
     assert.equal((await player()).paused, true, 'The background player responded to Space inside a modal');
     await browser.keys(Key.Escape);
-    await expect($('dialog')).not.toExist();
+    await expect($('[role="dialog"]')).not.toExist();
     await expect($('.transcript-panel')).toBeDisplayed();
     await browser.waitUntil(async () => (await player()).surfaceVisible);
     await expect($('button=Playback settings')).toBeFocused();
@@ -171,70 +176,66 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
     await transcript.click();
     await expect($('.transcript-panel')).not.toBeDisplayed();
   });
-  it('keeps phrase actions clickable while a save notification moves between the page and modal', async () => {
+  it('autosaves edits directly and restores the visible edit action without a confirmation', async () => {
     const original = (await invoke('get_app_snapshot')).cards.find(card => card.id === fixture.cardId);
     assert(original);
     try {
       await navigate('/cards');
-      const menu = () => $(`summary[aria-label="Actions for ${original.term}"]`);
-      await menu().click();
-      await $('.phrase-options[open]').$('button=Edit').click();
-      await $('dialog textarea').addValue(' Native notice regression.');
-      await $('dialog').$('button=Save').click();
-      await expect($('dialog')).not.toExist();
-      await $('button.toast.success').waitForDisplayed();
-      assert(await browser.execute(() => {
-        const notice = document.querySelector('button.toast.success').getBoundingClientRect();
-        const content = document.querySelector('.page-content').getBoundingClientRect();
-        return notice.bottom <= content.top + 1;
-      }), 'The global save notification overlays page actions');
-      await menu().click();
-      await saveNativeScreenshot(resolve('test-results/native/global-toast-phrase-menu.png'));
-      await $('.phrase-options[open]').$('button=Edit').click();
-      await $('dialog .modal-notifications button.toast.success').waitForDisplayed();
-      await $('dialog').$('button=Cancel').click();
-      await expect($('dialog')).not.toExist();
-      await expect($('button.toast.success')).toBeDisplayed();
+      const row = () => $(`summary[aria-label="Actions for ${original.term}"]`).$('..').$('..').$('..');
+      const edit = () => row().$('[aria-label="Edit phrase"]');
+      await edit().click();
+      const editor = $('[role="dialog"]');
+      const meaning = editor.$('textarea');
+      await meaning.waitForEnabled();
+      await replaceValue(meaning, 'Native automatic edit');
+      await editor.$('input').click();
+      await browser.waitUntil(async () => (await invoke('get_app_snapshot')).cards.find(card => card.id === original.id)?.meaning === 'Native automatic edit');
+      await expect(meaning).toBeEnabled();
+      assert.equal((await $$('[role="dialog"]')).length, 1);
+      await editor.$('[aria-label="Close"]').click();
+      await expect($('[role="dialog"]')).not.toExist();
+      await expect(edit()).toBeFocused();
+      await saveNativeScreenshot(resolve('test-results/native/card-autosave-return.png'));
     } finally {
-      await invoke('edit_card', { request: {
-        id: original.id, term: original.term, meaning: original.meaning, example: original.example,
-        translation: original.translation, explanation: original.explanation,
-      } });
+      await invoke('edit_card', { request: { id: original.id, term: original.term, meaning: original.meaning,
+        example: original.example, translation: original.translation, explanation: original.explanation } });
       await navigate(`/study/${mediaId}`);
       await browser.refresh();
       await $('.play-button').waitForEnabled();
     }
   });
-  it('preserves unsaved phrase edits when Escape closes only the nested confirmation', async () => {
+  it('retains unfinished phrase input across Escape and reopening without nested confirmation', async () => {
     const original = (await invoke('get_app_snapshot')).cards.find(card => card.id === fixture.cardId);
-    assert(original, 'Expected a seeded phrase in the disposable profile');
-    await navigate('/cards');
-    await $(`summary[aria-label="Actions for ${original.term}"]`).click();
-    await saveNativeScreenshot(resolve('test-results/native/cards-success-notification-menu.png'));
-    await $('.phrase-options[open]').$('button=Edit').click();
-    const editor = $('dialog');
-    await editor.waitForDisplayed();
-    const meaning = editor.$('textarea');
-    await meaning.click();
-    await browser.keys([Key.Ctrl, 'a']);
-    await browser.keys(Key.Backspace);
-    await meaning.addValue('Native unsaved phrase edit');
-    await editor.$('button=Cancel').click();
-    await browser.waitUntil(async () => (await $$('dialog[open]')).length === 2);
-    await browser.keys(Key.Escape);
-    await browser.waitUntil(async () => (await $$('dialog[open]')).length === 1);
-    await expect(editor.$('h2')).toHaveText('Edit phrase');
-    await expect(meaning).toHaveValue('Native unsaved phrase edit');
-    await expect(editor.$('button=Cancel')).toBeFocused();
-    await saveNativeScreenshot(resolve('test-results/native/nested-edit-confirmation.png'));
-    await editor.$('button=Cancel').click();
-    await $('button=Discard changes').click();
-    await expect($('dialog')).not.toExist();
-    assert.equal((await invoke('get_app_snapshot')).cards.find(card => card.id === original.id).meaning, original.meaning);
-    await navigate(`/study/${mediaId}`);
-    await $('.play-button').waitForEnabled();
-    await browser.waitUntil(async () => (await player()).surfaceVisible);
-    await assertNativeVideoBounds();
+    assert(original);
+    try {
+      await navigate('/cards');
+      const edit = () => $(`summary[aria-label="Actions for ${original.term}"]`).$('..').$('..').$('..').$('[aria-label="Edit phrase"]');
+      await edit().click();
+      const editor = $('[role="dialog"]');
+      const term = editor.$('input'), meaning = editor.$('textarea');
+      await term.waitForEnabled();
+      await replaceValue(term, '');
+      await replaceValue(meaning, 'Native unfinished phrase edit');
+      await browser.keys(Key.Escape);
+      await expect($('[role="dialog"]')).not.toExist();
+      assert.equal((await invoke('get_app_snapshot')).cards.find(card => card.id === original.id).term, original.term);
+      await edit().click();
+      await term.waitForEnabled();
+      await expect(term).toHaveValue('');
+      await expect(meaning).toHaveValue('Native unfinished phrase edit');
+      assert.equal((await $$('[role="dialog"]')).length, 1);
+      await replaceValue(term, original.term);
+      await editor.$('[aria-label="Close"]').click();
+      await expect($('[role="dialog"]')).not.toExist();
+      await browser.waitUntil(async () => (await invoke('get_app_snapshot')).cards.find(card => card.id === original.id)?.meaning === 'Native unfinished phrase edit');
+    } finally {
+      await invoke('edit_card', { request: { id: original.id, term: original.term, meaning: original.meaning,
+        example: original.example, translation: original.translation, explanation: original.explanation } });
+      await navigate(`/study/${mediaId}`);
+      await $('.play-button').waitForEnabled();
+      await browser.waitUntil(async () => (await player()).surfaceVisible);
+      await assertNativeVideoBounds();
+    }
   });
   it('restores video bounds after fullscreen and page scrolling', async () => {
     const fullscreen = $('[aria-label="Toggle fullscreen"]');

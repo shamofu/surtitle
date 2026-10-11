@@ -39,7 +39,7 @@ async function openTranscript(page: Page, reducedMotion: 'no-preference' | 'redu
   }
   await page.goto('/study/visual-fixture');
   await page.waitForLoadState('networkidle');
-  await expect(page.getByRole('button', { name: 'Inspect this subtitle', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Explore meaning', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Transcript', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Following playback', exact: true })).toBeVisible();
   await expectCentered(page, 10);

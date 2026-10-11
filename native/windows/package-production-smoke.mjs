@@ -10,7 +10,7 @@ import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const appId = 'app.surtitle.desktop';
+const defaultAppId = 'app.surtitle.desktop';
 const requireCheck = (value, message) => { if (!value) throw Object.assign(new Error(message), { code: 'ERR_PRODUCTION_CHECK' }); };
 
 const diagnosticStages = new Set(['arguments', 'profile', 'fixture', 'application', 'driver-files',
@@ -81,10 +81,11 @@ export function parseOptions(argv) {
   const names = new Set(['application', 'data-root', 'fixture', 'driver', 'native-driver', 'output']);
   for (let index = 0; index < argv.length; index++) {
     const key = argv[index].replace(/^--/, '');
-    requireCheck(argv[index].startsWith('--') && (names.has(key) || key === 'disposable-profile') && !(key in options), 'Unknown or duplicate production probe argument');
+    requireCheck(argv[index].startsWith('--') && (names.has(key) || key === 'app-id' || key === 'disposable-profile') && !(key in options), 'Unknown or duplicate production probe argument');
     options[key] = key === 'disposable-profile' ? true : argv[++index];
   }
   for (const name of names) requireCheck(typeof options[name] === 'string' && options[name].length > 0, `Missing --${name}`);
+  if (options['app-id'] !== undefined) requireCheck(/^app\.surtitle\.evaluation\.[a-z0-9]+$/.test(options['app-id']), 'Only an isolated evaluation application identifier may be selected');
   return options;
 }
 
@@ -168,6 +169,8 @@ export async function runProductionProbe(options, diagnostics = createProduction
   requireCheck(process.platform === 'win32', 'Installed production smoke requires Windows');
   requireCheck(process.env.CI === 'true' || options['disposable-profile'] === true, 'Use an isolated CI runner or explicitly disposable Windows profile');
   const profile = knownProfilePaths();
+  const appId = options['app-id'] ?? defaultAppId;
+  requireCheck(appId === defaultAppId || /^app\.surtitle\.evaluation\.[a-z0-9]+$/.test(appId), 'Invalid evaluation application identifier');
   const expectedRoot = resolve(profile.local, appId);
   requireCheck(resolve(options['data-root']).toLowerCase() === expectedRoot.toLowerCase(), 'Production probe cannot override the real local application data directory');
   const root = plainPath(options['data-root'], false);
@@ -266,7 +269,7 @@ export async function runProductionProbe(options, diagnostics = createProduction
     diagnostics.stage('final-snapshot');
     const final = validateSnapshot(await invoke('get_app_snapshot'), fixture);
     const report = { schemaVersion: 1, sha: process.env.GITHUB_SHA ?? null, passed: true, normalBuild: true,
-      fixtureMediaId: fixture.mediaId,
+      fixtureMediaId: fixture.mediaId, applicationIdentifier: appId, isolatedIdentity: appId !== defaultAppId,
       appReady: true, settingsReady: true, nativeMetadataPassed: true, visibleSurfacePassed: true,
       playbackAdvanced: true, intervalStopPassed: true, seekPassed: true, accountingUnchanged: true,
       paidRequests: 0, initial, final, ui, observations: { metadata, advancing, stopped, sought },

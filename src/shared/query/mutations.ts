@@ -41,18 +41,8 @@ export async function mutateData<T>(
       : changedKeys(change).map((queryKey) => ({ queryKey }));
   const result = await action();
   // Keep pending reads alive when a write fails. After a successful commit,
-  // cancel older reads, including any started by a heartbeat during the write.
+  // cancel older reads, including any started by a resource event during the write.
   await Promise.all(filters.map((filter) => client.cancelQueries(filter)));
   await Promise.all(filters.map((filter) => client.invalidateQueries(filter)));
   return result;
-}
-
-/** Native app-changed is a five-second heartbeat with no resource identifiers. */
-export async function refreshLiveData(client: QueryClient): Promise<void> {
-  await client.invalidateQueries({
-    predicate: ({ queryKey }) =>
-      ['snapshot', 'downloads', 'review'].includes(String(queryKey[0])) ||
-      (queryKey[0] === 'media' &&
-        ['segments', 'candidates', 'drafts', 'transcript-issues'].includes(String(queryKey[2]))),
-  });
 }

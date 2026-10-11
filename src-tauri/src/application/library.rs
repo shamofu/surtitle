@@ -3,7 +3,6 @@ use anyhow::ensure;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use surtitle_core::Media;
-use tauri::Emitter;
 
 type IpcResult<T> = std::result::Result<T, String>;
 mod local;
@@ -46,7 +45,7 @@ pub async fn import_media(
     import_local_media(state, request).map(|_| ())
 }
 pub async fn start_url_import(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     state: AppState,
     request: ImportRequest,
 ) -> IpcResult<String> {
@@ -95,7 +94,6 @@ pub async fn start_url_import(
             }
             .await;
             let _ = state.downloads.finish(&id, result);
-            let _ = app.emit("app-changed", ());
         });
         Ok(job_id)
     })()

@@ -74,6 +74,13 @@ pub(super) fn has_blocking_attempt(conn: &Connection) -> Result<bool> {
         |r| r.get(0),
     )?)
 }
+pub(super) fn has_unknown_attempt(conn: &Connection) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM ai_attempts WHERE state='unknown')",
+        [],
+        |row| row.get(0),
+    )?)
+}
 pub(super) fn job_spend(conn: &Connection, id: &str) -> Result<u64> {
     Ok(conn.query_row("SELECT COALESCE(SUM(COALESCE(charged_microusd,reserve_microusd)),0) FROM ai_attempts WHERE job_id=?",[id],|r|r.get::<_,i64>(0))? as u64)
 }

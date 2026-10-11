@@ -52,7 +52,7 @@ async function openQuote() {
 it('retains a closing inline quote while locking approval and removes it before a fresh quote can reopen', async () => {
   render(<JobActions job={job} inlineTranscription />);
   const panel = await openQuote();
-  fireEvent.click(screen.getByRole('checkbox'));
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   const approval = screen.getByRole('button', { name: 'Start transcription' });
   expect(approval).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
@@ -68,7 +68,7 @@ it('retains a closing inline quote while locking approval and removes it before 
   expect(panel).not.toBeInTheDocument();
   const reopened = await openQuote();
   expect(reopened).toHaveAttribute('data-state', 'open');
-  expect(screen.getByRole('checkbox')).not.toBeChecked();
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   await act(async () => { vi.advanceTimersByTime(exitFallbackMs * 2); });
   expect(reopened).toBeInTheDocument();
   expect(aiApi.createRetryQuote).toHaveBeenCalledTimes(2);
@@ -77,7 +77,7 @@ it('retains a closing inline quote while locking approval and removes it before 
 it('closes after successful approval without sending another request during exit', async () => {
   render(<JobActions job={job} inlineTranscription />);
   const panel = await openQuote();
-  fireEvent.click(screen.getByRole('checkbox'));
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   const approval = screen.getByRole('button', { name: 'Start transcription' });
   await act(async () => { fireEvent.click(approval); });
   expect(panel).toHaveAttribute('data-state', 'closing');
@@ -87,14 +87,14 @@ it('closes after successful approval without sending another request during exit
   expect(panel).not.toBeInTheDocument();
 });
 
-it('keeps the same acknowledged quote available when approval fails', async () => {
+it('keeps the same quote available when approval fails', async () => {
   vi.mocked(aiApi.reapproveQuote).mockRejectedValueOnce(new Error('Connection failed'));
   render(<JobActions job={job} inlineTranscription />);
   const panel = await openQuote();
-  fireEvent.click(screen.getByRole('checkbox'));
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Start transcription' })); });
   expect(panel).toHaveAttribute('data-state', 'open');
-  expect(screen.getByRole('checkbox')).toBeChecked();
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Start transcription' })).toBeEnabled();
   expect(fixture.errors).toEqual(['Error: Connection failed']);
 });

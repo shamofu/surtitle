@@ -1,0 +1,15 @@
+{
+  "applicationIdentifier": "app.surtitle.evaluation.redesignfinal20261011c",
+  "installedExecutableSha256": "b6946dff5737312b6d4d7b9140359f68ff7ed0ef7e6f0f30b4f4c709f72ce8b5",
+  "removedEvaluationInstallation": true,
+  "diagnosticDataRetained": true,
+  "retainedFiles": {
+    "C:\\Users\\shamo\\AppData\\Local\\app.surtitle.evaluation.redesignfinal20261011c\\workspace.sqlite-wal": "0240f9933152db1acb7560db3660079f650baabef831505381ca7e844861935b",
+    "C:\\Users\\shamo\\AppData\\Local\\app.surtitle.evaluation.redesignfinal20261011c\\charges.sqlite": "e9b8b6fdf309626460cf624f37a7cd2af27a767c544c8d9fdb3ad7d0f61e3df5",
+    "C:\\Users\\shamo\\AppData\\Local\\app.surtitle.evaluation.redesignfinal20261011c\\learning.sqlite": "f973a74d6819af02bd697ac017a07ff9e49534ae26201f3c8cd86570f2264f7e",
+    "C:\\Users\\shamo\\AppData\\Local\\app.surtitle.evaluation.redesignfinal20261011c\\learning.sqlite-wal": "0546987ec42a1e42d8a3fa049d0684d77fa4acb2a6d8eabc5531662c680defd8",
+    "C:\\Users\\shamo\\AppData\\Local\\app.surtitle.evaluation.redesignfinal20261011c\\workspace.sqlite": "da63a52bdf62b3fc863995d79f497584be3ba97c1de4c55d1d301afbafab6cfc"
+  },
+  "cleanupOnly": true,
+  "cleanedAt": "2026-10-11T15:04:38.0814688Z"
+}

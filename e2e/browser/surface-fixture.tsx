@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Browser-only harness for native dialog/top-layer interactions. Not imported by the app.
+// Browser-only harness for modal portals, input blocking, and opaque registration.
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -16,9 +16,10 @@ function Surfaces() {
   const outerExit = useModalExit(outer);
   const innerExit = useModalExit(inner);
   const { report } = useNotifications();
-  const { surfaceHidden } = useSurface();
+  const { surfaceHidden, occludingElements } = useSurface();
   return <main>
-    <output data-testid="surface-state">{surfaceHidden ? 'hidden' : 'visible'}</output>
+    <output data-testid="surface-state">{surfaceHidden ? 'blocked' : 'available'}</output>
+    <output data-testid="occlusion-count">{occludingElements.length}</output>
     <button onClick={() => { setLong(false); setOuter(true); }}>Open editor</button>
     <button onClick={() => { setLong(true); setOuter(true); }}>Open long editor</button>
     {outer && <Modal {...outerExit.modalProps} title="Editor" closeDisabled={locked} onClose={() => void outerExit.close(() => setOuter(false))}>

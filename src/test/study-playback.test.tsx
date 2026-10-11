@@ -93,7 +93,7 @@ vi.mock('../features/study/editor-drafts/api', () => ({
   },
 }));
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
-vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, closeWindow: vi.fn() }));
+vi.mock('../shared/native/window', () => ({ registerCloseTask: () => () => {}, subscribeWindowClose: () => () => {}, closeWindow: vi.fn() }));
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(async (name: string, listener: typeof fixture.listener) => {
     if (name === 'player-state') fixture.listener = listener;
@@ -286,7 +286,9 @@ afterEach(async () => {
   vi.resetAllMocks();
 });
 
-const inspectButton = () => screen.getByRole('button', { name: 'Inspect this subtitle' });
+const inspectButton = () => screen.getByRole('button', { name: 'Explore meaning' });
+const phraseSaveToggle = () => within(document.querySelector('.phrase-inspector') as HTMLElement).getByRole('button', { name: 'Save phrase', expanded: false });
+const savePhrase = () => within(document.getElementById('phrase-save-form')!).getByRole('button', { name: 'Save phrase' });
 const inspectReplay = () => within(document.querySelector('.phrase-inspector') as HTMLElement).getByRole('button', { name: 'Play this passage' });
 async function ready() {
   await waitFor(() => expect(inspectButton()).toBeEnabled());
@@ -312,7 +314,7 @@ describe('watching and inspecting phrases', () => {
     await openTranscript();
     const play = await screen.findByRole('button', { name: 'Play from source audio range 0:00' });
     await waitFor(() => expect(play).toBeEnabled());
-    expect(screen.queryByRole('button', { name: 'Inspect this subtitle' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Explore meaning' })).not.toBeInTheDocument();
     expect(screen.getByText(/Text received · subtitle timing unavailable/)).toBeVisible();
     fireEvent.click(play);
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' }));
@@ -324,8 +326,8 @@ describe('watching and inspecting phrases', () => {
     await screen.findByRole('button', { name: 'Resume from original position' });
     fireEvent.click(inspectReplay());
     await waitFor(() => expect(playerApi.playSourceRange).toHaveBeenCalledWith('media', ['a']));
-    expect(screen.getByRole('button', { name: 'Estimate explanation with AI' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Review and save phrase' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Explain this phrase' })).toBeEnabled();
+    expect(phraseSaveToggle()).toBeEnabled();
   });
 
   it('trims a long source-block recording in the normal card form and keeps the exact chosen range', async () => {
@@ -343,13 +345,13 @@ describe('watching and inspecting phrases', () => {
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'source' } });
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'origin' } });
     fireEvent.change(screen.getByLabelText('Audio to'), { target: { value: '3:06.000' } });
-    expect(screen.getByRole('button', { name: 'Save phrase' })).toBeDisabled();
+    expect(savePhrase()).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Audio from'), { target: { value: '0:10.123' } });
     fireEvent.change(screen.getByLabelText('Audio to'), { target: { value: '0:40.456' } });
     fireEvent.click(screen.getByRole('button', { name: 'Play selected audio range' }));
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'source-seek', startMs: 10123, endMs: 40456 }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save phrase' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Save phrase' }));
+    await waitFor(() => expect(savePhrase()).toBeEnabled());
+    fireEvent.click(savePhrase());
     await waitFor(() => expect(cardsApi.saveCard).toHaveBeenCalledWith(expect.objectContaining({ segmentId: 'a', sourceRange: { startMs: 10123, endMs: 40456 } })));
     expect(editorDraftApi.commitSubtitle).not.toHaveBeenCalled();
   });
@@ -358,12 +360,12 @@ describe('watching and inspecting phrases', () => {
     vi.mocked(studyApi.segments).mockResolvedValue([{ ...cues[0], status: 'generated' }]);
     const client = mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
+    fireEvent.click(phraseSaveToggle());
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'would like' } });
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'want politely' } });
     await act(async () => client.setQueryData(queryKeys.segments('media'), [{ ...cues[0], status: 'generated' }, { ...cues[1], status: 'generated' }]));
     expect(screen.getByLabelText('Meaning')).toHaveValue('want politely');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save phrase' })).toBeEnabled());
+    await waitFor(() => expect(savePhrase()).toBeEnabled());
     expect(screen.queryByText('The source subtitles or audio changed. Select the passage again.')).not.toBeInTheDocument();
   });
 
@@ -439,7 +441,7 @@ describe('watching and inspecting phrases', () => {
     expect(toggle.closest('[inert], [hidden], [aria-hidden="true"]')).toBeNull();
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.queryByRole('button', { name: 'Close panel' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close panel' })).toBeVisible();
     fireEvent.change(screen.getByLabelText('Search transcript'), { target: { value: 'like' } });
     screen.getByLabelText('Search transcript').focus();
     fireEvent.keyDown(screen.getByLabelText('Search transcript'), { key: 'Escape' });
@@ -487,10 +489,10 @@ describe('watching and inspecting phrases', () => {
     fireEvent.pointerUp(caption);
     await screen.findByRole('button', { name: 'Resume from original position' });
     window.getSelection()!.removeAllRanges();
-    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
+    fireEvent.click(phraseSaveToggle());
     expect(screen.getByLabelText('Word or phrase')).toHaveValue('would like');
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'want politely' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save phrase' }));
+    fireEvent.click(savePhrase());
     await waitFor(() => expect(cardsApi.saveCard).toHaveBeenCalledWith(expect.objectContaining({
       mediaId: 'media', segmentId: 'a', term: 'would like', meaning: 'want politely', example: cues[0].text,
     })));
@@ -513,7 +515,7 @@ describe('watching and inspecting phrases', () => {
     expect(document.querySelector('.phrase-panel .context-sentence')).toHaveTextContent(cues[0].text);
     expect(document.querySelector('.current-caption-text')).toHaveTextContent(cues[2].text);
       expect(document.querySelector('.current-caption-text')).toBe(caption);
-    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
+    fireEvent.click(phraseSaveToggle());
     expect(screen.getByLabelText('Word or phrase')).toHaveValue('would like');
   });
 
@@ -531,7 +533,7 @@ describe('watching and inspecting phrases', () => {
     fireEvent.pointerUp(caption);
     await screen.findByRole('button', { name: 'Resume from original position' });
     expect(screen.getByText('The source subtitles changed. Select the subtitles or phrase again.')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Review and save phrase' })).toBeDisabled();
+    expect(phraseSaveToggle()).toBeDisabled();
     expect(cardsApi.saveCard).not.toHaveBeenCalled();
   });
 
@@ -541,7 +543,7 @@ describe('watching and inspecting phrases', () => {
     if (source === 'file') fixture.media.path = 'C:/replacement.mkv';
     else fixture.media.audioStreamIndex = 2;
     await emit({ positionMs: 2600 });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Review and save phrase' })).toBeDisabled());
+    await waitFor(() => expect(phraseSaveToggle()).toBeDisabled());
     expect(inspectReplay()).toBeDisabled();
     expect(cardsApi.saveCard).not.toHaveBeenCalled();
   });
@@ -550,13 +552,13 @@ describe('watching and inspecting phrases', () => {
     vi.mocked(cardsApi.saveCard).mockRejectedValue(new Error('Could not save audio'));
     mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
+    fireEvent.click(phraseSaveToggle());
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'would like' } });
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'want politely' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save phrase' }));
+    fireEvent.click(savePhrase());
     await waitFor(() => expect(fixture.notify).toHaveBeenCalledWith(expect.stringContaining('Could not save audio'), 'error'));
     expect(screen.getByLabelText('Word or phrase')).toHaveValue('would like');
-    expect(screen.getByRole('button', { name: 'Save phrase' })).toBeEnabled();
+    expect(savePhrase()).toBeEnabled();
     expect(screen.getByRole('alert')).toHaveTextContent('Could not save audio');
     expect(playerApi.player).not.toHaveBeenCalledWith({ action: 'play' });
   });
@@ -587,7 +589,7 @@ describe('watching and inspecting phrases', () => {
     vi.mocked(studyApi.segments).mockResolvedValue([{ ...cues[0], status: 'provisional' }]);
     mount();
     await inspectCurrent();
-    expect(screen.getByRole('button', { name: 'Review and save phrase' })).toBeDisabled();
+    expect(phraseSaveToggle()).toBeDisabled();
     expect(cardsApi.saveCard).not.toHaveBeenCalled();
   });
 
@@ -595,7 +597,7 @@ describe('watching and inspecting phrases', () => {
     vi.mocked(studyApi.candidates).mockResolvedValue([]);
     const client = mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Estimate explanation with AI' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Explain this phrase' }));
     const requested = { id: 'new-meaning', mediaId: 'media', segmentId: 'a', sourceCueIds: ['a'],
       term: cues[0].text, meaning: 'A polite way of saying what you want', example: cues[0].text,
       explanation: 'Use this to make a courteous request.', startMs: 0, endMs: 1000 };
@@ -606,7 +608,7 @@ describe('watching and inspecting phrases', () => {
     expect(screen.getByText(requested.explanation)).toBeVisible();
     expect(document.querySelector('.phrase-panel .context-sentence')).toHaveTextContent(cues[0].text);
     expect(screen.getByRole('button', { name: 'Hide meaning' })).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
+    fireEvent.click(phraseSaveToggle());
     expect(screen.getByLabelText('Meaning')).toHaveValue(requested.meaning);
     expect(screen.getByLabelText('Explanation or notes (optional)')).toHaveValue(requested.explanation);
   });
@@ -627,7 +629,7 @@ describe('watching and inspecting phrases', () => {
     vi.mocked(studyApi.segments).mockResolvedValue([]);
     mount();
     await screen.findByRole('button', { name: 'Create subtitles from audio' });
-    expect(screen.queryByRole('button', { name: 'Inspect this subtitle' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Explore meaning' })).not.toBeInTheDocument();
     await openTranscript();
     expect(screen.getByRole('button', { name: 'Add or switch subtitles' })).toBeEnabled();
     expect(within(document.querySelector('.study-transcript') as HTMLElement).getByRole('button', { name: 'Create subtitles from audio' })).toBeEnabled();
@@ -638,10 +640,11 @@ describe('watching and inspecting phrases', () => {
     vi.mocked(studyApi.segments).mockResolvedValue([]);
     vi.mocked(studyApi.transcriptIssues).mockResolvedValue([{ id: 'silent', mediaId: 'media', sourceId: 'preparation', kind: 'no_speech', startMs: 0, endMs: 4000, alternatives: [] }]);
     mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Activity & tools' }));
     await screen.findByText('Passages without subtitles to check (1)');
     fireEvent.click(screen.getByText('Passages without subtitles to check (1)'));
     await waitFor(() => expect(screen.getByRole('button', { name: '0:00–0:04' })).toBeEnabled());
-    expect(screen.queryByRole('button', { name: 'Inspect this subtitle' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Explore meaning' })).not.toBeInTheDocument();
     vi.mocked(playerApi.player).mockClear();
     fireEvent.click(screen.getByRole('button', { name: '0:00–0:04' }));
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' }));
@@ -700,7 +703,7 @@ describe('study navigation and unfinished phrases', () => {
   it('direct caption replay retains the inspected source and unsaved form', async () => {
     mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
+    fireEvent.click(phraseSaveToggle());
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'my phrase' } });
     await emit({ positionMs: 2600 });
     fireEvent.click(within(screen.getByRole('group', { name: 'Subtitle playback' })).getByRole('button', { name: 'Replay this subtitle' }));
@@ -737,21 +740,21 @@ describe('study navigation and unfinished phrases', () => {
   it('retains separate source drafts after Escape and clears only the saved draft', async () => {
     mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
+    fireEvent.click(phraseSaveToggle());
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'first phrase' } });
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'first meaning' } });
     fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByLabelText('Word or phrase')).not.toBeInTheDocument());
     await emit({ positionMs: 2600 });
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
+    fireEvent.click(phraseSaveToggle());
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'second phrase' } });
     fireEvent.click(screen.getByRole('button', { name: 'Unfinished phrases (2)' }));
     fireEvent.click(screen.getByRole('button', { name: /first phrase 0:00/ }));
     await waitFor(() => expect(screen.getByLabelText('Word or phrase')).toHaveValue('first phrase'));
     expect(screen.getByLabelText('Meaning')).toHaveValue('first meaning');
     vi.mocked(cardsApi.saveCard).mockResolvedValue(undefined);
-    fireEvent.click(screen.getByRole('button', { name: 'Save phrase' }));
+    fireEvent.click(savePhrase());
     await waitFor(() => expect(screen.getByRole('button', { name: 'Unfinished phrases (1)' })).toBeVisible());
     expect(cardsApi.saveCard).toHaveBeenCalledWith(expect.objectContaining({ segmentId: 'a', term: 'first phrase' }));
   });
@@ -772,7 +775,7 @@ describe('study navigation and unfinished phrases', () => {
     });
     mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
+    fireEvent.click(phraseSaveToggle());
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'restart phrase' } });
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'meaning before restart' } });
     fireEvent.change(screen.getByLabelText('Original context'), { target: { value: 'my retained context' } });
@@ -793,9 +796,9 @@ describe('study navigation and unfinished phrases', () => {
     expect(screen.getByLabelText('Meaning')).toHaveValue('meaning before restart');
     expect(screen.getByLabelText('Original context')).toHaveValue('my retained context');
     expect(screen.getByLabelText('Explanation or notes (optional)')).toHaveValue('unfinished\nnotes');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save phrase' })).toBeEnabled());
+    await waitFor(() => expect(savePhrase()).toBeEnabled());
     expect(editorDraftApi.save).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Save phrase' }));
+    fireEvent.click(savePhrase());
     await waitFor(() => expect(cardsApi.saveCard).toHaveBeenCalledWith(expect.objectContaining({
       term: 'restart phrase', meaning: 'meaning before restart', example: 'my retained context', explanation: 'unfinished\nnotes',
     })));
@@ -812,13 +815,13 @@ describe('study navigation and unfinished phrases', () => {
     vi.mocked(studyApi.segments).mockResolvedValue([generated, ...cues.slice(1)]);
     mount();
     await inspectCurrent();
-    expect(screen.getByRole('button', { name: 'Review and save phrase' })).toBeEnabled();
+    expect(phraseSaveToggle()).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Edit subtitle' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
+    fireEvent.click(phraseSaveToggle());
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'would like' } });
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'want politely' } });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save phrase' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Save phrase' }));
+    await waitFor(() => expect(savePhrase()).toBeEnabled());
+    fireEvent.click(savePhrase());
     await waitFor(() => expect(cardsApi.saveCard).toHaveBeenCalledWith(expect.objectContaining({ segmentId: 'a', term: 'would like' })));
     expect(editorDraftApi.commitSubtitle).not.toHaveBeenCalled();
     expect(editorDraftApi.save).toHaveBeenCalledWith(expect.objectContaining({ sourceCues: [generated] }));
@@ -840,16 +843,16 @@ describe('study navigation and unfinished phrases', () => {
   it('retains edited text but blocks saving after the source changes', async () => {
     const client = mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
+    fireEvent.click(phraseSaveToggle());
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'do not lose me' } });
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'a meaning' } });
     await act(async () => client.setQueryData(['media', 'media', 'segments'], [{ ...cues[0], text: 'Changed' }, ...cues.slice(1)]));
     expect(screen.getByLabelText('Word or phrase')).toHaveValue('do not lose me');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save phrase' })).toBeDisabled());
+    await waitFor(() => expect(savePhrase()).toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: 'Continue later' }));
     fireEvent.click(screen.getByRole('button', { name: 'Unfinished phrases (1)' }));
     fireEvent.click(screen.getByRole('button', { name: /do not lose me 0:00/ }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save phrase' })).toBeDisabled());
+    await waitFor(() => expect(savePhrase()).toBeDisabled());
     expect(screen.getByLabelText('Meaning')).toHaveValue('a meaning');
     fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Unfinished phrases (1)' })).not.toBeInTheDocument());
@@ -859,7 +862,7 @@ describe('study navigation and unfinished phrases', () => {
   it.each(['button', 'Escape'])('can close an unfinished form with %s after player failure without losing its input', async close => {
     mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
+    fireEvent.click(phraseSaveToggle());
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'keep after failure' } });
     await emit({ ready: false, error: 'Player failed' });
     vi.mocked(playerApi.player).mockClear();
@@ -877,7 +880,7 @@ describe('study navigation and unfinished phrases', () => {
   it('keeps notes and the exit confirmation accessible if the material disappears', async () => {
     mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
+    fireEvent.click(phraseSaveToggle());
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'orphan notes' } });
     fixture.hasMedia = false;
     fixture.blockerStatus = 'blocked';
@@ -1105,14 +1108,14 @@ describe('study sentence and source playback', () => {
   it('clears the previous inspection when resuming from the list without discarding its draft', async () => {
     mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
+    fireEvent.click(phraseSaveToggle());
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'unfinished wording' } });
     fireEvent.click(screen.getByRole('button', { name: 'Repeat selected segment' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Repeat selected segment' })).toHaveAttribute('aria-pressed', 'true'));
     vi.mocked(playerApi.player).mockClear();
     await openTranscript();
     expect(screen.getByRole('tab', { name: 'Transcript' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.queryByRole('button', { name: 'Close panel' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close panel' })).toBeVisible();
     expect(playerApi.player).toHaveBeenCalledWith({ action: 'pause' });
     expect(playerApi.player).toHaveBeenCalledWith(expect.objectContaining({ action: 'seek' }));
     expect(playerApi.player).not.toHaveBeenCalledWith({ action: 'play' });
@@ -1196,7 +1199,7 @@ describe('study sentence and source playback', () => {
     vi.mocked(playerApi.playSourceRange).mockClear();
     await act(async () => client.setQueryData(['media', 'media', 'segments'], changedCues));
     await waitFor(() => expect(inspectReplay()).toBeDisabled());
-    expect(screen.getByRole('button', { name: 'Review and save phrase' })).toBeDisabled();
+    expect(phraseSaveToggle()).toBeDisabled();
     expect(screen.getByText('The source subtitles changed. Select the subtitles or phrase again.')).toBeVisible();
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'loop' }));
     expect(playerApi.playSourceRange).not.toHaveBeenCalled();

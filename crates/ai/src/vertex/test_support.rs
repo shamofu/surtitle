@@ -11,6 +11,7 @@ use tokio::sync::oneshot;
 #[derive(Clone, Copy)]
 pub enum Scenario {
     Translation,
+    SingleTranslation,
     Transcription,
     TranscriptionCoarseFirst,
     Transcription429ThenSuccess,
@@ -125,6 +126,7 @@ impl Transport for OfflineTransport {
         self.gate.wait(Stage::AfterSend, reply.ordinal).await;
         match self.scenario {
             Scenario::Translation
+            | Scenario::SingleTranslation
             | Scenario::Transcription
             | Scenario::TranscriptionCoarseFirst
             | Scenario::Transcription429ThenSuccess
@@ -172,7 +174,13 @@ pub struct OfflineVertexService {
 impl OfflineVertexService {
     pub fn new(store: AiStore, job_id: &str, scenario: Scenario) -> Result<Self> {
         let plan = store.prepared_job(job_id)?;
-        if plan.requests.len() != 2 {
+        if plan.requests.len()
+            != if matches!(scenario, Scenario::SingleTranslation) {
+                1
+            } else {
+                2
+            }
+        {
             return Err(AiError::Invalid(
                 "Offline fixture requires two fixed requests".into(),
             ));
@@ -200,7 +208,13 @@ impl OfflineVertexService {
                         "Offline fixture only supports translation".into(),
                     ));
                 };
-                let indices = if ordinal == 0 { 0..30 } else { 30..31 };
+                let indices = if matches!(scenario, Scenario::SingleTranslation) {
+                    0..1
+                } else if ordinal == 0 {
+                    0..30
+                } else {
+                    30..31
+                };
                 let expected_ids = indices
                     .clone()
                     .map(|index| format!("fixture-cue-{index:02}"))

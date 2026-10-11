@@ -10,7 +10,17 @@ pub async fn load_media(
     state: State<'_, AppState>,
     media_id: String,
 ) -> IpcResult<()> {
-    crate::application::playback::load_media(app, state.inner().clone(), media_id).await
+    let committed_changes = state.changes.clone();
+    let changed_media = Some(media_id.clone());
+    let result =
+        crate::application::playback::load_media(app, state.inner().clone(), media_id).await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Media,
+            changed_media,
+        );
+    }
+    result
 }
 #[tauri::command]
 pub fn get_player_state(state: State<'_, AppState>) -> IpcResult<PlayerState> {

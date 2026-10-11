@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "purpose": "geometry candidate, not final acceptance",
+  "testedAt": "2026-10-11T14:46:16.1342283Z",
+  "identifier": "app.surtitle.evaluation.redesignfinal20261011c",
+  "rustVersion": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "features": [
+    "default"
+  ],
+  "finalAcceptance": false,
+  "files": [
+    {
+      "bytes": 26599936,
+      "sha256": "ab47683cc7bcad75fb978c3359c89a5436eea2d14f8a50ca97ecfc53dadf9ee0",
+      "path": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\src-tauri\\target\\redesign-production\\release\\surtitle.exe"
+    },
+    {
+      "bytes": 27226862,
+      "sha256": "1f5ecca59ad3f862fb19a7ffb8d672431eb8d3b7cd96a4f478eb19aad2d361ae",
+      "path": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\src-tauri\\target\\redesign-production\\release\\bundle\\nsis\\Surtitle Evaluation RedesignFinal20261011c_0.1.5_x64-setup.exe"
+    },
+    {
+      "bytes": 54273939,
+      "sha256": "17409eefce3e4916c51fa6abaa5332fe0dc1550a1dd355afd31a918547297fad",
+      "path": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\src-tauri\\resources\\native\\mpv-2.dll"
+    },
+    {
+      "bytes": 16149344,
+      "sha256": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471",
+      "path": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\src-tauri\\resources\\native\\onnxruntime.dll"
+    },
+    {
+      "bytes": 21856,
+      "sha256": "87f6878cdc1f80b3a9afa5b0c84663315030b4957f5bbb6b66470557cb2f48d8",
+      "path": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\src-tauri\\resources\\native\\onnxruntime_providers_shared.dll"
+    },
+    {
+      "bytes": 74649,
+      "sha256": "b53332caf7c6f1ae17d37b12253d7e153a9e6e268d15e115e3e584abf66fcd06",
+      "path": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\dist\\assets\\index-CiNBTgCt.css"
+    },
+    {
+      "bytes": 885578,
+      "sha256": "deae51110ffd3893a65de1b49d5ee2049b8c4da088f18e8da0b365cd8cca2b1e",
+      "path": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\dist\\assets\\index-G5Ie9-Vk.js"
+    }
+  ]
+}

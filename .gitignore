@@ -3,6 +3,7 @@
 /.cargo/config.toml
 /dist/
 /target/
+/src-tauri/target/
 /work/
 /artifacts/
 /src-tauri/resources/native/*

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "purpose": "final normal installed acceptance",
+  "builtAt": "2026-10-11T14:53:03.7913695Z",
+  "identifier": "app.surtitle.evaluation.redesignfinal20261011d",
+  "rustVersion": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "features": [
+    "default"
+  ],
+  "acceptancePending": false,
+  "files": [
+    {
+      "sha256": "766505a56d7130ee3c5af24f3238f494d76cec2bb0879ca250678766739b1496",
+      "path": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\src-tauri\\target\\redesign-production\\release\\surtitle.exe",
+      "bytes": 26606592
+    },
+    {
+      "sha256": "52dbe3c2ee3c7424d5e2515d4efef33856ea30086bb113517d4f95929b340b01",
+      "path": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\src-tauri\\target\\redesign-production\\release\\bundle\\nsis\\Surtitle Evaluation RedesignFinal20261011d_0.1.5_x64-setup.exe",
+      "bytes": 27226402
+    },
+    {
+      "sha256": "17409eefce3e4916c51fa6abaa5332fe0dc1550a1dd355afd31a918547297fad",
+      "path": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\src-tauri\\resources\\native\\mpv-2.dll",
+      "bytes": 54273939
+    },
+    {
+      "sha256": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471",
+      "path": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\src-tauri\\resources\\native\\onnxruntime.dll",
+      "bytes": 16149344
+    },
+    {
+      "sha256": "87f6878cdc1f80b3a9afa5b0c84663315030b4957f5bbb6b66470557cb2f48d8",
+      "path": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\src-tauri\\resources\\native\\onnxruntime_providers_shared.dll",
+      "bytes": 21856
+    },
+    {
+      "sha256": "b53332caf7c6f1ae17d37b12253d7e153a9e6e268d15e115e3e584abf66fcd06",
+      "path": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\dist\\assets\\index-CiNBTgCt.css",
+      "bytes": 74649
+    },
+    {
+      "sha256": "ece889877cdffa3241d346d481d27278da6d8207c9fe9091872def5379e12796",
+      "path": "C:\\Users\\shamo\\.codex\\worktrees\\4d45\\surtitle\\dist\\assets\\index-CpKs70GE.js",
+      "bytes": 886626
+    }
+  ],
+  "acceptanceCompletedAt": "2026-10-11T15:04:36.6638036Z"
+}

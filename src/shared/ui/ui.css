@@ -1,21 +1,27 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-container { outline: none; }
+.modal[data-native-occlusion='pending'] { visibility: hidden; pointer-events: none; }
 .modal {
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 0;
   padding: 0;
   width: min(640px, calc(100vw - 48px));
   max-height: calc(100dvh - 60px);
   overflow: hidden;
   background: var(--surface);
   color: var(--text);
-  box-shadow: var(--shadow);
+  box-shadow: none;
 }
 .modal.wide {
   width: min(840px, calc(100vw - 48px));
-}
-.modal::backdrop {
-  background: #17253899;
-  backdrop-filter: blur(3px);
 }
 .modal-inner {
   padding: 28px;

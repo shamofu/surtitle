@@ -23,6 +23,8 @@ export const emptyModel = (purpose: AiPurpose): AiModelPreference => ({
 });
 
 export const validOutputTokens = (value: number) => Number.isInteger(value) && value >= 1 && value <= 1048576;
+export interface ModelInputDraft { manual: boolean; input: string; output: string; maxOutputTokens?: string; thinkingBudget?: string }
+export const validTokenInput = (value: string, min: number, max: number) => /^\d+$/.test(value) && Number(value) >= min && Number(value) <= max;
 
 export function ModelEditor({
   value,
@@ -32,6 +34,9 @@ export function ModelEditor({
   disabled = false,
   candidates,
   onPricePendingChange,
+  inputDraft,
+  onInputDraftChange,
+  autoApplyRates = false,
 }: {
   value: AiModelPreference;
   onChange: (value: AiModelPreference) => void;
@@ -40,6 +45,9 @@ export function ModelEditor({
   disabled?: boolean;
   candidates?: DiscoveredModel[];
   onPricePendingChange?: (pending: boolean) => void;
+  inputDraft?: ModelInputDraft;
+  onInputDraftChange?: (draft: ModelInputDraft) => void;
+  autoApplyRates?: boolean;
 }) {
   const { t } = useAppearance();
   const id = useId();
@@ -70,21 +78,28 @@ export function ModelEditor({
   const recommendedTokens = emptyModel(purpose).maxOutputTokens;
   const [editingCustomOutput, setEditingCustomOutput] = useState(false);
   const customOutput =
-    editingCustomOutput || value.maxOutputTokens !== recommendedTokens;
+    editingCustomOutput || inputDraft?.maxOutputTokens !== undefined || value.maxOutputTokens !== recommendedTokens;
   const details = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     setEditingCustomOutput(false);
   }, [purpose]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
-  const [manual, setManual] = useState(value.price?.source === 'user');
-  const [input, setInput] = useState(
-    value.price ? String(value.price.inputMicrousdPerMillion / 1_000_000) : '',
-  );
-  const [output, setOutput] = useState(
-    value.price ? String(value.price.outputMicrousdPerMillion / 1_000_000) : '',
-  );
+  const [localInput, setLocalInput] = useState<ModelInputDraft>(() => ({ manual: value.price?.source === 'user',
+    input: value.price ? String(value.price.inputMicrousdPerMillion / 1_000_000) : '', output: value.price ? String(value.price.outputMicrousdPerMillion / 1_000_000) : '' }));
+  const { manual, input, output } = inputDraft ?? localInput;
+  const tokensInput = (inputDraft ?? localInput).maxOutputTokens ?? (Number.isFinite(value.maxOutputTokens) ? String(value.maxOutputTokens) : '');
+  const thinkingInput = (inputDraft ?? localInput).thinkingBudget ?? String(value.thinkingBudget ?? 1024);
+  const inputRef = useRef(inputDraft ?? localInput); inputRef.current = inputDraft ?? localInput;
+  function changeInput(patch: Partial<ModelInputDraft>) { const next = { ...inputRef.current, ...patch }; inputRef.current = next; setLocalInput(next); onInputDraftChange?.(next); }
+  const setManual = (manual: boolean) => changeInput({ manual });
+  const setInput = (input: string) => changeInput({ input });
+  const setOutput = (output: string) => changeInput({ output });
+  const previousPrice = useRef([value.price?.id, value.modelId, location, purpose]);
   useEffect(() => {
+    const identity = [value.price?.id, value.modelId, location, purpose];
+    if (inputDraft && identity.every((value, index) => value === previousPrice.current[index])) return;
+    previousPrice.current = identity;
     setManual(value.price?.source === 'user');
     setInput(
       value.price
@@ -97,6 +112,13 @@ export function ModelEditor({
         : '',
     );
   }, [value.price?.id, value.modelId, location, purpose]);
+  useEffect(() => {
+    if (!autoApplyRates || !manual || !validRate(input) || !validRate(output)) return;
+    const inputRate = Math.round(Number(input) * 1_000_000), outputRate = Math.round(Number(output) * 1_000_000);
+    if (value.price?.source === 'user' && value.price.inputMicrousdPerMillion === inputRate && value.price.outputMicrousdPerMillion === outputRate) return;
+    const timer = window.setTimeout(() => applyManual(), 500);
+    return () => window.clearTimeout(timer);
+  }, [autoApplyRates, manual, input, output, value.price]);
   const thinking = value.thinkingLevel
     ? 'level'
     : value.thinkingBudget != null
@@ -200,7 +222,10 @@ export function ModelEditor({
     );
   }
   return (
-    <div className="model-editor">
+    <div className="model-editor" onBlur={() => {
+      if (autoApplyRates && manual && validRate(input) && validRate(output) &&
+        (value.price?.inputMicrousdPerMillion !== Math.round(Number(input) * 1_000_000) || value.price?.outputMicrousdPerMillion !== Math.round(Number(output) * 1_000_000))) applyManual();
+    }}>
       <Field
         label={t('GeminiモデルID', 'Gemini model ID')}
         hint={t(
@@ -307,6 +332,7 @@ export function ModelEditor({
           onChange={(event) => {
             if (event.target.value === 'standard') {
               setEditingCustomOutput(false);
+              changeInput({ maxOutputTokens: undefined });
               onChange({ ...value, maxOutputTokens: recommendedTokens });
             } else {
               setEditingCustomOutput(true);
@@ -327,7 +353,7 @@ export function ModelEditor({
         <div className="model-editor-detail-content">
           <MotionRegion open={customOutput} keepMounted>
             <Field
-              error={!validOutputTokens(value.maxOutputTokens) ? t('1〜1,048,576 の整数を入力してください。', 'Enter a whole number between 1 and 1,048,576.') : undefined}
+              error={!validTokenInput(tokensInput, 1, 1048576) ? t('1〜1,048,576 の整数を入力してください。', 'Enter a whole number between 1 and 1,048,576.') : undefined}
               label={t(
                 '1要求の出力トークン上限',
                 'Maximum output tokens per request',
@@ -338,18 +364,14 @@ export function ModelEditor({
               )}
             >
               <input
-                type="number"
-                min="1"
-                max="1048576"
-                step="1"
-                value={Number.isNaN(value.maxOutputTokens) ? '' : value.maxOutputTokens}
+                inputMode="numeric"
+                value={tokensInput}
                 disabled={frozen}
-                onChange={(event) =>
-                  onChange({
-                    ...value,
-                    maxOutputTokens: event.target.value === '' ? Number.NaN : Number(event.target.value),
-                  })
-                }
+                onChange={event => {
+                  const raw = event.target.value;
+                  changeInput({ maxOutputTokens: raw });
+                  if (validTokenInput(raw, 1, 1048576)) onChange({ ...value, maxOutputTokens: Number(raw) });
+                }}
               />
             </Field>
           </MotionRegion>
@@ -357,13 +379,14 @@ export function ModelEditor({
             <select
               value={thinking}
               disabled={frozen}
-              onChange={(event) =>
+              onChange={(event) => {
+                changeInput({ thinkingBudget: undefined });
                 onChange({
                   ...value,
                   thinkingLevel: event.target.value === 'level' ? 'LOW' : null,
                   thinkingBudget: event.target.value === 'budget' ? 1024 : null,
-                })
-              }
+                });
+              }}
             >
               <option value="omit">
                 {t('モデルの既定値', 'Model default')}
@@ -390,19 +413,16 @@ export function ModelEditor({
             </Field>
           </MotionRegion>
           <MotionRegion open={thinking === 'budget'} keepMounted>
-            <Field label={t('思考トークン予算', 'Thinking token budget')}>
+            <Field label={t('思考トークン予算', 'Thinking token budget')} error={!validTokenInput(thinkingInput, 0, 65536) ? t('0〜65,536 の整数を入力してください。', 'Enter a whole number between 0 and 65,536.') : undefined}>
               <input
-                type="number"
-                min="0"
-                max="65536"
-                value={value.thinkingBudget ?? 1024}
+                inputMode="numeric"
+                value={thinkingInput}
                 disabled={frozen}
-                onChange={(event) =>
-                  onChange({
-                    ...value,
-                    thinkingBudget: Number(event.target.value),
-                  })
-                }
+                onChange={event => {
+                  const raw = event.target.value;
+                  changeInput({ thinkingBudget: raw });
+                  if (validTokenInput(raw, 0, 65536)) onChange({ ...value, thinkingBudget: Number(raw) });
+                }}
               />
             </Field>
           </MotionRegion>
@@ -463,12 +483,12 @@ export function ModelEditor({
                   />
                 </Field>
               </div>
-              <Button
+              {!autoApplyRates && <Button
                 disabled={frozen || !validRate(input) || !validRate(output)}
                 onClick={applyManual}
               >
                 {t('この単価を適用', 'Apply these rates')}
-              </Button>
+              </Button>}
           </MotionRegion>
         </div>
       </AnimatedDetails>

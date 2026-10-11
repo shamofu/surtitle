@@ -81,7 +81,7 @@ export function LibraryPage() {
     blocked: importBusy || transferOpen,
     // Inspect open dialogs at delivery time so a just-closed modal cannot
     // reject the next drop while its surface-count cleanup is settling.
-    canDrop: () => !document.querySelector('dialog[open]:not(:has(.media-import))'),
+    canDrop: () => !document.querySelector('[data-app-modal]:not(:has(.media-import))'),
     onDrop: paths => {
       if (importPending.current) return;
       importPending.current = true;
@@ -127,7 +127,7 @@ export function LibraryPage() {
         </Button>
       </PageTitle>
       <p className="library-drop-hint"><Upload size={15} aria-hidden="true" />{t('動画・音声ファイルをここへドロップして追加できます。', 'Drop video or audio files here to add them.')}</p>
-      <MotionRegion mode="status" open={dragging && !importOpen}><div className="library-drop-overlay" role="status"><div><Upload size={34} aria-hidden="true" /><strong>{t('ドロップして教材を追加', 'Drop to add your materials')}</strong><p>{t('ファイルと言語を確認してから、ライブラリに追加します。', 'Review the files and languages before adding them to your library.')}</p></div></div></MotionRegion>
+      <MotionRegion mode="status" open={dragging && !importOpen}><div className="library-drop-overlay" role="status"><div><Upload size={34} aria-hidden="true" /><strong>{t('ドロップして教材を追加', 'Drop to add your materials')}</strong><p>{t('設定した言語で、すぐに取り込みを開始します。', 'Import immediately with your selected languages.')}</p></div></div></MotionRegion>
       <DownloadJobs />
       <MotionRegion mode="status" open={continuing.length > 0}>
         <section className="continue-section" aria-labelledby="continue-title">

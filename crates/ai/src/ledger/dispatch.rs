@@ -1,5 +1,7 @@
 //! Atomic reservations and final authorization before paid dispatch.
-use super::accounting::{check_budget, has_blocking_attempt, read_job, validate_scope};
+use super::accounting::{
+    check_budget, has_blocking_attempt, has_unknown_attempt, read_job, validate_scope,
+};
 use super::{audit, AiStore, ReservedRequest};
 #[cfg(feature = "development-validation")]
 use crate::RequestTask;
@@ -40,6 +42,9 @@ impl AiStore {
         }
         if state != "approved" || plan.digest()? != digest {
             return Err(AiError::ApprovalRequired);
+        }
+        if has_unknown_attempt(&tx)? {
+            return Err(AiError::UnknownOutcome);
         }
         if has_blocking_attempt(&tx)? {
             if expected_approval.is_some()

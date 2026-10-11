@@ -10,6 +10,7 @@ use windows_sys::Win32::System::LibraryLoader::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 mod input;
+mod regions;
 type Handle = *mut c_void;
 type Create = unsafe extern "C" fn() -> Handle;
 type Init = unsafe extern "C" fn(Handle) -> i32;
@@ -181,7 +182,21 @@ impl Mpv {
                 }
             }
             #[cfg(feature = "e2e-test")]
-            for (key, value) in [("hwdec", "no"), ("d3d11-warp", "yes"), ("ao", "null")] {
+            let hardware_evaluation =
+                std::env::var("SURTITLE_E2E_HARDWARE_RENDERING").as_deref() == Ok("1");
+            #[cfg(feature = "e2e-test")]
+            for (key, value) in [
+                (
+                    "hwdec",
+                    if hardware_evaluation {
+                        "auto-safe"
+                    } else {
+                        "no"
+                    },
+                ),
+                ("d3d11-warp", if hardware_evaluation { "no" } else { "yes" }),
+                ("ao", "null"),
+            ] {
                 let result = option(
                     handle,
                     CString::new(key)?.as_ptr(),
@@ -264,6 +279,7 @@ impl Mpv {
         self.string(key)?.parse().ok()
     }
     pub fn bounds(&self, b: &Bounds) -> Result<()> {
+        input::set_blocked(self.child, b.input_blocked);
         place_video_window(self.child, b)
     }
     pub fn on_surface_click(&self, callback: impl Fn() + Send + Sync + 'static) -> Result<()> {
@@ -444,6 +460,7 @@ fn describe_error(error_string: ErrorString, code: i32) -> String {
     }
 }
 fn place_video_window(child: windows_sys::Win32::Foundation::HWND, b: &Bounds) -> Result<()> {
+    regions::apply(child, b)?;
     let positioned = unsafe {
         SetWindowPos(
             child,
@@ -508,6 +525,9 @@ mod surface_tests {
                 width: 80.,
                 height: 60.,
                 scale_factor: 1.5,
+                clip: None,
+                occlusions: vec![],
+                input_blocked: false,
             };
             for width in [80., 90.] {
                 ShowWindow(video, SW_HIDE);
@@ -538,6 +558,9 @@ mod surface_tests {
             width: 10.,
             height: 10.,
             scale_factor: 1.,
+            clip: None,
+            occlusions: vec![],
+            input_blocked: false,
         };
         assert!(place_video_window(ptr::null_mut(), &bounds).is_err());
     }

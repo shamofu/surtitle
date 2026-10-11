@@ -45,8 +45,8 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
   const jobUpdates = useRef(new Map<string, { signature: string; updatedAt: string }>());
   const startedAt = useRef(Date.now());
   const generations = useRef(new Map<string, symbol>());
-  const downloads = useQuery({ queryKey: queryKeys.downloads, queryFn: libraryApi.downloadJobs, enabled: nativeAvailable(), refetchInterval: 1000 });
-  const native = useQuery({ queryKey: queryKeys.operations, queryFn: () => call<OperationProgress[]>('list_operation_progress'), enabled: nativeAvailable(), refetchInterval: 1000 });
+  const downloads = useQuery({ queryKey: queryKeys.downloads, queryFn: libraryApi.downloadJobs, enabled: nativeAvailable() });
+  const native = useQuery({ queryKey: queryKeys.operations, queryFn: () => call('list_operation_progress'), enabled: nativeAvailable() });
   useEffect(() => {
     if (native.data) setOperations(current => mergeOperationProgress(current, native.data));
   }, [native.data]);

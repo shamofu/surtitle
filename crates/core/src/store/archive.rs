@@ -35,6 +35,10 @@ impl Store {
         crate::transfer::validate(archive)?;
         self.backup(backup_path)?;
         let tx = self.conn.transaction()?;
+        tx.execute(
+            "UPDATE learning_metadata SET value=? WHERE key='generation'",
+            [id()],
+        )?;
         tx.execute_batch(
             "DELETE FROM transcript_publications; DELETE FROM transcript_issues; DELETE FROM editor_drafts; DELETE FROM draft_study_selections; DELETE FROM transcript_range_selections; DELETE FROM transcript_range_revisions; DELETE FROM transcript_draft_heads; DELETE FROM transcript_adoptions; DELETE FROM transcript_drafts; DELETE FROM ai_result_applications; DELETE FROM reviews; DELETE FROM cards; DELETE FROM segments; DELETE FROM media;",
         )?;

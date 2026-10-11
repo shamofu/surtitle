@@ -125,6 +125,12 @@ export function StudyTranscript({
   const initialMeasurements = cached?.search === search && cached.showTranslations === showTranslations ? cached : undefined;
   const previousLayout = useRef({ search, showTranslations, width: initialMeasurements?.width });
   const virtualizer = useVirtualizer({
+    // Scroll restoration and dynamic row measurements also run in layout effects.
+    // Let React 19 batch these updates instead of re-entering a commit via flushSync.
+    useFlushSync: false,
+    // The transcript is retained behind the inspector. Hidden rows report zero
+    // height; retaining their cache avoids moving a manually browsed position.
+    useCachedMeasurements: !active || tab !== 'transcript',
     count: filtered.length,
     getScrollElement: () => scrollRef.current,
     getItemKey: (index) => filtered[index].id,
@@ -135,6 +141,8 @@ export function StudyTranscript({
   });
   const viewportWidth = virtualizer.scrollRect?.width ?? 0;
   const viewportHeight = virtualizer.scrollRect?.height ?? 0;
+  const activeIndex = filtered.findIndex(item => item.id === activeId);
+  const measuredActive = virtualizer.getVirtualItems().find(item => item.index === activeIndex);
 
   useLayoutEffect(() => {
     if (!active || tab !== 'transcript' || !scrollRef.current) return;
@@ -156,22 +164,21 @@ export function StudyTranscript({
         followedSubtitle.current = undefined;
         return;
       }
-      const index = filtered.findIndex(item => item.id === activeId);
       // A retained panel can still have the hidden viewport's zero-height
       // measurement when it opens. Align after ResizeObserver reports its size.
-      if (index < 0 || viewportHeight <= 0) return;
+      if (activeIndex < 0 || viewportHeight <= 0) return;
       const scroll = scrollRef.current;
       const smooth = !reducedMotion && followedSubtitle.current !== undefined &&
         followedSubtitle.current !== activeId;
       followedSubtitle.current = activeId;
-      virtualizer.scrollToIndex(index, { align: 'center', behavior: smooth ? 'smooth' : 'auto' });
+      virtualizer.scrollToIndex(activeIndex, { align: 'center', behavior: smooth ? 'smooth' : 'auto' });
       return () => {
         // Interrupt an in-flight follow before manual scrolling, hiding the
         // panel, changing motion preferences, or following another subtitle.
         if (scroll) virtualizer.scrollToOffset(scroll.scrollTop, { behavior: 'auto' });
       };
     },
-    [active, activeId, following, search, tab, filtered.length, showTranslations, reducedMotion, viewportWidth, viewportHeight]
+    [active, activeId, activeIndex, measuredActive?.start, measuredActive?.size, following, search, tab, filtered.length, showTranslations, reducedMotion, viewportWidth, viewportHeight]
   );
 
   return (
@@ -358,10 +365,10 @@ export function StudyTranscript({
                       className="transcript-scroll"
                       tabIndex={0}
                       aria-label={t('字幕一覧', 'Subtitle list')}
-                      onScroll={event => updateView({
+                      onScroll={event => { if (!active || tab !== 'transcript') return; updateView({
                         scrollOffset: event.currentTarget.scrollTop,
                         measurementCache: { search, showTranslations, width: event.currentTarget.clientWidth, items: virtualizer.takeSnapshot() },
-                      })}
+                      }); }}
                       onWheel={() => updateView({ following: false })}
                       onTouchMove={() => updateView({ following: false })}
                       onPointerDown={event => {

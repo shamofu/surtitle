@@ -14,13 +14,19 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
+  render as renderComponent,
   screen,
   waitFor,
   within,
 } from '@testing-library/react';
 import { DraftStudyPanel } from '../features/study/drafts/DraftStudyPanel';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
+import { queryKeys } from '../shared/query/keys';
+let queryClient: QueryClient;
+const render = (node: ReactNode) => renderComponent(node, { wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider> });
 vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
+vi.mock('../shared/editing/drafts', () => import('./editing-mocks'));
 import { studyApi } from '../features/study/api';
 import { aiApi } from '../features/ai/api';
 import type { AiModelPreference } from '../shared/contracts/ai';
@@ -28,6 +34,7 @@ import type { AiQuote } from '../shared/contracts/ai';
 import type { AppSnapshot } from '../shared/contracts/snapshot';
 import type { Media } from '../shared/contracts/media';
 import type { TranscriptReview } from '../shared/contracts/transcript';
+import { uiDraftApi } from '../shared/editing/drafts';
 import { draftStudyApi } from '../features/study/drafts/api';
 import { savedDraftText } from '../features/study/drafts/saved-text';
 import type { DraftSelection } from '../features/study/drafts/api';
@@ -67,6 +74,7 @@ vi.mock('../features/study/api', () => ({
 vi.mock('../features/ai/api', () => ({ aiApi: { approveQuote: vi.fn() } }));
 
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
+vi.mock('../shared/native/window', () => ({ registerCloseTask: () => () => {}, subscribeWindowClose: () => () => {}, closeWindow: vi.fn() }));
 vi.mock('../features/study/drafts/api', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../features/study/drafts/api')>();
@@ -227,6 +235,10 @@ afterAll(() => {
   Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
 });
 beforeEach(() => {
+  vi.mocked(uiDraftApi.get).mockResolvedValue(null);
+  vi.mocked(uiDraftApi.remove).mockResolvedValue(undefined);
+  vi.mocked(uiDraftApi.save).mockImplementation(async (kind, entityId, expectedRevision, fields) => ({ kind, entityId, revision: expectedRevision + 1, fields, updatedAt: '', stale: false }));
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   bookmarks = [];
   context.data = {
     media: [media],
@@ -283,6 +295,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  queryClient.clear();
   cleanup();
   vi.useRealTimers();
   vi.resetAllMocks();
@@ -331,10 +344,10 @@ describe('study from independently saved draft excerpts', () => {
     });
     expect(
       editor.getByRole('button', { name: 'Create an audio card' }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(
       editor.getByRole('button', { name: 'AI help for this phrase' }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(draftStudyApi.saveCard).not.toHaveBeenCalled();
     expect(draftStudyApi.createQuote).not.toHaveBeenCalled();
     expect(aiApi.approveQuote).not.toHaveBeenCalled();
@@ -344,49 +357,14 @@ describe('study from independently saved draft excerpts', () => {
     expect(onReview).toHaveBeenCalledExactlyOnceWith('job');
   });
 
-  it('requires current audio replay and explicit confirmation; editing invalidates both', async () => {
-    const { editor, onPlay } = await openSelection();
-    const acknowledge = editor.getByRole('checkbox');
-    expect(acknowledge).toBeDisabled();
-    fireEvent.click(
-      editor.getByRole('button', { name: 'Play audio for this text' }),
-    );
-    await waitFor(() => expect(acknowledge).toBeEnabled());
-    expect(onPlay).toHaveBeenCalledExactlyOnceWith({
-      startMs: 1000,
-      endMs: 2500,
-    });
-    fireEvent.click(acknowledge);
-    expect(
-      editor.getByRole('button', { name: 'Confirm this text and audio' }),
-    ).toBeEnabled();
-    fireEvent.change(editor.getByLabelText('Text to learn'), {
-      target: { value: 'Blue beagle.' },
-    });
-    expect(acknowledge).not.toBeChecked();
-    expect(acknowledge).toBeDisabled();
-    fireEvent.click(
-      editor.getByRole('button', { name: 'Play audio for this text' }),
-    );
-    await waitFor(() => expect(acknowledge).toBeEnabled());
-    fireEvent.click(acknowledge);
-    fireEvent.click(
-      editor.getByRole('button', { name: 'Confirm this text and audio' }),
-    );
-    await waitFor(() =>
-      expect(draftStudyApi.update).toHaveBeenCalledExactlyOnceWith({
-        id: selection.id,
-        version: 0,
-        text: 'Blue beagle.',
-        startMs: 1000,
-        endMs: 2500,
-        confirm: true,
-      }),
-    );
-    expect(
-      await screen.findByRole('button', { name: 'Create an audio card' }),
-    ).toBeEnabled();
-    expect(aiApi.approveQuote).not.toHaveBeenCalled();
+  it('opens card creation directly and binds edited text to its revision in the same action', async () => {
+    const { editor } = await openSelection();
+    expect(editor.queryByRole('checkbox')).not.toBeInTheDocument();
+    fireEvent.change(editor.getByLabelText('Text to learn'), { target: { value: 'Blue beagle.' } });
+    fireEvent.click(editor.getByRole('button', { name: 'Create an audio card' }));
+    await waitFor(() => expect(draftStudyApi.update).toHaveBeenCalledExactlyOnceWith({ id: selection.id, version: 0, text: 'Blue beagle.', startMs: 1000, endMs: 2500, confirm: true }));
+    await screen.findByRole('dialog', { name: 'Keep this phrase' });
+    expect(draftStudyApi.saveCard).not.toHaveBeenCalled(); expect(aiApi.approveQuote).not.toHaveBeenCalled();
   });
 
   it('retains invalid-timing raw text as source-block text without word or cue synchronization', async () => {
@@ -470,7 +448,7 @@ describe('study from independently saved draft excerpts', () => {
     );
   });
 
-  it('saves a postponed revision without enabling card or AI actions', async () => {
+  it('saves a postponed revision without executing card or AI actions', async () => {
     const { editor } = await openSelection();
     fireEvent.change(editor.getByLabelText('Text to learn'), {
       target: { value: 'Check this later.' },
@@ -490,10 +468,10 @@ describe('study from independently saved draft excerpts', () => {
     );
     expect(
       screen.getByRole('button', { name: 'Create an audio card' }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(
       screen.getByRole('button', { name: 'AI help for this phrase' }),
-    ).toBeDisabled();
+    ).toBeEnabled();
   });
 
   it('keeps replay times within source bounds and does not accept reversed or empty ranges', async () => {
@@ -513,17 +491,12 @@ describe('study from independently saved draft excerpts', () => {
     expect(draftStudyApi.update).not.toHaveBeenCalled();
   });
 
-  it('does not mark a failed player command as listened', async () => {
-    const { editor, onPlay } = await openSelection();
-    onPlay.mockRejectedValue(new Error('player source changed'));
-    fireEvent.click(
-      editor.getByRole('button', { name: 'Play audio for this text' }),
-    );
-    await waitFor(() => expect(onPlay).toHaveBeenCalledTimes(1));
-    expect(editor.getByRole('checkbox')).toBeDisabled();
-    expect(
-      editor.getByRole('button', { name: 'Confirm this text and audio' }),
-    ).toBeDisabled();
+  it('reports failed playback without adding a listening approval gate', async () => {
+    const { editor, onPlay } = await openSelection(); onPlay.mockRejectedValue(Error('player source changed'));
+    fireEvent.click(editor.getByRole('button', { name: 'Play audio for this text' }));
+    await waitFor(() => expect(onPlay).toHaveBeenCalledOnce());
+    expect(editor.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(draftStudyApi.update).not.toHaveBeenCalled(); expect(aiApi.approveQuote).not.toHaveBeenCalled();
   });
 
   it('blocks stale learning actions while retaining JSON export and removal', async () => {
@@ -577,6 +550,7 @@ describe('study from independently saved draft excerpts', () => {
     expect(
       card.getByRole('button', { name: 'Save card and audio' }),
     ).toBeDisabled();
+    await waitFor(() => expect(card.getByLabelText('Phrase to remember')).toBeEnabled());
     fireEvent.change(card.getByLabelText('Phrase to remember'), {
       target: { value: 'beagle' },
     });
@@ -598,7 +572,9 @@ describe('study from independently saved draft excerpts', () => {
     expect(aiApi.approveQuote).not.toHaveBeenCalled();
   });
 
-  it('estimates only checked text and requires the existing separate quote approval', async () => {
+  it('automatically estimates checked text and sends only with the single Start action', async () => {
+    context.data!.settings.credentialConfigured = true;
+    context.data!.settings.vertexProject = 'project';
     const quote: AiQuote = {
       id: 'quote',
       mediaId: media.id,
@@ -627,9 +603,6 @@ describe('study from independently saved draft excerpts', () => {
       dialog.getByLabelText('Phrase to explain (leave blank for suggestions)'),
       { target: { value: 'beagle' } },
     );
-    fireEvent.click(
-      dialog.getByRole('button', { name: 'Estimate using this checked text' }),
-    );
     await waitFor(() =>
       expect(draftStudyApi.createQuote).toHaveBeenCalledExactlyOnceWith({
         selectionId: 'selection',
@@ -640,10 +613,10 @@ describe('study from independently saved draft excerpts', () => {
     );
     expect(aiApi.approveQuote).not.toHaveBeenCalled();
     const approve = await dialog.findByRole('button', {
-      name: 'Approve this job',
+      name: 'Find expressions',
     });
-    expect(approve).toBeDisabled();
-    fireEvent.click(dialog.getByRole('checkbox'));
+    expect(approve).toBeEnabled();
+    expect(dialog.queryByRole('checkbox')).not.toBeInTheDocument();
     fireEvent.click(approve);
     await waitFor(() =>
       expect(aiApi.approveQuote).toHaveBeenCalledExactlyOnceWith(quote),
@@ -677,7 +650,7 @@ describe('study from independently saved draft excerpts', () => {
       id: 'selection',
       version: 4,
     });
-    expect(card.getByLabelText('Meaning')).toHaveValue('A small hound.');
+    await waitFor(() => expect(card.getByLabelText('Meaning')).toHaveValue('A small hound.'));
     expect(card.getByText('Blue, blue beagle.')).toBeVisible();
     expect(card.queryByText(/model-generated example/)).toBeNull();
     expect(draftStudyApi.saveCard).not.toHaveBeenCalled();
@@ -712,7 +685,8 @@ describe('study from independently saved draft excerpts', () => {
         ],
       },
     });
-    await screen.findByText('A late provider version.', {}, { timeout: 3500 });
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: queryKeys.review('job') }); });
+    await screen.findByText('A late provider version.');
     expect(editor.getByLabelText('Text to learn')).toHaveValue(
       'My checked wording in progress.',
     );
@@ -761,7 +735,7 @@ describe('study from independently saved draft excerpts', () => {
     expect(draftStudyApi.saveCard).not.toHaveBeenCalled();
   });
 
-  it('serializes polling and stops scheduling reads after unmount', async () => {
+  it('deduplicates in-flight reads and performs no periodic reads after completion or unmount', async () => {
     vi.useFakeTimers();
     let finish!: (value: TranscriptReview) => void;
     vi.mocked(studyApi.transcriptReview).mockReturnValue(
@@ -788,12 +762,12 @@ describe('study from independently saved draft excerpts', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000);
     });
-    expect(studyApi.transcriptReview).toHaveBeenCalledTimes(2);
+    expect(studyApi.transcriptReview).toHaveBeenCalledTimes(1);
     component.unmount();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10000);
     });
-    expect(studyApi.transcriptReview).toHaveBeenCalledTimes(2);
+    expect(studyApi.transcriptReview).toHaveBeenCalledTimes(1);
   });
 
   it('bounds rendered draft rows for long recordings without dropping the remaining pages', async () => {

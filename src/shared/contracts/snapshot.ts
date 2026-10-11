@@ -12,3 +12,4 @@ export interface AppSnapshot {
   jobs: JobSummary[];
   budget: BudgetSummary;
 }
+export type SnapshotPatch = Partial<AppSnapshot>;

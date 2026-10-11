@@ -1,50 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { createContext, useContext, useLayoutEffect, useRef, useState, type ReactNode, type TransitionEvent } from 'react';
-import { MotionRegion, useAppMotion, useMotionChange } from '../../shared/motion';
+import { createContext, useContext, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { MotionRegion, useMotionChange } from '../../shared/motion';
 
 const StudyRegionActivity = createContext(true);
 export const useStudyRegionActive = () => useContext(StudyRegionActivity);
 
-/** CSS owns the continuous, reversible geometry; React owns activity and lifetime. */
+/** One deliberate layout change keeps the native video aligned with the page. */
 export function useStudyPresence(open: boolean) {
-  const { reducedMotion } = useAppMotion();
-  const [state, setState] = useState({ target: open, retained: open, moving: false });
-  const latest = useRef(open);
-  latest.current = open;
-  if (state.target !== open) {
-    setState({ target: open, retained: open || state.retained, moving: !reducedMotion && !document.hidden });
-  }
-  const finish = () => setState({ target: latest.current, retained: latest.current, moving: false });
-  useLayoutEffect(() => {
-    if (reducedMotion || document.hidden || !state.moving) {
-      if (state.retained !== open || state.moving) finish();
-      return;
-    }
-    // WebViews can omit transitionend when hidden or resized. Settle to the latest
-    // target in those cases, and let the native surface observe the final layout.
-    const timer = window.setTimeout(finish, 320);
-    const visibility = () => { if (document.hidden) finish(); };
-    document.addEventListener('visibilitychange', visibility);
-    window.addEventListener('resize', finish);
-    return () => {
-      window.clearTimeout(timer);
-      document.removeEventListener('visibilitychange', visibility);
-      window.removeEventListener('resize', finish);
-    };
-  }, [open, state.moving, state.retained, reducedMotion]);
-  return {
-    visible: open || (state.retained && !reducedMotion),
-    moving: state.moving && !reducedMotion,
-    dockProps: {
-      'data-open': open,
-      'data-moving': state.moving && !reducedMotion,
-      onTransitionEnd: (event: TransitionEvent<HTMLDivElement>) => {
-        if (event.target === event.currentTarget && (event.propertyName === 'width' || event.propertyName === 'height')) finish();
-      },
-    },
-  };
+  return { visible: open, moving: false, dockProps: { 'data-open': open, 'data-moving': false } };
 }
-
 /** Tab content changes immediately, with only the incoming view fading in. */
 export function StudyRegion({ open, children, keepMounted = false, freezeOnExit = true, className = '', retain = false, animate = true }: {
   open: boolean;

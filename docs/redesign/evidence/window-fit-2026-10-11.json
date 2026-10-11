@@ -1,0 +1,35 @@
+{
+  "scope": "Native work-area fitting and post-change workspace regression checks",
+  "rustToolchain": "1.99.0",
+  "geometryTests": {
+    "passed": 5,
+    "failed": 0,
+    "covers": [
+      "Normal 125% logical minimum and requested size",
+      "Measured 200% work area and frame, including 636.5 logical client height",
+      "Smaller work area reducing both minimum dimensions",
+      "Negative monitor origin and top taskbar",
+      "Idempotent transition to roomier 100% monitor"
+    ]
+  },
+  "workspace": {
+    "command": "cargo test --workspace --all-features --locked",
+    "passed": 553,
+    "failed": 0,
+    "ignored": 12,
+    "ignoredClassification": "Harness entries include separately executed integrations and subprocess helpers exercised by parent tests; this is not a count of unexecuted requirements.",
+    "byPackage": {
+      "surtitle": 180,
+      "surtitle-ai": 246,
+      "surtitle-ai-validation": 19,
+      "surtitle-core": 86,
+      "surtitle-tools": 22
+    },
+    "log": "work/rust-1.99-window-fit-workspace.log"
+  },
+  "format": "cargo fmt --all -- --check passed",
+  "clippy": "cargo clippy -p surtitle --all-targets --all-features --locked -- -D warnings passed",
+  "adaptivePacingReview": "No new finding. Schema inspection and migration use one IMMEDIATE transaction, rollback preserves the legacy table after interruption/error, marker prevents repeated migration, and observed cooldowns/approval floors/unknown holds remain intact.",
+  "nativeAcceptance": "At this unit-test checkpoint, installed-window startup and monitor-transition checks were pending. Subsequent normal installed c geometry-candidate checks passed real 100% to 200% scaling, fresh 200% startup and mixed-monitor movement; see native-c-dpi-live-96-to-192.json and native-c-dpi-192.json. The c build predates the restore-boundary correction and is not final d package acceptance.",
+  "paidRequestsInThisValidation": 0
+}

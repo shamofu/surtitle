@@ -44,11 +44,25 @@ pub fn commit_subtitle_editor_draft(
     reference: EditorDraftVersion,
     segment: SubtitleSegment,
 ) -> IpcResult<Option<String>> {
-    crate::application::editor_drafts::commit_subtitle_editor_draft(
+    let committed_changes = state.changes.clone();
+    let changed_subtitles = None;
+    let changed_media = None;
+    let result = crate::application::editor_drafts::commit_subtitle_editor_draft(
         state.inner().clone(),
         reference,
         segment,
-    )
+    );
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Subtitles,
+            changed_subtitles,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Media,
+            changed_media,
+        );
+    }
+    result
 }
 #[tauri::command]
 pub async fn save_phrase_editor_draft(
@@ -57,11 +71,20 @@ pub async fn save_phrase_editor_draft(
     request: SaveCard,
     operation_id: Option<String>,
 ) -> IpcResult<()> {
-    crate::application::editor_drafts::save_phrase_editor_draft(
+    let committed_changes = state.changes.clone();
+    let changed_cards = None;
+    let result = crate::application::editor_drafts::save_phrase_editor_draft(
         state.inner().clone(),
         reference,
         request,
         operation_id,
     )
-    .await
+    .await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Cards,
+            changed_cards,
+        );
+    }
+    result
 }

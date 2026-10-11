@@ -294,6 +294,155 @@ async fn approved_batches_use_the_real_worker_and_persist_each_application_once(
 }
 
 #[tokio::test]
+async fn another_job_can_start_during_a_request_and_gets_the_next_dispatch_turn() {
+    let fixture = Fixture::new().await;
+    let bulk = fixture.offline(Scenario::Translation);
+    let mut first = bulk.checkpoint(Stage::AfterSend, 0);
+    let bulk_worker = fixture.start(fixture.approve(), bulk.clone());
+    reached(&mut first).await;
+    let quote = create_quote(
+        fixture.state.clone(),
+        QuoteRequest {
+            media_id: "offline-app-media".into(),
+            kind: "translate".into(),
+            start_ms: 0,
+            end_ms: 1000,
+            focus_term: None,
+            model: None,
+        },
+    )
+    .await
+    .unwrap();
+    let approved =
+        approve_for_execution(&fixture.state, &quote.id, &quote.digest, false, false, true)
+            .unwrap();
+    let interactive = Arc::new(
+        OfflineVertexService::new(
+            fixture.state.ai.clone(),
+            &quote.id,
+            Scenario::SingleTranslation,
+        )
+        .unwrap(),
+    );
+    let mut second = interactive.checkpoint(Stage::AfterSend, 0);
+    let state = fixture.state.clone();
+    let job_id = quote.id.clone();
+    let service = interactive.clone();
+    let interactive_worker = tokio::spawn(run_approved_with(state, job_id, approved, move |_| {
+        Ok(service)
+    }));
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !fixture.state.ai_session.dispatch.is_waiting(&quote.id) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(interactive.sent_ordinals().is_empty());
+    assert_eq!(fixture.state.ai.quote(&quote.id).unwrap().state, "approved");
+    assert!(fixture.state.ai.job_issue(&quote.id).unwrap().is_none());
+    first.resume();
+    reached(&mut second).await;
+    assert_eq!(bulk.sent_ordinals(), [0]);
+    second.resume();
+    finished(interactive_worker).await.unwrap();
+    finished(bulk_worker).await.unwrap();
+    assert_eq!(interactive.sent_ordinals(), [0]);
+    assert_eq!(bulk.sent_ordinals(), [0, 1]);
+    assert_eq!(
+        fixture.state.ai.summary().unwrap().unknown_attempts.len(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn queued_pause_cancel_or_new_unknown_outcome_never_dispatches_waiting_work() {
+    for stop in ["pause", "cancel", "unknown"] {
+        let fixture = Fixture::new().await;
+        let bulk = fixture.offline(if stop == "unknown" {
+            Scenario::SendFailure
+        } else {
+            Scenario::Translation
+        });
+        let mut sent = bulk.checkpoint(Stage::AfterSend, 0);
+        let bulk_worker = fixture.start(fixture.approve(), bulk.clone());
+        reached(&mut sent).await;
+        let quote = create_quote(
+            fixture.state.clone(),
+            QuoteRequest {
+                media_id: "offline-app-media".into(),
+                kind: "translate".into(),
+                start_ms: 0,
+                end_ms: 1000,
+                focus_term: None,
+                model: None,
+            },
+        )
+        .await
+        .unwrap();
+        let approved =
+            approve_for_execution(&fixture.state, &quote.id, &quote.digest, false, false, true)
+                .unwrap();
+        let service = Arc::new(
+            OfflineVertexService::new(
+                fixture.state.ai.clone(),
+                &quote.id,
+                Scenario::SingleTranslation,
+            )
+            .unwrap(),
+        );
+        let state = fixture.state.clone();
+        let job_id = quote.id.clone();
+        let executor = service.clone();
+        let waiting = tokio::spawn(run_approved_with(state, job_id, approved, move |_| {
+            Ok(executor)
+        }));
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !fixture.state.ai_session.dispatch.is_waiting(&quote.id) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        match stop {
+            "pause" => fixture.state.ai.pause(&quote.id).unwrap(),
+            "cancel" => fixture.state.ai.cancel(&quote.id).unwrap(),
+            _ => {}
+        }
+        sent.resume();
+        let result = finished(waiting).await;
+        let bulk_result = finished(bulk_worker).await;
+        assert!(service.sent_ordinals().is_empty(), "{stop}");
+        assert!(!fixture.state.ai_session.dispatch.is_waiting(&quote.id));
+        assert_eq!(
+            fixture
+                .state
+                .ai
+                .quote(&quote.id)
+                .unwrap()
+                .request_counts
+                .in_flight,
+            0
+        );
+        if stop == "unknown" {
+            assert!(result.is_err());
+            assert!(bulk_result.is_err());
+            let summary = fixture.state.ai.summary().unwrap();
+            assert_eq!(summary.unknown_attempts.len(), 1);
+            assert!(summary.daily_held_microusd > 0);
+            assert_eq!(
+                fixture.state.ai.job_issue(&quote.id).unwrap().unwrap().code,
+                "unknown_outcome"
+            );
+        } else {
+            result.unwrap();
+            bulk_result.unwrap();
+            assert!(fixture.state.ai.job_issue(&quote.id).unwrap().is_none());
+        }
+    }
+}
+
+#[tokio::test]
 async fn simultaneous_approvals_start_only_one_worker() {
     let fixture = Fixture::new().await;
     let barrier = Arc::new(std::sync::Barrier::new(3));

@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { Children, cloneElement, Fragment, isValidElement, useCallback, useId, useLayoutEffect, useRef } from 'react';
-import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { Children, cloneElement, Fragment, isValidElement, useId, useLayoutEffect, useRef } from 'react';
+import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode, RefObject } from 'react';
+import { Button as AriaButton, Dialog, Modal as AriaModal, ModalOverlay } from 'react-aria-components';
 import { ArrowUpRight, LoaderCircle, X } from 'lucide-react';
 import { useSurface, useAppearance } from '../../app/runtime';
-import { MotionRegion, MotionSwap, motionCssEase, motionDurations, useAppMotion } from '../motion';
-import './modal-motion.css';
+import { MotionRegion, MotionSwap } from '../motion';
 export { useModalExit } from './useModalExit';
 
 export function Button({
@@ -48,16 +47,7 @@ export function IconButton({
     </button>
   );
 }
-export function Modal({
-  title,
-  eyebrow,
-  onClose,
-  children,
-  wide = false,
-  closeDisabled = false,
-  open = true,
-  onExited,
-}: {
+interface ModalProps {
   title: string;
   eyebrow?: string;
   onClose: () => void;
@@ -66,92 +56,75 @@ export function Modal({
   closeDisabled?: boolean;
   open?: boolean;
   onExited?: () => void;
-}) {
-  const { registerModal, activeModal } = useSurface();
+}
+export function Modal(props: ModalProps) {
+  const { activeModal } = useSurface();
+  const dialog = useRef<HTMLElement>(null);
+  const { open = true, closeDisabled = false } = props;
+  function requestClose() {
+    if (open && !closeDisabled && (!activeModal || activeModal === dialog.current)) props.onClose();
+  }
+  return <ModalOverlay
+    className="modal-overlay"
+    isOpen
+    isDismissable={open && !closeDisabled}
+    isKeyboardDismissDisabled={!open || closeDisabled}
+    onOpenChange={next => { if (!next) requestClose(); }}
+  >
+    <AriaModal className="modal-container">
+      <ModalContent {...props} dialog={dialog} requestClose={requestClose} />
+    </AriaModal>
+  </ModalOverlay>;
+}
+// This component mounts inside React Aria's portal, so surface registration
+// happens with the actual dialog node before it can be painted over native video.
+function ModalContent({
+  title,
+  eyebrow,
+  children,
+  wide = false,
+  closeDisabled = false,
+  open = true,
+  onExited,
+  dialog,
+  requestClose,
+}: ModalProps & { dialog: RefObject<HTMLElement | null>; requestClose: () => void }) {
+  const { registerModal } = useSurface();
   const { t } = useAppearance();
-  const { reducedMotion } = useAppMotion();
-  const dialog = useRef<HTMLDialogElement>(null);
   const notificationHost = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  const release = useRef<(() => void) | null>(null);
   const completed = useRef(false);
-  const latest = useRef({ open, onExited });
-  latest.current = { open, onExited };
-  const finishExit = useCallback(() => {
-    if (latest.current.open || completed.current) return;
-    completed.current = true;
-    release.current?.();
-    latest.current.onExited?.();
-  }, []);
-  // Register the native top layer before paint so an immediate Escape cannot
-  // observe the previous modal as the active surface.
+  // Keep the opaque native exclusion until the owner unmounts. An accepted close can
+  // still fail asynchronously; its inputs and focus scope must survive a retry.
   useLayoutEffect(() => {
     const element = dialog.current;
     const host = notificationHost.current;
-    if (!element || !host || !open) return;
-    completed.current = false;
-    if (release.current) return;
-    const opener = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    element.showModal();
-    const cleanup = registerModal(element, host);
-    release.current = () => {
-      if (!release.current) return;
-      release.current = null;
-      element.close();
-      cleanup();
-      // WebView2 can lose native dialog focus restoration when React removes it.
-      // Wait for the closing render, and never steal focus from another dialog.
-      window.requestAnimationFrame(() => {
-        if (!opener?.isConnected) return;
-        const dialogs = Array.from(document.querySelectorAll('dialog[open]'));
-        if (dialogs.length && !dialogs.some(item => item.contains(opener))) return;
-        if (document.activeElement === document.body ||
-            !document.activeElement || element?.contains(document.activeElement)) {
-          opener.focus({ preventScroll: true });
-        }
-      });
-    };
-  }, [open, registerModal]);
-  useLayoutEffect(() => () => { release.current?.(); }, []);
+    if (!element || !host) return;
+    const unregister = registerModal(element, host);
+    // Async editors initially render disabled inputs. Put keyboard focus on the
+    // dialog before painting so inerting the opener cannot leave Escape on body.
+    // React Aria still owns containment, IME handling, and return focus.
+    if (!element.contains(document.activeElement)) element.focus({ preventScroll: true });
+    return unregister;
+  }, [dialog, registerModal]);
   useLayoutEffect(() => {
-    if (open) return;
+    if (open) { completed.current = false; return; }
     // Move focus out before making the old controls inert. Notifications remain usable.
     const element = dialog.current;
     if (element?.querySelector('.modal-body')?.contains(document.activeElement)) element.focus({ preventScroll: true });
-    if (reducedMotion) { finishExit(); return; }
-    // A bounded timer also completes in a hidden WebView; cancelled CSS animations
-    // cannot deliver a stale completion to a dialog that has been reopened.
-    const timer = window.setTimeout(finishExit, motionDurations.exit * 1000 + 100);
-    return () => window.clearTimeout(timer);
-  }, [open, reducedMotion, finishExit]);
-  function requestClose() {
-    if (open && !closeDisabled && (!activeModal || activeModal === dialog.current)) onClose();
-  }
-  return createPortal(
-    <dialog
+    if (completed.current) return;
+    completed.current = true;
+    // Opaque native-video exclusions cannot follow CSS fades or transforms.
+    // There is no visual exit to wait for; keep this scope while the owner commits.
+    onExited?.();
+  }, [open, onExited, dialog]);
+  return (
+    <Dialog
       ref={dialog}
       className={`modal ${wide ? 'wide' : ''}`}
       aria-labelledby={titleId}
-      tabIndex={-1}
+      data-app-modal=""
       data-state={open ? 'open' : 'closing'}
-      data-motion={reducedMotion ? 'reduced' : 'full'}
-      style={{ '--modal-duration': `${open ? motionDurations.enter : motionDurations.exit}s`, '--modal-ease': motionCssEase } as CSSProperties}
-      onAnimationEnd={(event) => {
-        if (event.target === event.currentTarget && event.animationName === 'modal-exit') finishExit();
-      }}
-      onCancel={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (event.target === event.currentTarget) requestClose();
-      }}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          event.stopPropagation();
-          requestClose();
-        }
-      }}
     >
       <div className="modal-inner">
         <header className="modal-header">
@@ -159,9 +132,9 @@ export function Modal({
             {eyebrow && <span className="eyebrow">{eyebrow}</span>}
             <h2 id={titleId}>{title}</h2>
           </div>
-          <IconButton label={t('閉じる', 'Close')} disabled={closeDisabled || !open} onClick={requestClose}>
+          <AriaButton className="icon-button" aria-label={t('閉じる', 'Close')} isDisabled={closeDisabled || !open} onPress={requestClose}>
             <X size={20} />
-          </IconButton>
+          </AriaButton>
         </header>
         <div className="modal-notifications" ref={notificationHost} />
         <div className="modal-body" inert={!open} onClickCapture={event => {
@@ -170,8 +143,7 @@ export function Modal({
           if (!open) { event.preventDefault(); event.stopPropagation(); }
         }}>{children}</div>
       </div>
-    </dialog>,
-    document.body,
+    </Dialog>
   );
 }
 export function EmptyState({

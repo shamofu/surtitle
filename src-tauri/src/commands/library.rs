@@ -29,7 +29,16 @@ pub async fn import_local_media(
     state: State<'_, AppState>,
     request: ImportRequest,
 ) -> IpcResult<LocalMediaImportResult> {
-    crate::application::library::import_local_media(state.inner().clone(), request)
+    let committed_changes = state.changes.clone();
+    let changed_media = None;
+    let result = crate::application::library::import_local_media(state.inner().clone(), request);
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Media,
+            changed_media,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -38,7 +47,17 @@ pub async fn import_media(
     state: State<'_, AppState>,
     request: ImportRequest,
 ) -> IpcResult<()> {
-    crate::application::library::import_media(app, state.inner().clone(), request).await
+    let committed_changes = state.changes.clone();
+    let changed_media = None;
+    let result =
+        crate::application::library::import_media(app, state.inner().clone(), request).await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Media,
+            changed_media,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -52,7 +71,16 @@ pub async fn start_url_import(
 
 #[tauri::command]
 pub async fn relink_media(state: State<'_, AppState>, media_id: String) -> IpcResult<()> {
-    crate::application::library::relink_media(state.inner().clone(), media_id).await
+    let committed_changes = state.changes.clone();
+    let changed_media = Some(media_id.clone());
+    let result = crate::application::library::relink_media(state.inner().clone(), media_id).await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Media,
+            changed_media,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -61,5 +89,30 @@ pub async fn remove_media(
     state: State<'_, AppState>,
     media_id: String,
 ) -> IpcResult<()> {
-    crate::application::library::remove_media(app, state.inner().clone(), media_id).await
+    let committed_changes = state.changes.clone();
+    let changed_media = Some(media_id.clone());
+    let changed_cards = None;
+    let changed_subtitles = Some(media_id.clone());
+    let changed_drafts = Some(media_id.clone());
+    let result =
+        crate::application::library::remove_media(app, state.inner().clone(), media_id).await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Media,
+            changed_media,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Cards,
+            changed_cards,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Subtitles,
+            changed_subtitles,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Drafts,
+            changed_drafts,
+        );
+    }
+    result
 }

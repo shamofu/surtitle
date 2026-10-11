@@ -42,7 +42,10 @@ pub async fn save_manual_transcript_range(
     expected_range_version: u64,
     content: ManualTranscriptContent,
 ) -> std::result::Result<TranscriptReview, String> {
-    crate::application::transcript::ranges::save_manual_transcript_range(
+    let committed_changes = state.changes.clone();
+    let changed_review = Some(job_id.clone());
+    let changed_drafts = None;
+    let result = crate::application::transcript::ranges::save_manual_transcript_range(
         state.inner().clone(),
         job_id,
         draft_digest,
@@ -50,7 +53,18 @@ pub async fn save_manual_transcript_range(
         expected_range_version,
         content,
     )
-    .await
+    .await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Review,
+            changed_review,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Drafts,
+            changed_drafts,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -62,7 +76,10 @@ pub async fn select_transcript_range_source(
     expected_range_version: u64,
     source: TranscriptRangeSelection,
 ) -> std::result::Result<TranscriptReview, String> {
-    crate::application::transcript::ranges::select_transcript_range_source(
+    let committed_changes = state.changes.clone();
+    let changed_review = Some(job_id.clone());
+    let changed_drafts = None;
+    let result = crate::application::transcript::ranges::select_transcript_range_source(
         state.inner().clone(),
         job_id,
         draft_digest,
@@ -70,7 +87,18 @@ pub async fn select_transcript_range_source(
         expected_range_version,
         source,
     )
-    .await
+    .await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Review,
+            changed_review,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Drafts,
+            changed_drafts,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -103,13 +131,27 @@ pub async fn reparse_transcript_evidence(
     ordinal: u32,
     evidence_sha256: String,
 ) -> std::result::Result<TranscriptReview, String> {
-    crate::application::transcript::review::reparse_transcript_evidence(
+    let committed_changes = state.changes.clone();
+    let changed_review = Some(job_id.clone());
+    let changed_drafts = None;
+    let result = crate::application::transcript::review::reparse_transcript_evidence(
         state.inner().clone(),
         job_id,
         ordinal,
         evidence_sha256,
     )
-    .await
+    .await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Review,
+            changed_review,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Drafts,
+            changed_drafts,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -120,14 +162,28 @@ pub async fn select_transcript_reparse(
     candidate_id: String,
     draft_digest: String,
 ) -> std::result::Result<TranscriptReview, String> {
-    crate::application::transcript::review::select_transcript_reparse(
+    let committed_changes = state.changes.clone();
+    let changed_review = Some(job_id.clone());
+    let changed_drafts = None;
+    let result = crate::application::transcript::review::select_transcript_reparse(
         state.inner().clone(),
         job_id,
         ordinal,
         candidate_id,
         draft_digest,
     )
-    .await
+    .await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Review,
+            changed_review,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Drafts,
+            changed_drafts,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -138,14 +194,28 @@ pub async fn resolve_transcript_boundary(
     boundary_id: String,
     choice: BoundaryChoice,
 ) -> std::result::Result<TranscriptReview, String> {
-    crate::application::transcript::review::resolve_transcript_boundary(
+    let committed_changes = state.changes.clone();
+    let changed_review = Some(job_id.clone());
+    let changed_drafts = None;
+    let result = crate::application::transcript::review::resolve_transcript_boundary(
         state.inner().clone(),
         job_id,
         draft_digest,
         boundary_id,
         choice,
     )
-    .await
+    .await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Review,
+            changed_review,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Drafts,
+            changed_drafts,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -155,13 +225,27 @@ pub async fn acknowledge_transcript_warning(
     draft_digest: String,
     warning_id: String,
 ) -> std::result::Result<TranscriptReview, String> {
-    crate::application::transcript::review::acknowledge_transcript_warning(
+    let committed_changes = state.changes.clone();
+    let changed_review = Some(job_id.clone());
+    let changed_drafts = None;
+    let result = crate::application::transcript::review::acknowledge_transcript_warning(
         state.inner().clone(),
         job_id,
         draft_digest,
         warning_id,
     )
-    .await
+    .await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Review,
+            changed_review,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Drafts,
+            changed_drafts,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -170,12 +254,46 @@ pub async fn apply_transcript_review(
     job_id: String,
     draft_digest: String,
 ) -> std::result::Result<TranscriptReview, String> {
-    crate::application::transcript::review::apply_transcript_review(
+    let committed_changes = state.changes.clone();
+    let changed_jobs = Some(job_id.clone());
+    let changed_budget = None;
+    let changed_subtitles = None;
+    let changed_media = None;
+    let changed_review = Some(job_id.clone());
+    let changed_drafts = None;
+    let result = crate::application::transcript::review::apply_transcript_review(
         state.inner().clone(),
         job_id,
         draft_digest,
     )
-    .await
+    .await;
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Jobs,
+            changed_jobs,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Budget,
+            changed_budget,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Subtitles,
+            changed_subtitles,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Media,
+            changed_media,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Review,
+            changed_review,
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Drafts,
+            changed_drafts,
+        );
+    }
+    result
 }
 
 #[tauri::command]

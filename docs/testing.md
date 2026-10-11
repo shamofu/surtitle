@@ -76,7 +76,7 @@ pnpm test:rust:required windows-six-hour
 
 The runner applies test-only optimization. The test writes its report under `work/ai-six-hour-acceptance/`; the manual native-acceptance workflow runs it separately.
 
-The spoken suite requires `SURTITLE_SPOKEN_FIXTURES` containing the pinned WAV/TextGrid/text files for LibriSpeech `1089-134686-0001` and `1089-134686-0003`. Acquisition of all six files and alignment provenance is not automated; supply the matching local files before selecting this suite.
+The spoken suite requires `SURTITLE_SPOKEN_FIXTURES` containing the pinned WAV/TextGrid/text files for LibriSpeech `1089-134686-0001` and `1089-134686-0003`. Run `python e2e/evaluation/acquire-spoken-fixtures.py --ffmpeg PATH_TO_FFMPEG` to acquire the six small files from the exact upstream commit into `work/spoken-fixture-acquisition`, retaining source URLs and hashes. It rewraps the original PCM16 audio, verifies byte-identical samples and the existing test hashes, and records the upstream automatic MFA alignment provenance. Set `SURTITLE_SPOKEN_FIXTURES` to that absolute directory before selecting this suite. The test itself never downloads inputs or calls a provider.
 
 ## Live verification and fixtures
 

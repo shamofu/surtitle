@@ -47,61 +47,27 @@ for (const locale of ['ja', 'en'] as const) {
         await page.getByRole('button', { name: text('字幕一覧', 'Transcript'), exact: true }).click();
         await page.getByRole('tab', { name: text('AI の提案', 'Suggestions'), exact: true }).click();
         await page.getByRole('button', { name: text('AIで語彙・表現を調べる', 'Explore words with AI'), exact: true }).click();
-        await page.getByRole('button', { name: text('見積もりを確認', 'Review estimate'), exact: true }).click();
       } else {
+        await page.getByRole('button', { name: text('処理・管理', 'Activity & tools'), exact: true }).click();
         await page.getByRole('button', { name: text('残りを再見積もり', 'Estimate remaining work'), exact: true }).click();
       }
       const dialog = page.getByRole('dialog');
-      const checkbox = dialog.getByRole('checkbox', { name: text(
-        '料金と品質が未確認であることを理解し、この範囲・要求数・音声時間・出力設定で今回の実行を承認します。',
-        'I understand that pricing and quality are unverified and approve this job for the displayed scope, request count, audio duration, and output settings.',
-      ), exact: true });
-      const approve = dialog.getByRole('button', { name: text('この実行を承認する', 'Approve this job'), exact: true });
+      const approve = dialog.getByRole('button', { name: text('表現の提案を開始', 'Find expressions'), exact: true });
+      await expect(dialog.getByRole('checkbox')).toHaveCount(0);
       const warning = text('見積もりの有効期限が切れたため、承認できません。見積もりを更新してください。', 'This quote has expired, so approval is disabled. Refresh the estimate to continue.');
-      await expect(checkbox).toBeDisabled();
-      await expect(checkbox).not.toBeChecked();
       await expect(approve).toBeDisabled();
       await expect(dialog.getByText(warning, { exact: true })).toBeVisible();
       const refresh = dialog.getByRole('button', { name: text('見積もりを更新', 'Refresh estimate'), exact: true });
-      await expect(refresh).toHaveCount(1);
       await expect(refresh).toBeEnabled();
-      await expect(checkbox).toHaveAccessibleDescription(warning);
-      await expect(checkbox.locator('..')).toHaveAttribute('data-disabled', 'true');
-      const disabledAppearance = await checkbox.locator('..').evaluate(element => {
-        const style = getComputedStyle(element);
-        return { color: style.color, opacity: style.opacity };
-      });
       const sends = () => page.evaluate(() => (window as any).__learningFixture.calls.filter((call: any) => ['approve_quote', 'reapprove_quote'].includes(call.command)));
       expect(await sends()).toHaveLength(0);
-      await checkbox.scrollIntoViewIfNeeded();
+      await approve.scrollIntoViewIfNeeded();
       await page.screenshot({ path: testInfo.outputPath(`expired-${entry}-${locale}.png`), animations: 'disabled' });
-
       await refresh.click();
-      await expect(checkbox).toBeEnabled();
-      await expect(checkbox).not.toBeChecked();
-      await expect(checkbox.locator('..')).not.toHaveAttribute('data-disabled', 'true');
-      await expect(approve).toBeDisabled();
+      await expect(approve).toBeEnabled();
       await expect(dialog.getByText(warning, { exact: true })).toHaveCount(0);
-      const enabledAppearance = await checkbox.locator('..').evaluate(element => {
-        const style = getComputedStyle(element);
-        return { color: style.color, opacity: style.opacity };
-      });
-      expect(disabledAppearance).not.toEqual(enabledAppearance);
       expect(await sends()).toHaveLength(0);
-      await checkbox.scrollIntoViewIfNeeded();
       await page.screenshot({ path: testInfo.outputPath(`refreshed-${entry}-${locale}.png`), animations: 'disabled' });
-
-      await checkbox.click();
-      await expect(checkbox).toBeChecked();
-      await expect(approve).toBeEnabled();
-      await checkbox.locator('..').locator('span').click();
-      await expect(checkbox).not.toBeChecked();
-      await expect(approve).toBeDisabled();
-      await checkbox.focus();
-      await page.keyboard.press('Space');
-      await expect(checkbox).toBeChecked();
-      await expect(approve).toBeEnabled();
-      expect(await sends()).toHaveLength(0);
       await approve.click();
       await expect(dialog).toHaveCount(0);
       expect(await sends()).toHaveLength(1);

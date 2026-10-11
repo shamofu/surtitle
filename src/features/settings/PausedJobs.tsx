@@ -28,11 +28,10 @@ export function UnknownAttempt({
   const { mutate } = useDataActions();
   const { t } = useAppearance();
   const { report } = useNotifications();
-  const [acknowledged, setAcknowledged] = useState(false);
   const unpriced = attempt.heldUsd == null;
   const [busy, setBusy] = useState(false);
   async function resolve() {
-    if (!acknowledged) return;
+    if (busy) return;
     setBusy(true);
     const success = await report(
       async () => {
@@ -71,27 +70,7 @@ export function UnknownAttempt({
               'Because the charge is unknown, the entire reservation remains held against your budget. Acknowledging it does not retry the request; any retry requires a separate approval.',
             )}</MotionSwap>
       </p>
-      <label className="check-field">
-        <input
-          type="checkbox"
-          checked={acknowledged}
-          disabled={busy}
-          onChange={(event) => setAcknowledged(event.target.checked)}
-        />
-        <span>
-          <MotionSwap disabled as="span" stateKey={unpriced ? 'unpriced' : money(attempt.heldUsd)}>{unpriced
-            ? t(
-                '金額不明の課金が発生した可能性を了承します。',
-                'I acknowledge that an unknown charge may have occurred.',
-              )
-            : t(
-                `課金の可能性を了承し、${money(attempt.heldUsd)} の予約額の保留を維持します。`,
-                `I acknowledge the possible charge and keep ${money(attempt.heldUsd)} reserved.`,
-              )}</MotionSwap>
-        </span>
-      </label>
       <Button
-        disabled={!acknowledged}
         busy={busy}
         onClick={() => void resolve()}
       >

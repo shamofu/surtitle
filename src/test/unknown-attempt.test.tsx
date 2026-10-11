@@ -56,30 +56,25 @@ describe('unknown-request accounting', () => {
     );
     expect(screen.getByText(/Cost not calculated/)).toBeVisible();
     expect(screen.queryByText(/\$0/)).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('checkbox', {
-        name: 'I acknowledge that an unknown charge may have occurred.',
-      }),
-    ).toBeVisible();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Acknowledge possible charge' })).toBeEnabled();
   });
   it.each([
     {
       locale: 'ja' as const,
       button: '課金の可能性を了承',
-      checkbox: '課金の可能性を了承し、$0.15 の予約額の保留を維持します。',
       explanation:
         '課金済みか確認できないため、予約額の全額を保留し、予算から差し引き続けます。この確認では再実行されません。再実行には別の承認が必要です。',
     },
     {
       locale: 'en' as const,
       button: 'Acknowledge possible charge',
-      checkbox: 'I acknowledge the possible charge and keep $0.15 reserved.',
       explanation:
         'Because the charge is unknown, the entire reservation remains held against your budget. Acknowledging it does not retry the request; any retry requires a separate approval.',
     },
   ])(
-    'requires acknowledgment of the retained hold and never retries ($locale)',
-    async ({ locale, button: buttonLabel, checkbox, explanation }) => {
+    'accounts for the retained hold with one action and never retries ($locale)',
+    async ({ locale, button: buttonLabel, explanation }) => {
       context.locale = locale;
       render(
         <UnknownAttempt
@@ -93,12 +88,10 @@ describe('unknown-request accounting', () => {
         />,
       );
       const button = screen.getByRole('button', { name: buttonLabel });
-      expect(button).toBeDisabled();
+      expect(button).toBeEnabled();
       expect(screen.getByText(explanation)).toBeVisible();
-      expect(screen.getByRole('checkbox', { name: checkbox })).toBeVisible();
-      fireEvent.click(button);
+      expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
       expect(aiApi.resolveUnknownAttempt).not.toHaveBeenCalled();
-      fireEvent.click(screen.getByRole('checkbox'));
       fireEvent.click(button);
       await waitFor(() =>
         expect(aiApi.resolveUnknownAttempt).toHaveBeenCalledWith(

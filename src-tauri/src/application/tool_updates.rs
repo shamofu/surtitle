@@ -123,6 +123,9 @@ where
                     );
                     Ok(true)
                 })?;
+                state
+                    .changes
+                    .publish(super::changes::ChangeDomain::Tools, None);
             }
             Err(error) => failures.push(format!("{}: {error}", kind.directory())),
         }

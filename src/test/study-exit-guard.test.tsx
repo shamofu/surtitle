@@ -22,6 +22,7 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
 vi.mock('../shared/native/window', () => ({
   closeWindow: vi.fn(),
+  registerCloseTask: () => () => {},
   subscribeWindowClose: (callback: () => boolean) => {
     fixture.closeRequested = callback;
     return fixture.stop;
@@ -59,24 +60,22 @@ it('resolves blocked navigation only on an explicit discard', async () => {
   expect(fixture.proceed).toHaveBeenCalledOnce();
 });
 
-it('does not discard during a pending save', async () => {
+it('does not discard or open a confirmation during a pending save', async () => {
   fixture.status = 'blocked';
   const { result } = renderHook(() => useStudyExitGuard(false, true, fixture.discard));
+  expect(result.current.open).toBe(false);
   await act(async () => expect(await result.current.discard()).toBe(false));
   expect(fixture.discard).not.toHaveBeenCalled();
   expect(fixture.proceed).not.toHaveBeenCalled();
   expect(closeWindow).not.toHaveBeenCalled();
 });
 
-it('keeps drafts and reports native close failures, and coalesces duplicate confirmations', async () => {
-  let reject!: (error: Error) => void;
-  vi.mocked(closeWindow).mockImplementation(() => new Promise((_, fail) => { reject = fail; }));
+it('does not offer or execute a misleading discard during a blocked native close', async () => {
   const { result } = renderHook(() => useStudyExitGuard(true, false, fixture.discard));
   act(() => { fixture.closeRequested?.(); });
-  act(() => { void result.current.discard(); void result.current.discard(); });
-  expect(closeWindow).toHaveBeenCalledOnce();
-  await act(async () => reject(new Error('Could not close')));
-  await waitFor(() => expect(result.current.error).toBe('Could not close'));
+  expect(result.current.canDiscard).toBe(false);
+  await act(async () => expect(await result.current.discard()).toBe(false));
+  expect(closeWindow).not.toHaveBeenCalled();
   expect(fixture.discard).not.toHaveBeenCalled();
   expect(result.current.open).toBe(true);
 });
@@ -91,6 +90,7 @@ it('waits for draft persistence before navigation and native closure', async () 
   await expect(navigation).resolves.toBe(false);
   act(() => { expect(fixture.closeRequested?.()).toBe(true); });
   expect(closeWindow).not.toHaveBeenCalled();
+  await waitFor(() => expect(flush).toHaveBeenCalledTimes(2));
   await act(async () => { complete(); });
   expect(closeWindow).toHaveBeenCalledOnce();
   expect(fixture.discard).not.toHaveBeenCalled();
@@ -118,4 +118,29 @@ it('reports a failed retry to the dialog so its exit can be reversed', async () 
   expect(result.current.open).toBe(true);
   expect(result.current.error).toBe('still full');
   expect(fixture.proceed).not.toHaveBeenCalled();
+});
+
+
+it('automatically continues navigation when the pending card save finishes', async () => {
+  const flush = vi.fn().mockResolvedValue(undefined);
+  const { result, rerender } = renderHook(({ saving }) => useStudyExitGuard(true, saving, fixture.discard, flush), { initialProps: { saving: true } });
+  const navigating = fixture.options!.shouldBlockFn({ current: { pathname: '/study/a' }, next: { pathname: '/cards' } });
+  expect(flush).not.toHaveBeenCalled();
+  expect(result.current.open).toBe(false);
+  rerender({ saving: false });
+  await expect(navigating).resolves.toBe(false);
+  expect(flush).toHaveBeenCalledOnce();
+  expect(fixture.discard).not.toHaveBeenCalled();
+});
+
+it('coalesces native close requests and waits for card save without a confirmation', async () => {
+  const flush = vi.fn().mockResolvedValue(undefined);
+  const { result, rerender } = renderHook(({ saving }) => useStudyExitGuard(true, saving, fixture.discard, flush), { initialProps: { saving: true } });
+  act(() => { expect(fixture.closeRequested?.()).toBe(true); expect(fixture.closeRequested?.()).toBe(true); });
+  expect(result.current.open).toBe(false);
+  expect(closeWindow).not.toHaveBeenCalled();
+  rerender({ saving: false });
+  await waitFor(() => expect(closeWindow).toHaveBeenCalledOnce());
+  expect(flush).toHaveBeenCalledOnce();
+  expect(fixture.discard).not.toHaveBeenCalled();
 });

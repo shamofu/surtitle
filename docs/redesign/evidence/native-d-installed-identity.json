@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "identifier": "app.surtitle.evaluation.redesignfinal20261011d",
+  "rawSha256": "766505a56d7130ee3c5af24f3238f494d76cec2bb0879ca250678766739b1496",
+  "installedSha256": "34af843982fe59203c57b54696c68b934657ff4f5289e885d79d3564149f5a65",
+  "bytes": 26606592,
+  "differentByteOffsets": [
+    21648986,
+    21648987,
+    21648988
+  ],
+  "bundleMarkerBefore": "UNK",
+  "bundleMarkerAfter": "NSS",
+  "normalizingOnlyBundleMarkerMatches": true
+}

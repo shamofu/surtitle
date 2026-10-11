@@ -89,6 +89,23 @@ pub fn edit_card(state: AppState, request: surtitle_core::EditCard) -> IpcResult
         .and_then(|db| db.edit_card(&request).map(|_| ()))
         .map_err(err)
 }
+pub fn get_card_edit_state(
+    state: AppState,
+    card_id: String,
+) -> IpcResult<surtitle_core::store::CardEditState> {
+    lock(&state.db)
+        .and_then(|db| db.card_edit_state(&card_id))
+        .map_err(err)
+}
+pub fn save_card_edit(
+    state: AppState,
+    request: surtitle_core::EditCard,
+    expected_revision: String,
+) -> IpcResult<surtitle_core::store::CardEditState> {
+    lock(&state.db)
+        .and_then(|mut db| db.edit_card_checked(&request, &expected_revision))
+        .map_err(err)
+}
 pub fn suspend_card(state: AppState, card_id: String, suspended: bool) -> IpcResult<()> {
     lock(&state.db)
         .and_then(|db| db.suspend_card(&card_id, suspended))

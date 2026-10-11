@@ -52,11 +52,9 @@ export function activeSegment(
 }
 export function quoteCanBeApproved(
   quote: { canApprove: boolean; expiresAt: string },
-  acknowledged: boolean,
   now = Date.now(),
 ): boolean {
   return (
-    acknowledged &&
     quote.canApprove &&
     new Date(quote.expiresAt).getTime() > now
   );

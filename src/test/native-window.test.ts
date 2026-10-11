@@ -1,10 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, expect, it, vi } from 'vitest';
-import { subscribeWindowClose } from '../shared/native/window';
+import { subscribeWindowClose, registerCloseTask, closeWindow, hasPendingCloseTasks } from '../shared/native/window';
 
-const fixture = vi.hoisted(() => ({ register: vi.fn() }));
-vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: fixture.register }) }));
+const fixture = vi.hoisted(() => ({ register: vi.fn(), destroy: vi.fn() }));
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: fixture.register, destroy: fixture.destroy }) }));
 afterEach(() => vi.resetAllMocks());
+
+it('waits for pending saves before destroying and leaves the app open after a failed write', async () => {
+  let finish!: () => void;
+  const remove = registerCloseTask(() => new Promise<void>(resolve => { finish = resolve; }));
+  const closing = closeWindow(); expect(fixture.destroy).not.toHaveBeenCalled();
+  finish(); await closing; expect(fixture.destroy).toHaveBeenCalledOnce(); remove();
+  fixture.destroy.mockClear();
+  const removeFailure = registerCloseTask(async () => { throw Error('Disk full'); });
+  await expect(closeWindow()).rejects.toThrow('Disk full'); expect(fixture.destroy).not.toHaveBeenCalled(); removeFailure();
+});
 
 it('prevents disposed close callbacks from overriding a newer unsaved-input guard', async () => {
   let complete!: (stop: () => void) => void;
@@ -37,4 +47,64 @@ it('allows clean closure and prevents protected closure', async () => {
   expect(event.preventDefault).toHaveBeenCalledOnce();
   dispose();
   expect(stop).toHaveBeenCalledOnce();
+});
+
+it('aggregates clean and pending editors through one native listener', async () => {
+  const stop = vi.fn(); fixture.register.mockResolvedValue(stop);
+  const clean = vi.fn(() => false), pending = vi.fn(() => true);
+  const disposeClean = subscribeWindowClose(clean, vi.fn());
+  const disposePending = subscribeWindowClose(pending, vi.fn());
+  await Promise.resolve();
+  expect(fixture.register).toHaveBeenCalledOnce();
+  const event = { preventDefault: vi.fn() };
+  fixture.register.mock.calls[0][0](event);
+  expect(clean).toHaveBeenCalledOnce(); expect(pending).toHaveBeenCalledOnce();
+  expect(event.preventDefault).toHaveBeenCalledOnce();
+  disposeClean(); expect(stop).not.toHaveBeenCalled();
+  disposePending(); expect(stop).toHaveBeenCalledOnce();
+});
+
+it('tracks detached pending work and coalesces simultaneous close requests', async () => {
+  let release!: () => void;
+  let pending = true;
+  const run = vi.fn(() => new Promise<void>(resolve => { release = () => { pending = false; resolve(); }; }));
+  const remove = registerCloseTask(run, () => pending);
+  expect(hasPendingCloseTasks()).toBe(true);
+  const first = closeWindow(), second = closeWindow();
+  expect(run).toHaveBeenCalledOnce(); release(); await Promise.all([first, second]);
+  expect(fixture.destroy).toHaveBeenCalledOnce();
+  remove(); expect(hasPendingCloseTasks()).toBe(false);
+});
+
+it('saves new input received after a faster editor flushes while another task is pending', async () => {
+  let input = 'first', persisted = '', release!: () => void;
+  let slowPending = true;
+  const fast = vi.fn(async () => { persisted = input; });
+  const removeFast = registerCloseTask(fast, () => persisted !== input);
+  const removeSlow = registerCloseTask(async () => {
+    if (slowPending) await new Promise<void>(resolve => { release = () => { slowPending = false; resolve(); }; });
+  }, () => slowPending);
+  try {
+    const closing = closeWindow();
+    expect(persisted).toBe('first');
+    input = 'typed while audio saves';
+    release(); await closing;
+    expect(persisted).toBe(input); expect(fast).toHaveBeenCalledTimes(2);
+    expect(fixture.destroy).toHaveBeenCalledOnce();
+  } finally { removeFast(); removeSlow(); }
+});
+
+it('includes a newly registered task before destroying the window', async () => {
+  let release!: () => void;
+  let pending = true;
+  const removeFirst = registerCloseTask(async () => {
+    if (pending) await new Promise<void>(resolve => { release = () => { pending = false; resolve(); }; });
+  }, () => pending);
+  const closing = closeWindow();
+  const failure = new Error('new draft is not durable');
+  const removeNew = registerCloseTask(async () => { throw failure; });
+  try {
+    release(); await expect(closing).rejects.toThrow(failure.message);
+    expect(fixture.destroy).not.toHaveBeenCalled();
+  } finally { removeFirst(); removeNew(); }
 });

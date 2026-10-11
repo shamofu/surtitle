@@ -1,0 +1,231 @@
+{
+  "schemaVersion": 1,
+  "sha": null,
+  "passed": true,
+  "normalBuild": true,
+  "fixtureMediaId": "fixture-media",
+  "applicationIdentifier": "app.surtitle.evaluation.redesignfinal20261011b",
+  "isolatedIdentity": true,
+  "appReady": true,
+  "settingsReady": true,
+  "nativeMetadataPassed": true,
+  "visibleSurfacePassed": true,
+  "playbackAdvanced": true,
+  "intervalStopPassed": true,
+  "seekPassed": true,
+  "accountingUnchanged": true,
+  "paidRequests": 0,
+  "initial": {
+    "mediaCount": 1,
+    "cardCount": 1,
+    "subtitleCount": 20000,
+    "credentialConfigured": false,
+    "savedModelPreferenceCount": 0,
+    "budget": {
+      "limitUsd": 0,
+      "monetaryTotalsComplete": true,
+      "reservedUsd": 0,
+      "spentUsd": 0,
+      "unknownAttempts": [],
+      "unpricedAttempts": 0
+    }
+  },
+  "final": {
+    "mediaCount": 1,
+    "cardCount": 1,
+    "subtitleCount": 20000,
+    "credentialConfigured": false,
+    "savedModelPreferenceCount": 0,
+    "budget": {
+      "limitUsd": 0,
+      "monetaryTotalsComplete": true,
+      "reservedUsd": 0,
+      "spentUsd": 0,
+      "unknownAttempts": [],
+      "unpricedAttempts": 0
+    }
+  },
+  "ui": {
+    "credentialMaterialVisible": false,
+    "modelInputs": 4,
+    "unsetInputs": 4
+  },
+  "observations": {
+    "metadata": {
+      "durationMs": 12000,
+      "error": null,
+      "paused": true,
+      "positionMs": 0,
+      "rate": 1,
+      "ready": true,
+      "revision": 9,
+      "sentencePause": false,
+      "surfaceVisible": true,
+      "tracks": [
+        {
+          "external": false,
+          "ffIndex": 0,
+          "id": 1,
+          "kind": "video",
+          "language": null,
+          "selected": true,
+          "title": "video 1"
+        },
+        {
+          "external": false,
+          "ffIndex": 1,
+          "id": 1,
+          "kind": "audio",
+          "language": null,
+          "selected": true,
+          "title": "audio 1"
+        },
+        {
+          "external": true,
+          "ffIndex": 0,
+          "id": 1,
+          "kind": "sub",
+          "language": null,
+          "selected": true,
+          "title": "Surtitle"
+        }
+      ],
+      "videoHeight": 360,
+      "videoWidth": 640,
+      "volume": 80
+    },
+    "advancing": {
+      "durationMs": 12000,
+      "error": null,
+      "paused": false,
+      "positionMs": 791,
+      "rate": 1,
+      "ready": true,
+      "revision": 17,
+      "sentencePause": false,
+      "surfaceVisible": true,
+      "tracks": [
+        {
+          "external": false,
+          "ffIndex": 0,
+          "id": 1,
+          "kind": "video",
+          "language": null,
+          "selected": true,
+          "title": "video 1"
+        },
+        {
+          "external": false,
+          "ffIndex": 1,
+          "id": 1,
+          "kind": "audio",
+          "language": null,
+          "selected": true,
+          "title": "audio 1"
+        },
+        {
+          "external": true,
+          "ffIndex": 0,
+          "id": 1,
+          "kind": "sub",
+          "language": null,
+          "selected": true,
+          "title": "Surtitle"
+        }
+      ],
+      "videoHeight": 360,
+      "videoWidth": 640,
+      "volume": 0
+    },
+    "stopped": {
+      "durationMs": 12000,
+      "error": null,
+      "paused": true,
+      "positionMs": 1916,
+      "rate": 1,
+      "ready": true,
+      "revision": 40,
+      "sentencePause": false,
+      "surfaceVisible": true,
+      "tracks": [
+        {
+          "external": false,
+          "ffIndex": 0,
+          "id": 1,
+          "kind": "video",
+          "language": null,
+          "selected": true,
+          "title": "video 1"
+        },
+        {
+          "external": false,
+          "ffIndex": 1,
+          "id": 1,
+          "kind": "audio",
+          "language": null,
+          "selected": true,
+          "title": "audio 1"
+        },
+        {
+          "external": true,
+          "ffIndex": 0,
+          "id": 1,
+          "kind": "sub",
+          "language": null,
+          "selected": true,
+          "title": "Surtitle"
+        }
+      ],
+      "videoHeight": 360,
+      "videoWidth": 640,
+      "volume": 0
+    },
+    "sought": {
+      "durationMs": 12000,
+      "error": null,
+      "paused": true,
+      "positionMs": 7000,
+      "rate": 1,
+      "ready": true,
+      "revision": 41,
+      "sentencePause": false,
+      "surfaceVisible": true,
+      "tracks": [
+        {
+          "external": false,
+          "ffIndex": 0,
+          "id": 1,
+          "kind": "video",
+          "language": null,
+          "selected": true,
+          "title": "video 1"
+        },
+        {
+          "external": false,
+          "ffIndex": 1,
+          "id": 1,
+          "kind": "audio",
+          "language": null,
+          "selected": true,
+          "title": "audio 1"
+        },
+        {
+          "external": true,
+          "ffIndex": 0,
+          "id": 1,
+          "kind": "sub",
+          "language": null,
+          "selected": true,
+          "title": "Surtitle"
+        }
+      ],
+      "videoHeight": 360,
+      "videoWidth": 640,
+      "volume": 0
+    }
+  },
+  "limitations": [
+    "Muted playback does not test audible output.",
+    "This production probe is separate from the fixture-enabled functional E2E suite."
+  ]
+}

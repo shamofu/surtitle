@@ -178,7 +178,6 @@ export function SubtitleSourceDialog({
   const [mode, setMode] = useState(initialMode === 'choose' ? 'embedded' : initialMode);
   const [stream, setStream] = useState('');
   const [version, setVersion] = useState('');
-  const [replace, setReplace] = useState(false);
   const [busy, setBusy] = useState(false);
   const exit = useModalExit();
   const close = () => { if (!busy) void exit.close(onClose); };
@@ -196,6 +195,7 @@ export function SubtitleSourceDialog({
     enabled: mode === 'versions' && !busy,
   });
   const hasExisting = media.segmentCount > 0;
+  const replace = hasExisting;
   useEffect(() => {
     if (!streams.data) return;
     const requested = streams.data.find(item => item.index === initialStreamIndex && item.kind === 'subtitle' && item.supportedText);
@@ -203,7 +203,7 @@ export function SubtitleSourceDialog({
     if (recommended !== undefined) setStream(String(recommended));
   }, [streams.data, initialStreamIndex, media.learningLanguage]);
   const canSubmit =
-    mode === 'transcribe' ? !!onTranscribe : (!hasExisting || replace) &&
+    mode === 'transcribe' ? !!onTranscribe :
     (mode === 'file' || (mode === 'embedded' ? streams.data?.some(item => String(item.index) === stream && item.supportedText) : version !== ''));
   async function submit() {
     if (!canSubmit || busy || exit.exiting) return;
@@ -265,7 +265,6 @@ export function SubtitleSourceDialog({
             onClick={() => {
               if (id === 'transcribe' && onTranscribe) { void exit.close(onTranscribe); return; }
               setMode(id);
-              setReplace(false);
             }}
           >
             {title}
@@ -364,20 +363,14 @@ export function SubtitleSourceDialog({
       )}
       </MotionSwap>
       <MotionRegion open={hasExisting && mode !== 'transcribe'}>
-        <label className="check-field">
-          <input
-            type="checkbox"
-            checked={replace}
-            disabled={busy}
-            onChange={(event) => setReplace(event.target.checked)}
-          />
+        <p className="helper-text">
           <span>
             {t(
               '現在の字幕を旧版として保存し、選択した字幕へ切り替えます。',
               'Keep the current subtitles as a saved version and switch to the selected source.',
             )}
           </span>
-        </label>
+        </p>
       </MotionRegion>
       <p className="helper-text">
         {t(

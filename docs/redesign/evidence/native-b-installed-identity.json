@@ -1,0 +1,16 @@
+{
+  "applicationIdentifier": "app.surtitle.evaluation.redesignfinal20261011b",
+  "installedExecutableSha256": "f2e9facc73a81eb0be7426894b8e6e8ba46e093c6e40739802e5bc0a65c9b487",
+  "testedAt": "2026-10-11T14:19:48.9840123Z",
+  "packagedDifference": {
+    "rawSha256": "7b638ebe03f889784c76d9bd0aa542eb59e51e17cb7003d30d79a8951c0b1b6f",
+    "differingOffsets": [
+      21621594,
+      21621595,
+      21621596
+    ],
+    "rawMarker": "__TAURI_BUNDLE_TYPE_VAR_UNK",
+    "installedMarker": "__TAURI_BUNDLE_TYPE_VAR_NSS",
+    "source": "tauri-utils-2.9.3/src/platform.rs"
+  }
+}

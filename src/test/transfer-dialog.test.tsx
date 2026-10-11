@@ -12,8 +12,10 @@ import {
 import { TransferDialog } from '../features/transfer/TransferDialog';
 import { transferApi } from '../features/transfer/api';
 import { clearEditorDraftSessions, flushEditorDrafts } from '../features/study/editor-drafts/useEditorDraft';
+import { refreshEdits } from '../shared/editing/session';
 
-const modal = vi.hoisted(() => ({ register: () => () => {} }));
+const modal = vi.hoisted(() => ({ register: () => () => {}, notify: vi.fn() }));
+vi.mock('../shared/editing/session', () => ({ flushEdits: vi.fn().mockResolvedValue(true), refreshEdits: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../features/study/editor-drafts/useEditorDraft', () => ({
   flushEditorDrafts: vi.fn().mockResolvedValue(undefined),
   clearEditorDraftSessions: vi.fn(),
@@ -25,7 +27,7 @@ vi.mock('../features/transfer/api', () => ({
     revealExportFile: vi.fn().mockResolvedValue(undefined),
     previewRestore: vi.fn(),
     discardRestorePreview: vi.fn().mockResolvedValue(undefined),
-    restoreLearning: vi.fn().mockResolvedValue(undefined),
+    restoreLearning: vi.fn().mockResolvedValue({ warnings: [] }),
   },
 }));
 
@@ -34,6 +36,7 @@ vi.mock('../app/runtime', () => {
   const useFixture = () => ({
     mutate: (action: () => Promise<unknown>) => action(),
     registerModal: modal.register,
+    notify: modal.notify,
     t: (_ja: string, en: string) => en,
     report: async (action: () => Promise<unknown>) => { try { return await action(); } catch { return undefined; } },
   });
@@ -177,9 +180,9 @@ it('discards replaced previews, retains a cancelled picker selection and require
     expect(transferApi.previewRestore).toHaveBeenCalledTimes(3),
   );
   expect(transferApi.discardRestorePreview).toHaveBeenCalledTimes(1);
-  expect(screen.getByRole('button', { name: 'Restore backup' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('checkbox'));
-  fireEvent.click(screen.getByRole('button', { name: 'Restore backup' }));
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  expect(transferApi.restoreLearning).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Replace learning data and restore' }));
   await waitFor(() =>
     expect(transferApi.restoreLearning).toHaveBeenCalledExactlyOnceWith(
       'second',
@@ -209,4 +212,26 @@ it('discards a native preview that arrives after the dialog was unmounted', asyn
     ),
   );
   expect(transferApi.restoreLearning).not.toHaveBeenCalled();
+});
+
+it.each(['native-cleanup', 'view-refresh'])('preserves a committed restore with %s warnings without offering another replacement', async kind => {
+  vi.mocked(transferApi.previewRestore).mockResolvedValueOnce(preview('committed'));
+  if (kind === 'native-cleanup') vi.mocked(transferApi.restoreLearning).mockResolvedValueOnce({ warnings: ['Could not clear old continuation references'] });
+  else vi.mocked(refreshEdits).mockRejectedValueOnce(new Error('readback unavailable'));
+  const close = vi.fn();
+  render(<TransferDialog onClose={close} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Choose backup' }));
+  await screen.findByText('Reviewed local backup');
+  fireEvent.click(screen.getByRole('button', { name: 'Replace learning data and restore' }));
+  await screen.findByText('Learning data restored.');
+  expect(screen.getByText(/The restore does not need to be repeated/)).toBeVisible();
+  expect(screen.getByText(kind === 'native-cleanup' ? 'Could not clear old continuation references' : /readback unavailable/)).toBeVisible();
+  expect(clearEditorDraftSessions).toHaveBeenCalledOnce();
+  expect(refreshEdits).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('button', { name: 'Replace learning data and restore' })).not.toBeInTheDocument();
+  expect(close).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(transferApi.restoreLearning).toHaveBeenCalledExactlyOnceWith('committed');
 });

@@ -26,6 +26,13 @@ export interface PlayerState {
   videoHeight?: number;
 }
 
+export interface PlayerSurfaceRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface PlayerControlRequest {
   action:
     | 'source-seek'
@@ -54,5 +61,11 @@ export interface PlayerControlRequest {
     width: number;
     height: number;
     scaleFactor: number;
+    /** Visible intersection with the page, in the same CSS coordinates. */
+    clip?: PlayerSurfaceRect;
+    /** Opaque UI rectangles to subtract without resizing the video. */
+    occlusions?: PlayerSurfaceRect[];
+    /** Modal input ownership is independent from video visibility. */
+    inputBlocked?: boolean;
   };
 }

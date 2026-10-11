@@ -1,534 +1,114 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from '@testing-library/react';
+vi.mock('../shared/editing/drafts', () => import('./editing-mocks'));
+vi.mock('../shared/editing/session', async importOriginal => {
+  const actual = await importOriginal<typeof import('../shared/editing/session')>();
+  return { ...actual, editingSession: (kind: 'settings', id: string, adapter: import('../shared/editing/session').EditAdapter) => new actual.EditingSession(kind, id, adapter) };
+});
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SettingsPage } from '../features/settings/SettingsPage';
-import { mergeSettingsRefresh } from '../features/settings/merge-settings';
-import { emptyModel } from '../features/ai/ModelEditor';
 import { settingsApi } from '../features/settings/api';
 import { aiApi } from '../features/ai/api';
-import type { AiModelPreference } from '../shared/contracts/ai';
 import type { AppSettings } from '../shared/contracts/settings';
 import type { AppSnapshot } from '../shared/contracts/snapshot';
-
-const context = vi.hoisted(() => ({
-  data: undefined as AppSnapshot | undefined,
-  notify: vi.fn(),
-  registerModal: () => () => {},
-}));
-
-vi.mock('../features/settings/api', () => ({
-  settingsApi: {
-    updateSettings: vi.fn().mockResolvedValue(undefined),
-    scanExternalTools: vi.fn().mockResolvedValue([]),
-    setToolProvider: vi.fn().mockResolvedValue(undefined),
-    importCredential: vi.fn().mockResolvedValue(true),
-  },
-}));
-vi.mock('../features/ai/api', () => ({
-  aiApi: { vertexModels: vi.fn().mockResolvedValue([]), vertexPrice: vi.fn() },
-}));
-
-vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
-vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn(), useBlocker: () => ({ status: 'idle' }) }));
-vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, closeWindow: vi.fn() }));
+const context = vi.hoisted(() => ({ data: undefined as AppSnapshot | undefined, notify: vi.fn(), revision: 0 }));
+vi.mock('../features/settings/api', () => ({ settingsApi: { state: vi.fn(), patch: vi.fn(), scanExternalTools: vi.fn(), setToolProvider: vi.fn(), importCredential: vi.fn() } }));
+vi.mock('../features/ai/api', () => ({ aiApi: { vertexModels: vi.fn(), vertexPrice: vi.fn() } }));
 vi.mock('../features/ai/continuations', () => ({ continuationApi: { list: vi.fn().mockResolvedValue([]) } }));
+vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
+vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn() }));
 vi.mock('../app/runtime', () => {
-  const useFixture = () => ({
-    mutate: (action: () => Promise<unknown>) => action(),
-    data: context.data,
-    t: (_ja: string, en: string) => en,
-    report: (action: () => Promise<unknown>) => action().catch(() => undefined),
-    notify: context.notify,
-    registerModal: context.registerModal,
-  });
-  return {
-    useSnapshot: useFixture,
-    useDataActions: useFixture,
-    useAppearance: useFixture,
-    useNotifications: useFixture,
-    useSurface: useFixture,
-  };
+  const useFixture = () => ({ data: context.data, t: (_ja: string, en: string) => en, locale: 'en',
+    mutate: (action: () => Promise<unknown>) => action(), report: (action: () => Promise<unknown>) => action().catch(() => undefined),
+    notify: context.notify, registerModal: () => () => {} });
+  return { useSnapshot: useFixture, useDataActions: useFixture, useAppearance: useFixture, useNotifications: useFixture, useSurface: useFixture };
 });
-beforeAll(() => {
+const settings = (): AppSettings => ({ theme: 'dark', locale: 'en', learningLanguage: 'en', explanationLanguage: 'ja', dailyBudgetUsd: 0,
+  vertexProject: 'original-project', vertexLocation: 'global', credentialConfigured: false, retention: .9, proficiency: 'B1', ytDlpChannel: 'nightly', aiModels: {} });
+const snapshot = (value: AppSettings): AppSnapshot => ({ settings: value, media: [], cards: [], tools: [], jobs: [], budget: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 } });
+const clients: QueryClient[] = [];
+async function mount() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); clients.push(client);
+  const view = render(<QueryClientProvider client={client}><SettingsPage /></QueryClientProvider>);
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Learning language' })).toBeEnabled());
+  return view;
+}
+beforeEach(() => {
+  context.data = snapshot(settings()); context.revision = 0;
   HTMLElement.prototype.scrollIntoView = vi.fn();
-});
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
+  vi.mocked(settingsApi.state).mockImplementation(async () => ({ settings: context.data!.settings, revision: String(context.revision) }));
+  vi.mocked(settingsApi.patch).mockImplementation(async (revision, patch) => {
+    if (revision !== String(context.revision)) throw Error('Revision conflict');
+    const { budgets, ...normal } = patch as Record<string, unknown>;
+    context.data = { ...context.data!, settings: { ...context.data!.settings, ...normal, ...(budgets as object ?? {}) } };
+    return { settings: context.data.settings, revision: String(++context.revision) };
+  });
   vi.mocked(settingsApi.scanExternalTools).mockResolvedValue([]);
-  vi.mocked(settingsApi.updateSettings).mockResolvedValue(undefined);
   vi.mocked(settingsApi.importCredential).mockResolvedValue(true);
   vi.mocked(aiApi.vertexModels).mockResolvedValue([]);
-  context.data = undefined;
 });
+afterEach(async () => { cleanup(); await act(async () => {}); clients.splice(0).forEach(client => client.clear()); vi.clearAllMocks(); });
 
-const settings = (): AppSettings => ({
-  theme: 'dark',
-  locale: 'en',
-  learningLanguage: 'en',
-  explanationLanguage: 'ja',
-  dailyBudgetUsd: 0,
-  vertexProject: 'original-project',
-  vertexLocation: 'global',
-  credentialConfigured: false,
-  retention: 0.9,
-  proficiency: 'B1',
-  ytDlpChannel: 'nightly',
-  aiModels: {},
+it('autosaves a valid field without a save button and leaves typing enabled', async () => {
+  await mount();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Animations' }), { target: { value: 'reduce' } });
+  expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
+  await waitFor(() => expect(settingsApi.patch).toHaveBeenCalledWith('0', { motionPreference: 'reduce' }));
+  expect(screen.getByRole('combobox', { name: 'Animations' })).toBeEnabled();
 });
-const model = (id = 'gemini-original'): AiModelPreference => ({
-  ...emptyModel('vocabulary'),
-  modelId: id,
+it('commits valid learning input while retaining an unfinished context value', async () => {
+  await mount();
+  const contextInput = screen.getByRole('textbox', { name: /Playback context on each side/ });
+  fireEvent.change(contextInput, { target: { value: '' } });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Learning language' }), { target: { value: 'fr' } });
+  fireEvent.blur(contextInput);
+  await waitFor(() => expect(settingsApi.patch).toHaveBeenCalledWith('0', { learningLanguage: 'fr' }));
+  expect(contextInput).toHaveValue('');
+  expect(context.data!.settings.replayContextMs).toBeUndefined();
 });
-const price = (id: string) => ({
-  id,
-  source: 'user',
-  observedAtMs: 1,
-  inputMicrousdPerMillion: 1,
-  outputMicrousdPerMillion: 2,
+it.each([0, 150, 1000])('saves playback context %i with a partial update', async value => {
+  context.data!.settings.replayContextMs = value === 150 ? 0 : 150;
+  await mount(); const input = screen.getByRole('textbox', { name: /Playback context on each side/ });
+  fireEvent.change(input, { target: { value: String(value) } }); fireEvent.blur(input);
+  await waitFor(() => expect(settingsApi.patch).toHaveBeenCalledWith('0', { replayContextMs: value }));
 });
-function snapshot(value: AppSettings): AppSnapshot {
-  return {
-    settings: value,
-    media: [],
-    cards: [],
-    tools: [],
-    jobs: [],
-    budget: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 },
-  };
-}
-
-describe('settings refresh preserves unrelated unsaved edits', () => {
-  it('preserves the external path input, focus and selection through committed tool refreshes', async () => {
-    context.data = {
-      ...snapshot(settings()),
-      tools: [{ id: 'deno', name: 'Deno', provider: 'managed', status: 'ready', version: '2.0', canRollback: false }],
-    };
-    const view = render(<SettingsPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'External' }));
-    const path = screen.getByRole('textbox', { name: 'Absolute executable path' }) as HTMLInputElement;
-    path.focus();
-    fireEvent.compositionStart(path);
-    fireEvent.change(path, { target: { value: 'C:/作業中/deno.exe' } });
-    path.setSelectionRange(3, 6);
-    context.data = {
-      ...context.data,
-      tools: [{ ...context.data.tools[0], provider: 'external', path: 'C:/committed/deno.exe', version: '2.1' }],
-    };
-    view.rerender(<SettingsPage />);
-    expect(screen.getByRole('textbox', { name: 'Absolute executable path' })).toBe(path);
-    expect(path).toHaveValue('C:/作業中/deno.exe');
-    expect(path).toHaveFocus();
-    expect([path.selectionStart, path.selectionEnd]).toEqual([3, 6]);
-    fireEvent.compositionEnd(path);
-    expect(settingsApi.setToolProvider).not.toHaveBeenCalled();
-    await act(async () => {});
-  });
-
-  it('normalizes legacy motion settings and only saves a changed preference on request', async () => {
-    context.data = snapshot(settings());
-    render(<SettingsPage />);
-    const animations = screen.getByRole('combobox', { name: 'Animations' });
-    expect(animations).toHaveValue('system');
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
-    fireEvent.change(animations, { target: { value: 'reduce' } });
-    expect(settingsApi.updateSettings).not.toHaveBeenCalled();
-    expect(screen.getByText('You have unsaved changes')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() => expect(settingsApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ motionPreference: 'reduce' })));
-  });
-
-  it('preserves the motion draft after save failure and unrelated snapshot refresh', async () => {
-    const initial = { ...settings(), motionPreference: 'system' as const };
-    context.data = snapshot(initial);
-    const view = render(<SettingsPage />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Animations' }), { target: { value: 'reduce' } });
-    vi.mocked(settingsApi.updateSettings).mockRejectedValueOnce(new Error('save failed'));
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled());
-    context.data = snapshot({ ...initial, theme: 'light' });
-    view.rerender(<SettingsPage />);
-    expect(screen.getByRole('combobox', { name: 'Animations' })).toHaveValue('reduce');
-    expect(screen.getByRole('combobox', { name: 'Theme' })).toHaveValue('light');
-  });
-
-  it('keeps settings saved across refreshes when no model preferences exist', () => {
-    const initial = { ...settings(), aiModels: undefined };
-    context.data = snapshot(initial);
-    const { rerender } = render(<SettingsPage />);
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
-    context.data = snapshot({ ...initial });
-    rerender(<SettingsPage />);
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
-    expect(screen.getByText('Settings are saved')).toBeVisible();
-  });
-  it('shows unverified startup candidates without adopting them and rescans only on request', async () => {
-    const first = {
-      toolId: 'deno' as const,
-      path: 'C:\\first\\deno.exe',
-      selectable: true,
-      verification: 'unverified' as const,
-      reason: null,
-    };
-    const second = { ...first, path: 'C:\\second\\deno.exe' };
-    vi.mocked(settingsApi.scanExternalTools)
-      .mockResolvedValueOnce([first])
-      .mockResolvedValueOnce([second]);
-    context.data = {
-      ...snapshot(settings()),
-      tools: [
-        {
-          id: 'deno',
-          name: 'Deno',
-          provider: 'managed',
-          status: 'missing',
-          canRollback: false,
-        },
-      ],
-    };
-    render(<SettingsPage />);
-    await waitFor(() =>
-      expect(settingsApi.scanExternalTools).toHaveBeenCalledWith(false),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'External' }));
-    fireEvent.click(
-      await screen.findByRole('button', { name: /C:\\first\\deno.exe/ }),
-    );
-    expect(
-      screen.getByText('Unverified; capabilities are checked when selected.'),
-    ).toBeVisible();
-    expect(settingsApi.setToolProvider).not.toHaveBeenCalled();
-    expect(settingsApi.scanExternalTools).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Rescan PATH' }));
-    await screen.findByRole('button', { name: /C:\\second\\deno.exe/ });
-    expect(settingsApi.scanExternalTools).toHaveBeenLastCalledWith(true);
-    expect(settingsApi.setToolProvider).not.toHaveBeenCalled();
-    fireEvent.click(
-      screen.getByRole('button', { name: /C:\\second\\deno.exe/ }),
-    );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Verify and use this path' }),
-    );
-    await waitFor(() =>
-      expect(settingsApi.setToolProvider).toHaveBeenCalledWith({
-        toolId: 'deno',
-        provider: 'external',
-        path: second.path,
-      }),
-    );
-  });
-  it('keeps typed models and learning edits through appearance and credential refreshes, then saves the fresh backend fields', async () => {
-    const initial = settings();
-    context.data = snapshot(initial);
-    const { rerender } = render(<SettingsPage />);
-    fireEvent.click(screen.getByText('Detailed settings by purpose'));
-    fireEvent.change(
-      screen.getAllByRole('combobox', { name: /Gemini model ID/ })[1],
-      { target: { value: 'gemini-future-model' } },
-    );
-    fireEvent.change(
-      screen.getByRole('combobox', { name: /Learning language/ }),
-      { target: { value: 'fr' } },
-    );
-    const appearance = {
-      ...initial,
-      theme: 'light' as const,
-      locale: 'ja' as const,
-    };
-    context.data = snapshot(appearance);
-    rerender(<SettingsPage />);
-    expect(
-      screen.getAllByRole('combobox', { name: /Gemini model ID/ })[1],
-    ).toHaveValue('gemini-future-model');
-    expect(
-      screen.getByRole('combobox', { name: /Learning language/ }),
-    ).toHaveValue('fr');
-    expect(screen.getByRole('combobox', { name: 'Theme' })).toHaveValue(
-      'light',
-    );
-    const credential = {
-      ...appearance,
-      credentialConfigured: true,
-      vertexProject: 'imported-project',
-    };
-    context.data = snapshot(credential);
-    rerender(<SettingsPage />);
-    fireEvent.click(screen.getAllByRole('button', { name: 'Save changes' })[0]);
-    await waitFor(() =>
-      expect(settingsApi.updateSettings).toHaveBeenCalledOnce(),
-    );
-    expect(
-      vi.mocked(settingsApi.updateSettings).mock.calls[0][0],
-    ).toMatchObject({
-      theme: 'light',
-      locale: 'ja',
-      credentialConfigured: true,
-      vertexProject: 'imported-project',
-      learningLanguage: 'fr',
-      aiModels: { vocabulary: { modelId: 'gemini-future-model' } },
-    });
-  });
-
-  it('saves language names as codes and preserves unlisted language codes', async () => {
-    context.data = snapshot({ ...settings(), learningLanguage: 'tlh' });
-    render(<SettingsPage />);
-    const learning = screen.getByRole('combobox', { name: /Learning language/ });
-    expect(learning).toHaveValue('tlh');
-    const explanation = screen.getByRole('combobox', { name: 'Explanation language' });
-    expect(explanation).toHaveValue('Japanese');
-    fireEvent.change(learning, { target: { value: 'French' } });
-    fireEvent.change(explanation, { target: { value: 'yue-Hant' } });
-    fireEvent.blur(explanation);
-    expect(explanation).toHaveValue('yue-Hant');
-    fireEvent.click(screen.getAllByRole('button', { name: 'Save changes' })[0]);
-    await waitFor(() => expect(settingsApi.updateSettings).toHaveBeenCalledOnce());
-    expect(vi.mocked(settingsApi.updateSettings).mock.calls[0][0]).toMatchObject({
-      learningLanguage: 'fr',
-      explanationLanguage: 'yue-Hant',
-    });
-  });
-
-  it('accepts a saved same-field change without erasing edits in another model', () => {
-    const before = {
-      ...settings(),
-      aiModels: {
-        vocabulary: model(),
-        translation: model('gemini-translation'),
-      },
-    };
-    const current = {
-      ...before,
-      vertexProject: 'unsaved-project',
-      aiModels: {
-        ...before.aiModels,
-        translation: { ...before.aiModels.translation, maxOutputTokens: 1234 },
-      },
-    };
-    const next = {
-      ...before,
-      vertexProject: 'new-imported-project',
-      aiModels: { ...before.aiModels, vocabulary: model('gemini-saved') },
-    };
-    const merged = mergeSettingsRefresh(before, current, next);
-    expect(merged.vertexProject).toBe('new-imported-project');
-    expect(merged.aiModels?.vocabulary?.modelId).toBe('gemini-saved');
-    expect(merged.aiModels?.translation?.maxOutputTokens).toBe(1234);
-  });
-
-  it('does not carry a dirty price across a remotely changed model or location', () => {
-    const before = { ...settings(), aiModels: { vocabulary: model() } };
-    const current = {
-      ...before,
-      aiModels: {
-        vocabulary: {
-          ...model(),
-          price: price('local-old-identity'),
-          maxOutputTokens: 1234,
-        },
-      },
-    };
-    for (const next of [
-      { ...before, vertexLocation: 'us-central1' },
-      { ...before, aiModels: { vocabulary: model('gemini-saved') } },
-    ]) {
-      const merged = mergeSettingsRefresh(before, current, next);
-      expect(merged.aiModels?.vocabulary?.price).toBeNull();
-      expect(merged.aiModels?.vocabulary?.maxOutputTokens).toBe(1234);
-    }
-    expect(current.aiModels.vocabulary.price.id).toBe('local-old-identity');
-  });
-
-  it('does not attach a refreshed old-model price to a locally changed model', () => {
-    const before = { ...settings(), aiModels: { vocabulary: model() } };
-    const current = {
-      ...before,
-      aiModels: { vocabulary: model('gemini-unsaved') },
-    };
-    const next = {
-      ...before,
-      aiModels: {
-        vocabulary: { ...model(), price: price('saved-original-model') },
-      },
-    };
-    expect(
-      mergeSettingsRefresh(before, current, next).aiModels?.vocabulary,
-    ).toMatchObject({ modelId: 'gemini-unsaved', price: null });
-  });
-
-  it('keeps thinking level and budget exclusive when saved settings change concurrently', () => {
-    const before = { ...settings(), aiModels: { vocabulary: model() } };
-    const current = {
-      ...before,
-      aiModels: { vocabulary: { ...model(), thinkingLevel: 'LOW' } },
-    };
-    const next = {
-      ...before,
-      aiModels: { vocabulary: { ...model(), thinkingBudget: 2048 } },
-    };
-    expect(
-      mergeSettingsRefresh(before, current, next).aiModels?.vocabulary,
-    ).toMatchObject({ thinkingLevel: null, thinkingBudget: 2048 });
-  });
-
-  it('uses a successful save as the next baseline instead of reviving older values', () => {
-    const before = settings();
-    const saved = {
-      ...before,
-      learningLanguage: 'fr',
-      aiModels: { vocabulary: model('gemini-saved') },
-    };
-    const acknowledged = mergeSettingsRefresh(before, saved, saved);
-    const next = { ...saved, learningLanguage: 'de', locale: 'ja' as const };
-    expect(mergeSettingsRefresh(saved, acknowledged, next)).toEqual(next);
-  });
+it.each(['-', '-1', '1001', '0.5', '1e', ''])('retains invalid playback context %s without committing it', async value => {
+  await mount(); const input = screen.getByRole('textbox', { name: /Playback context on each side/ });
+  fireEvent.change(input, { target: { value } }); fireEvent.blur(input); await act(async () => {});
+  expect(settingsApi.patch).not.toHaveBeenCalled();
+  fireEvent.change(input, { target: { value: '0' } }); fireEvent.blur(input);
+  await waitFor(() => expect(settingsApi.patch).toHaveBeenCalledWith('0', { replayContextMs: 0 }));
 });
-
-describe('guided settings and shared model catalogue', () => {
-  it('keeps custom retention through unrelated edits and offers workload presets', async () => {
-    context.data = snapshot({ ...settings(), retention: 0.912 });
-    render(<SettingsPage />);
-    expect(screen.getByRole('combobox', { name: /Review frequency/ })).toHaveValue('custom');
-    expect(screen.getByRole('spinbutton', { name: /Target retention/ })).toHaveValue(91.2);
-    expect(screen.getByRole('option', { name: /B1.*Explain experiences/ })).toBeInTheDocument();
-    fireEvent.change(screen.getByRole('combobox', { name: /Learning language/ }), { target: { value: 'French' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() => expect(settingsApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ retention: 0.912 })));
-    fireEvent.change(screen.getByRole('combobox', { name: /Review frequency/ }), { target: { value: '0.95' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() => expect(settingsApi.updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ retention: 0.95 })));
-  });
-
-  it('sets all standard caps when the first monthly budget is entered', async () => {
-    context.data = snapshot(settings());
-    render(<SettingsPage />);
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
-    fireEvent.change(screen.getByRole('spinbutton', { name: /Monthly AI budget/ }), { target: { value: '5' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() => expect(settingsApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ monthlyBudgetUsd: 5, dailyBudgetUsd: 5, perJobBudgetUsd: 5 })));
-    expect(screen.getByText('Settings are saved')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
-  });
-
-  it('preserves independent caps and can restore monthly-following defaults', async () => {
-    context.data = snapshot({ ...settings(), monthlyBudgetUsd: 10, dailyBudgetUsd: 2, perJobBudgetUsd: 1 });
-    render(<SettingsPage />);
-    fireEvent.change(screen.getByRole('spinbutton', { name: /Monthly AI budget/ }), { target: { value: '20' } });
-    expect(screen.getByText(/Advanced limits:/)).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() => expect(settingsApi.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ monthlyBudgetUsd: 20, dailyBudgetUsd: 2, perJobBudgetUsd: 1 })));
-    fireEvent.click(screen.getByText('Adjust daily and per-job limits'));
-    screen.getAllByRole('button', { name: 'Match the monthly budget' }).forEach((button) => fireEvent.click(button));
-    fireEvent.change(screen.getByRole('spinbutton', { name: /Monthly AI budget/ }), { target: { value: '30' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() => expect(settingsApi.updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ monthlyBudgetUsd: 30, dailyBudgetUsd: 30, perJobBudgetUsd: 30 })));
-  });
-
-  it('blocks a blank budget and preserves unsaved edits after a failed save', async () => {
-    context.data = snapshot(settings());
-    render(<SettingsPage />);
-    const budget = screen.getByRole('spinbutton', { name: /Monthly AI budget/ });
-    fireEvent.change(budget, { target: { value: '' } });
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
-    expect(screen.getByText('Check the entered values.')).toBeVisible();
-    for (const button of screen.getAllByRole('button', { name: 'Match the monthly budget', hidden: true })) expect(button).toBeDisabled();
-    fireEvent.change(budget, { target: { value: '4' } });
-    vi.mocked(settingsApi.updateSettings).mockRejectedValueOnce(new Error('write failed'));
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled());
-    expect(budget).toHaveValue(4);
-    expect(screen.getByText('You have unsaved changes')).toBeVisible();
-  });
-
-  it('associates validation with language and wrapped budget inputs and focuses the first error', () => {
-    context.data = snapshot(settings());
-    render(<SettingsPage />);
-    const language = screen.getByRole('combobox', { name: 'Learning language' });
-    const budget = screen.getByRole('spinbutton', { name: 'Monthly AI budget (USD)' });
-    fireEvent.change(language, { target: { value: '' } });
-    fireEvent.change(budget, { target: { value: '1001' } });
-    expect(language).toHaveAttribute('aria-invalid', 'true');
-    expect(language).toHaveAccessibleDescription(/Choose a learning language/);
-    expect(budget).toHaveAttribute('aria-invalid', 'true');
-    expect(budget).toHaveAccessibleDescription(/Enter an amount between 0 and 1,000 USD/);
-    fireEvent.click(screen.getByRole('button', { name: 'Review errors' }));
-    expect(language).toHaveFocus();
-    fireEvent.change(language, { target: { value: 'French' } });
-    fireEvent.change(budget, { target: { value: '4' } });
-    expect(screen.queryByRole('button', { name: 'Review errors' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
-  });
-
-  it('opens collapsed budget and model details to focus the invalid setting', () => {
-    context.data = snapshot({ ...settings(), dailyBudgetUsd: -1, monthlyBudgetUsd: 0, perJobBudgetUsd: 0 });
-    const view = render(<SettingsPage />);
-    const daily = screen.getByLabelText('Daily limit (USD)');
-    const budgetDetails = daily.closest('details')!;
-    expect(budgetDetails.open).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Review errors' }));
-    expect(budgetDetails.open).toBe(true);
-    expect(daily).toHaveFocus();
-    view.unmount();
-
-    context.data = snapshot({ ...settings(), aiModels: { vocabulary: { ...model(), maxOutputTokens: 0 } } });
-    render(<SettingsPage />);
-    const tokens = screen.getByLabelText('Maximum output tokens per request');
-    const modelDetails = tokens.closest('details')!;
-    expect(modelDetails.open).toBe(false);
-    expect(tokens).toHaveAttribute('aria-invalid', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'Review errors' }));
-    expect(modelDetails.open).toBe(true);
-    expect(tokens).toHaveFocus();
-    fireEvent.change(tokens, { target: { value: '' } });
-    expect(tokens).toHaveValue(null);
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
-    fireEvent.change(tokens, { target: { value: '8000' } });
-    expect(tokens).not.toHaveAttribute('aria-invalid');
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
-  });
-
-  it('identifies out-of-range retention and non-integer playback context', () => {
-    context.data = snapshot({ ...settings(), retention: 0.5, replayContextMs: 1.5 });
-    render(<SettingsPage />);
-    const retention = screen.getByRole('spinbutton', { name: 'Target retention (%)' });
-    const contextInput = screen.getByRole('spinbutton', { name: 'Playback context on each side (ms)' });
-    expect(retention).toHaveAccessibleDescription(/between 70% and 97%/);
-    expect(contextInput).toHaveAccessibleDescription(/whole number between 0 and 1,000 ms/);
-    fireEvent.change(retention, { target: { value: '90' } });
-    fireEvent.change(contextInput, { target: { value: '150' } });
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
-  });
-
-  it('locks editable settings during an in-flight save and retains them on failure', async () => {
-    context.data = snapshot({ ...settings(), aiModels: { vocabulary: model() } });
-    let reject!: (error: Error) => void;
-    vi.mocked(settingsApi.updateSettings).mockReturnValueOnce(new Promise((_resolve, rejectSave) => { reject = rejectSave; }));
-    render(<SettingsPage />);
-    fireEvent.click(screen.getByText('Detailed settings by purpose'));
-    const language = screen.getByRole('combobox', { name: 'Learning language' });
-    fireEvent.change(language, { target: { value: 'French' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    expect(language).toBeDisabled();
-    expect(screen.getByRole('spinbutton', { name: 'Monthly AI budget (USD)' })).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: 'yt-dlp update channel' })).toBeDisabled();
-    expect(screen.getAllByRole('combobox', { name: 'Gemini model ID' }).every(input => input.hasAttribute('disabled'))).toBe(true);
-    await act(async () => { reject(new Error('write failed')); });
-    expect(language).toBeEnabled();
-    expect(language).toHaveValue('French');
-    expect(screen.getByText('You have unsaved changes')).toBeVisible();
-  });
-
+it('keeps failed input editable and retries from inline status', async () => {
+  vi.mocked(settingsApi.patch).mockRejectedValueOnce(Error('Disk full'));
+  await mount(); const input = screen.getByRole('combobox', { name: 'Learning language' });
+  fireEvent.change(input, { target: { value: 'fr' } }); fireEvent.blur(input);
+  await screen.findByText(/Disk full/); expect(input).toHaveValue('French'); expect(input).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  await waitFor(() => expect(context.data!.settings.learningLanguage).toBe('fr'));
+});
+it('saves budget caps only through the budget patch', async () => {
+  await mount(); const input = screen.getByRole('textbox', { name: /Monthly AI budget/ });
+  fireEvent.change(input, { target: { value: '5' } }); fireEvent.blur(input);
+  await waitFor(() => expect(settingsApi.patch).toHaveBeenCalledWith('0', { budgets: { dailyBudgetUsd: 5, monthlyBudgetUsd: 5, perJobBudgetUsd: 5 } }));
+});
+it('preserves external-tool input, focus and composition through unrelated refreshes', async () => {
+  context.data!.tools = [{ id: 'deno', name: 'Deno', provider: 'managed', status: 'ready', version: '2.0', canRollback: false }];
+  const view = await mount(); fireEvent.click(screen.getByRole('button', { name: 'External' }));
+  const input = screen.getByRole('textbox', { name: 'Absolute executable path' }) as HTMLInputElement;
+  input.focus(); fireEvent.compositionStart(input); fireEvent.change(input, { target: { value: 'C:/作業中/deno.exe' } }); input.setSelectionRange(3, 6);
+  context.data = { ...context.data!, tools: [{ ...context.data!.tools[0], version: '2.1' }] };
+  view.rerender(<QueryClientProvider client={clients.at(-1)!}><SettingsPage /></QueryClientProvider>);
+  expect(input).toHaveFocus(); expect(input).toHaveValue('C:/作業中/deno.exe'); expect([input.selectionStart, input.selectionEnd]).toEqual([3, 6]);
+  fireEvent.compositionEnd(input); expect(settingsApi.setToolProvider).not.toHaveBeenCalled();
+});
+describe('shared model catalogue', () => {
   it('fetches once for all four purposes without changing selected model IDs', async () => {
     context.data = snapshot({ ...settings(), credentialConfigured: true });
     vi.mocked(aiApi.vertexModels).mockResolvedValue([{ id: 'gemini-shared', displayName: 'Shared model' }]);
-    const { container } = render(<SettingsPage />);
+    const { container } = await mount();
     fireEvent.click(screen.getByText('Detailed settings by purpose'));
     const buttons = screen.getAllByRole('button', { name: /Fetch Vertex/ });
     expect(buttons).toHaveLength(1);
@@ -546,7 +126,7 @@ describe('guided settings and shared model catalogue', () => {
     let complete!: (models: Awaited<ReturnType<typeof aiApi.vertexModels>>) => void;
     vi.mocked(aiApi.vertexModels).mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }));
     context.data = snapshot({ ...settings(), credentialConfigured: true });
-    const { container } = render(<SettingsPage />);
+    const { container } = await mount();
     fireEvent.click(screen.getByRole('button', { name: /Fetch Vertex model/ }));
     const location = screen.getByRole('textbox', { name: 'Location' });
     fireEvent.change(location, { target: { value: 'us-central1' } });
@@ -559,7 +139,7 @@ describe('guided settings and shared model catalogue', () => {
   it('invalidates the catalogue after importing another key for the same project', async () => {
     context.data = snapshot({ ...settings(), credentialConfigured: true });
     vi.mocked(aiApi.vertexModels).mockResolvedValue([{ id: 'gemini-shared', displayName: 'Shared' }]);
-    const { container } = render(<SettingsPage />);
+    const { container } = await mount();
     fireEvent.click(screen.getByRole('button', { name: /Fetch Vertex model/ }));
     await screen.findByText(/1 candidate is available/);
     fireEvent.click(screen.getByRole('button', { name: 'Import JSON' }));
@@ -572,7 +152,7 @@ describe('guided settings and shared model catalogue', () => {
     context.data = snapshot({ ...settings(), credentialConfigured: true });
     vi.mocked(aiApi.vertexModels).mockResolvedValue([{ id: 'gemini-shared', displayName: 'Shared' }]);
     vi.mocked(settingsApi.importCredential).mockResolvedValueOnce(false);
-    const { container } = render(<SettingsPage />);
+    const { container } = await mount();
     fireEvent.click(screen.getByRole('button', { name: /Fetch Vertex model/ }));
     await screen.findByText(/1 candidate is available/);
     fireEvent.click(screen.getByRole('button', { name: 'Import JSON' }));
@@ -584,7 +164,7 @@ describe('guided settings and shared model catalogue', () => {
   it('keeps direct model entry available after candidate discovery fails', async () => {
     context.data = snapshot({ ...settings(), credentialConfigured: true });
     vi.mocked(aiApi.vertexModels).mockRejectedValueOnce(new Error('denied'));
-    render(<SettingsPage />);
+    await mount();
     fireEvent.click(screen.getByText('Detailed settings by purpose'));
     fireEvent.click(screen.getByRole('button', { name: /Fetch Vertex model/ }));
     await screen.findByText(/Could not fetch candidates/);
@@ -594,13 +174,4 @@ describe('guided settings and shared model catalogue', () => {
     expect(modelId).toHaveValue('gemini-manual');
   });
 
-  it('defaults a missing channel to stable while keeping saved nightly', () => {
-    const initial = { ...settings(), ytDlpChannel: undefined };
-    context.data = snapshot(initial);
-    const { rerender } = render(<SettingsPage />);
-    expect(screen.getByRole('combobox', { name: /yt-dlp update channel/ })).toHaveValue('stable');
-    context.data = snapshot({ ...initial, ytDlpChannel: 'nightly' });
-    rerender(<SettingsPage />);
-    expect(screen.getByRole('combobox', { name: /yt-dlp update channel/ })).toHaveValue('nightly');
-  });
 });
