@@ -126,7 +126,7 @@ async function cardArticle() { await navigate('/cards'); const search = $('[aria
     await article.$('[aria-label="Listen to managed phrase"]').click();
     await browser.waitUntil(async () => { const state = await invoke('get_player_state'); return state.ready && !state.paused && state.positionMs > 100; });
     await article.$('[aria-label="Edit phrase"]').click();
-    const meaning = $('[role="dialog"]').$('label=Meaning').$('textarea');
+    const meaning = $('[role="dialog"] textarea');
     await meaning.waitForEnabled();
     await expect(meaning).toHaveValue('Original meaning');
     await replaceValue(meaning, 'Corrected meaning');
