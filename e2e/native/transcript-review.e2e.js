@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { Key } from 'webdriverio';
+import { withReadOnlyDatabase } from '../support/native-e2e-database.mjs';
 
 const mediaId = 'e2e-transcript-review';
 const pendingMediaId = 'e2e-transcript-pending';
@@ -29,8 +29,7 @@ let jobId, pendingJobId, originalDigest, originalConflict, adoptedDigest;
 let ledgerBefore;
 
 function withLedger(read) {
-  const database = new DatabaseSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'charges.sqlite'), { readOnly: true });
-  try { return read(database); } finally { database.close(); }
+  return withReadOnlyDatabase(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'charges.sqlite'), read);
 }
 function ledger() {
   return withLedger(database => ({
@@ -414,11 +413,8 @@ async function closeReview() {
     assert(card?.audioPath && card.reviewCount === 1, 'The preceding manual learning chain must pass first');
     const originalCue = (await segments(pendingMediaId)).find(cue => cue.id === card.segmentId);
     const audioHash = createHash('sha256').update(readFileSync(card.audioPath)).digest('hex');
-    const readReviews = path => {
-      const db = new DatabaseSync(path, { readOnly: true });
-      try { return db.prepare('SELECT data FROM reviews WHERE card_id=? ORDER BY id').all(card.id).map(row => JSON.parse(row.data)); }
-      finally { db.close(); }
-    };
+    const readReviews = path => withReadOnlyDatabase(path,
+      db => db.prepare('SELECT data FROM reviews WHERE card_id=? ORDER BY id').all(card.id).map(row => JSON.parse(row.data)));
     const originalReviews = readReviews(resolve(dataRoot, 'learning.sqlite'));
     assert.equal(originalReviews.length, 1);
     // The fixture overrides only native file selection. Export, preview, confirmation,
@@ -502,20 +498,19 @@ async function closeReview() {
     for (const path of [card.audioPath, restored.audioPath]) assert.equal(createHash('sha256').update(readFileSync(path)).digest('hex'), audioHash);
     const addedBackups = readdirSync(resolve(dataRoot, 'backups')).filter(name => !backupsBefore.includes(name));
     assert.equal(addedBackups.length, 1, 'Exactly one pre-restore learning backup must be created');
-    const backup = new DatabaseSync(resolve(dataRoot, 'backups', addedBackups[0]), { readOnly: true });
-    try {
+    withReadOnlyDatabase(resolve(dataRoot, 'backups', addedBackups[0]), backup => {
       assert.equal(JSON.parse(backup.prepare('SELECT data FROM segments WHERE id=?').get(originalCue.id).data).text, 'Changed after the portable backup.');
       assert.deepEqual(JSON.parse(backup.prepare('SELECT data FROM cards WHERE id=?').get(card.id).data), changedCard);
-    } finally { backup.close(); }
+    });
     assert.equal(createHash('sha256').update(readFileSync(zipPath)).digest('hex'), zipHash);
     assert.deepEqual(previewFiles(), []);
     assert.deepEqual(JSON.parse(readFileSync(resolve(dataRoot, 'preferences.json'), 'utf8')), preferences);
     assert.equal(readFileSync(keyMarker, 'utf8'), 'Synthetic preservation marker; not a service-account credential.');
     assert.deepEqual([storedJob(jobId), storedJob(pendingJobId)], jobs);
     assert.deepEqual(ledger(), ledgerBefore);
-    const learning = new DatabaseSync(resolve(dataRoot, 'learning.sqlite'), { readOnly: true });
-    try { assert.equal(learning.prepare('SELECT count(*) AS count FROM transcript_range_revisions').get().count, 0); }
-    finally { learning.close(); }
+    withReadOnlyDatabase(resolve(dataRoot, 'learning.sqlite'), learning => {
+      assert.equal(learning.prepare('SELECT count(*) AS count FROM transcript_range_revisions').get().count, 0);
+    });
     await browser.reloadSession(); await ready();
     assert.deepEqual((await snapshot()).cards.find(item => item.id === card.id), restored);
     assert.deepEqual((await segments(pendingMediaId)).find(cue => cue.id === originalCue.id), originalCue);

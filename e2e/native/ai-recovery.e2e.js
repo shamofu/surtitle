@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { withReadOnlyDatabase } from '../support/native-e2e-database.mjs';
 
 const mediaId = 'e2e-ai-recovery';
 const invoke = (command, args = {}) => browser.execute(async (name, parameters) => window.__TAURI_INTERNALS__.invoke(name, parameters), command, args);
@@ -12,13 +12,8 @@ let jobId;
 let ledgerBefore;
 
 function attempts() {
-  const db = new DatabaseSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'charges.sqlite'), { readOnly: true });
-  try {
-    // The application may be finishing its startup WAL write after refresh.
-    // Wait for that writer while keeping this observer strictly read-only.
-    db.exec('PRAGMA busy_timeout = 10000');
-    return db.prepare('SELECT id,job_id,state,reserve_microusd,charged_microusd,usage_json FROM ai_attempts ORDER BY id').all();
-  } finally { db.close(); }
+  return withReadOnlyDatabase(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'charges.sqlite'),
+    db => db.prepare('SELECT id,job_id,state,reserve_microusd,charged_microusd,usage_json FROM ai_attempts ORDER BY id').all());
 }
 async function ready() {
   await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__), { timeoutMsg: 'Native IPC not ready' });
