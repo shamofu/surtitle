@@ -4,7 +4,8 @@ import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode, RefObject } from 
 import { Button as AriaButton, Dialog, Modal as AriaModal, ModalOverlay } from 'react-aria-components';
 import { ArrowUpRight, LoaderCircle, X } from 'lucide-react';
 import { useSurface, useAppearance } from '../../app/runtime';
-import { MotionRegion, MotionSwap } from '../motion';
+import { MotionRegion, MotionSwap, useAppMotion } from '../motion';
+import { animateEntrance, canAnimate } from '../motion/surfaces';
 export { useModalExit } from './useModalExit';
 
 export function Button({
@@ -92,8 +93,11 @@ function ModalContent({
   const { registerModal } = useSurface();
   const { t } = useAppearance();
   const notificationHost = useRef<HTMLDivElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
+  const { reducedMotion } = useAppMotion();
   const titleId = useId();
   const completed = useRef(false);
+  const entranceAttempted = useRef(false);
   // Keep the opaque native exclusion until the owner unmounts. An accepted close can
   // still fail asynchronously; its inputs and focus scope must survive a retry.
   useLayoutEffect(() => {
@@ -107,6 +111,29 @@ function ModalContent({
     if (!element.contains(document.activeElement)) element.focus({ preventScroll: true });
     return unregister;
   }, [dialog, registerModal]);
+  useLayoutEffect(() => {
+    const shell = dialog.current;
+    const content = inner.current;
+    if (entranceAttempted.current) return;
+    if (!shell || !content) return;
+    if (!open || !canAnimate(content, reducedMotion)) { entranceAttempted.current = true; return; }
+    let started = false;
+    let cancel: (() => void) | undefined;
+    // Surface registration can trigger the player's layout effect. Wait until
+    // that commit has marked any native exclusion before starting the contents.
+    const start = () => {
+      if (started || shell.dataset.nativeOcclusion === 'pending') return;
+      started = true;
+      entranceAttempted.current = true;
+      if (canAnimate(content, reducedMotion)) cancel = animateEntrance(content, 'modal');
+    };
+    const observer = new MutationObserver(start);
+    const frame = requestAnimationFrame(() => {
+      observer.observe(shell, { attributes: true, attributeFilter: ['data-native-occlusion'] });
+      start();
+    });
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); cancel?.(); };
+  }, [dialog, open, reducedMotion]);
   useLayoutEffect(() => {
     if (open) { completed.current = false; return; }
     // Move focus out before making the old controls inert. Notifications remain usable.
@@ -124,9 +151,10 @@ function ModalContent({
       className={`modal ${wide ? 'wide' : ''}`}
       aria-labelledby={titleId}
       data-app-modal=""
+      data-motion-geometry="stable"
       data-state={open ? 'open' : 'closing'}
     >
-      <div className="modal-inner">
+      <div className="modal-inner" ref={inner}>
         <header className="modal-header">
           <div>
             {eyebrow && <span className="eyebrow">{eyebrow}</span>}

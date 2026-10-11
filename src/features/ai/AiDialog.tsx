@@ -32,6 +32,7 @@ import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { preparedSourceMatches, usePreparationSession } from './PreparationSessions';
 import { PreparationProgress } from './PreparationProgress';
 import { AnimatedValue, MotionRegion } from '../../shared/motion';
+import { SelectionIndicator } from '../../shared/motion/SelectionIndicator';
 
 export function AiDialog({
   media,
@@ -357,9 +358,10 @@ export function AiDialog({
           <div className="scope-heading">
             <h3>{t('対象', 'Scope')}</h3>
           </div>
-          <MotionRegion open={kind === 'transcribe'}><div className="segmented-control">
-            <button disabled={busy || preparing} className={wholeMedia ? 'selected' : ''} onClick={() => { setWholeMedia(true); setPreparation(undefined); }}>{t('全編を文字起こし', 'Transcribe the whole video')}</button>
-            <button disabled={busy || preparing} className={!wholeMedia ? 'selected' : ''} onClick={() => { setWholeMedia(false); setPreparation(undefined); }}>{t('範囲を指定', 'Choose a range')}</button>
+          <MotionRegion open={kind === 'transcribe'}><div className="segmented-control" role="group" aria-label={t('文字起こしの対象', 'Transcription scope')}>
+            <SelectionIndicator variant="pill" />
+            <button disabled={busy || preparing} aria-pressed={wholeMedia} className={wholeMedia ? 'selected' : ''} onClick={() => { setWholeMedia(true); setPreparation(undefined); }}>{t('全編を文字起こし', 'Transcribe the whole video')}</button>
+            <button disabled={busy || preparing} aria-pressed={!wholeMedia} className={!wholeMedia ? 'selected' : ''} onClick={() => { setWholeMedia(false); setPreparation(undefined); }}>{t('範囲を指定', 'Choose a range')}</button>
           </div></MotionRegion>
           <MotionRegion open={kind === 'transcribe' && wholeMedia}><p className="notice">{media.durationMs > 0
             ? t(`全編 ${timestamp(media.durationMs, true)} を一括で処理します。`, `Process the entire ${timestamp(media.durationMs, true)} video in one job.`)

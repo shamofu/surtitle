@@ -32,7 +32,7 @@ import {
 } from '../../app/runtime';
 import { shouldIgnoreShortcut } from '../../shared/keyboard';
 import { activeSegment, languageName, timestamp } from '../../shared/format';
-import { AnimatedValue, MotionRegion } from '../../shared/motion';
+import { AnimatedValue, MotionRegion, useMotionChange } from '../../shared/motion';
 import { nativeAvailable } from '../../shared/native/transport';
 import { Button, EmptyState, IconButton, Modal, useModalExit } from '../../shared/ui/index';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
@@ -173,6 +173,8 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const [selectionRevision, setSelectionRevision] = useState(0);
   const [panel, setPanel] = useState<'transcript' | 'phrase' | 'activity' | null>(null);
   const companion = useStudyPresence(panel !== null);
+  const companionContents = useRef<HTMLDivElement>(null);
+  useMotionChange(companionContents, Number(panel !== null), !panel, 'panel');
   const previousPanel = useRef(panel);
   useLayoutEffect(() => { if (panel) previousPanel.current = panel; }, [panel]);
   const presentedPanel = panel || previousPanel.current;
@@ -774,7 +776,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                 <X size={19} />
               </IconButton>}
             </header>
-            <div className="study-companion-body">
+            <div className="study-companion-body" ref={companionContents}>
       <div className="study-auxiliary" hidden={panel !== 'activity'}>
       {emptyRangeIssues.length > 0 && <AnimatedDetails className="notice warning">
         <summary><AnimatedValue value={t(`字幕がない要確認区間 (${emptyRangeIssues.length})`, `Passages without subtitles to check (${emptyRangeIssues.length})`)} /></summary>

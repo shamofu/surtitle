@@ -91,15 +91,19 @@ it('uses the exact complete video despite a selected cue and automatically prepa
 
 it('keeps the range input DOM and selection when switching whole-video scope repeatedly', () => {
   render(<AiDialog media={media} onClose={() => {}} />);
+  expect(screen.getByRole('button', { name: 'Transcribe the whole video' })).toHaveAttribute('aria-pressed', 'true');
   fireEvent.click(screen.getByRole('button', { name: 'Choose a range' }));
+  expect(screen.getByRole('button', { name: 'Choose a range' })).toHaveAttribute('aria-pressed', 'true');
   const from = screen.getByLabelText(/^From/) as HTMLInputElement;
   fireEvent.change(from, { target: { value: '00:01:23' } });
   from.focus();
   from.setSelectionRange(3, 5);
   fireEvent.click(screen.getByRole('button', { name: 'Transcribe the whole video' }));
+  expect(screen.getByRole('button', { name: 'Choose a range' })).toHaveAttribute('aria-pressed', 'false');
   expect(screen.queryByRole('textbox', { name: /^From/ })).not.toBeInTheDocument();
   expect(from).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Choose a range' }));
+  expect(screen.getByRole('button', { name: 'Transcribe the whole video' })).toHaveAttribute('aria-pressed', 'false');
   expect(screen.getByLabelText(/^From/)).toBe(from);
   expect(from).toHaveValue('00:01:23');
   expect(from.selectionStart).toBe(3);

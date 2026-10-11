@@ -12,7 +12,8 @@ import { Badge, Button, EmptyState, PageTitle } from '../../shared/ui/index';
 import { TransferDialog } from '../transfer/TransferDialog';
 import { DownloadJobs } from './MediaManagement';
 import { useLibraryDrop } from './useLibraryDrop';
-import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
+import { AnimatedValue, MotionRegion, MotionSwap, useMotionEntrance } from '../../shared/motion';
+import { SelectionIndicator } from '../../shared/motion/SelectionIndicator';
 
 function MediaRow({ media }: { media: Media }) {
   const { t, locale } = useAppearance();
@@ -65,6 +66,8 @@ function MediaRow({ media }: { media: Media }) {
 }
 
 export function LibraryPage() {
+  const pageRef = useRef<HTMLDivElement>(null);
+  useMotionEntrance(pageRef);
   const { data, loading, error } = useSnapshot();
   const { refresh } = useDataActions();
   const { t, locale } = useAppearance();
@@ -109,7 +112,7 @@ export function LibraryPage() {
   const filtering = !!search || filter !== 'all';
 
   return (
-    <div className="library-page" onDragOver={event => {
+    <div ref={pageRef} className="library-page" onDragOver={event => {
       if (Array.from(event.dataTransfer.types).includes('Files')) event.preventDefault();
     }} onDrop={event => {
       if (!Array.from(event.dataTransfer.types).includes('Files')) return;
@@ -154,6 +157,7 @@ export function LibraryPage() {
           </div>
           <div className="library-tools">
             <div className="filter-tabs" role="group" aria-label={t('コンテンツの種類', 'Content type')}>
+              <SelectionIndicator variant="pill" />
               {[
                 ['all', t('すべて', 'All')],
                 ['video', t('動画', 'Video')],

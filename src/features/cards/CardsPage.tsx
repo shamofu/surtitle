@@ -33,7 +33,7 @@ import {
 import { TransferDialog } from '../transfer/TransferDialog';
 import { EditCardDialog, DeleteCardDialog } from './CardManagement';
 import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
-import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
+import { AnimatedValue, MotionRegion, MotionSwap, useMotionEntrance } from '../../shared/motion';
 
 function closePhraseMenu(element: HTMLElement, restoreFocus = true) {
   const menu = element.closest('details');
@@ -42,6 +42,8 @@ function closePhraseMenu(element: HTMLElement, restoreFocus = true) {
 }
 
 export function CardsPage() {
+  const page = useRef<HTMLDivElement>(null);
+  useMotionEntrance(page);
   const { mutate, refresh } = useDataActions();
   const { data, loading, error } = useSnapshot();
   const { t, locale } = useAppearance();
@@ -118,7 +120,7 @@ export function CardsPage() {
   useLayoutEffect(() => { list.current?.closest<HTMLElement>('.page-content')?.scrollTo({ top: 0 }); }, [search, language]);
   const visible = virtualized ? virtual.getVirtualItems().map(item => ({ card: filtered[item.index], item })) : filtered.map(card => ({ card, item: undefined }));
   return (
-    <div className="phrases-page page-enter">
+    <div className="phrases-page" ref={page}>
       <PageTitle
         title={t('フレーズ帳', 'Phrases')}
         description={t(

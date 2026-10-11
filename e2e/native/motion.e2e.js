@@ -16,9 +16,11 @@ const nativeVideo = windows => windows.find(window => window.visible && window.p
   let originalSettings;
   before(async () => {
     await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__));
-    if (process.env.SURTITLE_E2E_FRONTEND_SCRIPT) {
+    const expectedFrontend = process.env.SURTITLE_E2E_FRONTEND_SCRIPT;
+    if (process.env.CI) assert(expectedFrontend, 'CI must identify the frontend built before the native executable');
+    if (expectedFrontend) {
       const scripts = await browser.execute(() => Array.from(document.querySelectorAll('script[src]'), script => new URL(script.src).pathname));
-      assert(scripts.includes(process.env.SURTITLE_E2E_FRONTEND_SCRIPT), 'The native executable must embed the current frontend');
+      assert(scripts.includes(expectedFrontend), `The native executable must embed the current frontend ${expectedFrontend}; loaded ${scripts.join(', ')}`);
     }
     const snapshot = await invoke('get_app_snapshot');
     assert.equal(snapshot.settings.credentialConfigured, false);
@@ -85,12 +87,28 @@ const nativeVideo = windows => windows.find(window => window.visible && window.p
         await $('[aria-label="Subtitle list"]').waitForDisplayed();
         const before = await assertNativeVideoBounds();
         const opener = $('button=Playback settings');
-        await opener.click();
-        await $('[role="dialog"]').waitForDisplayed();
-        await browser.waitUntil(async () => browser.execute(() => !document.querySelector('[data-native-occlusion="pending"]')));
-        const modal = await assertNativeVideoBounds();
+        const trace = await sampleNativeVideoBounds(async () => {
+          await opener.click();
+          await $('[role="dialog"]').waitForDisplayed();
+          await browser.waitUntil(async () => browser.execute(() => !document.querySelector('[data-native-occlusion="pending"]')));
+          return assertNativeVideoBounds();
+        }, `motion-${preference}-native-modal-open.json`);
+        const modal = trace.result;
+        for (const sample of trace.samples) assert(nativeVideo(sample.windows), 'Modal entry hid the whole native video');
         assert.deepEqual(modal.dom.viewport, before.dom.viewport);
         assert(nativeVideo(modal.native)?.regionRectangles?.length, 'Native modal exclusion was not applied');
+        const ancestors = await browser.execute(() => {
+          const result = [];
+          for (let node = document.querySelector('[role="dialog"]'); node; node = node.parentElement) {
+            const css = getComputedStyle(node);
+            result.push({ name: node.className || node.tagName, transform: css.transform, opacity: css.opacity });
+          }
+          return result;
+        });
+        for (const ancestor of ancestors) {
+          assert.equal(ancestor.transform, 'none', `${ancestor.name} transformed the native modal exclusion`);
+          assert.equal(ancestor.opacity, '1', `${ancestor.name} faded the native modal exclusion`);
+        }
         await browser.execute(() => document.querySelector('[role="dialog"]').focus());
         await browser.keys(Key.Space);
         assert.equal((await player()).paused, true, 'Modal Space started background playback');

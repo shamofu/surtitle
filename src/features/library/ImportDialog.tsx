@@ -9,6 +9,8 @@ import { Button, Field, IconButton, Modal } from '../../shared/ui/index';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { useActivities } from '../../app/providers/Activities';
 import { LanguageInput } from '../../shared/ui/LanguageInput';
+import { MotionSwap } from '../../shared/motion';
+import { SelectionIndicator } from '../../shared/motion/SelectionIndicator';
 import './import.css';
 
 export interface DroppedMediaFiles { revision: number; paths: string[] }
@@ -58,6 +60,7 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
   return <Modal title={t('作品を追加', 'Add a video or audio file')} onClose={onClose}>
     <div className="media-import"><div className="import-body">
       <div className="segmented-control" role="group" aria-label={t('追加する方法', 'Import source')}>
+        <SelectionIndicator variant="pill" />
         <button className={view.mode === 'local' ? 'selected' : ''} aria-pressed={view.mode === 'local'} onClick={() => workspace.change({ mode: 'local' })}><FolderOpen size={16} />{t('ファイル', 'Local file')}</button>
         <button className={view.mode === 'url' ? 'selected' : ''} aria-pressed={view.mode === 'url'} onClick={() => workspace.change({ mode: 'url' })}><Link2 size={16} />URL</button>
       </div>
@@ -65,6 +68,7 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
         <Field label={t('学習する言語', 'Learning language')}><LanguageInput value={view.learningLanguage} onChange={learningLanguage => workspace.change({ learningLanguage })} disabled={busy || !view.ready} /></Field>
         <Field label={t('説明・翻訳の言語', 'Explanation language')}><LanguageInput value={view.explanationLanguage} onChange={explanationLanguage => workspace.change({ explanationLanguage })} disabled={busy || !view.ready} /></Field>
       </div>
+      <MotionSwap stateKey={view.mode}>
       {view.mode === 'local' ? <>
         <button className={`import-drop ${dragging ? 'is-dragging' : ''}`} onClick={() => void selectFiles()} disabled={busy || !view.ready || !languagesValid}>
           <span className="drop-icon"><Upload size={26} /></span><strong>{t('動画・音声ファイルを選択', 'Choose a video or audio file')}</strong>
@@ -78,6 +82,7 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
           </li>)}</ul>
         </section>}
       </> : <Field label={t('動画・音声の URL', 'Video or audio URL')} hint={t('公開 YouTube 動画、またはメディアファイルへの直接リンク。', 'A public YouTube video or direct media link.')}><input value={view.url} onChange={event => workspace.change({ url: event.target.value })} type="url" placeholder="https://…" disabled={startingUrl} /></Field>}
+      </MotionSwap>
       {view.busy && <ProgressStatus label={t('ファイルを追加中', 'Importing files')} phase="importing" completed={view.completed} total={view.total} unit="items" />}
       {busy && <p className="helper-text">{t('この画面を閉じても取り込みは続きます。', 'Importing continues when you close this panel.')}</p>}
       {view.error && <p className="notice warning" role="alert">{view.error}

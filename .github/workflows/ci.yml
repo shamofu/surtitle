@@ -185,6 +185,7 @@ jobs:
           e2e/support/native-e2e-database.test.mjs
           native/build/native-ci-artifact.test.mjs
           native/windows/native-installer-prepare.test.mjs
+          e2e/support/frontend-bundle.test.mjs
       - run: pnpm build
       - run: pnpm test:rust
       - name: Verify ordinary builds cannot bypass evaluation accounting
@@ -208,7 +209,10 @@ jobs:
           & pwsh -NoProfile -File e2e/support/run-windows-standard-user.ps1 -Application "$PWD/target/debug/examples/seed_fixture.exe" -ArgumentsBase64 $seedArgumentsBase64
           if ($LASTEXITCODE -ne 0) { throw 'Windows E2E learning fixture preparation failed.' }
       - name: Build actual Windows native E2E binary
-        run: pnpm build:native:e2e
+        run: |
+          $frontendScript = node e2e/support/frontend-bundle.mjs
+          pnpm build:native:e2e
+          "SURTITLE_E2E_FRONTEND_SCRIPT=$frontendScript" >> $env:GITHUB_ENV
       - name: Required FFmpeg, libmpv and Silero regressions
         run: |
           $env:SURTITLE_TEST_FFMPEG = (Get-Command ffmpeg -CommandType Application).Source

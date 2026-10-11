@@ -3,8 +3,8 @@ import { expect, test } from '@playwright/test';
 import { installLearningFixture } from './learning-fixture';
 import { motionDurations } from '../../src/shared/motion';
 
-// Outlive the configured exit and its bounded completion fallback.
-const obsoleteExitDeadline = motionDurations.exit * 1000 + 150;
+// Outlive the disclosure's bounded completion fallback, including a stale one.
+const obsoleteExitDeadline = motionDurations.reveal * 1000 + 150;
 
 test('disclosure animates actual height and following content, then reverses with the same draft', async ({ page }, info) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -13,43 +13,71 @@ test('disclosure animates actual height and following content, then reverses wit
   await page.waitForLoadState('networkidle');
   const details = page.locator('.budget-details');
   await details.scrollIntoViewIfNeeded();
-  const observe = (reverse = false) => details.evaluate(async (element, reverse) => {
+  const observe = (reverse = false) => details.evaluate(async (element, { reverse, duration }) => {
     const summary = element.querySelector('summary')!;
     const text = element.querySelector('.helper-text')!;
     const following = element.nextElementSibling!;
-    const start = performance.now();
-    const read = () => ({ at: performance.now() - start, height: element.getBoundingClientRect().height,
+    const read = (at: number) => ({ at, height: element.getBoundingClientRect().height,
       following: following.getBoundingClientRect().y, summary: summary.textContent, text: text.textContent,
       font: getComputedStyle(text).fontSize, transform: getComputedStyle(text).transform,
       opacity: getComputedStyle(text).opacity, inert: !!text.closest('[inert]'),
       open: (element as HTMLDetailsElement).open });
-    const frames = [read()];
-    let reversed = false;
-    summary.click();
-    while (performance.now() - start < 420) {
-      await new Promise(requestAnimationFrame);
-      frames.push(read());
-      if (reverse && !reversed && performance.now() - start >= 60) {
-        summary.click();
-        reversed = true;
+    const frames = [read(0)];
+    const originalAnimate = element.animate;
+    let started: (animation: Animation) => void;
+    // Pause synchronously at creation so CI frame cadence cannot skip a short transition.
+    element.animate = function (...args) {
+      const animation = originalAnimate.apply(this, args);
+      animation.pause();
+      started(animation);
+      return animation;
+    };
+    const toggle = async () => {
+      const pending = new Promise<Animation>(resolve => { started = resolve; });
+      summary.click();
+      const animation = await pending;
+      if (animation.effect!.getTiming().duration !== duration) throw new Error('Unexpected disclosure duration');
+      return animation;
+    };
+    try {
+      let animation = await toggle();
+      for (const fraction of (reverse ? [0, .2, .4] : [0, .2, .5, .8, 1])) {
+        animation.currentTime = duration * fraction;
+        frames.push(read(duration * fraction));
       }
+      let reversalJump = 0;
+      if (reverse) {
+        const before = element.getBoundingClientRect().height;
+        animation = await toggle();
+        animation.currentTime = 0;
+        reversalJump = Math.abs(element.getBoundingClientRect().height - before);
+        for (const fraction of [0, .2, .5, .8, 1]) {
+          animation.currentTime = duration * fraction;
+          frames.push(read(duration * (.4 + fraction)));
+        }
+      }
+      animation.finish();
+      await animation.finished;
+      frames.push(read(duration * (reverse ? 1.4 : 1)));
+      return { frames, reversalJump };
+    } finally {
+      element.animate = originalAnimate;
     }
-    return frames;
-  }, reverse);
-  const opening = await observe();
+  }, { reverse, duration: motionDurations.reveal * 1000 });
+  const { frames: opening } = await observe();
   const daily = page.getByRole('textbox', { name: 'Daily limit (USD)', exact: true });
   await daily.fill('12.5');
-  // Editing a limit also updates a summary above this disclosure; let that independent change settle.
-  await page.waitForTimeout(240);
+  await expect(page.locator('.budget-custom-summary')).toContainText('$12.50');
   const original = await daily.elementHandle();
-  const closing = await observe();
+  const { frames: closing } = await observe();
   expect(closing.some(frame => frame.inert)).toBe(true);
   for (const [name, frames, increasing] of [['open', opening, true], ['close', closing, false]] as const) {
     await info.attach(`disclosure-${name}-geometry.json`, { body: JSON.stringify(frames), contentType: 'application/json' });
     const first = frames[0], last = frames.at(-1)!;
     const low = Math.min(first.height, last.height), high = Math.max(first.height, last.height);
     expect(high - low).toBeGreaterThan(100);
-    expect(new Set(frames.filter(frame => frame.height > low + 2 && frame.height < high - 2).map(frame => Math.round(frame.height))).size).toBeGreaterThan(1);
+    // These samples are at known animation times, rather than accidental painted frames.
+    expect(frames.slice(2, 5).every(frame => frame.height > low + 2 && frame.height < high - 2)).toBe(true);
     for (let index = 0; index < frames.length; index++) {
       const frame = frames[index];
       expect(frame.font).toBe(first.font);
@@ -62,9 +90,9 @@ test('disclosure animates actual height and following content, then reverses wit
     }
   }
   await expect(details).not.toHaveAttribute('open');
-  await details.locator('summary').click();
-  await page.waitForTimeout(240);
-  const reversing = await observe(true);
+  await observe();
+  const { frames: reversing, reversalJump } = await observe(true);
+  expect(reversalJump).toBeLessThan(1);
   const heights = reversing.map(frame => frame.height);
   expect(Math.min(...heights)).toBeGreaterThan(closing.at(-1)!.height + 2);
   expect(Math.min(...heights)).toBeLessThan(heights[0] - 10);

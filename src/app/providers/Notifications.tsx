@@ -11,9 +11,9 @@ import {
 } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import * as m from 'motion/react-m';
 import { useSurface } from './Surface';
-import { motionDurations, motionEase, useAppMotion } from '../../shared/motion';
+import { motionDurations, motionCssExitEase, useAppMotion } from '../../shared/motion';
+import { animateEntrance, canAnimate } from '../../shared/motion/surfaces';
 
 interface Toast {
   id: number;
@@ -109,18 +109,48 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
 }
 function ToastMessage({ toast, dismiss, remove }: { toast: Toast; dismiss: (id: number) => void; remove: (id: number) => void }) {
   const { reducedMotion } = useAppMotion();
-  useEffect(() => {
-    if (!toast.closing) return;
-    if (reducedMotion) { remove(toast.id); return; }
-    const fallback = window.setTimeout(() => remove(toast.id), motionDurations.exit * 1000 + 100);
-    return () => clearTimeout(fallback);
+  const element = useRef<HTMLButtonElement>(null);
+  const entered = useRef(false);
+  useLayoutEffect(() => {
+    const node = element.current;
+    if (!node || !canAnimate(node, reducedMotion)) {
+      entered.current = true;
+      if (toast.closing) remove(toast.id);
+      return;
+    }
+    if (!toast.closing) {
+      if (entered.current) return;
+      let cancel: (() => void) | undefined;
+      const frame = requestAnimationFrame(() => {
+        entered.current = true;
+        if (canAnimate(node, reducedMotion)) cancel = animateEntrance(node, 'toast');
+      });
+      return () => { cancelAnimationFrame(frame); cancel?.(); };
+    }
+    const duration = motionDurations.exit * 1000;
+    const animation = node.animate(
+      [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-8px)' }],
+      { duration, easing: motionCssExitEase, fill: 'both' });
+    let settled = false;
+    const cleanup = () => {
+      animation.cancel(); clearTimeout(timer);
+      document.removeEventListener('visibilitychange', finish);
+      window.removeEventListener('resize', finish);
+    };
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (toast.closing) remove(toast.id);
+    };
+    const timer = window.setTimeout(finish, duration + 100);
+    document.addEventListener('visibilitychange', finish);
+    window.addEventListener('resize', finish);
+    void animation.finished.then(finish, () => {});
+    return () => { settled = true; cleanup(); };
   }, [toast.closing, toast.id, reducedMotion, remove]);
-  return <m.button className={`toast ${toast.kind}`} disabled={toast.closing}
-    initial={reducedMotion ? false : { opacity: 0, y: -10 }}
-    animate={{ opacity: toast.closing ? 0 : 1, y: toast.closing && !reducedMotion ? -8 : 0 }}
-    transition={{ duration: reducedMotion ? 0 : toast.closing ? motionDurations.exit : motionDurations.enter, ease: motionEase }}
-    onAnimationComplete={() => { if (toast.closing) remove(toast.id); }}
-    onClick={() => dismiss(toast.id)}>{toast.text}</m.button>;
+  return <button ref={element} className={`toast ${toast.kind}`} disabled={toast.closing}
+    onClick={() => dismiss(toast.id)}>{toast.text}</button>;
 }
 export function NotificationRegion() {
   const { registerRegion } = useNotifications();

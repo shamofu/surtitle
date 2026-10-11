@@ -440,7 +440,7 @@ body:has(.settings-page) .toast-stack { bottom: 112px; }
   border-left-color: var(--danger);
 }
 .spin {
-  animation: spin 1.1s linear infinite;
+  animation: spin var(--motion-spin) linear infinite;
 }
 @keyframes spin {
   to {

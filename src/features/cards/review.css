@@ -7,12 +7,8 @@
   gap: 12px;
 }
 .page-content:has(.review-page) { padding: 16px 24px; overflow: hidden; }
-.review-session, .review-transition { min-height: 0; height: 100%; }
-.review-transition { display: grid; grid-template-rows: minmax(0, 1fr) auto; }
-.review-transition > .review-card,
-.review-transition > .review-complete {
-  animation: none;
-}
+.review-session, .review-transition, .review-transition > .motion-swap-live { min-height: 0; height: 100%; }
+.review-transition > .motion-swap-live { display: grid; grid-template-rows: minmax(0, 1fr) auto; }
 .review-page-header {
   display: flex;
   align-items: center;

@@ -16,7 +16,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useSettings } from '../../shared/query/snapshot';
 import { mutateData } from '../../shared/query/mutations';
 import { useNotifications } from './Notifications';
-import { motionCssEase, motionDurations, useAppMotion } from '../../shared/motion';
+import { useAppMotion } from '../../shared/motion';
+import { animateEntrance, canAnimate } from '../../shared/motion/surfaces';
 interface Appearance {
   locale: 'ja' | 'en';
   setLocale: (locale: 'ja' | 'en') => void;
@@ -39,13 +40,11 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     if (!changed || reducedMotion || document.hidden) return;
     // The video is a separate HWND: fade only DOM regions that do not contain it.
     const regions = document.querySelectorAll<HTMLElement>(
-      '.topbar, .preview-banner, .page-content > :not(.study-page), .study-top, .study-auxiliary, .current-caption, .player-controls, .study-companion, dialog .modal-inner',
+      '.topbar, .preview-banner, .page-content > :not(.study-page), .study-top, .study-auxiliary, .current-caption, .player-controls, .study-companion, [data-app-modal] .modal-inner',
     );
-    const animations = [...regions].filter(node => !node.querySelector('.native-player-viewport') && typeof node.animate === 'function')
-      .map(node => node.animate([{ opacity: 0 }, { opacity: 1 }], { duration: motionDurations.swap * 1000, easing: motionCssEase }));
-    const finish = () => animations.forEach(animation => animation.cancel());
-    document.addEventListener('visibilitychange', finish);
-    return () => { finish(); document.removeEventListener('visibilitychange', finish); };
+    const cancel = [...regions].filter(node => canAnimate(node, reducedMotion))
+      .map(node => animateEntrance(node, 'swap'));
+    return () => cancel.forEach(finish => finish?.());
   }, [locale, reducedMotion]);
   const changeLocale = useCallback(
     (value: 'ja' | 'en') => {

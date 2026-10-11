@@ -7,7 +7,7 @@
 .progress-status progress::-webkit-progress-bar { background: var(--surface-raised); }
 .progress-status progress::-webkit-progress-value { background: var(--accent); border-radius: 3px; }
 .progress-status progress::-moz-progress-bar { background: var(--accent); border-radius: 3px; }
-.progress-status progress:not([value]) { background: linear-gradient(90deg, var(--surface-raised) 0 30%, var(--accent) 30% 60%, var(--surface-raised) 60%); background-size: 200% 100%; animation: progress-pulse 1.6s ease-in-out infinite; }
+.progress-status progress:not([value]) { background: linear-gradient(90deg, var(--surface-raised) 0 30%, var(--accent) 30% 60%, var(--surface-raised) 60%); background-size: 200% 100%; animation: progress-pulse var(--motion-progress) var(--motion-reveal-ease) infinite; }
 .progress-status progress:not([value])::-webkit-progress-bar { background: transparent; }
 .progress-status-count { font-variant-numeric: tabular-nums; margin: 0; }
 .progress-status-error { color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }
