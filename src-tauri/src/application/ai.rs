@@ -22,6 +22,9 @@ pub struct JobSummary {
     kind: String,
     status: String,
     progress: f64,
+    request_counts: RequestCounts,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    execution_outcome: Option<String>,
     message: Option<String>,
     created_at: String,
     pending_results: usize,
@@ -162,6 +165,7 @@ pub struct PreparationSummary {
 }
 
 pub(crate) mod bindings;
+pub(crate) mod runtime;
 pub(crate) mod snapshot;
 use bindings::*;
 pub(crate) mod quotes;

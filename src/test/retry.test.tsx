@@ -104,6 +104,14 @@ describe('fresh approval for remaining AI work', () => {
       screen.queryByRole('button', { name: 'Estimate remaining work' }),
     ).not.toBeInTheDocument();
   });
+  it('allows reviewed retry of rejected vocabulary requests after the initial run drains', async () => {
+    vi.mocked(aiApi.createRetryQuote).mockResolvedValue({ ...quote, kind: 'vocabulary' });
+    render(<JobActions job={{ ...job, kind: 'vocabulary', status: 'failed', progress: 1, executionOutcome: 'partial',
+      requestCounts: { total: 3, succeeded: 2, rejected: 1, pending: 0, inFlight: 0 } }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Estimate remaining work' }));
+    await screen.findByRole('button', { name: 'Approve this job' });
+    expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
+  });
   it('offers only local application when every response has already arrived', async () => {
     render(<JobActions job={{ ...job, status: 'failed', progress: 1, issue: { code: 'local_apply', phase: 'apply', occurredAt: '', nextAction: 'retry_local' } }} />);
     expect(screen.queryByRole('button', { name: 'Estimate remaining work' })).not.toBeInTheDocument();

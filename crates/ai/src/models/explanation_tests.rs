@@ -98,3 +98,30 @@ fn split_expression_requires_every_contributing_cue_without_relaxing_citations()
         assert!(parse_output(&t, &output("look forward to", citations)).is_err());
     }
 }
+
+#[test]
+fn text_rejection_diagnostics_distinguish_structure_from_source_without_raw_errors() {
+    let selected = task();
+    for (raw, expected) in [
+        ("{unfinished".to_owned(), OutputFailureReason::InvalidJson),
+        (
+            r#"{"items":"provider-controlled diagnostic"}"#.to_owned(),
+            OutputFailureReason::InvalidFields,
+        ),
+        (
+            output("look after", vec!["cue"]),
+            OutputFailureReason::InvalidSource,
+        ),
+        (
+            output("look forward to", vec!["invented"]),
+            OutputFailureReason::InvalidSource,
+        ),
+        (
+            output("look forward to", vec!["other"]),
+            OutputFailureReason::InvalidSource,
+        ),
+    ] {
+        assert_eq!(parse_text_output(&selected, &raw).unwrap_err(), expected);
+    }
+    assert!(parse_text_output(&selected, &output("look forward to", vec!["cue"])).is_ok());
+}

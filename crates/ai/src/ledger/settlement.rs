@@ -1,6 +1,8 @@
 //! Durable settlement, unknown outcomes, and interrupted-work recovery.
 use super::{audit, AiStore};
-use crate::{AiError, ParsedOutput, Result};
+use crate::{
+    AiError, OutputFailureReason, ParsedOutput, ReservedRequest, Result, TextFailurePolicy,
+};
 use rusqlite::{params, TransactionBehavior};
 
 impl AiStore {
@@ -53,6 +55,27 @@ impl AiStore {
         error: Option<&str>,
     ) -> Result<()> {
         self.finish_attempt(attempt_id, None, Some(usage), response, error, "settled")
+    }
+
+    /// Record a fully received text response rejected by output validation.
+    /// Only this fixed diagnostic class can be skipped by an opted-in plan.
+    /// Unknown usage, transport failure, and local persistence errors never
+    /// become settled rejections and therefore still block further dispatch.
+    pub fn settle_rejected(
+        &self,
+        request: &ReservedRequest,
+        actual_microusd: Option<u64>,
+        usage: &serde_json::Value,
+        reason: OutputFailureReason,
+    ) -> Result<()> {
+        self.finish_attempt(
+            &request.attempt_id,
+            actual_microusd,
+            Some(usage),
+            None,
+            Some(reason.code()),
+            "settled",
+        )
     }
 
     pub(crate) fn record_model_version(&self, attempt_id: &str, value: Option<&str>) -> Result<()> {
@@ -139,18 +162,53 @@ impl AiStore {
             [id],
             |row| row.get(0),
         )?;
+        let (plan, _, _, _) = super::accounting::read_job(&tx, &job_id)?;
         if previous == "reserved" && dispatched && state != "released" {
-            let (plan, _, _, _) = super::accounting::read_job(&tx, &job_id)?;
             self.pace_outcome(&tx, &plan, ordinal, success)?;
         }
         tx.execute("UPDATE ai_requests SET state=?,response_json=?,error_code=? WHERE job_id=? AND ordinal=?",params![if success {"completed"} else if state == "unknown" {"unknown"} else {"failed"},response.map(serde_json::to_string).transpose()?,error,job_id,ordinal])?;
-        if !success || charged.zip(reserve).is_some_and(|(n, r)| n > r) {
+        let over_reservation = charged.zip(reserve).is_some_and(|(n, r)| n > r);
+        let output_within_limit = usage
+            .and_then(|usage| {
+                let candidate = match usage.get("candidatesTokenCount") {
+                    Some(value) => value.as_u64()?,
+                    None if usage
+                        .get("totalTokenCount")
+                        .and_then(serde_json::Value::as_u64)
+                        == usage
+                            .get("promptTokenCount")
+                            .and_then(serde_json::Value::as_u64) =>
+                    {
+                        0
+                    }
+                    None => return None,
+                };
+                let thoughts = match usage.get("thoughtsTokenCount") {
+                    Some(value) => value.as_u64()?,
+                    None => 0,
+                };
+                usage
+                    .get("promptTokenCount")
+                    .and_then(serde_json::Value::as_u64)?;
+                candidate.checked_add(thoughts)
+            })
+            .is_some_and(|tokens| tokens <= u64::from(plan.execution.max_output_tokens));
+        let skip_rejection = !success
+            && state == "settled"
+            && dispatched
+            && error.and_then(OutputFailureReason::from_code).is_some()
+            && output_within_limit
+            && !over_reservation
+            && plan.text_failure_policy == TextFailurePolicy::SkipRejected;
+        if !success && !skip_rejection || over_reservation {
             tx.execute(
                 "UPDATE ai_jobs SET state='needs_review' WHERE id=? AND state NOT IN ('cancelled','paused')",
                 [&job_id],
             )?;
         } else {
-            tx.execute("UPDATE ai_jobs SET state='completed' WHERE id=? AND state='approved' AND NOT EXISTS(SELECT 1 FROM ai_requests WHERE job_id=? AND state!='completed')",params![job_id,job_id])?;
+            // A drained batch with rejected requests is finished, but it still
+            // has work the user may explicitly reapprove. Never leave it running.
+            tx.execute("UPDATE ai_jobs SET state=CASE WHEN EXISTS(SELECT 1 FROM ai_requests WHERE job_id=? AND state!='completed') THEN 'needs_review' ELSE 'completed' END WHERE id=? AND state='approved' AND NOT EXISTS(SELECT 1 FROM ai_requests WHERE job_id=? AND state IN ('pending','reserved','unknown'))",params![job_id,job_id,job_id])?;
         }
         audit(&tx, self.now_ms(), state, Some(&job_id), id)?;
         tx.commit()?;

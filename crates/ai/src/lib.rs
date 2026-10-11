@@ -25,7 +25,9 @@ pub use transcript_review::*;
 pub use vad::*;
 #[cfg(feature = "test-support")]
 pub use vertex::test_support;
-pub use vertex::{ExecutionResult, VertexService};
+pub use vertex::{
+    ExecutionEvent, ExecutionObserver, ExecutionResult, ExecutionStage, VertexService,
+};
 
 use sha2::{Digest, Sha256};
 
@@ -41,6 +43,10 @@ pub enum AiError {
     PacingWaiting(i64),
     #[error("{0}")]
     Invalid(String),
+    /// The provider response was received and its usage durably settled, but
+    /// its output cannot be published. This never means a transport failure.
+    #[error("Provider output was rejected: {0}")]
+    OutputRejected(OutputFailureReason),
     #[error("Paid work is disabled until nonzero daily, monthly, and job limits are configured")]
     BudgetDisabled,
     #[error("This request exceeds the configured {0} budget")]
@@ -59,7 +65,9 @@ pub enum AiError {
     Credentials,
     #[error("The request may have been billed; automatic retry is disabled")]
     UnknownOutcome,
-    #[error("Vertex rejected the request (HTTP {0}); inspect project, model availability, and permissions")]
+    #[error(
+        "Vertex rejected the request (HTTP {0}); inspect project, model availability, and permissions"
+    )]
     Provider(u16),
     #[error("Prepared input changed; prepare and approve a new job")]
     PreparationChanged,

@@ -44,6 +44,7 @@ pub struct Services {
 }
 #[derive(Default)]
 struct AiSession {
+    runtime: ai::runtime::RuntimeRegistry,
     preparation: Mutex<Option<PreparationCancellation>>,
     transcript_review: Mutex<()>,
 }

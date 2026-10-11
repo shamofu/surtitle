@@ -114,6 +114,17 @@ pub(super) fn make_plan(
     max_audio_seconds: Option<u32>,
 ) -> Result<PreparedJob> {
     task.validate().map_err(ai_error)?;
+    if execution.response_mode == surtitle_ai::ResponseMode::StreamGenerateContent
+        && !matches!(
+            task,
+            RequestTask::Vocabulary { .. }
+                | RequestTask::Explanation { .. }
+                | RequestTask::Translation { .. }
+                | RequestTask::AudioTranscription { .. }
+        )
+    {
+        return Err("This transcription adapter requires the synchronous API".into());
+    }
     let source = source_metadata(&task);
     let source_hash = source
         .1

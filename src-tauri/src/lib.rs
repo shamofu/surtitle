@@ -15,6 +15,10 @@ pub fn run() {
                 .map(std::path::PathBuf::from)
                 .unwrap_or(root);
             let services = Services::open(root)?;
+            let progress_handle = app.handle().clone();
+            application::ai::runtime::install_publisher(&services, move |snapshot| {
+                let _ = progress_handle.emit("ai-runtime", snapshot);
+            })?;
             #[cfg(feature = "e2e-test")]
             application::ai::fixtures::seed_ai_recovery_fixture(&services)?;
             #[cfg(feature = "e2e-test")]
@@ -86,6 +90,7 @@ pub fn run() {
             commands::editor_drafts::save_phrase_editor_draft,
             commands::transfer::reveal_export_file,
             commands::ai::get_app_snapshot,
+            commands::ai::get_ai_runtime,
             commands::models::list_vertex_models,
             commands::models::update_appearance,
             commands::models::lookup_vertex_price,

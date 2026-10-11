@@ -23,7 +23,9 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                 let has_transcript_result = has_audio && state.ai.has_transcript_result(&q.id)?;
                 let applied = has_audio && (lock(&state.db)?.transcript_adopted(&q.id, &q.digest)?.is_some()
                     || state.ai.transcript_application_recorded(&q.id, &q.digest)?);
-                let automatic = has_audio && state.ai.prepared_job(&q.id)?.apply_policy == TranscriptApplyPolicy::Auto;
+                let plan = state.ai.prepared_job(&q.id)?;
+                let automatic = has_audio && plan.apply_policy == TranscriptApplyPolicy::Auto;
+                let skip_rejected = plan.text_failure_policy == TextFailurePolicy::SkipRejected;
                 let transcript_review = has_transcript_result && !applied && !automatic;
                 let transcription_ranges = if has_audio {
                     // Damaged or unavailable local preparation metadata must
@@ -56,6 +58,7 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                         _ => "failed",
                     }
                 };
+                let execution_outcome = execution_outcome(&q, status, skip_rejected, issue.as_ref());
                 let (ja, en) = match issue.as_ref().map(|issue| issue.code.as_str()) {
                     Some("credentials") => ("認証設定を確認してください。受信済み結果は保存されています。", "Check your credentials. Received results are saved."),
                     Some("budget") => ("予算の上限に達しました。設定を見直して残りを再開できます。", "The budget limit was reached. Update it to resume the remaining work."),
@@ -66,7 +69,12 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                     Some("provider") => ("サービスがリクエストを受け付けませんでした。モデルとプロジェクトの設定を確認してください。", "The service rejected the request. Check the model and project settings."),
                     Some("source_changed") => ("元の動画または字幕が変更されています。受信済み結果は保存されています。", "The source media or subtitles changed. Received results are saved."),
                     Some("local_apply") => ("結果は受信済みですが、字幕への反映に失敗しました。追加送信せずに反映を再試行できます。", "Results were received but could not be applied. Retry applying without another request."),
-                    Some("invalid_output") => ("受信した結果を確認してください。既に完成した部分は保存されています。", "Review the received result. Completed portions are saved."),
+                    Some("invalid_output") => ("受信結果を確定できませんでした。処理の詳細を確認し、必要な範囲を再見積もりできます。", "The response could not be finalized. Check the processing details and estimate the needed work again."),
+                    Some("output_limit") => ("出力上限に達し、この結果を確定できませんでした。対象範囲や出力設定を見直して再見積もりできます。", "The response reached its output limit and could not be finalized. Adjust the scope or output settings and review a new estimate."),
+                    Some("output_blocked") => ("サービスがこの応答を返せなかったため、結果を確定できませんでした。対象の内容を確認してください。", "The provider blocked this response. Review the selected source."),
+                    Some("output_incomplete") => ("応答が完了していないため、結果を確定できませんでした。受信した途中の内容は処理の詳細で確認できます。", "The response was incomplete. Its unfinished content is available in the processing details."),
+                    Some("output_json" | "output_fields") => ("応答が必要な形式を満たさず、結果を確定できませんでした。受信内容と利用記録は処理の詳細で確認できます。", "The response did not match the required format. Check its received content and usage in the processing details."),
+                    Some("output_source") => ("応答の表現または出典が選択した字幕と一致せず、結果を確定できませんでした。対象の表現と字幕を確認してください。", "The expression or citations did not match the selected subtitles. Review the selected phrase and source."),
                     _ => match status {
                     "unknown" => ("結果不明です。費用記録を保持しています。再実行は別途承認が必要です。", "The outcome is unknown. Accounting is retained. Retrying requires separate approval."),
                     "paused" => ("一時停止しています。続行には残りの処理の承認が必要です。", "Paused. Approve the remaining work to continue."),
@@ -92,13 +100,21 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
                     _ if status == "running" && pacing.is_some() => ("次の区間の送信まで待機しています。受信済み字幕は使えます。", "Waiting before sending the next section. Received subtitles remain available."),
                     _ => (ja, en),
                 };
+                let (ja, en) = if skip_rejected && status == "running" && q.request_counts.rejected > 0 {
+                    ("取得できなかった区間を記録し、残りの区間を処理しています。成功した結果はそのまま使えます。", "Skipped a rejected response and continued with the remaining sections. Successful results remain available.")
+                } else if execution_outcome.as_deref() == Some("partial") {
+                    ("全区間の処理が終了しました。一部の結果を取得できませんでしたが、成功した結果は使えます。", "All sections were processed. Some responses could not be finalized; successful results are available.")
+                } else { (ja, en) };
                 let message = if p.settings.locale == "ja" { ja } else { en }.to_owned();
+                let processed = if skip_rejected { q.request_counts.succeeded + q.request_counts.rejected } else { q.completed_requests };
                 Ok(JobSummary {
                     id: q.id,
                     media_id: Some(q.binding.media_id),
                     kind: context.map(|c| c.kind.clone()).unwrap_or(q.title),
                     status: status.into(),
-                    progress: q.completed_requests as f64 / q.requests.len().max(1) as f64,
+                    progress: processed as f64 / q.requests.len().max(1) as f64,
+                    request_counts: q.request_counts,
+                    execution_outcome,
                     message: Some(message),
                     created_at: utc_time(q.created_at_ms),
                     pending_results,
@@ -143,4 +159,43 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
         })
     })()
     .map_err(err)
+}
+
+fn execution_outcome(
+    quote: &JobQuote,
+    status: &str,
+    skip_rejected: bool,
+    issue: Option<&JobIssue>,
+) -> Option<String> {
+    let counts = &quote.request_counts;
+    Some(
+        match status {
+            "queued" => return None,
+            "running" => "running",
+            "completed" => "complete",
+            "paused" | "cancelled" | "unknown" => "stopped",
+            _ if skip_rejected
+                && counts.rejected > 0
+                && counts.pending == 0
+                && counts.in_flight == 0
+                && issue
+                    .is_none_or(|issue| OutputFailureReason::from_code(&issue.code).is_some()) =>
+            {
+                if counts.succeeded > 0 {
+                    "partial"
+                } else {
+                    "failed"
+                }
+            }
+            _ if counts.pending > 0
+                || counts.in_flight > 0
+                || issue
+                    .is_some_and(|issue| OutputFailureReason::from_code(&issue.code).is_none()) =>
+            {
+                "stopped"
+            }
+            _ => "failed",
+        }
+        .into(),
+    )
 }

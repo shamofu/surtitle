@@ -42,6 +42,7 @@ import { AiDialog } from '../ai/AiDialog';
 import { continuationApi, type AiContinuation } from '../ai/continuations';
 import { editorDraftApi, flushEditorDrafts } from './editor-drafts/useEditorDraft';
 import { JobActions } from '../ai/JobActions';
+import { AiRuntime, JobOutcome } from '../ai/AiRuntime';
 import { TransferDialog } from '../transfer/TransferDialog';
 import { studyApi } from './api';
 import { playerApi } from './playback/api';
@@ -642,6 +643,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const needsAttention = jobs.some(job => ['failed', 'unknown', 'paused'].includes(job.status) || (job.pendingResults || 0) > 0 ||
     !!job.needsAttention);
   const completedJobs = data?.jobs.filter(job => job.mediaId === mediaId && job.kind !== 'transcribe' && !job.automaticTranscript && job.status === 'completed' && !job.needsAttention && !(job.pendingResults || 0)) || [];
+  const runtimeJobs = data?.jobs.filter(job => job.mediaId === mediaId && (job.status === 'running' || !!job.executionOutcome)).slice(0, 3) ?? [];
   function openTranscription(range?: { startMs: number; endMs: number }) {
     rememberTrigger();
     setPanel('transcript'); setTab('transcription'); setAiKind(undefined);
@@ -744,6 +746,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             key={job.id}
           >
             <ProgressStatus label={job.kind} phase={job.message} status={job.status === 'queued' ? 'waiting' : job.status} completed={job.progress} total={1} />
+            <JobOutcome job={job} />
             {job.resultState === 'applied_with_warnings' && <span>{t('完了・注意箇所あり', 'Complete · marked passages')}</span>}
             <JobActions
               job={job}
@@ -751,7 +754,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             />
           </div>)}</div>
         </AnimatedDetails>}
-      {completedJobs.length > 0 && <AnimatedDetails className="study-jobs"><summary>{t('処理履歴', 'Job history')} (<AnimatedValue value={completedJobs.length} />)</summary><div>{completedJobs.map(job => <div className="job-status" key={job.id}><span>{job.resultState === 'applied_with_warnings' ? t('完了・注意箇所あり', 'Complete · marked passages') : job.message || job.kind}</span><JobActions job={job} onReviewTranscript={setDraftReview} /></div>)}</div></AnimatedDetails>}
+      {completedJobs.length > 0 && <AnimatedDetails className="study-jobs"><summary>{t('処理履歴', 'Job history')} (<AnimatedValue value={completedJobs.length} />)</summary><div>{completedJobs.map(job => <div className="job-status" key={job.id}><span>{job.resultState === 'applied_with_warnings' ? t('完了・注意箇所あり', 'Complete · marked passages') : job.message || job.kind}</span><JobOutcome job={job} /><JobActions job={job} onReviewTranscript={setDraftReview} /></div>)}</div></AnimatedDetails>}
       <MotionRegion mode="status" open={media.status === 'missing' || media.status === 'error'}>
         <div
           className="job-status warning"
@@ -855,6 +858,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                 active={panel === 'transcript'}
                 transcriptionWorkspace={<TranscriptionWorkspace media={media} request={transcriptionRequest} onRequest={openTranscription} continuations={continuationsQuery.data} onResume={resumeAi} focusJobId={focusedTranscriptionJob} active={panel === 'transcript' && tab === 'transcription'} onOpenEarlierDrafts={() => setTab('draft')} onDone={() => { setTranscriptionRequest(undefined); void continuationsQuery.refetch(); }} onStarted={() => { setTranscriptionRequest(undefined); setTab('transcript'); void continuationsQuery.refetch(); }} />}
                 transcriptionStatus={<TranscriptionStatus mediaId={mediaId} hasRequest={!!transcriptionRequest} onOpen={jobId => { setFocusedTranscriptionJob(jobId); setTab('transcription'); }} />}
+                aiRuntime={runtimeJobs.length > 0 && <div className="study-runtime-dock">{runtimeJobs.map(job => <AiRuntime key={job.id} job={job} compact />)}</div>}
                 onTranscribeRange={openTranscription}
                 media={media}
                 segments={segments}

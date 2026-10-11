@@ -84,9 +84,8 @@ it('uses the exact complete video despite a selected cue and prepares then estim
   expect(continuationApi.save).toHaveBeenCalledWith(expect.objectContaining({ sourceCueIds: ['a', 'b'], sourceRevision: 'frozen source' }));
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
   expect(close).not.toHaveBeenCalled();
-  expect(screen.getByRole('button', { name: 'Approve this job' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('checkbox'));
-  fireEvent.click(screen.getByRole('button', { name: 'Approve this job' }));
+  expect(screen.getByRole('button', { name: 'Start transcription' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Start transcription' }));
   await waitFor(() => expect(aiApi.approveQuote).toHaveBeenCalledExactlyOnceWith(quote));
   expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
   expect(close).toHaveBeenCalledOnce();
@@ -164,7 +163,7 @@ it('reuses completed preparation after reopening without approving or preparing 
   expect(aiApi.createTranscriptionQuote).not.toHaveBeenCalled();
   view.rerender(<AiDialog media={media} onClose={() => {}} />);
   fireEvent.click(estimate());
-  await screen.findByRole('button', { name: 'Approve this job' });
+  await screen.findByRole('button', { name: 'Start transcription' });
   expect(aiApi.prepareTranscription).toHaveBeenCalledOnce();
   expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
@@ -181,7 +180,7 @@ it('ignores a preparation completed after its audio source changed', async () =>
   expect(aiApi.createTranscriptionQuote).not.toHaveBeenCalled();
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
   fireEvent.click(estimate());
-  await screen.findByRole('button', { name: 'Approve this job' });
+  await screen.findByRole('button', { name: 'Start transcription' });
   expect(aiApi.prepareTranscription).toHaveBeenCalledTimes(2);
 });
 
@@ -193,7 +192,7 @@ it('continues the first estimate when the preparation confirms its automatic aud
   await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledOnce());
   view.rerender(<AiDialog media={{ ...media, audioStreamIndex: 2 }} onClose={() => {}} />);
   await act(async () => finish({ ...preparation, audioStreamIndex: 2 }));
-  await screen.findByRole('button', { name: 'Approve this job' });
+  await screen.findByRole('button', { name: 'Start transcription' });
   expect(aiApi.prepareTranscription).toHaveBeenCalledOnce();
   expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
@@ -205,9 +204,8 @@ it('finishes successful approval even if cleaning up the saved request fails', a
   vi.mocked(continuationApi.discard).mockRejectedValueOnce(new Error('Local cleanup failed'));
   render(<AiDialog media={media} onClose={close} />);
   fireEvent.click(estimate());
-  await screen.findByRole('button', { name: 'Approve this job' });
-  fireEvent.click(screen.getByRole('checkbox'));
-  fireEvent.click(screen.getByRole('button', { name: 'Approve this job' }));
+  await screen.findByRole('button', { name: 'Start transcription' });
+  fireEvent.click(screen.getByRole('button', { name: 'Start transcription' }));
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
   expect(aiApi.approveQuote).toHaveBeenCalledExactlyOnceWith(quote);
   expect(fixture.errors).toHaveLength(1);
@@ -216,15 +214,14 @@ it('finishes successful approval even if cleaning up the saved request fails', a
 it('discards the visible approval on restore and requires a fresh explicit estimate', async () => {
   render(<><AiDialog media={media} onClose={() => {}} /><RestoreData /></>);
   fireEvent.click(estimate());
-  await screen.findByRole('button', { name: 'Approve this job' });
-  fireEvent.click(screen.getByRole('checkbox'));
+  await screen.findByRole('button', { name: 'Start transcription' });
   fireEvent.click(screen.getByRole('button', { name: 'Restore data' }));
-  expect(screen.queryByRole('button', { name: 'Approve this job' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Start transcription' })).not.toBeInTheDocument();
   expect(screen.getByText('Data was restored. Check the source and prepare a new estimate.')).toBeVisible();
   expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
   fireEvent.click(estimate());
-  await screen.findByRole('button', { name: 'Approve this job' });
+  await screen.findByRole('button', { name: 'Start transcription' });
   expect(aiApi.prepareTranscription).toHaveBeenCalledTimes(2);
 });
 
@@ -249,13 +246,12 @@ it.each([false, true])('opens a queued estimate and uses the recorded retry stat
   vi.mocked(aiApi.reviewAiJob).mockResolvedValue(reviewed);
   render(<JobActions job={{ id: quote.id, mediaId: media.id, kind: 'transcribe', status: 'queued', progress: 0, createdAt: '' }} />);
   fireEvent.click(screen.getByRole('button', { name: 'Open estimate' }));
-  await screen.findByRole('button', { name: 'Approve this job' });
+  await screen.findByRole('button', { name: 'Start transcription' });
   expect(aiApi.reviewAiJob).toHaveBeenCalledExactlyOnceWith(quote.id);
   expect(aiApi.createRetryQuote).not.toHaveBeenCalled();
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
   expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('checkbox'));
-  fireEvent.click(screen.getByRole('button', { name: 'Approve this job' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Start transcription' }));
   await waitFor(() => expect(isRetry ? aiApi.reapproveQuote : aiApi.approveQuote).toHaveBeenCalledExactlyOnceWith(reviewed));
   expect(isRetry ? aiApi.approveQuote : aiApi.reapproveQuote).not.toHaveBeenCalled();
 });
@@ -296,11 +292,10 @@ it('re-estimates remaining paused work and requires a fresh approval', async () 
   vi.mocked(aiApi.createRetryQuote).mockResolvedValue(retry);
   render(<JobActions job={{ id: quote.id, mediaId: media.id, kind: 'transcribe', status: 'paused', progress: 0.5, createdAt: '' }} />);
   fireEvent.click(screen.getByRole('button', { name: 'Estimate remaining work' }));
-  await screen.findByRole('button', { name: 'Approve this job' });
+  await screen.findByRole('button', { name: 'Start transcription' });
   expect(aiApi.createRetryQuote).toHaveBeenCalledExactlyOnceWith(quote.id);
   expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('checkbox'));
-  fireEvent.click(screen.getByRole('button', { name: 'Approve this job' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Start transcription' }));
   await waitFor(() => expect(aiApi.reapproveQuote).toHaveBeenCalledExactlyOnceWith(retry));
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
 });
@@ -315,7 +310,7 @@ it.each([undefined, '["C:/old-video.mkv",2,"fr","de"]'])('invalidates old whole-
   expect(aiApi.reviewAiJob).not.toHaveBeenCalled();
   expect(aiApi.prepareTranscription).not.toHaveBeenCalled();
   fireEvent.click(estimate());
-  await screen.findByRole('button', { name: 'Approve this job' });
+  await screen.findByRole('button', { name: 'Start transcription' });
   expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith(media.id, 0, media.durationMs, true, expect.any(String));
   expect(continuationApi.save).toHaveBeenCalledWith(expect.objectContaining({ sourceMediaSignature: mediaSignature, quoteId: quote.id }));
   expect(aiApi.approveQuote).not.toHaveBeenCalled();

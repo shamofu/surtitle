@@ -522,6 +522,7 @@ export function AiDialog({
             quote={invalidSource ? { ...quote, canApprove: false, blockedReason: t('字幕を選び直してください。', 'Select the subtitles again.') } : quote}
             busy={busy}
             onApprove={() => void approve()}
+            onRefresh={invalidSource ? undefined : () => void estimate()}
           />
         </>
       )}</MotionSwap>

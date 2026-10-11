@@ -3,8 +3,38 @@ use super::arguments::{Arguments, usd};
 use super::context::{Context, Manifest, manifest_path, read_manifest};
 use super::{Result, ai_error, campaigns, ensure_windows};
 use serde_json::{Value, json};
-use std::path::Path;
-use surtitle_ai::{AiError, ValidationApproval, VertexService};
+use std::{
+    path::Path,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
+use surtitle_ai::{AiError, ExecutionEvent, ExecutionStage, ValidationApproval, VertexService};
+
+#[derive(Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TransportObservation {
+    text_chunks: usize,
+    text_bytes: usize,
+    first_text_ms: Option<u128>,
+    last_text_ms: Option<u128>,
+    settled_ms: Option<u128>,
+}
+impl TransportObservation {
+    fn observe(&mut self, event: &ExecutionEvent, elapsed_ms: u128) {
+        if let Some(text) = &event.text_delta {
+            self.text_chunks += 1;
+            self.text_bytes += text.len();
+            self.first_text_ms.get_or_insert(elapsed_ms);
+            self.last_text_ms = Some(elapsed_ms);
+        }
+        if matches!(
+            event.stage,
+            ExecutionStage::Settled | ExecutionStage::Rejected
+        ) {
+            self.settled_ms = Some(elapsed_ms);
+        }
+    }
+}
 
 pub(super) async fn execute(root: &Path, mut args: Arguments) -> Result<Value> {
     let id = args.string("--job-id")?;
@@ -54,7 +84,16 @@ pub(super) async fn execute(root: &Path, mut args: Arguments) -> Result<Value> {
     }
     .map_err(ai_error)?;
     let path = manifest_path(&context.root, &id)?;
-    let service = VertexService::new(scoped.clone(), context.vault.clone()).map_err(ai_error)?;
+    let observation = Arc::new(Mutex::new(TransportObservation::default()));
+    let observed = observation.clone();
+    let started = Instant::now();
+    let service = VertexService::new(scoped.clone(), context.vault.clone())
+        .map_err(ai_error)?
+        .with_observer(Arc::new(move |event| {
+            if let Ok(mut value) = observed.lock() {
+                value.observe(&event, started.elapsed().as_millis());
+            }
+        }));
     let output = service
         .execute_next_with_guard(&id, || {
             if read_manifest(&path).ok().as_ref() != Some(&manifest) {
@@ -65,7 +104,7 @@ pub(super) async fn execute(root: &Path, mut args: Arguments) -> Result<Value> {
         .await
         .map_err(ai_error)?;
     Ok(
-        json!({"execution":output,"quote":scoped.quote(&id).map_err(ai_error)?,"validation":scoped.validation_totals().map_err(ai_error)?}),
+        json!({"execution":output,"transportObservation":&*observation.lock().map_err(|_| "Observation interrupted")?,"quote":scoped.quote(&id).map_err(ai_error)?,"validation":scoped.validation_totals().map_err(ai_error)?}),
     )
 }
 

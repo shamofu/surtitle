@@ -24,8 +24,25 @@ pub struct PreparedJob {
     /// from a legacy range or changed by later settings.
     #[serde(default, skip_serializing_if = "TranscriptApplyPolicy::is_manual")]
     pub apply_policy: TranscriptApplyPolicy,
+    /// Missing on older plans; omitting the default preserves their digest.
+    #[serde(default, skip_serializing_if = "TextFailurePolicy::is_fail_fast")]
+    pub text_failure_policy: TextFailurePolicy,
     frozen_requests: Vec<Value>,
     frozen_task_digests: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TextFailurePolicy {
+    #[default]
+    FailFast,
+    SkipRejected,
+}
+
+impl TextFailurePolicy {
+    fn is_fail_fast(&self) -> bool {
+        *self == Self::FailFast
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -85,6 +102,7 @@ impl PreparedJob {
             requests,
             execution,
             apply_policy: TranscriptApplyPolicy::Manual,
+            text_failure_policy: TextFailurePolicy::FailFast,
             frozen_requests: Vec::new(),
             frozen_task_digests: Vec::new(),
         })
@@ -118,6 +136,7 @@ impl PreparedJob {
             requests,
             execution,
             apply_policy: TranscriptApplyPolicy::Manual,
+            text_failure_policy: TextFailurePolicy::FailFast,
             frozen_requests,
             frozen_task_digests,
         };
@@ -126,6 +145,7 @@ impl PreparedJob {
     }
     pub fn with_execution(self, execution: ExecutionConfig) -> Result<Self> {
         let policy = self.apply_policy;
+        let text_failure_policy = self.text_failure_policy;
         Self::new(
             self.title,
             self.project_id,
@@ -136,8 +156,14 @@ impl PreparedJob {
         )
         .map(|mut job| {
             job.apply_policy = policy;
+            job.text_failure_policy = text_failure_policy;
             job
         })
+    }
+    pub fn with_text_failure_policy(mut self, policy: TextFailurePolicy) -> Result<Self> {
+        self.text_failure_policy = policy;
+        self.validate()?;
+        Ok(self)
     }
     pub fn with_apply_policy(mut self, policy: TranscriptApplyPolicy) -> Result<Self> {
         if policy == TranscriptApplyPolicy::Auto
@@ -194,6 +220,31 @@ impl PreparedJob {
 
     pub fn validate(&self) -> Result<()> {
         self.execution.validate()?;
+        if self.execution.response_mode == crate::ResponseMode::StreamGenerateContent
+            && self.requests.iter().any(|task| {
+                !matches!(
+                    task,
+                    RequestTask::Vocabulary { .. }
+                        | RequestTask::Explanation { .. }
+                        | RequestTask::Translation { .. }
+                        | RequestTask::AudioTranscription { .. }
+                )
+            })
+        {
+            return Err(AiError::Invalid(
+                "This transcription adapter does not support streaming responses".into(),
+            ));
+        }
+        if self.text_failure_policy == TextFailurePolicy::SkipRejected
+            && self.requests.iter().any(|task| {
+                !matches!(
+                    task,
+                    RequestTask::Vocabulary { .. } | RequestTask::Explanation { .. }
+                )
+            })
+        {
+            return Err(AiError::PreparationChanged);
+        }
         if self.apply_policy == TranscriptApplyPolicy::Auto
             && self.requests.iter().any(|task| {
                 !matches!(

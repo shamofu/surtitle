@@ -780,7 +780,7 @@ describe('transcript review and local adoption', () => {
       'boundary-1',
     );
     expect(
-      screen.getByRole('button', { name: 'Approve this job' }),
+      screen.getByRole('button', { name: 'Start transcription' }),
     ).toBeDisabled();
     expect(aiApi.approveQuote).not.toHaveBeenCalled();
   });

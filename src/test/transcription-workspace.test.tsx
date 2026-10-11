@@ -85,12 +85,13 @@ it('distinguishes successful approval from closing setup so the caller can retur
   expect(done).not.toHaveBeenCalled();
 });
 
-it('requires explicit acknowledgement when the price is unknown', async () => {
+it('approves unknown pricing only through the single explicit start action', async () => {
   vi.mocked(aiApi.createTranscriptionQuote).mockResolvedValue({ ...quote, estimatedUsd: null, maximumUsd: null, unpriced: true });
   render(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
   const start = await screen.findByRole('button', { name: 'Start transcription' });
-  expect(start).toBeDisabled();
-  fireEvent.click(screen.getByRole('checkbox', { name: /price cannot be determined in advance/ }));
+  expect(screen.queryByRole('checkbox', { name: /price cannot be determined in advance/ })).not.toBeInTheDocument();
+  expect(screen.getByText('Price unknown')).toBeVisible();
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
   expect(start).toBeEnabled();
   fireEvent.click(start);
   await waitFor(() => expect(aiApi.approveQuote).toHaveBeenCalledOnce());

@@ -4,7 +4,7 @@ use super::{MAX_AUDIO_SECONDS, Result, ai_error};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
-use surtitle_ai::{ExecutionConfig, PriceSnapshot, ThinkingConfig};
+use surtitle_ai::{ExecutionConfig, PriceSnapshot, ResponseMode, ThinkingConfig};
 
 pub(super) struct Arguments {
     values: BTreeMap<String, OsString>,
@@ -67,6 +67,12 @@ pub(super) fn parse_execution(args: &mut Arguments) -> Result<ExecutionConfig> {
         .string("--max-output-tokens")?
         .parse()
         .map_err(|_| "Invalid output token limit")?;
+    let response_mode = match args.take("--response-mode") {
+        None => ResponseMode::GenerateContent,
+        Some(value) if value == "buffered" => ResponseMode::GenerateContent,
+        Some(value) if value == "stream" => ResponseMode::StreamGenerateContent,
+        Some(_) => return Err("Response mode must be buffered or stream".into()),
+    };
     let level = args.take("--thinking-level");
     let budget = args.take("--thinking-budget");
     let thinking = match (level, budget) {
@@ -97,6 +103,7 @@ pub(super) fn parse_execution(args: &mut Arguments) -> Result<ExecutionConfig> {
         max_output_tokens,
         thinking,
         price,
+        response_mode,
     };
     config.validate().map_err(ai_error)?;
     Ok(config)

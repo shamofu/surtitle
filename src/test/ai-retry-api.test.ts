@@ -8,10 +8,10 @@ vi.mock('../shared/native/transport', () => ({ call: vi.fn().mockResolvedValue(u
 afterEach(() => vi.clearAllMocks());
 
 it.each(['approveQuote', 'reapproveQuote'] as const)('%s echoes only the policy version actually reviewed', async method => {
-  const quote = { id: 'job', digest: 'frozen', retryPolicy: { version: 1, maxRetries: 2 } } as AiQuote;
+  const quote = { id: 'job', digest: 'frozen', unpriced: true, retryPolicy: { version: 1, maxRetries: 2 } } as AiQuote;
   await aiApi[method](quote);
   expect(call).toHaveBeenLastCalledWith(method === 'approveQuote' ? 'approve_quote' : 'reapprove_quote', expect.objectContaining({
-    quoteId: 'job', digest: 'frozen', retryPolicyVersion: 1,
+    quoteId: 'job', digest: 'frozen', retryPolicyVersion: 1, acknowledgeUnpriced: true,
   }));
   await aiApi[method]({ ...quote, retryPolicy: undefined });
   expect(call).toHaveBeenLastCalledWith(method === 'approveQuote' ? 'approve_quote' : 'reapprove_quote', expect.objectContaining({ retryPolicyVersion: undefined }));

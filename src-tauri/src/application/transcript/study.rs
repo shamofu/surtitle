@@ -572,21 +572,27 @@ pub async fn create_draft_selection_quote(
             },
             Some(request.model),
         )?;
-        let quote = state.ai.prepare(PreparedJob::new(
-            format!("{} · study excerpt", media.title),
-            p.settings.vertex_project.clone(),
-            credential,
-            PreparationBinding {
-                media_id: media.id.clone(),
-                transcript_revision: format!("{QUOTE_PREFIX}{}:{}", selected.id, selected.version),
-                source_sha256: sha256_bytes(&serde_json::to_vec(&cues)?),
-                settings_sha256: crate::application::ai::bindings::settings_fingerprint(
-                    &p.settings,
-                )?,
-            },
-            vec![task],
-            execution,
-        )?)?;
+        let quote = state.ai.prepare(
+            PreparedJob::new(
+                format!("{} · study excerpt", media.title),
+                p.settings.vertex_project.clone(),
+                credential,
+                PreparationBinding {
+                    media_id: media.id.clone(),
+                    transcript_revision: format!(
+                        "{QUOTE_PREFIX}{}:{}",
+                        selected.id, selected.version
+                    ),
+                    source_sha256: sha256_bytes(&serde_json::to_vec(&cues)?),
+                    settings_sha256: crate::application::ai::bindings::settings_fingerprint(
+                        &p.settings,
+                    )?,
+                },
+                vec![task],
+                execution,
+            )?
+            .with_text_failure_policy(TextFailurePolicy::SkipRejected)?,
+        )?;
         {
             state.preferences.update(|p| {
                 p.quotes.insert(

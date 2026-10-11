@@ -73,6 +73,39 @@ fn execution_requires_explicit_model_location_limit_and_keeps_price_optional() {
 }
 
 #[test]
+fn response_mode_is_explicit_and_validated() {
+    for mode in ["buffered", "stream", "unexpected"] {
+        let mut args = Arguments::parse(
+            [
+                "--model-id",
+                "gemini-future",
+                "--location",
+                "global",
+                "--max-output-tokens",
+                "2048",
+                "--response-mode",
+                mode,
+            ]
+            .into_iter()
+            .map(OsString::from)
+            .collect(),
+        )
+        .unwrap();
+        let result = parse_execution(&mut args);
+        if mode == "unexpected" {
+            assert!(result.is_err());
+        } else {
+            let execution = result.unwrap();
+            assert_eq!(
+                execution.response_mode == surtitle_ai::ResponseMode::StreamGenerateContent,
+                mode == "stream"
+            );
+            args.finish().unwrap();
+        }
+    }
+}
+
+#[test]
 fn unpriced_approval_is_not_a_zero_dollar_approval_and_remains_bound_to_exact_scope() {
     let directory = tempfile::tempdir().unwrap();
     let store = AiStore::open(directory.path().join("new.sqlite")).unwrap();
@@ -122,6 +155,7 @@ fn manifest() -> Manifest {
             location: "global".into(),
             max_output_tokens: 1024,
             thinking: ThinkingConfig::Omit,
+            response_mode: surtitle_ai::ResponseMode::GenerateContent,
             price: Some(PriceSnapshot {
                 id: "fixture".into(),
                 source: "user".into(),

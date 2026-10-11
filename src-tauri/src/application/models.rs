@@ -17,12 +17,18 @@ pub(crate) fn execution_for(
         .or_else(|| settings.ai_models.get(purpose).cloned())
         .context("Select a Gemini model in the AI settings or this job")?;
     validate_model(&model, &settings.vertex_location, false)?;
-    Ok(to_execution(&model, &settings.vertex_location))
+    let mut execution = to_execution(&model, &settings.vertex_location);
+    if purpose == "transcription" && model.transcription_mode == "transcribe" {
+        // Word timestamps are only supported by Transcribe's synchronous API.
+        execution.response_mode = surtitle_ai::ResponseMode::GenerateContent;
+    }
+    Ok(execution)
 }
 
 pub(crate) fn to_execution(model: &AiModelPreference, location: &str) -> ExecutionConfig {
     ExecutionConfig {
         model_id: model.model_id.trim().to_owned(),
+        response_mode: surtitle_ai::ResponseMode::StreamGenerateContent,
         location: location.to_owned(),
         max_output_tokens: model.max_output_tokens,
         thinking: match (&model.thinking_level, model.thinking_budget) {
@@ -145,6 +151,7 @@ pub fn update_appearance(
 pub(crate) fn fixture_execution() -> ExecutionConfig {
     ExecutionConfig {
         model_id: "gemini-offline-fixture".into(),
+        response_mode: surtitle_ai::ResponseMode::GenerateContent,
         location: "global".into(),
         max_output_tokens: 12288,
         thinking: ThinkingConfig::Omit,
@@ -357,6 +364,36 @@ fn import_credential_file(state: &AppState, file: Option<&std::path::Path>) -> R
 #[cfg(test)]
 mod settings_tests {
     use super::*;
+
+    #[test]
+    fn new_ai_jobs_stream_except_synchronous_transcribe_without_switching_models() {
+        for purpose in ["vocabulary", "explanation", "translation", "transcription"] {
+            for transcribe in [false, true] {
+                let mut settings = AppSettings::default();
+                let preference = preference_for(&fixture_execution(), transcribe);
+                settings
+                    .ai_models
+                    .insert(purpose.into(), preference.clone());
+                let expected = if purpose == "transcription" && transcribe {
+                    surtitle_ai::ResponseMode::GenerateContent
+                } else {
+                    surtitle_ai::ResponseMode::StreamGenerateContent
+                };
+                let stored = execution_for(&settings, purpose, None).unwrap();
+                assert_eq!(stored.response_mode, expected, "{purpose} / {transcribe}");
+                assert_eq!(stored.model_id, preference.model_id);
+
+                let mut selected = preference.clone();
+                selected.model_id = "gemini-selected-fixture".into();
+                let overridden = execution_for(&settings, purpose, Some(selected.clone())).unwrap();
+                assert_eq!(
+                    overridden.response_mode, expected,
+                    "{purpose} / {transcribe}"
+                );
+                assert_eq!(overridden.model_id, selected.model_id);
+            }
+        }
+    }
 
     #[test]
     fn motion_preference_is_saved_reopened_and_invalid_values_are_rejected() {

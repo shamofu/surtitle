@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import type { JobSummary } from './ai';
 export type ProgressUnit = 'bytes' | 'milliseconds' | 'items';
 export type ActivityStatus = 'running' | 'waiting' | 'paused' | 'unknown' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
 
@@ -40,6 +41,7 @@ export interface Activity extends Omit<ActivityDescriptor, 'id'> {
   updatedAt: string;
   toolId?: string;
   resultId?: string;
+  aiJob?: JobSummary;
 }
 
 export type ActivityUpdate = Partial<Pick<Activity, 'phase' | 'completed' | 'total' | 'unit' | 'error'>> & {

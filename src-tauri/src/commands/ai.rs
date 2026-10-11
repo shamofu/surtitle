@@ -9,6 +9,14 @@ use crate::application::ai::VocabularyCandidate;
 use tauri::State;
 
 #[tauri::command]
+pub fn get_ai_runtime(
+    state: State<'_, AppState>,
+    job_id: String,
+) -> std::result::Result<Option<crate::application::ai::runtime::RuntimeSnapshot>, String> {
+    crate::application::ai::runtime::get_ai_runtime(state.inner().clone(), job_id)
+}
+
+#[tauri::command]
 pub fn get_app_snapshot(state: State<'_, AppState>) -> std::result::Result<AppSnapshot, String> {
     crate::application::ai::snapshot::get_app_snapshot(state.inner().clone())
 }

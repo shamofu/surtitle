@@ -64,6 +64,7 @@ export function StudyTranscript({
   onDraftPlay,
   transcriptionWorkspace,
   transcriptionStatus,
+  aiRuntime,
   active = true,
   onTranscribeRange,
 }: {
@@ -94,6 +95,7 @@ export function StudyTranscript({
   onDraftPlay: PlayRange;
   transcriptionWorkspace?: ReactNode;
   transcriptionStatus?: ReactNode;
+  aiRuntime?: ReactNode;
   active?: boolean;
   onTranscribeRange?: (range: { startMs: number; endMs: number }) => void;
 }) {
@@ -204,6 +206,7 @@ export function StudyTranscript({
           </button>
         ))}
       </div>
+      {(tab === 'transcript' || tab === 'vocabulary') && aiRuntime}
       <div className="transcript-tab-content">
       {transcriptionWorkspace && <StudyRegion open={tab === 'transcription'} keepMounted freezeOnExit={false}><div
         className="transcription-view"

@@ -323,6 +323,14 @@
 .check-field input {
   margin: 2px 0;
 }
+.quote-review .check-field[data-disabled='true'] {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.quote-review .check-field[data-disabled='true'] input {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .full-width {
   width: 100%;
 }

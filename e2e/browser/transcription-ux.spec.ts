@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { installLearningFixture } from './learning-fixture';
 
-async function installTranscriptionFixture(page: Page, locale: 'ja' | 'en', existingSubtitles = false, automaticRetry = false) {
+async function installTranscriptionFixture(page: Page, locale: 'ja' | 'en', existingSubtitles = false, automaticRetry = false, unpriced = false) {
     await installLearningFixture(page, locale, 'light');
     await page.route(/\/src\/shared\/native\/transport\.ts(?:\?|$)/, route => route.fulfill({
       contentType: 'application/javascript', body: `
@@ -33,7 +33,7 @@ async function installTranscriptionFixture(page: Page, locale: 'ja' | 'en', exis
           if (command === 'create_transcription_quote') {
             fixture.calls.push({ command, args });
             return { id: 'quote', mediaId: 'visual-fixture', kind: 'transcribe', startMs: 0, endMs: 840000,
-              model: 'gemini-transcribe', estimatedUsd: .1, maximumUsd: ${automaticRetry ? '.6' : '.2'}, inputTokens: 100, maxOutputTokens: 12288,
+              model: 'gemini-transcribe', unpriced: ${unpriced}, estimatedUsd: ${unpriced ? 'null' : '.1'}, maximumUsd: ${unpriced ? 'null' : automaticRetry ? '.6' : '.2'}, inputTokens: 100, maxOutputTokens: 12288,
               ${automaticRetry ? 'retryPolicy: { version: 1, maxRetries: 2 }, requestCount: 5, sendDurationMs: 846000, totalOutputTokens: 61440, maximumRequestCount: 15, maximumSendDurationMs: 2538000, maximumTotalOutputTokens: 184320,' : ''}
               expiresAt: '2099-01-01T00:00:00Z', warnings: [], canApprove: true, applyPolicy: 'auto' };
           }
@@ -50,6 +50,27 @@ async function installTranscriptionFixture(page: Page, locale: 'ja' | 'en', exis
 }
 
 for (const locale of ['ja', 'en'] as const) {
+  test(`unpriced transcription has one explicit start action ${locale}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1024, height: 700 });
+    await installTranscriptionFixture(page, locale, false, true, true);
+    await page.goto('/study/visual-fixture');
+    const text = (ja: string, en: string) => locale === 'ja' ? ja : en;
+    await page.getByRole('button', { name: text('音声から字幕を作成', 'Create subtitles from audio'), exact: true }).click();
+    const start = page.getByRole('button', { name: text('この内容で文字起こしを開始', 'Start transcription'), exact: true });
+    await expect(start).toBeEnabled();
+    await expect(start).toBeInViewport();
+    await expect(page.getByText(text('料金不明', 'Price unknown'), { exact: true })).toHaveCount(1);
+    await expect(page.getByText(text('金額上限は保証できません', 'A dollar limit cannot be guaranteed'), { exact: true })).toBeVisible();
+    await expect(page.locator('.quote-review input[type="checkbox"]')).toHaveCount(0);
+    await expect(page.getByTestId('automatic-retry-policy')).not.toBeVisible();
+    await expect(page.getByTestId('transcription-pacing-policy')).not.toBeVisible();
+    const sends = () => page.evaluate(() => (window as any).__learningFixture.calls.filter((call: any) => ['approve_quote', 'reapprove_quote'].includes(call.command)));
+    expect(await sends()).toHaveLength(0);
+    await page.screenshot({ path: testInfo.outputPath(`unpriced-${locale}.png`), fullPage: true, animations: 'disabled' });
+    await start.click();
+    expect(await sends()).toHaveLength(1);
+    expect((await sends())[0].args.acknowledgeUnpriced).toBe(true);
+  });
   test(`transcription has its own tab and returns to received subtitles ${locale}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1024, height: 700 });
     await installTranscriptionFixture(page, locale);
@@ -127,6 +148,8 @@ for (const locale of ['ja', 'en'] as const) {
     await installTranscriptionFixture(page, locale, false, true);
     await page.goto('/study/visual-fixture');
     await page.getByRole('button', { name: locale === 'ja' ? '音声から字幕を作成' : 'Create subtitles from audio', exact: true }).click();
+    await expect(page.getByTestId('transcription-pacing-policy')).not.toBeVisible();
+    await page.getByText(locale === 'ja' ? '料金・送信の詳細' : 'Cost and request details', { exact: true }).click();
     await expect(page.getByTestId('transcription-pacing-policy')).toBeVisible();
     await page.getByRole('button', { name: locale === 'ja' ? 'この内容で文字起こしを開始' : 'Start transcription', exact: true }).click();
     await page.evaluate(() => {
@@ -174,8 +197,10 @@ for (const locale of ['ja', 'en'] as const) {
     await installTranscriptionFixture(page, locale, false, true);
     await page.goto('/study/visual-fixture');
     await page.getByRole('button', { name: locale === 'ja' ? '音声から字幕を作成' : 'Create subtitles from audio', exact: true }).click();
+    await expect(page.getByTestId('automatic-retry-policy')).not.toBeVisible();
+    await page.getByText(locale === 'ja' ? '料金・送信の詳細' : 'Cost and request details', { exact: true }).click();
     await expect(page.getByTestId('automatic-retry-policy')).toBeVisible();
-    await expect(page.getByTestId('automatic-retry-policy')).toContainText(locale === 'ja' ? '最大15回の送信' : '15 requests maximum');
+    await expect(page.getByTestId('automatic-retry-policy')).toContainText(locale === 'ja' ? '最大15回送信' : '15 requests maximum');
     await page.getByRole('button', { name: locale === 'ja' ? 'この内容で文字起こしを開始' : 'Start transcription', exact: true }).click();
     await page.evaluate(() => {
       const context = window as unknown as { __transcriptionJob: object; __transcriptionChanged: (event: { payload: null }) => void };

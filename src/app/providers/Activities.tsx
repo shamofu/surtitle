@@ -93,7 +93,7 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
       const status = job.status === 'queued' ? 'waiting' : job.status;
       if (!activityFinished({ status }) || !jobBaseline.current?.has(job.id) || Date.parse(job.createdAt) >= startedAt.current) seenJobs.current.add(job.id);
       if (!seenJobs.current.has(job.id)) continue;
-      const signature = JSON.stringify([job.status, job.progress, job.message]);
+      const signature = JSON.stringify([job.status, job.progress, job.message, job.executionOutcome, job.requestCounts]);
       let update = jobUpdates.current.get(job.id);
       if (update?.signature !== signature) {
         update = { signature, updatedAt: new Date().toISOString() };
@@ -104,7 +104,7 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
         : job.kind === 'translate' ? t('翻訳', 'Translation') : t('語彙・解説', 'Vocabulary and explanations');
       jobActivities.push({ id: `ai:${job.id}`, source: 'ai', sourceId: job.id, kind: job.kind, label: media ? `${media.title} · ${purpose}` : purpose,
         status, phase: job.message || 'running', completed: job.progress, total: 1,
-        mediaId: job.mediaId, updatedAt: update.updatedAt });
+        mediaId: job.mediaId, updatedAt: update.updatedAt, aiJob: job });
     }
     // Native parents reference the persisted job id; the UI adapters namespace it.
     const jobParents = new Map([...downloadActivities, ...jobActivities].map(activity => [activity.sourceId, activity.id]));

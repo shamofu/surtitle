@@ -11,7 +11,8 @@ import { BookmarkPlus, Play } from 'lucide-react';
 
 import type { Media } from '../../../shared/contracts/media';
 
-import { useAppearance, useNotifications } from '../../../app/runtime';
+import { useAppearance, useNotifications, useSnapshot } from '../../../app/runtime';
+import { AiRuntime } from '../../ai/AiRuntime';
 
 import { timestamp } from '../../../shared/format';
 import { AnimatedValue, MotionRegion, MotionSwap } from '../../../shared/motion';
@@ -77,6 +78,9 @@ function DraftStudyContent({
     effectiveBlockPage,
     removeActive,
   } = useDraftStudy(media);
+  const { data } = useSnapshot();
+  const runtimeJobs = (data?.jobs ?? []).filter(job => job.mediaId === media.id &&
+    (job.status === 'running' || job.id === jobId || !!job.executionOutcome)).slice(0, 3);
   const originLabel = (origin: string) =>
     origin === 'manual'
       ? t('手動修正', 'Manual correction')
@@ -85,7 +89,7 @@ function DraftStudyContent({
         : origin === 'ai'
           ? t('AIの下書き', 'AI draft')
           : t('出所は全体の確認画面を参照', 'See full review for provenance');
-  if (!jobs.length && !bookmarks.length && !loading && !error)
+  if (!jobs.length && !runtimeJobs.length && !bookmarks.length && !loading && !error)
     return (
       <EmptyState icon={<BookmarkPlus size={26} />} title={t('下書きはまだありません', 'No drafts yet')}
         description={t('字幕を読み込むか、文字起こしを見積もれます。届いた区間から原音を確認できます。', 'Import subtitles or estimate a transcription. You can check each received passage against the audio.')}>
@@ -116,6 +120,7 @@ function DraftStudyContent({
         </div>
         <Badge tone="warning">{t('下書き', 'Draft')}</Badge>
       </header>
+      {runtimeJobs.map(job => <AiRuntime key={job.id} job={job} compact />)}
       <MotionRegion mode="status" open={!!error}>{error && (
         <p className="notice warning" role="status">
           {t('下書きの更新に失敗しました。', 'Could not refresh drafts.')}{' '}

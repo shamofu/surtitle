@@ -134,6 +134,7 @@ fn approve_for_execution_with_retry(
     }
     drop(review_guard);
     state.ai.clear_job_issue_scoped(quote_id, &approval_id)?;
+    let _ = super::runtime::begin(state, quote_id, &approval_id);
     Ok(ApprovedExecution { plan, approval_id })
 }
 
@@ -168,7 +169,8 @@ pub(super) async fn run_approved(
         Ok(VertexService::new(
             state.ai.clone(),
             CredentialVault::new(state.root.join("credentials"))?,
-        )?)
+        )?
+        .with_observer(super::runtime::observer(state.clone())))
     })
     .await
 }
@@ -181,6 +183,7 @@ async fn run_approved_with<E: JobExecutor>(
 ) -> Result<()> {
     let ApprovedExecution { plan, approval_id } = approved;
     let mut phase = "source";
+    let mut superseded_or_busy = false;
     let execution = async {
         if !state.ai.approval_is_current(&quote_id, &approval_id)? {
             return Ok(());
@@ -208,8 +211,17 @@ async fn run_approved_with<E: JobExecutor>(
             if !state.ai.approval_is_current(&quote_id, &approval_id)? {
                 return Ok(());
             }
-            let state_before = state.ai.quote(&quote_id)?.state;
+            let current = state.ai.quote(&quote_id)?;
+            let state_before = current.state;
             if ["paused", "cancelled", "completed"].contains(&state_before.as_str()) {
+                break;
+            }
+            if state_before == "needs_review"
+                && plan.text_failure_policy == TextFailurePolicy::SkipRejected
+                && current.request_counts.rejected > 0
+                && current.request_counts.pending == 0
+                && current.request_counts.in_flight == 0
+            {
                 break;
             }
             if let Err(error) = verify_current_binding(&state, &plan) {
@@ -230,7 +242,35 @@ async fn run_approved_with<E: JobExecutor>(
             let result = match result {
                 Ok(Some(result)) => result,
                 Ok(None) => break,
-                Err(AiError::Superseded | AiError::WorkerBusy) => return Ok(()),
+                Err(AiError::Superseded | AiError::WorkerBusy) => {
+                    superseded_or_busy = true;
+                    return Ok(());
+                }
+                Err(AiError::OutputRejected(reason)) => {
+                    state.ai.record_job_issue_scoped(
+                        &quote_id,
+                        &approval_id,
+                        reason.code(),
+                        "execute",
+                        None,
+                        "resume",
+                    )?;
+                    // Settlement decides whether this exact rejection is safe
+                    // to skip. A generic Invalid or unknown outcome never does.
+                    let current = state.ai.quote(&quote_id)?;
+                    if plan.text_failure_policy == TextFailurePolicy::SkipRejected {
+                        if current.state == "approved" {
+                            continue;
+                        }
+                        if current.state == "needs_review"
+                            && current.request_counts.pending == 0
+                            && current.request_counts.in_flight == 0
+                        {
+                            break;
+                        }
+                    }
+                    return Err(AiError::OutputRejected(reason).into());
+                }
                 Err(AiError::RetryWaiting(at) | AiError::PacingWaiting(at)) => {
                     if !wait_for_dispatch(&state, &quote_id, &approval_id, at).await? {
                         return Ok(());
@@ -271,6 +311,9 @@ async fn run_approved_with<E: JobExecutor>(
         Ok(())
     }
     .await;
+    if superseded_or_busy {
+        return Ok(());
+    }
     // A second native invocation can approve before the first one reserves its
     // request. Losing that race must not leave an idle job labelled running.
     if !state.ai.approval_is_current(&quote_id, &approval_id)? {
@@ -289,6 +332,24 @@ async fn run_approved_with<E: JobExecutor>(
             .ai
             .record_job_issue_scoped(&quote_id, &approval_id, code, phase, http, action)?;
     }
+    let quote = state.ai.quote(&quote_id)?;
+    let counts = &quote.request_counts;
+    let outcome = if execution.is_err()
+        || counts.pending > 0
+        || counts.in_flight > 0
+        || ["paused", "cancelled"].contains(&quote.state.as_str())
+    {
+        "stopped"
+    } else if counts.rejected > 0 {
+        if counts.succeeded > 0 {
+            "partial"
+        } else {
+            "failed"
+        }
+    } else {
+        "completed"
+    };
+    let _ = super::runtime::finish(&state, &quote_id, &approval_id, outcome);
     execution
 }
 
@@ -338,6 +399,7 @@ fn failure_issue(phase: &str, error: &anyhow::Error) -> (&'static str, Option<u1
             ("unknown_outcome", None, "review_unknown")
         }
         Some(AiError::PreparationChanged) => ("source_changed", None, "prepare_again"),
+        Some(AiError::OutputRejected(reason)) => (reason.code(), None, "resume"),
         _ if phase == "apply" => ("local_apply", None, "retry_local"),
         _ if phase == "source" => ("source_changed", None, "prepare_again"),
         Some(AiError::Invalid(_)) => ("invalid_output", None, "review_result"),
@@ -436,3 +498,5 @@ pub fn resolve_unknown_attempt(
 mod tests;
 #[cfg(all(test, feature = "e2e-test"))]
 mod transcription_tests;
+#[cfg(test)]
+mod vocabulary_tests;

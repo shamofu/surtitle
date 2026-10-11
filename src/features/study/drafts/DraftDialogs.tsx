@@ -228,6 +228,7 @@ export function DraftAiDialog({
           quote={quote}
           busy={busy}
           onApprove={() => void approve()}
+          onRefresh={() => void estimate()}
         />
       ) : (
         <>

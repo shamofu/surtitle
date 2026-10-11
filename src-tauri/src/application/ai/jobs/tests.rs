@@ -380,6 +380,139 @@ async fn recovered_and_superseded_worker_cannot_publish_response_or_failure() {
 }
 
 #[tokio::test]
+async fn reapproval_clears_old_preview_before_worker_start_even_if_history_write_fails() {
+    for history_write_fails in [false, true] {
+        let fixture = Fixture::new().await;
+        if history_write_fails {
+            std::fs::write(
+                fixture.directory.path().join("ai-progress"),
+                b"not a directory",
+            )
+            .unwrap();
+        }
+        let published = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let publications = published.clone();
+        super::super::runtime::install_publisher(&fixture.state, move |snapshot| {
+            publications
+                .lock()
+                .unwrap()
+                .push(serde_json::to_value(snapshot).unwrap());
+        })
+        .unwrap();
+        let original = fixture.approve();
+        let observer = super::super::runtime::observer(fixture.state.clone());
+        let old_event = surtitle_ai::ExecutionEvent {
+            job_id: fixture.quote.id.clone(),
+            approval_id: Some(original.approval_id.clone()),
+            attempt_id: "preceding-attempt".into(),
+            ordinal: 0,
+            stage: surtitle_ai::ExecutionStage::Receiving,
+            text_delta: Some("{\"translations\":[{\"text\":\"old preview\"".into()),
+            http_status: Some(200),
+            rejection_reason: None,
+        };
+        observer(old_event.clone());
+        let snapshot = || {
+            serde_json::to_value(
+                super::super::runtime::get_ai_runtime(
+                    fixture.state.clone(),
+                    fixture.quote.id.clone(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+        };
+        let before = snapshot();
+        assert!(
+            before["preview"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("old preview")
+        );
+        fixture.state.ai.pause(&fixture.quote.id).unwrap();
+        let renewed = approve_for_execution(
+            &fixture.state,
+            &fixture.quote.id,
+            &fixture.quote.digest,
+            true,
+            false,
+            true,
+        )
+        .unwrap();
+        assert_ne!(original.approval_id, renewed.approval_id);
+        fixture.assert_attempts(&[]);
+        let after = snapshot();
+        assert_eq!(after["approvalId"], renewed.approval_id);
+        assert!(after.get("preview").is_none());
+        assert!(after["revision"].as_u64().unwrap() > before["revision"].as_u64().unwrap());
+        let last = after["events"].as_array().unwrap().last().unwrap();
+        assert_eq!(last["phase"], "preparing");
+        assert!(last.get("attemptId").is_none());
+        assert_eq!(published.lock().unwrap().last().unwrap(), &after);
+        // A late callback from the preceding approval cannot restore its text.
+        observer(old_event);
+        assert_eq!(snapshot(), after);
+        assert_eq!(
+            fixture.state.ai.quote(&fixture.quote.id).unwrap().state,
+            "approved"
+        );
+    }
+}
+
+#[tokio::test]
+async fn duplicate_busy_worker_does_not_publish_a_false_runtime_stop() {
+    let fixture = Fixture::new().await;
+    let service = fixture.offline(Scenario::Translation);
+    let mut checkpoint = service.checkpoint(Stage::AfterSend, 0);
+    let approved = fixture.approve();
+    let duplicate = approved.clone();
+    let approval_id = approved.approval_id.clone();
+    let worker = fixture.start(approved, service.clone());
+    reached(&mut checkpoint).await;
+    let attempt = fixture.state.ai.summary().unwrap().unknown_attempts[0]
+        .id
+        .clone();
+    super::super::runtime::observer(fixture.state.clone())(surtitle_ai::ExecutionEvent {
+        job_id: fixture.quote.id.clone(),
+        approval_id: Some(approval_id),
+        attempt_id: attempt,
+        ordinal: 0,
+        stage: surtitle_ai::ExecutionStage::Receiving,
+        text_delta: Some("{\"translations\":[".into()),
+        http_status: Some(200),
+        rejection_reason: None,
+    });
+    let snapshot = || {
+        serde_json::to_value(
+            super::super::runtime::get_ai_runtime(fixture.state.clone(), fixture.quote.id.clone())
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let before = snapshot();
+    finished(fixture.start(duplicate, service.clone()))
+        .await
+        .unwrap();
+    assert_eq!(
+        snapshot(),
+        before,
+        "a busy duplicate cannot terminate another worker's preview"
+    );
+    assert_eq!(
+        fixture.state.ai.quote(&fixture.quote.id).unwrap().state,
+        "approved"
+    );
+    assert_eq!(service.sent_ordinals(), [0]);
+    checkpoint.resume();
+    finished(worker).await.unwrap();
+    assert_eq!(service.sent_ordinals(), [0, 1]);
+    let after = snapshot();
+    let events = after["events"].as_array().unwrap();
+    assert_eq!(events.last().unwrap()["phase"], "completed");
+    assert!(!events.iter().any(|event| event["phase"] == "stopped"));
+}
+
+#[tokio::test]
 async fn source_or_settings_change_during_auth_prevents_the_first_send() {
     for change_settings in [false, true] {
         let fixture = Fixture::new().await;

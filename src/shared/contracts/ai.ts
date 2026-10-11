@@ -57,6 +57,8 @@ export interface JobSummary {
     | 'unknown'
     | 'cancelled';
   progress: number;
+  executionOutcome?: 'running' | 'complete' | 'partial' | 'failed' | 'stopped';
+  requestCounts?: { total: number; succeeded: number; rejected: number; pending: number; inFlight: number };
   message?: string;
   createdAt: string;
   pendingResults?: number;
@@ -80,6 +82,28 @@ export interface JobSummary {
   };
   automaticTranscript?: boolean;
   transcriptionRanges?: { startMs: number; endMs: number; state: 'pending' | 'received' | 'failed' | 'source_block' }[];
+}
+
+export interface AiRuntimeSnapshot {
+  jobId: string;
+  approvalId: string;
+  revision: number;
+  events: {
+    id: string;
+    timestamp: string;
+    phase: string;
+    ordinal?: number;
+    attemptId?: string;
+    reason?: string;
+    httpStatus?: number;
+  }[];
+  preview?: {
+    attemptId: string;
+    ordinal: number;
+    text: string;
+    state: 'streaming' | 'validated' | 'rejected';
+    truncated?: boolean;
+  };
 }
 
 export interface TranscriptionPreparation {

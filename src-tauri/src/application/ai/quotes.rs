@@ -137,7 +137,7 @@ pub(super) fn quote_for_ui_with_policy(
             "Model quality is not guaranteed. Review generated content before using it.",
         )]
     };
-    if additional.is_none() {
+    if additional.is_none() && context.kind != "transcribe" {
         warnings.push(tr("料金不明です。要求数・音声時間・出力設定で範囲を制限しますが、ドル上限は保証できません。", "Pricing is unknown. Request count, audio duration, and output settings bound this scope; a dollar limit cannot be guaranteed."));
     }
     if !summary.monetary_totals_complete {
@@ -222,7 +222,9 @@ pub async fn create_quote(
         let settings_hash=settings_fingerprint(&p.settings)?;
         // Text jobs bind to the exact selected textual input, not an expensive video hash.
         let source_hash=sha256_bytes(&serde_json::to_vec(&cues)?);
-        let quote=state.ai.prepare(PreparedJob::new(format!("{} · {}",media.title,request.kind),p.settings.vertex_project,credential,PreparationBinding{media_id:media.id.clone(),transcript_revision:transcript_fingerprint(&all)?,source_sha256:source_hash,settings_sha256:settings_hash},requests,execution)?)?;
+        let plan=PreparedJob::new(format!("{} · {}",media.title,request.kind),p.settings.vertex_project,credential,PreparationBinding{media_id:media.id.clone(),transcript_revision:transcript_fingerprint(&all)?,source_sha256:source_hash,settings_sha256:settings_hash},requests,execution)?;
+        let plan=if request.kind=="vocabulary" {plan.with_text_failure_policy(TextFailurePolicy::SkipRejected)?} else {plan};
+        let quote=state.ai.prepare(plan)?;
         let context=QuoteContext{media_id:media.id.clone(),kind:request.kind.clone(),start_ms:request.start_ms,end_ms:request.end_ms};
         {state.preferences.update(|p| {p.quotes.insert(quote.id.clone(),context);Ok(()) }) ?;}
         let quote=if quote.state=="prepared"&&quote.quote_expires_at_ms<=chrono::Utc::now().timestamp_millis(){state.ai.refresh_quote(&quote.id)?}else{quote};

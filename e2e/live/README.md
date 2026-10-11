@@ -1,4 +1,36 @@
-# Opt-in live transcription
+# Opt-in live AI validation
+
+## Vocabulary and explanations without the application
+
+`vocabulary.mjs` uses `surtitle-ai-validation` and therefore the production Rust
+request builder, SSE parser, result validator, and charge ledger. Follow
+[CLI setup](../../docs/vertex-verification.md) to create one isolated validation
+root with an explicit lifetime ceiling and import a protected credential. Do not
+reuse the application's profile or reset a root to erase earlier spending.
+
+For the October 2026 vocabulary investigation use lifetime $15, daily/monthly
+$12, and per-job $2. The runner also stops before a reservation would take the
+lifetime charged-or-held total above $12. Verified prices are mandatory;
+unpriced requests and automatic retries are forbidden.
+
+```powershell
+node e2e/live/vocabulary.mjs --mode prepare --root ABS_ROOT --validator ABS_EXE --credential ID --price ABS_PRICE_JSON
+node e2e/live/vocabulary.mjs --mode run --root ABS_ROOT --validator ABS_EXE --offset 0 --count 2
+# Inspect the first two outputs, usage and transportObservation before continuing.
+node e2e/live/vocabulary.mjs --mode run --root ABS_ROOT --validator ABS_EXE --offset 2 --count 24
+```
+
+Preparation makes 6 authored vocabulary cases, two 60-cue cases, and 18
+explanations across A2/B1/C1. Only source cues and task settings reach the target
+model; oracle translations, meanings and grading criteria are excluded. Each
+request sends once and writes its response/report without overwriting earlier
+evidence. Rerunning skips attempted jobs. A deliberate post-fix validation uses
+`--round r2` in the same root and keeps all prior charges/holds. Review actual
+output using `semantic-review-v2.json`; passing schema validation is not a
+semantic-quality or human-review claim. Offline worker tests separately cover
+multi-batch continuation and forced failures.
+
+## Transcription through the application
 
 `full-transcription.e2e.js` exercises the actual Tauri audio preparation, quote,
 UI approval, Vertex worker, progressive subtitle publication and final application.

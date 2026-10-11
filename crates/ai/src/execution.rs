@@ -53,6 +53,19 @@ pub enum ThinkingConfig {
 
 /// Immutable per-job wire settings. Model IDs are syntactically checked, never
 /// selected from an application-owned model or price allowlist.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseMode {
+    #[default]
+    GenerateContent,
+    StreamGenerateContent,
+}
+impl ResponseMode {
+    fn is_buffered(&self) -> bool {
+        *self == Self::GenerateContent
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionConfig {
@@ -62,6 +75,9 @@ pub struct ExecutionConfig {
     #[serde(default)]
     pub thinking: ThinkingConfig,
     pub price: Option<PriceSnapshot>,
+    // Omitting the legacy default preserves historical serialized plan digests.
+    #[serde(default, skip_serializing_if = "ResponseMode::is_buffered")]
+    pub response_mode: ResponseMode,
 }
 
 impl ExecutionConfig {
@@ -72,6 +88,7 @@ impl ExecutionConfig {
             max_output_tokens: task.max_output_tokens(),
             thinking: ThinkingConfig::Omit,
             price: None,
+            response_mode: ResponseMode::GenerateContent,
         }
     }
     pub fn validate(&self) -> Result<()> {
@@ -140,7 +157,11 @@ impl ExecutionConfig {
         } else {
             format!("{}-aiplatform.googleapis.com", self.location)
         };
-        Ok(format!("https://{host}/v1/projects/{project}/locations/{}/publishers/google/models/{}:generateContent", self.location, self.model_id))
+        let method = match self.response_mode {
+            ResponseMode::GenerateContent => "generateContent",
+            ResponseMode::StreamGenerateContent => "streamGenerateContent?alt=sse",
+        };
+        Ok(format!("https://{host}/v1/projects/{project}/locations/{}/publishers/google/models/{}:{method}", self.location, self.model_id))
     }
 }
 

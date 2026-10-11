@@ -27,7 +27,35 @@ fn config() -> ExecutionConfig {
         max_output_tokens: 2048,
         thinking: ThinkingConfig::Omit,
         price: None,
+        response_mode: ResponseMode::GenerateContent,
     }
+}
+
+#[test]
+fn response_mode_preserves_legacy_digests_and_freezes_new_endpoint() {
+    let legacy = job();
+    let old_json = serde_json::to_string(&legacy).unwrap();
+    assert!(!old_json.contains("response_mode"));
+    let restored: PreparedJob = serde_json::from_str(&old_json).unwrap();
+    assert_eq!(restored.digest().unwrap(), legacy.digest().unwrap());
+    assert!(restored
+        .execution
+        .endpoint("fixture-project")
+        .unwrap()
+        .ends_with(":generateContent"));
+    let mut streamed_config = config();
+    streamed_config.response_mode = ResponseMode::StreamGenerateContent;
+    let streamed = legacy.clone().with_execution(streamed_config).unwrap();
+    assert_eq!(
+        legacy.request_body_snapshot(0).unwrap(),
+        streamed.request_body_snapshot(0).unwrap()
+    );
+    assert_ne!(legacy.digest().unwrap(), streamed.digest().unwrap());
+    assert!(streamed
+        .execution
+        .endpoint("fixture-project")
+        .unwrap()
+        .ends_with(":streamGenerateContent?alt=sse"));
 }
 fn job() -> PreparedJob {
     PreparedJob::new(

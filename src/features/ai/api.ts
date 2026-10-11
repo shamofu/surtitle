@@ -7,9 +7,11 @@ import type {
   AiQuote,
   SavedAiResult,
   TranscriptionPreparation,
+  AiRuntimeSnapshot,
 } from '../../shared/contracts/ai';
 
 export const aiApi = {
+  runtime: (jobId: string) => call<AiRuntimeSnapshot | null>('get_ai_runtime', { jobId }),
   vertexModels: (location?: string) =>
     call<DiscoveredModel[]>('list_vertex_models', { location }),
   vertexPrice: (modelId: string, location?: string) =>

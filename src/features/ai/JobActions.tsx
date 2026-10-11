@@ -37,6 +37,7 @@ export function JobActions({
   const savedExit = useModalExit(!!saved);
   const quoteExit = useModalExit(!!quote);
   const exiting = savedExit.exiting || quoteExit.exiting;
+  const hasRemaining = job.requestCounts ? job.requestCounts.succeeded < job.requestCounts.total : job.progress < 1;
   function closeQuote() {
     void quoteExit.close(() => setQuote(undefined));
   }
@@ -143,7 +144,7 @@ export function JobActions({
             {t('中止', 'Cancel')}
           </Button>
         )}
-        {['paused', 'failed', 'unknown'].includes(job.status) && job.progress < 1 && (
+        {['paused', 'failed', 'unknown'].includes(job.status) && hasRemaining && (
           <Button busy={busy} onClick={() => void estimateRetry()}>
             <RotateCw size={13} />
             {inlineTranscription ? t('残りを再開', 'Resume remaining work') : t('残りを再見積もり', 'Estimate remaining work')}

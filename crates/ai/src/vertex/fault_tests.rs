@@ -399,6 +399,15 @@ impl Harness {
         replies: Vec<std::result::Result<FakeResponse, SendFailure>>,
         approve: bool,
     ) -> Self {
+        Self::with_response_mode(tasks, replies, approve, ResponseMode::GenerateContent)
+    }
+
+    fn with_response_mode(
+        tasks: Vec<RequestTask>,
+        replies: Vec<std::result::Result<FakeResponse, SendFailure>>,
+        approve: bool,
+        mode: ResponseMode,
+    ) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let db_path = directory.path().join("charges.sqlite");
         let store = AiStore::open(&db_path).unwrap();
@@ -409,19 +418,22 @@ impl Harness {
                 monthly_microusd: 1_000_000,
             })
             .unwrap();
+        let plan = PreparedJob::fixture(
+            "Deterministic offline Vertex test".into(),
+            "fixture-project".into(),
+            "fixture-credential".into(),
+            PreparationBinding {
+                media_id: "fixture-media".into(),
+                transcript_revision: "revision-one".into(),
+                source_sha256: sha256_bytes(b"source"),
+                settings_sha256: sha256_bytes(b"settings"),
+            },
+            tasks,
+        );
+        let mut execution = plan.execution.clone();
+        execution.response_mode = mode;
         let quote = store
-            .prepare(PreparedJob::fixture(
-                "Deterministic offline Vertex test".into(),
-                "fixture-project".into(),
-                "fixture-credential".into(),
-                PreparationBinding {
-                    media_id: "fixture-media".into(),
-                    transcript_revision: "revision-one".into(),
-                    source_sha256: sha256_bytes(b"source"),
-                    settings_sha256: sha256_bytes(b"settings"),
-                },
-                tasks,
-            ))
+            .prepare(plan.with_execution(execution).unwrap())
             .unwrap();
         if approve {
             store.approve(&quote.id, &quote.digest).unwrap();
@@ -534,6 +546,184 @@ fn assert_sanitized(error: &AiError) {
     }
 }
 
+fn streaming_response(response: &Value, split: usize) -> FakeResponse {
+    let text = response["candidates"][0]["content"]["parts"][0]["text"]
+        .as_str()
+        .unwrap();
+    let mut frames = vec![json!({"usageMetadata":{"promptTokenCount":1000}})];
+    frames.push(json!({"candidates":[{"content":{"parts":[{"thought":true,"text":FAKE_PROVIDER_SECRET}]}}]}));
+    for fragment in text.chars().collect::<Vec<_>>().chunks(11) {
+        frames.push(json!({"candidates":[{"index":0,"content":{"parts":[{"text":fragment.iter().collect::<String>()}]}}]}));
+    }
+    frames.push(json!({"candidates":[{"index":0,"finishReason":response["candidates"][0]["finishReason"]}],"usageMetadata":response["usageMetadata"]}));
+    let wire = frames
+        .into_iter()
+        .map(|frame| format!("data: {frame}\n\n"))
+        .collect::<String>();
+    FakeResponse {
+        status: 200,
+        chunks: wire
+            .as_bytes()
+            .chunks(split)
+            .map(|bytes| Ok(bytes.to_vec()))
+            .collect(),
+        reads: Arc::new(AtomicUsize::new(0)),
+        pause_on_read: None,
+    }
+}
+
+#[tokio::test]
+async fn streaming_preview_is_scoped_and_only_final_validated_content_settles_once() {
+    let h = Harness::with_response_mode(
+        vec![task()],
+        vec![Ok(streaming_response(&valid_response(), 7))],
+        true,
+        ResponseMode::StreamGenerateContent,
+    );
+    let observed = Arc::new(Mutex::new(Vec::<ExecutionEvent>::new()));
+    let events = observed.clone();
+    let store = h.store.clone();
+    let observer: ExecutionObserver = Arc::new(move |event| {
+        if event.text_delta.is_some() {
+            assert!(store
+                .response(&event.job_id, event.ordinal)
+                .unwrap()
+                .is_none());
+            assert!(store.summary().unwrap().daily_held_microusd > 0);
+        }
+        events.lock().unwrap().push(event);
+    });
+    let result = execute_observed_with_io(
+        &h.store,
+        &h.auth,
+        &h.transport,
+        &h.quote.id,
+        None,
+        || Ok(()),
+        Some(&observer),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(result.charged_microusd, Some(575));
+    assert_eq!(
+        h.store.summary().unwrap().daily_actual_charged_microusd,
+        575
+    );
+    assert!(h.store.summary().unwrap().unknown_attempts.is_empty());
+    assert!(h.execute().await.is_err());
+    assert_eq!(h.sends(), 1);
+    let events = observed.lock().unwrap();
+    assert_eq!(events.first().unwrap().stage, ExecutionStage::Preparing);
+    assert_eq!(events.last().unwrap().stage, ExecutionStage::Settled);
+    assert!(events.iter().all(|event| event.rejection_reason.is_none()));
+    assert!(events.iter().all(|event| event.job_id == h.quote.id
+        && event.attempt_id == result.attempt_id
+        && event.ordinal == 0));
+    assert!(
+        events
+            .iter()
+            .filter(|event| event.text_delta.is_some())
+            .count()
+            > 1
+    );
+    let text: String = events
+        .iter()
+        .filter_map(|event| event.text_delta.as_deref())
+        .collect();
+    assert_eq!(
+        text,
+        valid_response()["candidates"][0]["content"]["parts"][0]["text"]
+    );
+    assert!(!text.contains(FAKE_PROVIDER_SECRET));
+    assert!(h.transport.requests.lock().unwrap()[0]
+        .url
+        .ends_with(":streamGenerateContent?alt=sse"));
+}
+
+#[tokio::test]
+async fn streaming_known_invalid_output_settles_but_partial_disconnect_keeps_hold() {
+    let mut rejected = valid_response();
+    rejected["candidates"][0]["finishReason"] = json!("MAX_TOKENS");
+    let h = Harness::with_response_mode(
+        vec![task()],
+        vec![Ok(streaming_response(&rejected, 29))],
+        true,
+        ResponseMode::StreamGenerateContent,
+    );
+    let observed = Arc::new(Mutex::new(Vec::<ExecutionEvent>::new()));
+    let events = observed.clone();
+    let store = h.store.clone();
+    let observer: ExecutionObserver = Arc::new(move |event| {
+        if event.rejection_reason.is_some() {
+            assert_eq!(store.summary().unwrap().daily_held_microusd, 0);
+            assert_eq!(store.summary().unwrap().daily_actual_charged_microusd, 575);
+        }
+        events.lock().unwrap().push(event);
+    });
+    assert!(matches!(
+        execute_observed_with_io(
+            &h.store,
+            &h.auth,
+            &h.transport,
+            &h.quote.id,
+            None,
+            || Ok(()),
+            Some(&observer),
+        )
+        .await,
+        Err(AiError::OutputRejected(
+            crate::OutputFailureReason::OutputLimit
+        ))
+    ));
+    assert_eq!(
+        observed.lock().unwrap().last().unwrap().rejection_reason,
+        Some(crate::OutputFailureReason::OutputLimit)
+    );
+    assert_eq!(
+        h.store.summary().unwrap().daily_actual_charged_microusd,
+        575
+    );
+    assert!(h.store.response(&h.quote.id, 0).unwrap().is_none());
+    assert_eq!(h.sends(), 1);
+
+    for after_terminal in [false, true] {
+        let mut reply = streaming_response(&valid_response(), 512);
+        if !after_terminal {
+            reply.chunks.truncate(1);
+        }
+        reply.chunks.push_back(Err(()));
+        let h = Harness::with_response_mode(
+            vec![task()],
+            vec![Ok(reply)],
+            true,
+            ResponseMode::StreamGenerateContent,
+        );
+        assert!(matches!(h.execute().await, Err(AiError::UnknownOutcome)));
+        h.assert_unknown();
+        assert!(h.execute().await.is_err());
+        assert_eq!(h.sends(), 1);
+    }
+}
+
+#[tokio::test]
+async fn generic_audio_transcription_uses_streamed_json_and_existing_final_validation() {
+    let directory = tempfile::tempdir().unwrap();
+    let response = transcript_response();
+    let h = Harness::with_response_mode(
+        vec![transcript_task(directory.path())],
+        vec![Ok(streaming_response(&response, 1))],
+        true,
+        ResponseMode::StreamGenerateContent,
+    );
+    let output = h.execute().await.unwrap().unwrap().output;
+    assert!(
+        matches!(output, ParsedOutput::Transcript { cues } if cues.len() == 1 && cues[0].text == "Hello.")
+    );
+    assert_eq!(h.sends(), 1);
+    assert_eq!(h.store.quote(&h.quote.id).unwrap().state, "completed");
+}
+
 #[tokio::test]
 async fn successful_request_uses_real_body_and_durable_reservation_then_settles_once() {
     let h = Harness::new(vec![Ok(FakeResponse::json(valid_response()))]);
@@ -545,7 +735,10 @@ async fn successful_request_uses_real_body_and_durable_reservation_then_settles_
     {
         let requests = h.transport.requests.lock().unwrap();
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].url, "https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google/models/gemini-3.8-flash:generateContent");
+        assert_eq!(
+            requests[0].url,
+            "https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google/models/gemini-3.8-flash:generateContent"
+        );
         assert_eq!(
             &requests[0].body,
             h.store
@@ -576,91 +769,101 @@ async fn successful_request_uses_real_body_and_durable_reservation_then_settles_
 }
 
 #[tokio::test]
-async fn explanation_refinement_is_frozen_and_old_approval_never_authorizes_new_prompt() {
-    const REFINEMENT: &str = "Describe contrasts as context-dependent unless a categorical restriction is well established; do not infer intention, agency, necessity, causes, or subsequent events that the cited source does not entail. ";
-    let h = Harness::with_approval(
-        vec![RequestTask::Explanation {
-            term: "take your time".into(),
-            learning_language: "en".into(),
-            explanation_language: "ja".into(),
-            proficiency: "B1".into(),
-            cues: vec![SourceCue {
-                id: "cue-one".into(),
-                start_ms: 100,
-                end_ms: 2000,
-                text: "Take your time.".into(),
+async fn semantic_refinements_are_frozen_and_old_approval_never_authorizes_new_prompts() {
+    for vocabulary in [false, true] {
+        let refinement = if vocabulary {
+            "Preserve the speaker's role and speech act: do not turn an offer of help into a request for help or a request into an offer, or infer that an offer was accepted. Do not infer intention or lack of intention from inflection alone; ground such claims in explicit context. "
+        } else {
+            "If the term occurs with different senses, focus on the first complete occurrence whose sense is clear from its local context. Explain only that occurrence and sense; do not merge occurrences or survey other senses. Keep meaning, explanation and example aligned with the cited occurrence. Keep the explanation concise, using two to four focused sentences or fewer when sufficient. "
+        };
+        let h = Harness::with_approval(
+            vec![if vocabulary {
+                task()
+            } else {
+                RequestTask::Explanation {
+                    term: "take your time".into(),
+                    learning_language: "en".into(),
+                    explanation_language: "ja".into(),
+                    proficiency: "B1".into(),
+                    cues: vec![SourceCue {
+                        id: "cue-one".into(),
+                        start_ms: 100,
+                        end_ms: 2000,
+                        text: "Take your time.".into(),
+                    }],
+                }
             }],
-        }],
-        vec![
-            Ok(FakeResponse::json(valid_response())),
-            Ok(FakeResponse::json(valid_response())),
-        ],
-        false,
-    );
-    let fresh = h.store.prepared_job(&h.quote.id).unwrap();
-    let fresh_body = fresh.request_body_snapshot(0).unwrap().clone();
-    let mut historical_json = serde_json::to_value(&fresh).unwrap();
-    let instruction = historical_json
-        .pointer_mut("/frozen_requests/0/systemInstruction/parts/0/text")
-        .unwrap();
-    let historical_instruction = instruction.as_str().unwrap().replace(REFINEMENT, "");
-    assert_ne!(historical_instruction, instruction.as_str().unwrap());
-    *instruction = json!(historical_instruction);
-    let historical: PreparedJob = serde_json::from_value(historical_json).unwrap();
-    historical.validate().unwrap();
-    let historical_body = historical.request_body_snapshot(0).unwrap().clone();
-    let historical_quote = h.store.prepare(historical).unwrap();
-    assert_ne!(historical_quote.digest, h.quote.digest);
-    assert!(h
-        .store
-        .approve(&historical_quote.id, &h.quote.digest)
-        .is_err());
-    h.store
-        .approve(&historical_quote.id, &historical_quote.digest)
-        .unwrap();
-    let reopened = AiStore::open(&h.transport.db_path).unwrap();
-    execute_with_io(
-        &reopened,
-        &h.auth,
-        &h.transport,
-        &historical_quote.id,
-        || Ok(()),
-    )
-    .await
-    .unwrap()
-    .unwrap();
-    assert_eq!(
-        h.transport.requests.lock().unwrap()[0].body,
-        historical_body
-    );
-    assert_eq!(
-        reopened
-            .prepared_job(&historical_quote.id)
-            .unwrap()
-            .request_body_snapshot(0)
-            .unwrap(),
-        &historical_body
-    );
-    assert!(reopened
-        .approve(&h.quote.id, &historical_quote.digest)
-        .is_err());
-    reopened.approve(&h.quote.id, &h.quote.digest).unwrap();
-    execute_with_io(&reopened, &h.auth, &h.transport, &h.quote.id, || Ok(()))
+            vec![
+                Ok(FakeResponse::json(valid_response())),
+                Ok(FakeResponse::json(valid_response())),
+            ],
+            false,
+        );
+        let fresh = h.store.prepared_job(&h.quote.id).unwrap();
+        let fresh_body = fresh.request_body_snapshot(0).unwrap().clone();
+        let mut historical_json = serde_json::to_value(&fresh).unwrap();
+        let instruction = historical_json
+            .pointer_mut("/frozen_requests/0/systemInstruction/parts/0/text")
+            .unwrap();
+        let historical_instruction = instruction.as_str().unwrap().replace(refinement, "");
+        assert_ne!(historical_instruction, instruction.as_str().unwrap());
+        *instruction = json!(historical_instruction);
+        let historical: PreparedJob = serde_json::from_value(historical_json).unwrap();
+        historical.validate().unwrap();
+        let historical_body = historical.request_body_snapshot(0).unwrap().clone();
+        let historical_quote = h.store.prepare(historical).unwrap();
+        assert_ne!(historical_quote.digest, h.quote.digest);
+        assert!(h
+            .store
+            .approve(&historical_quote.id, &h.quote.digest)
+            .is_err());
+        h.store
+            .approve(&historical_quote.id, &historical_quote.digest)
+            .unwrap();
+        let reopened = AiStore::open(&h.transport.db_path).unwrap();
+        execute_with_io(
+            &reopened,
+            &h.auth,
+            &h.transport,
+            &historical_quote.id,
+            || Ok(()),
+        )
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(h.transport.requests.lock().unwrap()[1].body, fresh_body);
-    assert!(execute_with_io(
-        &reopened,
-        &h.auth,
-        &h.transport,
-        &historical_quote.id,
-        || Ok(())
-    )
-    .await
-    .is_err());
-    assert_eq!(h.sends(), 2);
-    assert_eq!(reopened.summary().unwrap().daily_held_microusd, 0);
+        assert_eq!(
+            h.transport.requests.lock().unwrap()[0].body,
+            historical_body
+        );
+        assert_eq!(
+            reopened
+                .prepared_job(&historical_quote.id)
+                .unwrap()
+                .request_body_snapshot(0)
+                .unwrap(),
+            &historical_body
+        );
+        assert!(reopened
+            .approve(&h.quote.id, &historical_quote.digest)
+            .is_err());
+        reopened.approve(&h.quote.id, &h.quote.digest).unwrap();
+        execute_with_io(&reopened, &h.auth, &h.transport, &h.quote.id, || Ok(()))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(h.transport.requests.lock().unwrap()[1].body, fresh_body);
+        assert!(execute_with_io(
+            &reopened,
+            &h.auth,
+            &h.transport,
+            &historical_quote.id,
+            || Ok(())
+        )
+        .await
+        .is_err());
+        assert_eq!(h.sends(), 2);
+        assert_eq!(reopened.summary().unwrap().daily_held_microusd, 0);
+    }
 }
 
 #[cfg(feature = "development-validation")]
@@ -866,7 +1069,10 @@ async fn scoped_parse_failure_keeps_generated_diagnostics_after_known_usage_sett
     let error = execute_with_io(&scoped, &h.auth, &h.transport, &h.quote.id, || Ok(()))
         .await
         .unwrap_err();
-    assert!(matches!(error, AiError::Invalid(_)));
+    assert!(matches!(
+        error,
+        AiError::OutputRejected(crate::OutputFailureReason::InvalidSource)
+    ));
     assert!(!error.to_string().contains("cue-19"));
     assert_eq!(h.sends(), 1);
     let attempts = scoped.validation_attempts().unwrap();
@@ -1190,7 +1396,12 @@ async fn invalid_output_with_valid_usage_settles_cost_and_requires_review() {
     let mut response = valid_response();
     response["candidates"][0]["finishReason"] = json!("MAX_TOKENS");
     let h = Harness::new(vec![Ok(FakeResponse::json(response))]);
-    assert!(matches!(h.execute().await, Err(AiError::Invalid(_))));
+    assert!(matches!(
+        h.execute().await,
+        Err(AiError::OutputRejected(
+            crate::OutputFailureReason::OutputLimit
+        ))
+    ));
     let summary = h.store.summary().unwrap();
     assert_eq!(summary.daily_actual_charged_microusd, 575);
     assert_eq!(summary.daily_held_microusd, 0);
@@ -1208,7 +1419,7 @@ async fn structured_output_errors_do_not_expose_provider_controlled_content() {
         json!(serde_json::to_string(&json!({"items": FAKE_PROVIDER_SECRET})).unwrap());
     let h = Harness::new(vec![Ok(FakeResponse::json(response))]);
     let error = h.execute().await.unwrap_err();
-    assert!(matches!(error, AiError::Invalid(_)));
+    assert!(matches!(error, AiError::OutputRejected(_)));
     assert_sanitized(&error);
     assert_eq!(
         h.store.summary().unwrap().daily_actual_charged_microusd,
@@ -1236,6 +1447,32 @@ async fn usage_above_reservation_records_actual_cost_and_stops_remaining_request
     );
     assert!(h.execute().await.is_err());
     assert_eq!(h.sends(), 1);
+}
+
+#[tokio::test]
+async fn rejected_output_above_output_or_cost_limit_is_a_hard_stop() {
+    for (field, count) in [
+        ("candidatesTokenCount", 100_000),
+        ("promptTokenCount", 1_000_000),
+    ] {
+        let mut response = valid_response();
+        response["candidates"][0]["finishReason"] = json!("MAX_TOKENS");
+        response["usageMetadata"][field] = json!(count);
+        let actual = usage_cost(crate::VOCABULARY_MODEL, &response["usageMetadata"]).unwrap();
+        let h = Harness::new(vec![Ok(FakeResponse::json(response))]);
+        assert!(matches!(h.execute().await, Err(AiError::Invalid(_))));
+        let quote = h.store.quote(&h.quote.id).unwrap();
+        assert_eq!(quote.state, "needs_review");
+        assert_eq!(quote.request_counts.rejected, 1);
+        assert_eq!(
+            h.store.summary().unwrap().daily_actual_charged_microusd,
+            actual
+        );
+        assert_eq!(h.store.summary().unwrap().daily_held_microusd, 0);
+        assert!(h.store.response(&h.quote.id, 0).unwrap().is_none());
+        assert!(h.execute().await.is_err());
+        assert_eq!(h.sends(), 1);
+    }
 }
 
 fn checkpoint_and_park(marker: &std::path::Path) -> ! {

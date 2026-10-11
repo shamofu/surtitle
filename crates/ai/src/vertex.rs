@@ -1,14 +1,84 @@
 use crate::{
     models::parse_output, AiError, AiStore, CredentialVault, ParsedOutput, RequestTask,
-    ReservedRequest, Result,
+    ReservedRequest, ResponseMode, Result,
 };
 use gcp_auth::TokenProvider;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{future::Future, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 use zeroize::Zeroizing;
 
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+mod streaming;
+
+/// Observable transport stages, never model reasoning or invented progress.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionStage {
+    Preparing,
+    Sending,
+    Receiving,
+    Validating,
+    Settled,
+    Rejected,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionEvent {
+    pub job_id: String,
+    pub approval_id: Option<String>,
+    pub attempt_id: String,
+    pub ordinal: u32,
+    pub stage: ExecutionStage,
+    /// Only non-thought model output. Native code projects JSON fields before UI display.
+    pub text_delta: Option<String>,
+    pub http_status: Option<u16>,
+    pub rejection_reason: Option<crate::OutputFailureReason>,
+}
+
+pub type ExecutionObserver = Arc<dyn Fn(ExecutionEvent) + Send + Sync>;
+
+fn observe(
+    observer: Option<&ExecutionObserver>,
+    request: &ReservedRequest,
+    stage: ExecutionStage,
+    text_delta: Option<String>,
+    http_status: Option<u16>,
+) {
+    if let Some(observer) = observer {
+        observer(ExecutionEvent {
+            job_id: request.job_id.clone(),
+            approval_id: request.approval_id.clone(),
+            attempt_id: request.attempt_id.clone(),
+            ordinal: request.ordinal,
+            stage,
+            text_delta,
+            http_status,
+            rejection_reason: None,
+        });
+    }
+}
+
+fn observe_rejected(
+    observer: Option<&ExecutionObserver>,
+    request: &ReservedRequest,
+    reason: crate::OutputFailureReason,
+) {
+    if let Some(observer) = observer {
+        observer(ExecutionEvent {
+            job_id: request.job_id.clone(),
+            approval_id: request.approval_id.clone(),
+            attempt_id: request.attempt_id.clone(),
+            ordinal: request.ordinal,
+            stage: ExecutionStage::Rejected,
+            text_delta: None,
+            http_status: None,
+            rejection_reason: Some(reason),
+        });
+    }
+}
 
 #[cfg(feature = "test-support")]
 pub mod test_support;
@@ -110,6 +180,7 @@ pub struct VertexService {
     store: AiStore,
     vault: CredentialVault,
     client: reqwest::Client,
+    observer: Option<ExecutionObserver>,
 }
 
 impl VertexService {
@@ -126,7 +197,13 @@ impl VertexService {
             store,
             vault,
             client,
+            observer: None,
         })
+    }
+
+    pub fn with_observer(mut self, observer: ExecutionObserver) -> Self {
+        self.observer = Some(observer);
+        self
     }
 
     /// The sole paid network entrypoint. No ambient credentials, automatic retry,
@@ -142,7 +219,16 @@ impl VertexService {
         job_id: &str,
         before_send: impl FnMut() -> Result<()>,
     ) -> Result<Option<ExecutionResult>> {
-        execute_with_io(&self.store, &self.vault, &self.client, job_id, before_send).await
+        execute_observed_with_io(
+            &self.store,
+            &self.vault,
+            &self.client,
+            job_id,
+            None,
+            before_send,
+            self.observer.as_ref(),
+        )
+        .await
     }
 
     /// Native workers bind every reservation to the approval that started them.
@@ -152,13 +238,14 @@ impl VertexService {
         approval_id: &str,
         before_send: impl FnMut() -> Result<()>,
     ) -> Result<Option<ExecutionResult>> {
-        execute_scoped_with_io(
+        execute_observed_with_io(
             &self.store,
             &self.vault,
             &self.client,
             job_id,
             Some(approval_id),
             before_send,
+            self.observer.as_ref(),
         )
         .await
     }
@@ -166,6 +253,7 @@ impl VertexService {
 
 /// Every transport, including the offline fault harness, uses the same durable
 /// reserve, preflight, dispatch validation, bounded parse, and settlement path.
+#[cfg(any(test, feature = "test-support"))]
 async fn execute_with_io(
     store: &AiStore,
     auth: &impl Authorization,
@@ -176,13 +264,35 @@ async fn execute_with_io(
     execute_scoped_with_io(store, auth, transport, job_id, None, before_send).await
 }
 
+#[cfg(any(test, feature = "test-support"))]
 async fn execute_scoped_with_io(
     store: &AiStore,
     auth: &impl Authorization,
     transport: &impl Transport,
     job_id: &str,
     approval_id: Option<&str>,
+    before_send: impl FnMut() -> Result<()>,
+) -> Result<Option<ExecutionResult>> {
+    execute_observed_with_io(
+        store,
+        auth,
+        transport,
+        job_id,
+        approval_id,
+        before_send,
+        None,
+    )
+    .await
+}
+
+async fn execute_observed_with_io(
+    store: &AiStore,
+    auth: &impl Authorization,
+    transport: &impl Transport,
+    job_id: &str,
+    approval_id: Option<&str>,
     mut before_send: impl FnMut() -> Result<()>,
+    observer: Option<&ExecutionObserver>,
 ) -> Result<Option<ExecutionResult>> {
     let reserved = match approval_id {
         Some(id) => store.reserve_next_scoped(job_id, id)?,
@@ -191,6 +301,27 @@ async fn execute_scoped_with_io(
     let Some(reservation) = reserved else {
         return Ok(None);
     };
+    observe(
+        observer,
+        &reservation,
+        ExecutionStage::Preparing,
+        None,
+        None,
+    );
+    if reservation.execution.response_mode == ResponseMode::StreamGenerateContent
+        && !matches!(
+            reservation.task,
+            RequestTask::Vocabulary { .. }
+                | RequestTask::Explanation { .. }
+                | RequestTask::Translation { .. }
+                | RequestTask::AudioTranscription { .. }
+        )
+    {
+        store.release_unsent(&reservation.attempt_id, "unsupported_stream_task")?;
+        return Err(AiError::Invalid(
+            "This transcription adapter requires the synchronous API".into(),
+        ));
+    }
     // Validate and load immutable local input before requesting an OAuth token.
     let prepared = prepare_authenticated(auth, &reservation).await;
     check_current_reservation(store, &reservation)?;
@@ -225,6 +356,7 @@ async fn execute_scoped_with_io(
         }
     }
     let url = reservation.execution.endpoint(&reservation.project_id)?;
+    observe(observer, &reservation, ExecutionStage::Sending, None, None);
     let response = transport.send(&url, &token, &body).await;
     drop(token);
     check_current_reservation(store, &reservation)?;
@@ -232,9 +364,17 @@ async fn execute_scoped_with_io(
         Ok(r) => r,
         Err(_) => {
             store.mark_unknown(&reservation.attempt_id)?;
+            observe(observer, &reservation, ExecutionStage::Unknown, None, None);
             return Err(AiError::UnknownOutcome);
         }
     };
+    observe(
+        observer,
+        &reservation,
+        ExecutionStage::Receiving,
+        None,
+        Some(response.status()),
+    );
     if !(200..300).contains(&response.status()) {
         let status = response.status();
         if status == 429 {
@@ -253,25 +393,62 @@ async fn execute_scoped_with_io(
         // Conservatively retain the reservation even for rejected HTTP requests;
         // no response usage means the client cannot prove the billing outcome.
         store.mark_unknown(&reservation.attempt_id)?;
+        observe(
+            observer,
+            &reservation,
+            ExecutionStage::Unknown,
+            None,
+            Some(status),
+        );
         return Err(AiError::Provider(status));
     }
     // Bound memory even if a provider response violates the requested token cap.
     let mut bytes = Vec::new();
+    let mut stream = (reservation.execution.response_mode == ResponseMode::StreamGenerateContent)
+        .then(streaming::StreamResponse::default);
+    let mut received_bytes = 0usize;
     loop {
         let chunk = response.chunk().await;
         check_current_reservation(store, &reservation)?;
         match chunk {
-            Ok(Some(chunk)) if chunk.len() <= MAX_RESPONSE_BYTES - bytes.len() => {
-                bytes.extend_from_slice(&chunk)
+            Ok(Some(chunk)) if chunk.len() <= MAX_RESPONSE_BYTES - received_bytes => {
+                received_bytes += chunk.len();
+                if let Some(stream) = &mut stream {
+                    match stream.push(&chunk) {
+                        Ok(deltas) => {
+                            for text in deltas {
+                                observe(
+                                    observer,
+                                    &reservation,
+                                    ExecutionStage::Receiving,
+                                    Some(text),
+                                    None,
+                                );
+                            }
+                        }
+                        Err(()) => {
+                            store.mark_unknown(&reservation.attempt_id)?;
+                            observe(observer, &reservation, ExecutionStage::Unknown, None, None);
+                            return Err(AiError::UnknownOutcome);
+                        }
+                    }
+                } else {
+                    bytes.extend_from_slice(&chunk);
+                }
             }
             Ok(None) => break,
             _ => {
                 store.mark_unknown(&reservation.attempt_id)?;
+                observe(observer, &reservation, ExecutionStage::Unknown, None, None);
                 return Err(AiError::UnknownOutcome);
             }
         }
     }
-    let value: Value = match serde_json::from_slice(&bytes) {
+    let decoded = match stream {
+        Some(stream) => stream.finish(),
+        None => serde_json::from_slice(&bytes).map_err(|_| ()),
+    };
+    let value: Value = match decoded {
         Ok(v) => v,
         Err(_) => {
             // Malformed JSON has no safe text fields to retain. Persist a fixed
@@ -281,9 +458,17 @@ async fn execute_scoped_with_io(
                 crate::TranscriptResultReason::InvalidStructure,
             );
             store.mark_unknown(&reservation.attempt_id)?;
+            observe(observer, &reservation, ExecutionStage::Unknown, None, None);
             return Err(AiError::UnknownOutcome);
         }
     };
+    observe(
+        observer,
+        &reservation,
+        ExecutionStage::Validating,
+        None,
+        None,
+    );
     // Evidence is durable before settlement. A persistence failure retains the
     // reservation and never exposes an adoptable result or triggers a resend.
     if store
@@ -333,7 +518,18 @@ async fn execute_scoped_with_io(
         }
     };
     let usage = &sanitized_usage(usage);
-    let parsed = parse_response(&reservation.task, &value);
+    let text_task = matches!(
+        reservation.task,
+        RequestTask::Vocabulary { .. }
+            | RequestTask::Explanation { .. }
+            | RequestTask::Translation { .. }
+    );
+    let parsed = if text_task {
+        parse_text_response(&reservation.task, &value)
+    } else {
+        parse_response(&reservation.task, &value)
+            .map_err(|_| crate::OutputFailureReason::InvalidFields)
+    };
     match parsed {
         Ok(output) => {
             match actual {
@@ -357,6 +553,7 @@ async fn execute_scoped_with_io(
                         .into(),
                 ));
             }
+            observe(observer, &reservation, ExecutionStage::Settled, None, None);
             Ok(Some(ExecutionResult {
                 job_id: job_id.into(),
                 ordinal: reservation.ordinal,
@@ -365,7 +562,22 @@ async fn execute_scoped_with_io(
                 output,
             }))
         }
-        Err(_) => {
+        Err(reason) => {
+            if text_task {
+                store.settle_rejected(&reservation, actual, usage, reason)?;
+                observe_rejected(observer, &reservation, reason);
+                if output_tokens > reservation.execution.max_output_tokens as u64
+                    || actual
+                        .zip(reservation.reserved_microusd)
+                        .is_some_and(|(cost, reserved)| cost > reserved)
+                {
+                    return Err(AiError::Invalid(
+                        "Provider exceeded the approved output or cost limit; review the settled request"
+                            .into(),
+                    ));
+                }
+                return Err(AiError::OutputRejected(reason));
+            }
             match actual {
                 Some(cost) => store.settle(
                     &reservation.attempt_id,
@@ -381,6 +593,7 @@ async fn execute_scoped_with_io(
                     Some("output_requires_review"),
                 )?,
             }
+            observe(observer, &reservation, ExecutionStage::Rejected, None, None);
             // Deserializers may embed provider-controlled strings in their
             // diagnostics. The renderer gets a static message, never raw
             // response content, transport diagnostics, or credential details.
@@ -577,6 +790,48 @@ pub(crate) fn parse_response(task: &RequestTask, response: &Value) -> Result<Par
         .filter_map(|p| p.get("text").and_then(Value::as_str))
         .collect::<String>();
     parse_output(task, &text)
+}
+
+fn parse_text_response(
+    task: &RequestTask,
+    response: &Value,
+) -> std::result::Result<ParsedOutput, crate::OutputFailureReason> {
+    use crate::OutputFailureReason as Reason;
+    if response.pointer("/promptFeedback/blockReason").is_some() {
+        return Err(Reason::Blocked);
+    }
+    let candidates = response
+        .get("candidates")
+        .and_then(Value::as_array)
+        .ok_or(Reason::InvalidFields)?;
+    if candidates.len() != 1 {
+        return Err(Reason::InvalidFields);
+    }
+    let candidate = &candidates[0];
+    match candidate.get("finishReason").and_then(Value::as_str) {
+        Some("STOP") => {}
+        Some("MAX_TOKENS") => return Err(Reason::OutputLimit),
+        Some(
+            "SAFETY" | "RECITATION" | "BLOCKLIST" | "PROHIBITED_CONTENT" | "SPII" | "IMAGE_SAFETY",
+        ) => return Err(Reason::Blocked),
+        _ => return Err(Reason::Incomplete),
+    }
+    let parts = candidate
+        .pointer("/content/parts")
+        .and_then(Value::as_array)
+        .ok_or(Reason::InvalidFields)?;
+    let mut text = String::new();
+    for part in parts {
+        match part.get("thought") {
+            Some(Value::Bool(true)) => continue,
+            None | Some(Value::Bool(false)) => {}
+            _ => return Err(Reason::InvalidFields),
+        }
+        if let Some(value) = part.get("text") {
+            text.push_str(value.as_str().ok_or(Reason::InvalidFields)?);
+        }
+    }
+    crate::models::parse_text_output(task, &text)
 }
 
 #[cfg(test)]

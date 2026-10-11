@@ -50,6 +50,8 @@ pub struct JobQuote {
     pub additional_reservation_microusd: Option<u64>,
     pub remaining_ordinals: Vec<u32>,
     pub completed_requests: u32,
+    #[serde(default)]
+    pub request_counts: RequestCounts,
     pub already_charged_or_held_microusd: u64,
     pub audio_duration_ms: u64,
     pub execution: ExecutionConfig,
@@ -58,6 +60,18 @@ pub struct JobQuote {
     pub quote_expires_at_ms: i64,
     pub created_at_ms: i64,
     pub disclaimer: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestCounts {
+    pub total: u32,
+    pub succeeded: u32,
+    /// Received output rejected after its usage was durably settled.
+    pub rejected: u32,
+    /// Unresolved work, including blocked or unknown requests, excluding in-flight work.
+    pub pending: u32,
+    pub in_flight: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,3 +158,5 @@ mod tests;
 
 #[cfg(test)]
 mod fault_tests;
+#[cfg(test)]
+mod vocabulary_tests;

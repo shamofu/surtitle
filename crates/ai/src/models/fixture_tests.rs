@@ -66,6 +66,14 @@ fn contextual_explanations_do_not_require_contrasts_or_embed_evaluation_answers(
     assert!(
         prompt.contains("do not infer intention, agency, necessity, causes, or subsequent events")
     );
+    assert!(prompt.contains("first complete occurrence whose sense is clear"));
+    assert!(prompt.contains("do not merge occurrences or survey other senses"));
+    assert!(prompt.contains("two to four focused sentences"));
+    assert!(prompt.contains("cite every contributing subtitle ID"));
+    assert!(prompt.contains("subtitle spelling alone is not such evidence"));
+    assert!(prompt
+        .contains("An outcome does not by itself establish an obligation to take further action"));
+    assert!(prompt.contains("Omit speculative consequences"));
     assert!(!prompt.contains("and a precise contrast"));
     let vocabulary = task("vocabulary").body(None).unwrap();
     let instructions = vocabulary["systemInstruction"]["parts"][0]["text"]
@@ -73,6 +81,19 @@ fn contextual_explanations_do_not_require_contrasts_or_embed_evaluation_answers(
         .unwrap();
     assert!(!instructions.contains("白紙"));
     assert!(instructions.contains("transitivity, voice, agency, argument roles"));
+    assert!(instructions.contains("do not turn an offer of help into a request for help"));
+    assert!(instructions.contains("or a request into an offer"));
+    assert!(
+        instructions.contains("Do not infer intention or lack of intention from inflection alone")
+    );
+    assert!(instructions.contains("subtitle spelling alone is not such evidence"));
+    assert!(
+        instructions.contains("without adding obligations, required next actions, or later events")
+    );
+    for fixture_answer in ["頭が痛い", "T02-ja-06", "T02-ja-07", "pitch pattern"] {
+        assert!(!prompt.contains(fixture_answer));
+        assert!(!instructions.contains(fixture_answer));
+    }
 }
 
 #[test]

@@ -15,6 +15,7 @@ import { continuationApi, type AiContinuation } from '../../ai/continuations';
 import { ModelEditor, emptyModel } from '../../ai/ModelEditor';
 import { QuoteApproval } from '../../ai/QuoteApproval';
 import { JobActions } from '../../ai/JobActions';
+import { AiRuntime } from '../../ai/AiRuntime';
 import { currentTranscriptionJob, JobProcessingDetails, JobStatusMessage } from '../../ai/JobStatus';
 import { studyApi } from '../api';
 import { libraryApi } from '../../library/api';
@@ -236,6 +237,7 @@ function TranscriptionJob({ job, focused, active, history, onReview, onRequest }
   }, [focused, active]);
   return <div className="transcription-job" data-job-id={job.id} ref={target} tabIndex={-1}>
     <TranscriptionProgress job={job} />
+    <AiRuntime job={job} compact />
     {!!job.transcriptionRanges?.length && <div className="transcription-ranges" aria-label={t('区間ごとの状態', 'Transcription ranges')}>{job.transcriptionRanges.map((range, index) => <span key={index} className={`range-${range.state}`} title={`${timestamp(range.startMs)}–${timestamp(range.endMs)} · ${range.state}`} />)}</div>}
     {(job.issue || job.retry || (job.status === 'running' && job.pacing)) && <AnimatedDetails ref={details}>
       <summary>{t('処理の詳細', 'Processing details')}</summary>

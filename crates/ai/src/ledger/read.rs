@@ -3,8 +3,8 @@ use super::accounting::{
     job_spend, limits, period_breakdown, period_spend, period_starts, read_job, sum_estimates,
     unpriced_count,
 };
-use super::{AiStore, AttemptSummary, BudgetLimits, JobQuote, SpendSummary};
-use crate::{AiError, ParsedOutput, PreparedJob, Result};
+use super::{AiStore, AttemptSummary, BudgetLimits, JobQuote, RequestCounts, SpendSummary};
+use crate::{AiError, OutputFailureReason, ParsedOutput, PreparedJob, Result};
 use rusqlite::params;
 
 impl AiStore {
@@ -27,15 +27,40 @@ impl AiStore {
         let requests = plan.estimates()?;
         let total = sum_estimates(requests.iter())?;
         let audio_duration_ms = requests.iter().map(|r| r.audio_duration_ms).sum();
-        let mut states =
-            conn.prepare("SELECT ordinal,state FROM ai_requests WHERE job_id=? ORDER BY ordinal")?;
-        let remaining_ordinals: Vec<u32> = states
+        let mut states = conn.prepare(
+            "SELECT ordinal,state,error_code FROM ai_requests WHERE job_id=? ORDER BY ordinal",
+        )?;
+        let request_states = states
             .query_map([job_id], |r| {
-                Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?))
+                Ok((
+                    r.get::<_, u32>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                ))
             })?
-            .collect::<std::result::Result<Vec<_>, _>>()?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut request_counts = RequestCounts {
+            total: request_states.len() as u32,
+            ..Default::default()
+        };
+        for (_, state, code) in &request_states {
+            match state.as_str() {
+                "completed" => request_counts.succeeded += 1,
+                "reserved" => request_counts.in_flight += 1,
+                "failed"
+                    if code
+                        .as_deref()
+                        .and_then(OutputFailureReason::from_code)
+                        .is_some() =>
+                {
+                    request_counts.rejected += 1
+                }
+                _ => request_counts.pending += 1,
+            }
+        }
+        let remaining_ordinals: Vec<u32> = request_states
             .into_iter()
-            .filter_map(|(ordinal, state)| (state != "completed").then_some(ordinal))
+            .filter_map(|(ordinal, state, _)| (state != "completed").then_some(ordinal))
             .collect();
         let completed_requests = requests.len() as u32 - remaining_ordinals.len() as u32;
         let additional_reservation_microusd = sum_estimates(
@@ -53,7 +78,7 @@ impl AiStore {
         Ok(JobQuote { id: job_id.into(), title: plan.title, digest, project_id: plan.project_id,
             credential_id: plan.credential_id, binding: plan.binding, state, requests,
             estimated_max_microusd: total, already_charged_or_held_microusd: job_spend(&conn, job_id)?,
-            additional_reservation_microusd,remaining_ordinals,completed_requests,created_at_ms,
+            additional_reservation_microusd,remaining_ordinals,completed_requests,request_counts,created_at_ms,
             audio_duration_ms, execution:plan.execution, total_output_tokens, unpriced_attempts, quote_expires_at_ms: expiry,
             disclaimer: "Approximate USD estimate when a price is supplied, never a provider-backed billing cap. Unpriced means unknown, not free. Approval binds model, input, request count, audio duration and generation settings. No automatic paid retries.".into() })
     }

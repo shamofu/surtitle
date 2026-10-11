@@ -7,6 +7,49 @@ use crate::{AiError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Fixed, user-visible diagnostics; never include provider-controlled text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputFailureReason {
+    #[error("the response reached its output limit")]
+    OutputLimit,
+    #[error("the provider blocked this response")]
+    Blocked,
+    #[error("the response was incomplete")]
+    Incomplete,
+    #[error("the response was not valid JSON")]
+    InvalidJson,
+    #[error("the response fields did not match the requested format")]
+    InvalidFields,
+    #[error("the response did not match the selected expression or its sources")]
+    InvalidSource,
+}
+
+impl OutputFailureReason {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::OutputLimit => "output_limit",
+            Self::Blocked => "output_blocked",
+            Self::Incomplete => "output_incomplete",
+            Self::InvalidJson => "output_json",
+            Self::InvalidFields => "output_fields",
+            Self::InvalidSource => "output_source",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "output_limit" => Some(Self::OutputLimit),
+            "output_blocked" => Some(Self::Blocked),
+            "output_incomplete" => Some(Self::Incomplete),
+            "output_json" => Some(Self::InvalidJson),
+            "output_fields" => Some(Self::InvalidFields),
+            "output_source" => Some(Self::InvalidSource),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VocabularyItem {
     pub term: String,
@@ -120,101 +163,24 @@ pub enum ParsedOutput {
 }
 
 pub(crate) fn parse_output(task: &RequestTask, text: &str) -> Result<ParsedOutput> {
+    if matches!(
+        task,
+        RequestTask::Explanation { .. }
+            | RequestTask::Vocabulary { .. }
+            | RequestTask::Translation { .. }
+    ) {
+        return parse_text_output(task, text)
+            .map_err(|reason| AiError::Invalid(reason.to_string()));
+    }
     let v: Value = serde_json::from_str(text)?;
     match task {
         #[cfg(feature = "development-validation")]
         RequestTask::TranscribeDiagnostic { .. } => Err(AiError::Invalid(
             "Untimed diagnostics require the structured transcription response".into(),
         )),
-        RequestTask::Explanation {
-            term,
-            learning_language,
-            explanation_language,
-            cues,
-            ..
-        } => {
-            let base = RequestTask::Vocabulary {
-                learning_language: learning_language.clone(),
-                explanation_language: explanation_language.clone(),
-                cues: cues.clone(),
-                max_items: 1,
-            };
-            let ParsedOutput::Vocabulary { mut items } = parse_output(&base, text)? else {
-                unreachable!()
-            };
-            if items.len() != 1 || normalized_term(&items[0].term) != normalized_term(term) {
-                return Err(AiError::Invalid(
-                    "Explanation changed the selected term or item count".into(),
-                ));
-            }
-            let cited: Vec<_> = cues
-                .iter()
-                .filter(|c| items[0].source_cue_ids.contains(&c.id))
-                .cloned()
-                .collect();
-            if !contains_term(&cited, term) {
-                return Err(AiError::Invalid(
-                    "Explanation citation does not contain the selected term".into(),
-                ));
-            }
-            items[0].term = term.clone();
-            Ok(ParsedOutput::Vocabulary { items })
-        }
-        RequestTask::Vocabulary {
-            cues, max_items, ..
-        } => {
-            let items: Vec<VocabularyItem> = serde_json::from_value(
-                v.get("items")
-                    .cloned()
-                    .ok_or_else(|| AiError::Invalid("Missing vocabulary items".into()))?,
-            )?;
-            let ids: std::collections::HashSet<_> = cues.iter().map(|c| &c.id).collect();
-            if items.len() > *max_items as usize
-                || items.iter().any(|i| {
-                    i.term.trim().is_empty()
-                        || i.term.len() >= 4096
-                        || i.meaning.trim().is_empty()
-                        || i.meaning.len() >= 64 * 1024
-                        || i.explanation.trim().is_empty()
-                        || i.explanation.len() >= 64 * 1024
-                        || i.example.trim().is_empty()
-                        || i.example.len() >= 64 * 1024
-                        || i.source_cue_ids.is_empty()
-                        || i.source_cue_ids.iter().any(|id| !ids.contains(id))
-                        || i.source_cue_ids
-                            .iter()
-                            .collect::<std::collections::HashSet<_>>()
-                            .len()
-                            != i.source_cue_ids.len()
-                })
-            {
-                return Err(AiError::Invalid(
-                    "Generated vocabulary has invalid fields, source references, or item count"
-                        .into(),
-                ));
-            }
-            Ok(ParsedOutput::Vocabulary { items })
-        }
-        RequestTask::Translation { cues, .. } => {
-            let translations: Vec<CueTranslation> = serde_json::from_value(
-                v.get("translations")
-                    .cloned()
-                    .ok_or_else(|| AiError::Invalid("Missing translations".into()))?,
-            )?;
-            let expected: std::collections::HashSet<_> =
-                cues.iter().map(|c| c.id.as_str()).collect();
-            let returned: std::collections::HashSet<_> =
-                translations.iter().map(|c| c.id.as_str()).collect();
-            if translations.len() != cues.len()
-                || expected != returned
-                || translations.iter().any(|c| c.translation.trim().is_empty())
-            {
-                return Err(AiError::Invalid(
-                    "Translation must preserve every source ID exactly once".into(),
-                ));
-            }
-            Ok(ParsedOutput::Translation { translations })
-        }
+        RequestTask::Explanation { .. }
+        | RequestTask::Vocabulary { .. }
+        | RequestTask::Translation { .. } => unreachable!("text tasks were parsed above"),
         RequestTask::AudioTranscription { audio, .. }
         | RequestTask::TranscribePreview { audio, .. } => {
             let mut cues: Vec<GeneratedCue> = serde_json::from_value(
@@ -249,5 +215,87 @@ pub(crate) fn parse_output(task: &RequestTask, text: &str) -> Result<ParsedOutpu
             }
             Ok(ParsedOutput::Transcript { cues })
         }
+    }
+}
+
+/// Validation diagnostics remain separate from the post-settlement error used
+/// by execution: a parser failure alone never authorizes another paid request.
+pub(crate) fn parse_text_output(
+    task: &RequestTask,
+    text: &str,
+) -> std::result::Result<ParsedOutput, OutputFailureReason> {
+    use OutputFailureReason::{InvalidFields, InvalidJson, InvalidSource};
+    let value: Value = serde_json::from_str(text).map_err(|_| InvalidJson)?;
+    match task {
+        RequestTask::Explanation { cues, .. } | RequestTask::Vocabulary { cues, .. } => {
+            let (selected_term, max_items) = match task {
+                RequestTask::Explanation { term, .. } => (Some(term), 1),
+                RequestTask::Vocabulary { max_items, .. } => (None, *max_items),
+                _ => unreachable!(),
+            };
+            let mut items: Vec<VocabularyItem> =
+                serde_json::from_value(value.get("items").cloned().ok_or(InvalidFields)?)
+                    .map_err(|_| InvalidFields)?;
+            if items.len() > usize::from(max_items)
+                || selected_term.is_some() && items.len() != 1
+                || items.iter().any(|item| {
+                    item.term.trim().is_empty()
+                        || item.term.len() >= 4096
+                        || [&item.meaning, &item.explanation, &item.example]
+                            .iter()
+                            .any(|field| field.trim().is_empty() || field.len() >= 64 * 1024)
+                })
+            {
+                return Err(InvalidFields);
+            }
+            let ids: std::collections::HashSet<_> = cues.iter().map(|cue| &cue.id).collect();
+            if items.iter().any(|item| {
+                item.source_cue_ids.is_empty()
+                    || item.source_cue_ids.iter().any(|id| !ids.contains(id))
+                    || item
+                        .source_cue_ids
+                        .iter()
+                        .collect::<std::collections::HashSet<_>>()
+                        .len()
+                        != item.source_cue_ids.len()
+            }) {
+                return Err(InvalidSource);
+            }
+            if let Some(term) = selected_term {
+                if normalized_term(&items[0].term) != normalized_term(term) {
+                    return Err(InvalidSource);
+                }
+                let cited: Vec<_> = cues
+                    .iter()
+                    .filter(|cue| items[0].source_cue_ids.contains(&cue.id))
+                    .cloned()
+                    .collect();
+                if !contains_term(&cited, term) {
+                    return Err(InvalidSource);
+                }
+                items[0].term = term.clone();
+            }
+            Ok(ParsedOutput::Vocabulary { items })
+        }
+        RequestTask::Translation { cues, .. } => {
+            let translations: Vec<CueTranslation> =
+                serde_json::from_value(value.get("translations").cloned().ok_or(InvalidFields)?)
+                    .map_err(|_| InvalidFields)?;
+            let expected: std::collections::HashSet<_> =
+                cues.iter().map(|cue| cue.id.as_str()).collect();
+            let returned: std::collections::HashSet<_> =
+                translations.iter().map(|cue| cue.id.as_str()).collect();
+            if translations.len() != cues.len() || expected != returned {
+                return Err(InvalidSource);
+            }
+            if translations
+                .iter()
+                .any(|cue| cue.translation.trim().is_empty())
+            {
+                return Err(InvalidFields);
+            }
+            Ok(ParsedOutput::Translation { translations })
+        }
+        _ => Err(InvalidFields),
     }
 }

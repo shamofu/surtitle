@@ -9,6 +9,7 @@ import { ProgressStatus } from '../shared/ui/ProgressStatus';
 import { rootActivities, type Activity } from '../shared/contracts/activity';
 import { libraryApi } from '../features/library/api';
 import { aiApi } from '../features/ai/api';
+import { AiRuntime } from '../features/ai/AiRuntime';
 import { AnimatedValue, MotionRegion, MotionSwap } from '../shared/motion';
 
 export function ActivityButton() {
@@ -61,6 +62,7 @@ function ActivityRow({ activity, children, onNavigate, exiting }: { activity: Ac
   }
   return <article className="activity-item" data-activity-id={activity.id}>
     <ProgressStatus {...activity} />
+    {activity.aiJob && <AiRuntime job={activity.aiJob} />}
     <MotionRegion mode="status" open={Children.count(children) > 0}><MotionSwap disabled stateKey={childKey}><div className="activity-children">{children}</div></MotionSwap></MotionRegion>
     <MotionSwap disabled stateKey={`${cancellable}:${activity.mediaId ?? activity.kind}`}><div className="inline-actions">
       {cancellable && <Button busy={busy} onClick={() => void cancel()}>{t('中止', 'Cancel')}</Button>}

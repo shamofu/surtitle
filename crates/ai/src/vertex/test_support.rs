@@ -269,7 +269,13 @@ impl OfflineVertexService {
                 replies.push_back(Reply {
                     ordinal: ordinal as u32,
                     expected_body,
-                    bytes: serde_json::to_vec(&response)?,
+                    bytes: if plan.execution.response_mode
+                        == crate::ResponseMode::StreamGenerateContent
+                    {
+                        format!("data: {}\n\n", serde_json::to_string(&response)?).into_bytes()
+                    } else {
+                        serde_json::to_vec(&response)?
+                    },
                     status: 200,
                     retry_after: None,
                 });
