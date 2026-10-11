@@ -305,16 +305,24 @@ async function inspectCurrent() {
 }
 
 describe('watching and inspecting phrases', () => {
-  it('reads and replays source-block text without presenting it as an active synchronized caption', async () => {
+  it('continues from a source block in the list and replays its range only from details', async () => {
     const block: SubtitleSegment = { ...cues[0], endMs: 4000, text: 'Text without word timing', status: 'generated_review', timingPrecision: 'source_block' };
     vi.mocked(studyApi.segments).mockResolvedValue([block]);
     mount();
     openTranscript();
-    const play = await screen.findByRole('button', { name: 'Play source audio range 0:00' });
+    const play = await screen.findByRole('button', { name: 'Play from source audio range 0:00' });
     await waitFor(() => expect(play).toBeEnabled());
     expect(screen.queryByRole('button', { name: 'Inspect this phrase' })).not.toBeInTheDocument();
     expect(screen.getByText(/Text received · subtitle timing unavailable/)).toBeVisible();
     fireEvent.click(play);
+    await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' }));
+    expect(playerApi.player).toHaveBeenCalledWith({ action: 'seek', value: 0 });
+    expect(playerApi.playSourceRange).not.toHaveBeenCalled();
+    expect(document.querySelector('.phrase-panel')).toBeNull();
+    await waitFor(() => expect(screen.getByRole('button', { name: block.text })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: block.text }));
+    await screen.findByRole('button', { name: 'Return to watching' });
+    fireEvent.click(inspectReplay());
     await waitFor(() => expect(playerApi.playSourceRange).toHaveBeenCalledWith('media', ['a']));
     expect(screen.getByRole('button', { name: 'Estimate explanation' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Save a phrase' })).toBeEnabled();
@@ -889,7 +897,7 @@ describe('study playback keyboard shortcuts', () => {
 
 describe('study sentence and source playback', () => {
   it.each(['subtitle timing', 'audio track'] as const)(
-    'does not replay a stale source after %s changes during a pending position read',
+    'does not resume a stale source after %s changes during a pending position read',
     async (changedSource) => {
       const client = mount();
       await ready();
@@ -901,7 +909,7 @@ describe('study sentence and source playback', () => {
       vi.mocked(playerApi.playerState).mockReturnValueOnce(position);
       vi.mocked(playerApi.player).mockClear();
 
-      fireEvent.click(screen.getByRole('button', { name: 'Play subtitle 0:00' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Play from subtitle 0:00' }));
       if (changedSource === 'subtitle timing') {
         await act(async () => client.setQueryData(
           ['media', 'media', 'segments'],
@@ -925,6 +933,8 @@ describe('study sentence and source playback', () => {
       expect(playerApi.player).not.toHaveBeenCalledWith(
         expect.objectContaining({ action: 'source-seek' }),
       );
+      expect(playerApi.player).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'seek' }));
+      expect(playerApi.player).not.toHaveBeenCalledWith({ action: 'play' });
       expect(playerApi.playSourceRange).not.toHaveBeenCalled();
       expect(document.querySelector('.phrase-panel')).toBeNull();
     },
@@ -1003,15 +1013,78 @@ describe('study sentence and source playback', () => {
     } finally { observer.disconnect(); }
   });
 
-  it('keeps timestamp replay explicit and suspends transcript follow for keyboard scrolling', async () => {
+  it.each([true, false])('resumes from a list timestamp with paused=%s and keeps the transcript view', async paused => {
+    state = { ...state, paused };
     mount();
     await ready();
     openTranscript();
-    const play = await screen.findByRole('button', { name: 'Play subtitle 0:00' });
-    fireEvent.click(play);
-    await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'source-seek', startMs: 0, endMs: 1000 }));
+    fireEvent.change(screen.getByLabelText('Search transcript'), { target: { value: 'home' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle translations' }));
+    fireEvent.wheel(screen.getByLabelText('Subtitle list'));
+    vi.mocked(playerApi.player).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Play from subtitle 0:01' }));
+    await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' }));
+    expect(vi.mocked(playerApi.player).mock.calls.map(([request]) => request)).toEqual([
+      { action: 'seek', value: 1000 }, { action: 'play' },
+    ]);
+    expect(state.paused).toBe(false);
+    expect(screen.getByLabelText('Search transcript')).toBeVisible();
+    expect(screen.getByLabelText('Search transcript')).toHaveValue('home');
+    expect(screen.getByRole('button', { name: 'Toggle translations' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Follow playback' })).toBeVisible();
+    expect(document.querySelector('.phrase-panel')).toBeNull();
     expect(playerApi.playSourceRange).not.toHaveBeenCalled();
+    expect(aiApi.createQuote).not.toHaveBeenCalled();
+  });
+
+  it('does not start playback if the list seek fails', async () => {
+    mount();
+    await ready();
     openTranscript();
+    vi.mocked(playerApi.player).mockClear();
+    vi.mocked(playerApi.player).mockRejectedValueOnce(new Error('Seek failed'));
+    fireEvent.click(screen.getByRole('button', { name: 'Play from subtitle 0:01' }));
+    await waitFor(() => expect(fixture.notify).toHaveBeenCalledWith(expect.stringContaining('Seek failed'), 'error'));
+    expect(playerApi.player).not.toHaveBeenCalledWith({ action: 'play' });
+    expect(screen.getByLabelText('Search transcript')).toBeVisible();
+    expect(document.querySelector('.phrase-panel')).toBeNull();
+  });
+
+  it('clears the previous inspection when resuming from the list without discarding its draft', async () => {
+    mount();
+    await inspectCurrent();
+    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'unfinished wording' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Repeat selected segment' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Repeat selected segment' })).toHaveAttribute('aria-pressed', 'true'));
+    openTranscript();
+    vi.mocked(playerApi.player).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Play from subtitle 0:01' }));
+    await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' }));
+    expect(vi.mocked(playerApi.player).mock.calls.map(([request]) => request)).toEqual([
+      { action: 'seek', value: 1000 }, { action: 'play' },
+    ]);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Close panel' })).toBeEnabled());
+    vi.mocked(playerApi.player).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Close panel' })).not.toBeInTheDocument());
+    expect(playerApi.player).not.toHaveBeenCalled();
+    expect(state.paused).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Unfinished phrases (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: /unfinished wording 0:00/ }));
+    await waitFor(() => expect(screen.getByLabelText('Word or phrase')).toHaveValue('unfinished wording'));
+    expect(screen.getByRole('button', { name: 'Repeat selected segment' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('keeps timestamp continuation explicit and suspends transcript follow for keyboard scrolling', async () => {
+    mount();
+    await ready();
+    openTranscript();
+    const play = await screen.findByRole('button', { name: 'Play from subtitle 0:00' });
+    fireEvent.click(play);
+    await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' }));
+    expect(playerApi.player).toHaveBeenCalledWith({ action: 'seek', value: 0 });
+    expect(playerApi.playSourceRange).not.toHaveBeenCalled();
     fireEvent.keyDown(screen.getByLabelText('Subtitle list'), { key: 'ArrowDown' });
     const previous = fixture.scroll.mock.calls.length;
     await emit({ positionMs: 2600 });

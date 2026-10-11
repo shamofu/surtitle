@@ -55,6 +55,7 @@ export function StudyTranscript({
   error,
   candidatesError,
   onInspect,
+  onPlayFrom,
   onReplay,
   onEdit,
   onImport,
@@ -84,6 +85,7 @@ export function StudyTranscript({
     candidate?: VocabularyCandidate,
     save?: boolean
   ) => void;
+  onPlayFrom: (segment: SubtitleSegment) => void;
   onReplay: (segment: SelectedContext) => void;
   onEdit: (segment: SubtitleSegment) => void;
   onImport: () => void;
@@ -384,8 +386,9 @@ export function StudyTranscript({
                                 type="button"
                                 className="segment-time"
                                 disabled={!ready}
-                                aria-label={`${segment.timingPrecision === 'source_block' ? t('取得元の音声範囲を再生', 'Play source audio range') : t('この字幕を再生', 'Play subtitle')} ${timestamp(segment.startMs)}`}
-                                onClick={() => onReplay(segment)}
+                                aria-label={`${segment.timingPrecision === 'source_block' ? t('取得元の音声範囲から再生', 'Play from source audio range') : t('この字幕から再生', 'Play from subtitle')} ${timestamp(segment.startMs)}`}
+                                title={t('ここから再生を続ける', 'Continue playing from here')}
+                                onClick={() => onPlayFrom(segment)}
                               >
                                 <MotionSwap as="span" stateKey={activeId === segment.id ? 'playing' : 'idle'}>{activeId === segment.id ? <AudioLines size={16} /> : <Play size={15} />}</MotionSwap>
                                 <AnimatedValue value={timestamp(segment.startMs)} />
@@ -438,7 +441,7 @@ export function StudyTranscript({
               <footer className="transcript-footer">
                 <AnimatedValue value={search
                   ? t(`${filtered.length} 件の一致`, `${filtered.length} matches`)
-                  : t('本文で確認、時刻で再生', 'Select text to inspect; time to replay')} />
+                  : t('本文で確認、時刻から再生', 'Select text to inspect; play from timestamp')} />
                 <button
                   type="button"
                   className={following && !search ? 'following' : ''}

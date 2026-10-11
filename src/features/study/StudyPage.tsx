@@ -485,7 +485,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
     });
   }
 
-  async function replay(source: SelectedContext) {
+  async function playSource(source: SelectedContext, mode: 'continue' | 'range') {
     if (!playerReady) return;
     rememberTrigger();
     await run(async () => {
@@ -508,6 +508,20 @@ function StudySession({ mediaId }: { mediaId: string }) {
           '出典の字幕または音声が変わりました。区間を選び直してください。',
           'The source subtitles or audio changed. Select the passage again.',
         ));
+      }
+      if (mode === 'continue') {
+        // A plain seek clears a previous range stop/loop without setting a new end.
+        await playerApi.player({ action: 'seek', value: source.startMs });
+        if (!alive.current) return;
+        await playerApi.player({ action: 'play' });
+        if (!alive.current) return;
+        returnPosition.current = undefined;
+        setInspection(undefined);
+        setInvalidated(false);
+        setDraftPlayback(undefined);
+        setShowSave(false);
+        setSelectionRevision(value => value + 1);
+        return;
       }
       if (source.sourceCueIds?.length || source.timingPrecision === 'source_block') await playerApi.playSourceRange(mediaId, source.sourceCueIds?.length ? source.sourceCueIds : [source.id]);
       else await playerApi.player({ action: 'source-seek', startMs: source.startMs, endMs: source.endMs });
@@ -833,7 +847,8 @@ function StudySession({ mediaId }: { mediaId: string }) {
                 error={segmentsQuery.error}
                 candidatesError={candidatesQuery.error}
                 onInspect={(...args) => void inspect(...args)}
-                onReplay={source => void replay(source)}
+                onPlayFrom={source => void playSource(source, 'continue')}
+                onReplay={source => void playSource(source, 'range')}
                 onEdit={setEdit}
                 onImport={() => { setSubtitleStreamIndex(undefined); setSubtitleSource('choose'); }}
                 onEstimate={openAi}
@@ -905,7 +920,8 @@ function StudySession({ mediaId }: { mediaId: string }) {
                 <div className="context-actions">
                   <Button
                     disabled={!selected || !playerReady || busy || saveBusy}
-                    onClick={() => selected && void replay(selected)}
+                    onClick={() => selected && void playSource(selected, 'range')}
+                    title={t('この区間だけ再生', 'Play only this passage')}
                   >
                     <Play size={16} />
                     {t('もう一度聴く', 'Listen again')}

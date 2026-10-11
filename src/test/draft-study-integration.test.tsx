@@ -353,11 +353,9 @@ describe('draft study in the real study page', () => {
   it('hides the previous caption context and suppresses its pause behavior without changing the saved preference', async () => {
     mount();
     fireEvent.click(screen.getByRole('button', { name: 'Transcript' }));
-    const play = await screen.findByRole('button', {
-      name: 'Play subtitle 0:00',
-    });
-    await waitFor(() => expect(play).toBeEnabled());
-    fireEvent.click(play);
+    const source = await screen.findByRole('button', { name: canonical.text });
+    await waitFor(() => expect(source).toBeEnabled());
+    fireEvent.click(source);
     await waitFor(() =>
       expect(document.querySelector('.context-sentence')).toHaveTextContent(
         canonical.text,

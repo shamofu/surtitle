@@ -199,7 +199,7 @@ describe('transcript session state', () => {
       const [viewState, onViewStateChange] = useState<TranscriptViewState>({ search: '', following: true, showTranslations: false, scrollOffset: 0 });
       return <><button onClick={() => setVisible(value => !value)}>Toggle inspector</button>{visible &&
         <StudyTranscript media={media} segments={cues} candidates={[]} activeId="a" ready tab={tab} onTab={setTab}
-          viewState={viewState} onViewStateChange={onViewStateChange} onInspect={vi.fn()} onReplay={vi.fn()}
+          viewState={viewState} onViewStateChange={onViewStateChange} onInspect={vi.fn()} onPlayFrom={vi.fn()} onReplay={vi.fn()}
           onEdit={vi.fn()} onImport={vi.fn()} onEstimate={vi.fn()} onReview={vi.fn()} onDraftPlay={vi.fn()} />}</>;
     }
     render(<Session />);
