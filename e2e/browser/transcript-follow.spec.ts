@@ -112,6 +112,38 @@ test('manual scrolling interrupts smooth follow and later playback cannot pull t
   await expect(page.getByRole('button', { name: 'Show current subtitle', exact: true })).toBeVisible();
 });
 
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(`jumping from a transcript timestamp resumes follow until another manual scroll (${reducedMotion})`, async ({ page }) => {
+    await openTranscript(page, reducedMotion);
+    const list = page.getByLabel('Subtitle list', { exact: true });
+    await list.hover();
+    await page.mouse.wheel(0, -180);
+    await expect(page.getByRole('button', { name: 'Show current subtitle', exact: true })).toBeVisible();
+
+    await list.locator('.transcript-row[data-index="9"] .segment-time').click();
+    await expect(page.getByRole('button', { name: 'Following playback', exact: true })).toBeVisible();
+    await expectCentered(page, 9);
+    await observePlaybackScroll(page, 10);
+    await expectCentered(page, 10);
+
+    await list.hover();
+    await page.mouse.wheel(0, -180);
+    await expect(page.getByRole('button', { name: 'Show current subtitle', exact: true })).toBeVisible();
+    const stopped = await list.evaluate(async element => {
+      const positions: number[] = [];
+      for (let frame = 0; frame < 24; frame += 1) {
+        await new Promise(requestAnimationFrame);
+        positions.push(element.scrollTop);
+      }
+      return positions.slice(-6);
+    });
+    expect(Math.max(...stopped) - Math.min(...stopped)).toBeLessThan(2);
+    const observed = await observePlaybackScroll(page, 11, 12);
+    expect(observed.samples.every(sample => Math.abs(sample.top - stopped.at(-1)!) < 2)).toBe(true);
+    await expect(page.getByRole('button', { name: 'Show current subtitle', exact: true })).toBeVisible();
+  });
+}
+
 test('reduced motion immediately follows the active subtitle without intermediate movement', async ({ page }) => {
   await openTranscript(page, 'reduce');
   const observed = await observePlaybackScroll(page, 12, 12);

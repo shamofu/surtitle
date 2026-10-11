@@ -197,12 +197,16 @@ for (const locale of ['en', 'ja'] as const) {
       });
     });
     expect(index).toBeGreaterThanOrEqual(0);
-    const row = list.locator('.transcript-row').nth(index);
-    const play = row.locator('.segment-time');
-    const time = (await play.textContent())!.trim();
+    const initialPlay = list.locator('.transcript-row').nth(index).locator('.segment-time');
+    const time = (await initialPlay.textContent())!.trim();
+    const playName = (await initialPlay.getAttribute('aria-label'))!;
+    // Search is cleared after playback starts, so identify the cue independently
+    // of its old position within the filtered virtualized rows.
+    const play = list.getByRole('button', { name: playName, exact: true });
+    const row = list.locator('.transcript-row').filter({ has: page.getByRole('button', { name: playName, exact: true }) });
     const [minutes, seconds] = time.split(':').map(Number);
     const startMs = (minutes * 60 + seconds) * 1000;
-    const offset = await list.evaluate(element => element.scrollTop);
+    const filteredOffset = await list.evaluate(element => element.scrollTop);
     const playbackRequestsSince = (from: number) => page.evaluate(start => (window as FixtureWindow).__learningFixture.calls
       .slice(start)
       .filter(call => call.command === 'player_control' && ['seek', 'play', 'pause', 'source-seek'].includes(call.args.request?.action ?? ''))
@@ -216,9 +220,25 @@ for (const locale of ['en', 'ja'] as const) {
     ]);
     await expect.poll(() => page.evaluate(() => ({ ...(window as FixtureWindow).__learningFixture.state }))).toMatchObject({ positionMs: startMs, paused: false });
     await expect(back).toHaveCount(0);
-    await expect(search).toHaveValue('coast');
+    await expect(search).toHaveValue('');
     await expect(translations).toHaveAttribute('aria-pressed', 'true');
-    await expect.poll(async () => Math.abs(await list.evaluate(element => element.scrollTop) - offset)).toBeLessThan(2);
+    await expect(page.getByRole('button', { name: locale === 'ja' ? '自動追従中' : 'Following playback', exact: true })).toBeVisible();
+    await expect(row).toHaveClass(/playing/);
+    await expect.poll(() => row.evaluate(element => {
+      const bounds = element.getBoundingClientRect();
+      const viewport = element.closest('.transcript-scroll')!.getBoundingClientRect();
+      return Math.abs((bounds.top + bounds.bottom - viewport.top - viewport.bottom) / 2);
+    })).toBeLessThan(2);
+
+    // Range playback in the inspector keeps a manually browsed view intact.
+    await search.fill('coast');
+    await list.dispatchEvent('wheel', { deltaY: 0 });
+    await list.evaluate((element, offset) => {
+      element.scrollTop = offset;
+      element.dispatchEvent(new Event('scroll', { bubbles: true }));
+    }, filteredOffset);
+    await row.locator('.segment-text').scrollIntoViewIfNeeded();
+    const offset = await list.evaluate(element => element.scrollTop);
 
     await row.locator('.segment-text').click();
     await expect(back).toBeVisible();
@@ -230,6 +250,7 @@ for (const locale of ['en', 'ja'] as const) {
     await back.click();
     await expect(search).toHaveValue('coast');
     await expect(translations).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('button', { name: locale === 'ja' ? '再生中の字幕へ' : 'Show current subtitle', exact: true })).toBeVisible();
     await expect.poll(async () => Math.abs(await list.evaluate(element => element.scrollTop) - offset)).toBeLessThan(2);
     const callsAfterReplay = await page.evaluate(() => (window as FixtureWindow).__learningFixture.calls.length);
     await play.click();
@@ -238,6 +259,8 @@ for (const locale of ['en', 'ja'] as const) {
       { action: 'play' },
     ]);
     await expect(back).toHaveCount(0);
+    await expect(search).toHaveValue('');
+    await expect(page.getByRole('button', { name: locale === 'ja' ? '自動追従中' : 'Following playback', exact: true })).toBeVisible();
   });
 }
 

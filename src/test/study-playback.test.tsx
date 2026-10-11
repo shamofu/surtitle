@@ -1050,7 +1050,7 @@ describe('study sentence and source playback', () => {
     } finally { observer.disconnect(); }
   });
 
-  it.each([true, false])('resumes from a list timestamp with paused=%s and keeps the transcript view', async paused => {
+  it.each([true, false])('resumes from a list timestamp with paused=%s and restores automatic follow', async paused => {
     state = { ...state, paused };
     mount();
     await ready();
@@ -1066,9 +1066,12 @@ describe('study sentence and source playback', () => {
     ]);
     expect(state.paused).toBe(false);
     expect(screen.getByLabelText('Search transcript')).toBeVisible();
-    expect(screen.getByLabelText('Search transcript')).toHaveValue('home');
+    expect(screen.getByLabelText('Search transcript')).toHaveValue('');
     expect(screen.getByRole('button', { name: 'Hide translations' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'Show current subtitle' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Following playback' })).toBeVisible();
+    const followed = fixture.scroll.mock.calls.length;
+    await emit({ positionMs: 2600 });
+    expect(fixture.scroll.mock.calls.length).toBeGreaterThan(followed);
     expect(document.querySelector('.phrase-panel')).toBeNull();
     expect(playerApi.playSourceRange).not.toHaveBeenCalled();
     expect(aiApi.createQuote).not.toHaveBeenCalled();
@@ -1078,12 +1081,16 @@ describe('study sentence and source playback', () => {
     mount();
     await ready();
     await openTranscript();
+    fireEvent.change(screen.getByLabelText('Search transcript'), { target: { value: 'home' } });
+    fireEvent.wheel(screen.getByLabelText('Subtitle list'));
     vi.mocked(playerApi.player).mockClear();
     vi.mocked(playerApi.player).mockRejectedValueOnce(new Error('Seek failed'));
     fireEvent.click(screen.getByRole('button', { name: 'Play from subtitle 0:01' }));
     await waitFor(() => expect(fixture.notify).toHaveBeenCalledWith(expect.stringContaining('Seek failed'), 'error'));
     expect(playerApi.player).not.toHaveBeenCalledWith({ action: 'play' });
     expect(screen.getByLabelText('Search transcript')).toBeVisible();
+    expect(screen.getByLabelText('Search transcript')).toHaveValue('home');
+    expect(screen.getByRole('button', { name: 'Show current subtitle' })).toBeVisible();
     expect(document.querySelector('.phrase-panel')).toBeNull();
   });
 

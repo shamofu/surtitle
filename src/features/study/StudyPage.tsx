@@ -524,6 +524,9 @@ function StudySession({ mediaId }: { mediaId: string }) {
         if (!alive.current) return;
         await playerApi.player({ action: 'play' });
         if (!alive.current) return;
+        // Continuing from a list timestamp returns the transcript to playback;
+        // clear search so the next subtitle can also remain in view.
+        setTranscriptView(view => ({ ...view, search: '', following: true }));
         returnPosition.current = undefined;
         setInspection(undefined);
         setInvalidated(false);
