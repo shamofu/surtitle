@@ -75,6 +75,30 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
   });
 }
 
+test('finishing the drawer opening preserves focus when search has already started', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await openStudy(page);
+  await page.evaluate(() => {
+    const dock = document.querySelector('.study-companion-dock')!;
+    dock.addEventListener('transitionrun', function startSearch(event) {
+      if (event.target !== dock || (event as TransitionEvent).propertyName !== 'width') return;
+      dock.removeEventListener('transitionrun', startSearch);
+      const search = document.querySelector<HTMLInputElement>('input[aria-label="Search transcript"]')!;
+      search.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'c');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  });
+  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  const search = page.getByLabel('Search transcript');
+  await expect(search).toHaveValue('c');
+  await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('oast');
+  await expect(search).toHaveValue('coast');
+  await expect(page.locator('.transcript-row').first()).toContainText('coast');
+});
+
 test('real router saves unfinished phrases before leaving and restores them on return', async ({ page }) => {
   await openStudy(page);
   await createDraft(page);

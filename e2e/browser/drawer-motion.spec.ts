@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from '@playwright/test';
-import { observeDrawer, expectSafeFrames, expectContinuous } from './drawer-motion-fixture';
+import { sampleDrawer, expectSafeFrames, expectContinuous } from './drawer-motion-fixture';
 import { installLearningFixture } from './learning-fixture';
 
 for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'] as const) {
@@ -16,7 +16,8 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await expect(toggle).toHaveAttribute('aria-expanded', 'false');
       const desktop = size.width >= 1000;
       const initialVideo = await page.getByTestId('native-player-viewport').boundingBox();
-      const opening = await observeDrawer(page);
+      const opening = await sampleDrawer(page);
+      expect(opening.transitions).toEqual([{ property: desktop ? 'width' : 'height', duration: 220, easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)' }]);
       await info.attach('drawer-open-geometry.json', { body: JSON.stringify(opening.frames), contentType: 'application/json' });
       expectSafeFrames(opening.frames, desktop);
       expectContinuous(opening.frames, desktop, true);
@@ -38,7 +39,8 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
         // Return to the original viewport before measuring the pure toggle operation.
         await page.locator('.page-content').evaluate(element => { element.scrollTop = 0; });
       }
-      const closing = await observeDrawer(page);
+      const closing = await sampleDrawer(page);
+      expect(closing.transitions).toEqual(opening.transitions);
       await info.attach('drawer-close-geometry.json', { body: JSON.stringify(closing.frames), contentType: 'application/json' });
       expectSafeFrames(closing.frames, desktop);
       expectContinuous(closing.frames, desktop, false);
@@ -100,9 +102,9 @@ test('drawer reverses an unfinished close from its current size and preserves th
   await toggle.click();
   const search = page.getByLabel('Search transcript');
   await search.fill('coast');
-  await page.waitForTimeout(260);
+  await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
   const original = await search.elementHandle();
-  const observed = await observeDrawer(page, true);
+  const observed = await sampleDrawer(page, true);
   await info.attach('drawer-reversal-geometry.json', { body: JSON.stringify(observed.frames), contentType: 'application/json' });
   expect(observed.reversed).toBe(true);
   expectSafeFrames(observed.frames, true);
@@ -110,6 +112,10 @@ test('drawer reverses an unfinished close from its current size and preserves th
   expect(Math.min(...widths)).toBeLessThan(widths[0] - 10);
   expect(Math.min(...widths)).toBeGreaterThan(44 + 2);
   expect(Math.abs(widths.at(-1)! - widths[0])).toBeLessThan(1);
+  expect(Math.abs(widths[5] - widths[4]), 'reversal starts at the current interpolated width').toBeLessThan(1);
+  expect(observed.transitions[0].duration).toBe(220);
+  expect(observed.transitions[1].duration).toBeGreaterThan(0);
+  expect(observed.transitions[1].duration).toBeLessThanOrEqual(220);
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(search).toHaveValue('coast');
   expect(await original!.evaluate(element => element === document.querySelector('input[aria-label="Search transcript"]'))).toBe(true);
@@ -122,28 +128,48 @@ test('inner study tabs replace outgoing content immediately and animate only the
   await page.goto('/study/visual-fixture');
   await page.getByRole('button', { name: 'Transcript', exact: true }).click();
   await page.getByLabel('Search transcript').fill('coast');
-  await page.waitForTimeout(260);
+  await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
   const changes = await page.getByRole('tab', { name: 'Suggestions', exact: true }).evaluate(async button => {
     const dock = document.querySelector('.study-companion-dock')!;
     const width = dock.getBoundingClientRect().width;
-    (button as HTMLButtonElement).click();
-    await new Promise(requestAnimationFrame);
+    const { incoming, animation } = await new Promise<{ incoming: HTMLElement; animation: Animation }>((resolve, reject) => {
+      const observer = new MutationObserver(() => {
+        const incoming = document.querySelector('.suggestions-panel')?.closest<HTMLElement>('.study-motion-region');
+        if (!incoming || incoming.hidden) return;
+        observer.disconnect();
+        const animations = incoming.getAnimations();
+        if (animations.length !== 1) { reject(new Error(`Expected one incoming content animation, found ${animations.length}`)); return; }
+        const animation = animations[0];
+        animation.pause();
+        animation.currentTime = 0;
+        resolve({ incoming, animation });
+      });
+      observer.observe(dock, { subtree: true, attributes: true, childList: true });
+      (button as HTMLButtonElement).click();
+    });
     const outgoing = document.querySelector('.transcript-view')?.closest<HTMLElement>('.study-motion-region');
-    const incoming = document.querySelector('.suggestions-panel')!.closest<HTMLElement>('.study-motion-region')!;
     const first = { outgoingHidden: !outgoing || outgoing.hidden, outgoingInert: !outgoing || outgoing.inert,
       incomingInert: incoming.inert, snapshots: dock.querySelectorAll('[data-motion-snapshot]').length,
       width: dock.getBoundingClientRect().width };
-    const opacity = [Number(getComputedStyle(incoming).opacity)];
-    const started = performance.now();
-    while (performance.now() - started < 160) {
-      await new Promise(requestAnimationFrame);
-      opacity.push(Number(getComputedStyle(incoming).opacity));
-    }
-    return { first, opacity, width };
+    const samples = [0, 25, 50, 75, 99].map(at => {
+      animation.currentTime = at;
+      return { opacity: Number(getComputedStyle(incoming).opacity), width: dock.getBoundingClientRect().width,
+        // Global state-color transitions are intentional. A tab change must not
+        // animate the outer drawer's geometry, transform, or opacity again.
+        outerAnimations: dock.getAnimations().filter(item => !(item instanceof CSSTransition) ||
+          !/^(color|background-color|border-(top|right|bottom|left)-color)$/.test(item.transitionProperty)).length };
+    });
+    const duration = animation.effect!.getTiming().duration;
+    animation.finish();
+    return { first, samples, width, duration, finalOpacity: Number(getComputedStyle(incoming).opacity) };
   });
   expect(changes.first).toEqual({ outgoingHidden: true, outgoingInert: true, incomingInert: false, snapshots: 0, width: changes.width });
-  expect(changes.opacity.at(-1)).toBe(1);
-  expect(changes.opacity.some(value => value < 1)).toBe(true);
+  expect(changes.duration).toBe(100);
+  expect(changes.finalOpacity).toBe(1);
+  expect(changes.samples[0].opacity).toBe(0);
+  expect(changes.samples[2].opacity).toBeGreaterThan(0);
+  expect(changes.samples[2].opacity).toBeLessThan(1);
+  expect(changes.samples.every(sample => sample.width === changes.width && sample.outerAnimations === 0), JSON.stringify(changes)).toBe(true);
   await expect(page.getByRole('tabpanel')).toHaveCount(1);
   await page.getByRole('tab', { name: 'Transcript', exact: true }).click();
   await expect(page.getByLabel('Search transcript')).toHaveValue('coast');

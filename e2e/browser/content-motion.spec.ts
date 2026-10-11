@@ -55,14 +55,26 @@ test('rapid subtitle and search changes keep current text opaque without stale r
   const observations = await page.evaluate(async () => {
     const fixture = (window as any).__learningFixture;
     const changes = [];
-    for (const index of [11, 12, 13]) {
-      await fixture.call('player_control', { request: { action: 'seek', value: index * 7000 + 10 } });
-      await new Promise(requestAnimationFrame);
-      const source = document.querySelector('.current-caption-text')!;
-      changes.push({ text: source.textContent, opacity: getComputedStyle(source).opacity,
-        snapshots: document.querySelectorAll('.current-caption [data-motion-snapshot]').length,
-        animations: source.getAnimations().filter(animation => animation.effect instanceof KeyframeEffect
-          && animation.effect.getKeyframes().some(frame => frame.opacity !== undefined || frame.transform !== undefined)).length });
+    for (const [index, expected] of [[11, 'First rapid caption'], [12, 'Second rapid caption'], [13, 'Latest rapid caption']] as const) {
+      changes.push(await new Promise<{ text: string | null; opacity: string; snapshots: number; animations: number }>((resolve, reject) => {
+        const caption = document.querySelector('.current-caption')!;
+        const cleanup = () => { observer.disconnect(); clearTimeout(timeout); };
+        // React may commit after the next animation frame on a busy runner.
+        // Sample in the commit's microtask, before any paint or fade can elapse.
+        const observer = new MutationObserver(() => {
+          const source = caption.querySelector('.current-caption-text')!;
+          if (source.textContent !== expected) return;
+          cleanup();
+          resolve({ text: source.textContent, opacity: getComputedStyle(source).opacity,
+            snapshots: caption.querySelectorAll('[data-motion-snapshot]').length,
+            animations: source.getAnimations().filter(animation => animation.effect instanceof KeyframeEffect
+              && animation.effect.getKeyframes().some(frame => frame.opacity !== undefined || frame.transform !== undefined)).length });
+        });
+        const timeout = setTimeout(() => { cleanup(); reject(new Error(`Caption did not commit: ${expected}`)); }, 5000);
+        observer.observe(caption, { childList: true, characterData: true, subtree: true });
+        void fixture.call('player_control', { request: { action: 'seek', value: index * 7000 + 10 } })
+          .catch((error: unknown) => { cleanup(); reject(error); });
+      }));
     }
     return changes;
   });
@@ -76,13 +88,22 @@ test('rapid subtitle and search changes keep current text opaque without stale r
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
     const observations = [];
     for (const query of ['coast', 'sea', 'detour', 'hurry']) {
-      setValue.call(input, query);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      await new Promise(requestAnimationFrame);
-      const rows = [...document.querySelectorAll('.transcript-row .segment-text')];
-      observations.push({ query, texts: rows.map(row => row.textContent!.toLowerCase()),
-        opacity: rows.map(row => getComputedStyle(row).opacity),
-        snapshots: document.querySelectorAll('.study-transcript [data-motion-snapshot]').length });
+      observations.push(await new Promise<{ query: string; texts: string[]; opacity: string[]; snapshots: number }>((resolve, reject) => {
+        const transcript = input.closest('.study-transcript')!;
+        const cleanup = () => { observer.disconnect(); clearTimeout(timeout); };
+        const observer = new MutationObserver(() => {
+          const rows = [...transcript.querySelectorAll('.transcript-row .segment-text')];
+          const texts = rows.map(row => row.textContent!.toLowerCase());
+          if (!texts.length || !texts.every(text => text.includes(query))) return;
+          cleanup();
+          resolve({ query, texts, opacity: rows.map(row => getComputedStyle(row).opacity),
+            snapshots: transcript.querySelectorAll('[data-motion-snapshot]').length });
+        });
+        const timeout = setTimeout(() => { cleanup(); reject(new Error(`Search results did not commit: ${query}`)); }, 5000);
+        observer.observe(transcript, { childList: true, characterData: true, subtree: true });
+        setValue.call(input, query);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }));
     }
     return observations;
   });

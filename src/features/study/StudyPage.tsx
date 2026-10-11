@@ -327,6 +327,12 @@ function StudySession({ mediaId }: { mediaId: string }) {
         // A disclosure toggle keeps its place and keyboard focus on narrow
         // screens. Inspecting a phrase or starting setup is explicit navigation.
         if (window.innerWidth < 1000 && panel === 'transcript' && trigger.current === transcriptToggle.current) return;
+        // Opening may finish after the user has already focused an input or
+        // another control. Only transfer focus while it still belongs to the
+        // opener (or was lost with the previous panel), never interrupt typing.
+        const focused = document.activeElement;
+        if (focused instanceof HTMLElement && focused !== document.body && focused !== trigger.current &&
+          !focused.closest('[inert], [hidden]')) return;
         panelTitle.current?.focus({ preventScroll: true });
         if (window.innerWidth < 1000) panelTitle.current?.scrollIntoView({ block: 'nearest' });
       }
