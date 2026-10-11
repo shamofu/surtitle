@@ -1,15 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-:root {
-  --motion-swap: 100ms;
-  --motion-reveal: 180ms;
-  --motion-fast: 160ms;
-  --motion-enter: 300ms;
-  --motion-exit: 220ms;
-  --motion-ease: cubic-bezier(.22, .61, .36, 1);
-}
-
-/* Color feedback is separate from measured disclosure and drawer geometry. */
-:where(html, body, body *) {
+/* MotionProvider publishes the shared tokens before paint. */
+:where(body, .app-shell, .topbar, .page-content, .modal, .study-companion,
+  button, a, input, select, textarea, summary, .media-row, .phrase-card, .transcript-row) {
   transition: background-color var(--motion-fast) var(--motion-ease),
     border-color var(--motion-fast) var(--motion-ease),
     color var(--motion-fast) var(--motion-ease);
@@ -19,10 +11,11 @@
     border-color var(--motion-fast) var(--motion-ease),
     color var(--motion-fast) var(--motion-ease),
     opacity var(--motion-fast) var(--motion-ease),
-    scale var(--motion-fast) var(--motion-ease);
+    scale var(--motion-release) var(--motion-ease);
 }
 :where(.button, .icon-button, .locale-button, .rating-button):active:not(:disabled):not([aria-disabled='true']) {
   scale: .98;
+  transition-duration: var(--motion-fast), var(--motion-fast), var(--motion-fast), var(--motion-fast), var(--motion-press);
 }
 .session-progress > span { transition: width var(--motion-swap) var(--motion-ease); }
 .toast { animation: none; }

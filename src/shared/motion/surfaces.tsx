@@ -2,6 +2,7 @@
 import { useLayoutEffect, useRef, useState, type HTMLAttributes, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { motionCssEase, motionDurations, useAppMotion } from './index';
+import { motionCssRevealEase, motionPresets, type MotionPreset } from './tokens';
 
 type ElementProps = HTMLAttributes<HTMLElement> & { as?: 'div' | 'span'; children?: ReactNode };
 
@@ -10,7 +11,7 @@ export function canAnimate(element: HTMLElement, reduced: boolean) {
 }
 
 /** Only current content enters. Live inputs and their selection never remount. */
-export function useMotionChange<T extends HTMLElement>(ref: RefObject<T | null>, key: string | number, disabled = false) {
+export function useMotionChange<T extends HTMLElement>(ref: RefObject<T | null>, key: string | number, disabled = false, preset: MotionPreset = 'swap') {
   const { reducedMotion } = useAppMotion();
   const previous = useRef(key);
   useLayoutEffect(() => {
@@ -18,18 +19,67 @@ export function useMotionChange<T extends HTMLElement>(ref: RefObject<T | null>,
     previous.current = key;
     const element = ref.current;
     if (!element || !changed || !canAnimate(element, reducedMotion || disabled)) return;
-    const animation = element.animate([{ opacity: 0 }, { opacity: 1 }], {
-      duration: motionDurations.swap * 1000, easing: motionCssEase,
+    return animateEntrance(element, preset);
+  }, [ref, key, disabled, reducedMotion, preset]);
+}
+
+// One entrance owns a visual subtree. Child layout effects run before parents,
+// so starting the parent also settles any entrance its children already began.
+const entrances = new Map<HTMLElement, () => void>();
+
+/** Animate only a safe live DOM region, never the native video's ancestors. */
+export function animateEntrance(element: HTMLElement, preset: MotionPreset) {
+  if (element.matches('.native-player-viewport, [data-app-modal]') || element.querySelector('.native-player-viewport')) return;
+  for (const active of entrances.keys()) {
+    if (active !== element && active.contains(element)) return;
+  }
+  for (const [active, cancel] of entrances) {
+    if (element.contains(active)) cancel();
+  }
+  const { duration, x, y } = motionPresets[preset];
+  const frames: Keyframe[] = x || y
+    ? [{ opacity: 0, transform: `translate(${x}px, ${y}px)` }, { opacity: 1, transform: 'none' }]
+    : [{ opacity: 0 }, { opacity: 1 }];
+  const animation = element.animate(frames, { duration: duration * 1000, easing: motionCssEase });
+  let settled = false;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    if (entrances.get(element) === finish) entrances.delete(element);
+    animation.cancel();
+    window.clearTimeout(timer);
+    document.removeEventListener('visibilitychange', finish);
+    window.removeEventListener('resize', finish);
+  };
+  const timer = window.setTimeout(finish, duration * 1000 + 100);
+  entrances.set(element, finish);
+  document.addEventListener('visibilitychange', finish);
+  window.addEventListener('resize', finish);
+  void animation.finished.then(finish, () => {});
+  return finish;
+}
+
+/** Enter once when mounted. Reduced-motion changes never replay an entrance. */
+export function useMotionEntrance<T extends HTMLElement>(ref: RefObject<T | null>, preset: MotionPreset = 'page') {
+  const { reducedMotion } = useAppMotion();
+  const entered = useRef(false);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (entered.current || !element) return;
+    if (!canAnimate(element, reducedMotion)) { entered.current = true; return; }
+    let cancel: (() => void) | undefined;
+    // Consume the entrance only when it starts. StrictMode can clean up and
+    // re-run this effect before the first frame without losing the entrance.
+    const frame = requestAnimationFrame(() => {
+      entered.current = true;
+      if (canAnimate(element, reducedMotion)) cancel = animateEntrance(element, preset);
     });
-    const finish = () => animation.cancel();
-    const timer = window.setTimeout(finish, motionDurations.swap * 1000 + 100);
-    document.addEventListener('visibilitychange', finish);
-    void animation.finished.then(finish, () => {});
-    return () => {
-      animation.cancel(); window.clearTimeout(timer);
-      document.removeEventListener('visibilitychange', finish);
-    };
-  }, [ref, key, disabled, reducedMotion]);
+    return () => { cancelAnimationFrame(frame); cancel?.(); };
+  }, [ref, preset, reducedMotion]);
+}
+
+export function hasStableGeometry(element: HTMLElement) {
+  return !!element.closest('[data-motion-geometry="stable"]');
 }
 
 /** Interrupted disclosures reverse from their visible size. */
@@ -38,7 +88,7 @@ export function animateHeight(element: HTMLElement, from: number, to: number, on
   element.style.overflow = 'hidden';
   element.style.minHeight = '0';
   const animation = element.animate([{ height: from + 'px' }, { height: to + 'px' }], {
-    duration: motionDurations.reveal * 1000, easing: motionCssEase, fill: 'both',
+    duration: motionDurations.reveal * 1000, easing: motionCssRevealEase, fill: 'both',
   });
   let finished = false;
   const restore = () => {
@@ -100,7 +150,7 @@ export function MotionRegion({ open, keepMounted = false, mode = 'disclosure', a
       if (restoreFocus && opener.current?.isConnected &&
           (document.activeElement === document.body || node.contains(document.activeElement))) opener.current.focus({ preventScroll: true });
     };
-    if (first || mode === 'status' || !canAnimate(node, reducedMotion)) {
+    if (first || mode === 'status' || hasStableGeometry(node) || !canAnimate(node, reducedMotion)) {
       interruptedHeight.current = undefined;
       finish();
       return;
@@ -120,11 +170,11 @@ export function MotionRegion({ open, keepMounted = false, mode = 'disclosure', a
 }
 
 /** Incoming content only, without cloning old actions or replacing the live subtree. */
-export function MotionSwap({ stateKey, disabled = false, as: Tag = 'div', children, className = '', ...props }: ElementProps & {
-  stateKey: string | number; disabled?: boolean;
+export function MotionSwap({ stateKey, disabled = false, preset = 'swap', as: Tag = 'div', children, className = '', ...props }: ElementProps & {
+  stateKey: string | number; disabled?: boolean; preset?: MotionPreset;
 }) {
   const live = useRef<HTMLElement>(null);
-  useMotionChange(live, stateKey, disabled);
+  useMotionChange(live, stateKey, disabled, preset);
   return <Tag {...props} className={'motion-swap' + (Tag === 'span' ? ' motion-swap-inline' : '') + ' ' + className}>
     <Tag ref={live as RefObject<HTMLDivElement & HTMLSpanElement>} className="motion-swap-live">{children}</Tag>
   </Tag>;

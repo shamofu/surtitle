@@ -8,6 +8,7 @@ import { IconButton } from '../shared/ui/index';
 import { NotificationRegion } from './providers/Notifications';
 import { ActivityButton } from './ActivityModal';
 import { AnimatedValue, MotionRegion, MotionSwap } from '../shared/motion';
+import { SelectionIndicator } from '../shared/motion/SelectionIndicator';
 
 export function AppShell() {
   const { data, error } = useSnapshot();
@@ -23,6 +24,7 @@ export function AppShell() {
             surtitle
           </Link>
           <nav aria-label={t('メインナビゲーション', 'Main navigation')} className="main-nav">
+            <SelectionIndicator thickness={3} />
             <Link to="/" activeOptions={{ exact: true }} activeProps={{ className: 'active', 'aria-current': 'page' }}>
               <LibraryBig size={18} aria-hidden="true" />
               <span>{t('ライブラリ', 'Library')}</span>

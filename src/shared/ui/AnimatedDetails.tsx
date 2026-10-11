@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { forwardRef, useLayoutEffect, useRef, useState, type ComponentPropsWithoutRef } from 'react';
 import { useAppMotion } from '../motion';
-import { animateHeight, canAnimate } from '../motion/surfaces';
+import { animateHeight, canAnimate, hasStableGeometry } from '../motion/surfaces';
 
 const revealDetails = new WeakMap<HTMLDetailsElement, () => void>();
 
@@ -64,7 +64,7 @@ export const AnimatedDetails = forwardRef<HTMLDetailsElement, ComponentPropsWith
       const complete = () => {
         if (generation === revision.current && !requestedOpen) setPresent(false);
       };
-      if (first || immediate.current || !present || !canAnimate(details, reducedMotion)) {
+      if (first || immediate.current || !present || hasStableGeometry(details) || !canAnimate(details, reducedMotion)) {
         immediate.current = false;
         interruptedHeight.current = undefined;
         complete();

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { Key } from 'webdriverio';
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
 const source = resolve(dirname(fixture.mediaPath), '多言語 & tracks.mkv');
 const invoke = (command, args = {}) => browser.execute(async (name, parameters) => window.__TAURI_INTERNALS__.invoke(name, parameters), command, args);
@@ -19,23 +20,31 @@ async function playerReady() {
   }, { timeout: 15000, timeoutMsg: 'Player did not decode video into its visible native surface' });
 }
 async function openManagement() {
-  if (!(await $('.study-secondary-tools').isExisting())) await $('button=Export and manage').click();
+  if (!(await $('.study-secondary-tools').isDisplayed())) await $('button=Activity & tools').click();
+  await $('.study-secondary-tools').waitForDisplayed();
 }
 async function openSubtitles() {
   const toggle = $('.study-transcript-toggle');
   if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
   await $('button=Add or switch subtitles').click();
-  await $('dialog').waitForDisplayed();
-  await $('dialog').$('button=Embedded').click();
-  await $('dialog select').waitForDisplayed();
+  await $('[role="dialog"]').waitForDisplayed();
+  await $('[role="dialog"]').$('button=Embedded').click();
+  await $('[role="dialog"] select').waitForDisplayed();
 }
-async function dialogClosed() { await $('dialog').waitForExist({ reverse: true, timeout: 60000 }); }
+async function dialogClosed() { await $('[role="dialog"]').waitForExist({ reverse: true, timeout: 60000 }); }
 async function chooseSubtitle(value) {
-  await $(`dialog option[value="${value}"]`).waitForExist({ timeout: 60000 });
-  await $('dialog select').waitForEnabled({ timeout: 60000 });
-  await $('dialog select').selectByAttribute('value', String(value));
+  await $(`[role="dialog"] option[value="${value}"]`).waitForExist({ timeout: 60000 });
+  await $('[role="dialog"] select').waitForEnabled({ timeout: 60000 });
+  await $('[role="dialog"] select').selectByAttribute('value', String(value));
 }
-async function cardArticle() { await navigate('/cards'); await $('[aria-label="Search your phrases"]').setValue('managed phrase'); await browser.waitUntil(async () => (await $$('.phrase-card')).length === 1); return $('.phrase-card'); }
+async function replaceValue(element, value) {
+  // EdgeDriver clear() can leave React's controlled value unchanged.
+  await element.click(); await browser.keys([Key.Control, 'a']); await browser.keys(Key.Backspace);
+  await expect(element).toHaveValue('');
+  if (value) await element.addValue(value);
+  await expect(element).toHaveValue(value);
+}
+async function cardArticle() { await navigate('/cards'); const search = $('[aria-label="Search your phrases"]'); await search.waitForEnabled(); await replaceValue(search, 'managed phrase'); await browser.waitUntil(async () => (await $$('.phrase-card')).length === 1); return $('.phrase-card'); }
 
 (process.platform === 'win32' ? describe : describe.skip)('native media management and background downloads', () => {
   before(async () => {
@@ -66,7 +75,7 @@ async function cardArticle() { await navigate('/cards'); await $('[aria-label="S
     await $('button=Playback settings').click();
     await $('[aria-label="Audio track"]').selectByAttribute('value', String(english.id));
     await browser.waitUntil(async () => (await snapshot()).media.find(item => item.id === mediaId).audioStreamIndex === 2);
-    await $('dialog [aria-label="Close"]').click();
+    await $('[role="dialog"] [aria-label="Close"]').click();
     await invoke('player_control', { request: { action: 'seek', startMs: 5000 } });
     await browser.waitUntil(async () => (await snapshot()).media.find(item => item.id === mediaId).lastPositionMs >= 4900);
     await browser.reloadSession(); await ready(); await navigate(`/study/${mediaId}`); await playerReady();
@@ -85,16 +94,19 @@ async function cardArticle() { await navigate('/cards'); await $('[aria-label="S
     await assert.rejects(invoke('extract_embedded_subtitles', { mediaId, streamIndex: 1, replaceExisting: false }), /Confirm replacement/);
     await browser.refresh(); await ready(); await openSubtitles();
     await chooseSubtitle('1');
-    await expect($('button=Use these subtitles')).toBeDisabled();
-    await $('dialog input[type="checkbox"]').click(); await $('button=Use these subtitles').click();
+    await $('button=Use these subtitles').waitForEnabled();
+    assert.match(await $('[role="dialog"]').getText(), /Keep the current subtitles as a saved version/);
+    assert.equal((await $$('[role="dialog"] input[type="checkbox"]')).length, 0, 'Selecting the replacement source should not need a second confirmation');
+    await $('button=Use these subtitles').click();
     await browser.waitUntil(async () => (await invoke('list_segments', { mediaId }))[0]?.text === 'English track one.', { timeout: 60000 });
     await dialogClosed();
     const versions = await invoke('list_subtitle_versions', { mediaId }); assert.equal(versions.length, 1);
     assert.equal(versions[0].streamIndex, 3); assert.equal(versions[0].segments[0].text, '日本語の字幕を編集しました。');
     await $('button=Add or switch subtitles').click();
-    await $('dialog').$('button=Saved subtitles').click();
+    await $('[role="dialog"]').$('button=Saved subtitles').click();
     await chooseSubtitle(versions[0].id);
-    await $('dialog input[type="checkbox"]').click(); await $('button=Use these subtitles').click();
+    await $('button=Use these subtitles').waitForEnabled();
+    await $('button=Use these subtitles').click();
     await browser.waitUntil(async () => (await invoke('list_segments', { mediaId }))[0]?.text === '日本語の字幕を編集しました。', { timeout: 60000 });
     await dialogClosed();
     assert.equal((await snapshot()).media.find(item => item.id === mediaId).subtitleStreamIndex, 3);
@@ -113,9 +125,15 @@ async function cardArticle() { await navigate('/cards'); await $('[aria-label="S
     await browser.refresh(); await ready(); const article = await cardArticle();
     await article.$('[aria-label="Listen to managed phrase"]').click();
     await browser.waitUntil(async () => { const state = await invoke('get_player_state'); return state.ready && !state.paused && state.positionMs > 100; });
-    await article.$('.phrase-options summary').click();
-    await article.$('button=Edit').click();
-    await $('dialog textarea').setValue('Corrected meaning'); await $('dialog').$('button=Save').click();
+    await article.$('[aria-label="Edit phrase"]').click();
+    const meaning = $('[role="dialog"] textarea');
+    await meaning.waitForEnabled();
+    await expect(meaning).toHaveValue('Original meaning');
+    await replaceValue(meaning, 'Corrected meaning');
+    await browser.keys(Key.Tab);
+    await browser.waitUntil(async () => (await snapshot()).cards.find(item => item.id === cardId).meaning === 'Corrected meaning');
+    await expect($('[role="dialog"] .autosave-footer [role="status"]')).toHaveText('Saved automatically');
+    await $('[role="dialog"] .modal-footer').$('button=Close').click();
     await dialogClosed();
     await browser.waitUntil(async () => (await snapshot()).cards.find(item => item.id === cardId).meaning === 'Corrected meaning');
     const suspendArticle = await cardArticle();
@@ -126,13 +144,13 @@ async function cardArticle() { await navigate('/cards'); await $('[aria-label="S
     assert.equal(changed.dueAt, rated.dueAt); assert.equal(changed.reviewCount, rated.reviewCount); assert.equal(hash(savedAudioPath), savedAudioHash);
 
     await navigate(`/study/${mediaId}`); await openManagement(); await $('button=Remove from library').click();
-    await $('dialog').$('button=Remove from library').click();
+    await $('[role="dialog"]').$('button=Remove from library').click();
     await dialogClosed();
     await browser.waitUntil(async () => !(await snapshot()).media.some(item => item.id === mediaId));
     assert(existsSync(source)); assert.equal(hash(savedAudioPath), savedAudioHash); assert((await snapshot()).cards.some(item => item.id === cardId));
     const deleteArticle = await cardArticle();
     await deleteArticle.$('.phrase-options summary').click();
-    await deleteArticle.$('button=Delete').click(); await $('dialog').$('button=Delete phrase').click();
+    await deleteArticle.$('button=Delete').click(); await $('[role="dialog"]').$('button=Delete phrase').click();
     await dialogClosed();
     await browser.waitUntil(async () => !(await snapshot()).cards.some(item => item.id === cardId));
     assert(existsSync(source));
@@ -148,7 +166,7 @@ async function cardArticle() { await navigate('/cards'); await $('[aria-label="S
       } else { response.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': body.length }); response.end(body); }
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); serverUrl = `http://127.0.0.1:${server.address().port}`;
-    await navigate('/'); await $('button=Add video or audio').click(); await $('dialog').$('button=URL').click(); await $('dialog input[type="url"]').setValue(`${serverUrl}/success.mp4`); await $('dialog').$('button=Add to library').click();
+    await navigate('/'); await $('button=Add video or audio').click(); await $('[role="dialog"]').$('button=URL').click(); await $('[role="dialog"] input[type="url"]').setValue(`${serverUrl}/success.mp4`); await $('[role="dialog"]').$('button=Start download').click();
     await browser.waitUntil(async () => (await invoke('list_download_jobs')).some(job => job.request.pathOrUrl === `${serverUrl}/success.mp4` && job.status === 'completed'));
     await dialogClosed();
     const completed = (await invoke('list_download_jobs')).find(job => job.request.pathOrUrl === `${serverUrl}/success.mp4`);

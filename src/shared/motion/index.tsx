@@ -2,10 +2,8 @@
 import { createContext, useContext, useLayoutEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
 import { domAnimation, LazyMotion, MotionConfig } from 'motion/react';
 import type { MotionPreference } from '../contracts/settings';
-
-export const motionDurations = { swap: 0.1, reveal: 0.18, fast: 0.16, enter: 0.3, exit: 0.22 } as const;
-export const motionEase = [0.22, 0.61, 0.36, 1] as const;
-export const motionCssEase = `cubic-bezier(${motionEase.join(', ')})`;
+import { motionDurations, motionEase, motionVariables } from './tokens';
+export * from './tokens';
 
 // Components rendered outside the application provider remain fully usable without motion.
 const MotionContext = createContext({ reducedMotion: true });
@@ -27,6 +25,7 @@ export function MotionProvider({ children, preference = 'system' }: { children: 
 
   useLayoutEffect(() => {
     document.documentElement.dataset.motion = reducedMotion ? 'reduce' : 'full';
+    for (const [name, value] of Object.entries(motionVariables)) document.documentElement.style.setProperty(name, value);
   }, [reducedMotion]);
   useLayoutEffect(() => {
     const updateVisibility = () => {
@@ -55,4 +54,4 @@ export function useAppMotion() {
   return useContext(MotionContext);
 }
 
-export { MotionRegion, MotionSwap, AnimatedValue, useMotionChange } from './surfaces';
+export { MotionRegion, MotionSwap, AnimatedValue, useMotionChange, useMotionEntrance } from './surfaces';

@@ -148,6 +148,8 @@ describe('media and card management', () => {
     mount(<SubtitleSourceDialog media={{ ...media, segmentCount: 0 }} onClose={() => {}} onTranscribe={transcribe} />);
     await waitFor(() => expect(screen.getByLabelText('Subtitle to extract')).toHaveValue('2'));
     expect(libraryApi.extractEmbeddedSubtitles).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Embedded' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Transcribe full media' })).not.toHaveAttribute('aria-pressed');
     fireEvent.click(screen.getByRole('button', { name: 'Transcribe full media' }));
     expect(transcribe).toHaveBeenCalledOnce();
   });

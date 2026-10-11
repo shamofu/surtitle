@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { Key } from 'webdriverio';
+import { withReadOnlyDatabase } from '../support/native-e2e-database.mjs';
 
 const mediaId = 'e2e-transcript-review';
 const pendingMediaId = 'e2e-transcript-pending';
@@ -22,14 +23,13 @@ const snapshot = () => invoke('get_app_snapshot');
 const segments = id => invoke('list_segments', { mediaId: id });
 const review = jobId => invoke('get_transcript_review', { jobId });
 const preparations = id => invoke('list_transcription_preparations', { mediaId: id });
-const dialog = () => $('dialog.modal.wide');
+const dialog = () => $('[role="dialog"].modal.wide');
 const history = () => $('.transcription-history-result');
 let jobId, pendingJobId, originalDigest, originalConflict, adoptedDigest;
 let ledgerBefore;
 
 function withLedger(read) {
-  const database = new DatabaseSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'charges.sqlite'), { readOnly: true });
-  try { return read(database); } finally { database.close(); }
+  return withReadOnlyDatabase(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'charges.sqlite'), read);
 }
 function ledger() {
   return withLedger(database => ({
@@ -51,11 +51,31 @@ async function ready() {
   await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__), { timeoutMsg: 'Native transcript review IPC was not ready' });
   await $('h1').waitForDisplayed();
 }
-async function clickVisible(element) {
+async function waitForSurfaceMotion(element) {
   await element.waitForExist();
+  // History disclosures move following actions. Wait for their measured height
+  // and the enclosing surface entry before choosing a WebDriver click position.
+  await browser.waitUntil(async () => browser.execute(node => {
+    const region = node.closest('[role="dialog"], .study-companion') ?? node;
+    return region.getAnimations({ subtree: true }).every(animation =>
+      (!animation.pending && animation.playState !== 'running') || animation.effect?.getTiming().iterations === Infinity);
+  }, await element), { timeoutMsg: 'The transcript surface did not finish its finite animations before scrolling' });
+}
+async function clickVisible(element) {
+  await waitForSurfaceMotion(element);
   await browser.execute(node => node.scrollIntoView({ block: 'center', behavior: 'instant' }), await element);
   await element.waitForClickable();
   await element.click();
+}
+async function replaceValue(element, value) {
+  // Native clear() can leave React's controlled value unchanged. Actual keys
+  // replace the selected value and exercise the same input events as typing.
+  await clickVisible(element);
+  await browser.keys([Key.Control, 'a']);
+  await browser.keys(Key.Backspace);
+  await expect(element).toHaveValue('');
+  if (value) await element.addValue(value);
+  await expect(element).toHaveValue(value);
 }
 async function openWorkspace(targetMediaId = mediaId) {
   await browser.execute(path => { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, `/study/${targetMediaId}`);
@@ -74,7 +94,8 @@ async function openHistory(id, targetMediaId = mediaId) {
   if (!(await job.$('.transcription-history-result').isExisting())) await clickVisible(button);
   await history().waitForDisplayed();
   await browser.waitUntil(async () => (await history().getText()).includes('This is the original transcription record.'), { timeoutMsg: 'Saved transcript history did not load' });
-  await expect($('dialog')).not.toExist();
+  await waitForSurfaceMotion(history());
+  await expect($('[role="dialog"]')).not.toExist();
 }
 async function closeHistory(id) {
   await clickVisible($(`[data-testid="transcript-review-open"][data-job-id="${id}"]`));
@@ -86,13 +107,15 @@ async function openReview(id, targetMediaId = mediaId) {
   const panel = $('[aria-label="Study from drafts"]');
   await panel.$('select').waitForDisplayed();
   await panel.$('select').selectByAttribute('value', id);
+  await expect(panel.$('select')).toHaveValue(id);
   await clickVisible(panel.$('button=Review or adopt the full result'));
   await dialog().waitForDisplayed();
   await dialog().$('button=Refresh saved results').waitForDisplayed();
+  await waitForSurfaceMotion(dialog());
   assert.equal(await dialog().$('h2').getText(), 'Review transcription');
 }
 async function closeReview() {
-  await dialog().$('button[aria-label="Close"]').click();
+  await clickVisible(dialog().$('button[aria-label="Close"]'));
   await expect(dialog()).not.toExist();
 }
 
@@ -129,7 +152,7 @@ async function closeReview() {
     assert.equal(initial.canApply, false);
     await assert.rejects(invoke('apply_transcript_review', { jobId: pendingJobId, draftDigest: initial.draft.digest }));
     await openHistory(pendingJobId, pendingMediaId);
-    assert((await history().getText()).includes('Not received'));
+    await expect(history()).toHaveText(expect.stringContaining('Not received'));
     await expect(history().$('button=Use saved results')).not.toExist();
     await expect(history().$('input[type="checkbox"]')).not.toExist();
     await browser.saveScreenshot(resolve('test-results/native/transcript-pending.png'));
@@ -172,11 +195,11 @@ async function closeReview() {
   it('prepares a separate repair estimate of at most thirty seconds without approval or sending', async () => {
     const initial = await review(jobId);
     await openReview(jobId);
-    await dialog().$('button=Estimate repair, up to 30 seconds').click();
-    const estimate = $('dialog.modal:not(.wide)');
+    await clickVisible(dialog().$('button=Estimate repair, up to 30 seconds'));
+    const estimate = $('[role="dialog"].modal:not(.wide)');
     await estimate.waitForDisplayed();
-    assert.equal(await estimate.$('h2').getText(), 'Boundary repair estimate');
-    await expect(estimate.$('button=Approve this job')).toBeDisabled();
+    await expect(estimate.$('h2')).toHaveText('Boundary repair estimate');
+    await expect(estimate.$('button=Start transcription')).toBeDisabled();
     const quote = await invoke('prepare_boundary_repair', { jobId, draftDigest: initial.draft.digest, boundaryId: originalConflict.id });
     assert(quote.id && quote.id !== jobId, 'Repair must have its own job and approval');
     assert.equal(quote.canApprove, false);
@@ -193,7 +216,7 @@ async function closeReview() {
     assert.equal((await review(jobId)).draft.digest, initial.draft.digest);
     assert.deepEqual(ledger(), ledgerBefore);
     await browser.saveScreenshot(resolve('test-results/native/transcript-repair-estimate.png'));
-    await estimate.$('button[aria-label="Close"]').click();
+    await clickVisible(estimate.$('button[aria-label="Close"]'));
     await expect(estimate).not.toExist();
     await closeReview();
   });
@@ -271,14 +294,14 @@ async function closeReview() {
       { startMs: 7200, endMs: 7600, text: 'Recovered locally.' },
     ];
     for (const [index, row] of rows.entries()) {
-      await editor().$('button=Add row').click();
+      await clickVisible(editor().$('button=Add row'));
       const element = (await editor().$$('.boundary-edit-row'))[index];
       const times = await element.$$('input');
-      await times[0].setValue((row.startMs / 1000).toFixed(3));
-      await times[1].setValue((row.endMs / 1000).toFixed(3));
-      await element.$('textarea').setValue(row.text);
+      await replaceValue(times[0], (row.startMs / 1000).toFixed(3));
+      await replaceValue(times[1], (row.endMs / 1000).toFixed(3));
+      await replaceValue(element.$('textarea'), row.text);
     }
-    await editor().$('button=Save correction and select for preview').click();
+    await clickVisible(editor().$('button=Save correction and select for preview'));
     await browser.waitUntil(async () => (await review(pendingJobId)).draft.chunks[1].source === 'manual');
     const saved = await review(pendingJobId);
     assert.deepEqual(saved.draft.chunks[0].segments, original);
@@ -390,11 +413,8 @@ async function closeReview() {
     assert(card?.audioPath && card.reviewCount === 1, 'The preceding manual learning chain must pass first');
     const originalCue = (await segments(pendingMediaId)).find(cue => cue.id === card.segmentId);
     const audioHash = createHash('sha256').update(readFileSync(card.audioPath)).digest('hex');
-    const readReviews = path => {
-      const db = new DatabaseSync(path, { readOnly: true });
-      try { return db.prepare('SELECT data FROM reviews WHERE card_id=? ORDER BY id').all(card.id).map(row => JSON.parse(row.data)); }
-      finally { db.close(); }
-    };
+    const readReviews = path => withReadOnlyDatabase(path,
+      db => db.prepare('SELECT data FROM reviews WHERE card_id=? ORDER BY id').all(card.id).map(row => JSON.parse(row.data)));
     const originalReviews = readReviews(resolve(dataRoot, 'learning.sqlite'));
     assert.equal(originalReviews.length, 1);
     // The fixture overrides only native file selection. Export, preview, confirmation,
@@ -406,17 +426,17 @@ async function closeReview() {
     const openTransfer = async () => {
       await browser.execute(() => { window.history.pushState({}, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); });
       await $('button=Your data').waitForDisplayed(); await $('button=Your data').click();
-      await $('dialog').$('h2=Take your learning with you').waitForDisplayed();
+      await $('[role="dialog"]').$('h2=Take your learning with you').waitForDisplayed();
     };
     await openTransfer();
-    assert((await $('dialog .format-option[aria-pressed="true"]').getText()).includes('Portable backup'));
-    await $('dialog').$('button=Choose destination').click();
-    const exportComplete = $('dialog [aria-label="Export complete"]');
+    assert((await $('[role="dialog"] .format-option[aria-pressed="true"]').getText()).includes('Portable backup'));
+    await $('[role="dialog"]').$('button=Choose destination').click();
+    const exportComplete = $('[role="dialog"] [aria-label="Export complete"]');
     await exportComplete.waitForDisplayed({ timeout: 60000 });
     await expect(exportComplete).toHaveText(expect.stringContaining(zipPath));
     await expect(exportComplete.$('button=Open containing folder')).toBeEnabled();
     await exportComplete.$('button=Done').click();
-    await $('dialog').waitForExist({ reverse: true, timeout: 60000 });
+    await $('[role="dialog"]').waitForExist({ reverse: true, timeout: 60000 });
     const zip = readFileSync(zipPath), zipHash = createHash('sha256').update(zip).digest('hex');
     assert.equal(zip.subarray(0, 4).toString('hex'), '504b0304');
     await assert.rejects(invoke('export_learning', { format: 'zip' }), /destination already exists/);
@@ -453,18 +473,20 @@ async function closeReview() {
     const preferences = JSON.parse(readFileSync(resolve(dataRoot, 'preferences.json'), 'utf8'));
     const jobs = [storedJob(jobId), storedJob(pendingJobId)];
     await openTransfer();
-    await $('dialog').$('button=Restore').click();
-    await $('dialog').$('button=Choose backup').click();
-    await $('dialog .restore-summary').waitForDisplayed();
+    await $('[role="dialog"]').$('button=Restore').click();
+    await $('[role="dialog"]').$('button=Choose backup').click();
+    await $('[role="dialog"] .restore-summary').waitForDisplayed();
     const counts = [];
-    for (const element of await $('dialog .restore-summary').$$('strong')) counts.push(await element.getText());
+    for (const element of await $('[role="dialog"] .restore-summary').$$('strong')) counts.push(await element.getText());
     assert.deepEqual(counts, [stale.mediaCount, stale.cardCount, stale.reviewCount, stale.audioCount].map(String));
-    await expect($('dialog').$('button=Restore backup')).toBeDisabled();
-    assert((await $('dialog').getText()).includes('This device keeps its credentials, usage ledger, and tool settings.'));
-    await $('dialog input[type="checkbox"]').click();
-    await expect($('dialog').$('button=Restore backup')).toBeEnabled();
-    await $('dialog').$('button=Restore backup').click();
-    await $('dialog').waitForExist({ reverse: true, timeout: 60000 });
+    const restoreDialog = $('[role="dialog"]');
+    const restoreCopy = await restoreDialog.getText();
+    assert(restoreCopy.includes('This replaces your current media, cards, and review history with this backup.'));
+    assert(restoreCopy.includes('This device keeps its credentials, usage ledger, and tool settings.'));
+    const restore = restoreDialog.$('button=Replace learning data and restore');
+    await expect(restore).toBeEnabled();
+    await clickVisible(restore);
+    await $('[role="dialog"]').waitForExist({ reverse: true, timeout: 60000 });
 
     const restored = (await snapshot()).cards.find(item => item.id === card.id);
     assert(restored?.audioPath && restored.audioPath !== card.audioPath);
@@ -476,20 +498,19 @@ async function closeReview() {
     for (const path of [card.audioPath, restored.audioPath]) assert.equal(createHash('sha256').update(readFileSync(path)).digest('hex'), audioHash);
     const addedBackups = readdirSync(resolve(dataRoot, 'backups')).filter(name => !backupsBefore.includes(name));
     assert.equal(addedBackups.length, 1, 'Exactly one pre-restore learning backup must be created');
-    const backup = new DatabaseSync(resolve(dataRoot, 'backups', addedBackups[0]), { readOnly: true });
-    try {
+    withReadOnlyDatabase(resolve(dataRoot, 'backups', addedBackups[0]), backup => {
       assert.equal(JSON.parse(backup.prepare('SELECT data FROM segments WHERE id=?').get(originalCue.id).data).text, 'Changed after the portable backup.');
       assert.deepEqual(JSON.parse(backup.prepare('SELECT data FROM cards WHERE id=?').get(card.id).data), changedCard);
-    } finally { backup.close(); }
+    });
     assert.equal(createHash('sha256').update(readFileSync(zipPath)).digest('hex'), zipHash);
     assert.deepEqual(previewFiles(), []);
     assert.deepEqual(JSON.parse(readFileSync(resolve(dataRoot, 'preferences.json'), 'utf8')), preferences);
     assert.equal(readFileSync(keyMarker, 'utf8'), 'Synthetic preservation marker; not a service-account credential.');
     assert.deepEqual([storedJob(jobId), storedJob(pendingJobId)], jobs);
     assert.deepEqual(ledger(), ledgerBefore);
-    const learning = new DatabaseSync(resolve(dataRoot, 'learning.sqlite'), { readOnly: true });
-    try { assert.equal(learning.prepare('SELECT count(*) AS count FROM transcript_range_revisions').get().count, 0); }
-    finally { learning.close(); }
+    withReadOnlyDatabase(resolve(dataRoot, 'learning.sqlite'), learning => {
+      assert.equal(learning.prepare('SELECT count(*) AS count FROM transcript_range_revisions').get().count, 0);
+    });
     await browser.reloadSession(); await ready();
     assert.deepEqual((await snapshot()).cards.find(item => item.id === card.id), restored);
     assert.deepEqual((await segments(pendingMediaId)).find(cue => cue.id === originalCue.id), originalCue);

@@ -25,6 +25,7 @@ import { useClearPreparationSessions } from '../ai/PreparationSessions';
 import { clearEditorDraftSessions, flushEditorDrafts } from '../study/editor-drafts/useEditorDraft';
 import { flushEdits, refreshEdits } from '../../shared/editing/session';
 import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
+import { SelectionIndicator } from '../../shared/motion/SelectionIndicator';
 
 export function TransferDialog({
   onClose,
@@ -214,8 +215,10 @@ export function TransferDialog({
         <footer className="modal-footer"><Button variant="primary" onClick={close}>{t('完了', 'Done')}</Button></footer>
       </> : <>
       <div className="segmented-control">
+        <SelectionIndicator variant="pill" />
         <button
           className={tab === 'export' ? 'selected' : ''}
+          aria-pressed={tab === 'export'}
           disabled={busy}
           onClick={() => setTab('export')}
         >
@@ -224,6 +227,7 @@ export function TransferDialog({
         </button>
         <button
           className={tab === 'restore' ? 'selected' : ''}
+          aria-pressed={tab === 'restore'}
           disabled={busy}
           onClick={() => setTab('restore')}
         >

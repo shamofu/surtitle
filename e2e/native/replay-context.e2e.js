@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { Key } from 'webdriverio';
+import { assertOfflineFixtureLedger, readFeeLedger } from '../support/native-e2e-ledger.mjs';
 
 const dataDirectory = resolve(process.env.SURTITLE_E2E_DATA_DIR);
 const fixture = JSON.parse(readFileSync(resolve(dataDirectory, 'fixture.json'), 'utf8'));
@@ -19,12 +19,7 @@ const contextInput = () => $('//label[contains(., "Playback context on each side
 let originalSettings, originalTool, originalCues = [], nominalCues = [], ledgerBefore, budgetBefore, verified = false;
 const savedCards = [];
 
-function ledger() {
-  const database = new DatabaseSync(resolve(dataDirectory, 'charges.sqlite'), { readOnly: true });
-  try {
-    return Object.fromEntries(['ai_settings', 'ai_jobs', 'ai_requests', 'ai_attempts'].map(table => [table, database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
-  } finally { database.close(); }
-}
+const ledger = () => readFeeLedger(dataDirectory);
 function readClip(card) {
   assert(card.audioPath && isAbsolute(card.audioPath), 'Expected an absolute saved clip path');
   const inside = relative(resolve(dataDirectory, 'card-audio'), resolve(card.audioPath));
@@ -55,7 +50,6 @@ async function openStudy() {
   await browser.waitUntil(async () => { const state = await player(); return state.ready && state.surfaceVisible && state.videoWidth === 640 && state.durationMs >= 11990 && state.durationMs <= 12010; }, { timeoutMsg: 'The real twelve-second disposable media was not loaded' });
 }
 async function saveContextInUi(value) {
-  const wasSaved = (await snapshot()).settings.replayContextMs === value;
   await navigate('/settings');
   await contextInput().waitForEnabled();
   // Use real editing keys so React observes clearing the controlled numeric input.
@@ -65,13 +59,11 @@ async function saveContextInUi(value) {
   await expect(contextInput()).toHaveValue('');
   await contextInput().addValue(String(value));
   await expect(contextInput()).toHaveValue(String(value));
-  if (wasSaved) {
-    await expect($('button=Save changes')).not.toBeEnabled();
-  } else {
-    await $('button=Save changes').waitForEnabled();
-    await $('button=Save changes').click();
-  }
+  await browser.keys(Key.Tab);
   await browser.waitUntil(async () => (await snapshot()).settings.replayContextMs === value, { timeoutMsg: `Playback context ${value} was not saved` });
+  // Even a same-value edit must flush its temporary empty input before reload.
+  await expect($('.settings-save [role="status"]')).toHaveText('Changes save automatically');
+  await expect($('.settings-save')).toHaveAttribute('aria-busy', 'false');
   await browser.refresh();
   await expect(contextInput()).toHaveValue(String(value));
   await openStudy();
@@ -124,9 +116,7 @@ async function assertNominalUnchanged() {
     assert.equal(initial.budget.unpricedAttempts ?? 0, 0);
     assert(initial.media.some(item => item.id === mediaId && item.path === fixture.mediaPath), 'Expected the exact disposable media fixture');
     ledgerBefore = ledger();
-    assert.deepEqual(initial.jobs.map(job => job.id).sort(), ledgerBefore.ai_jobs.map(job => job.id).sort(), 'IPC must use the explicitly seeded fee database');
-    assert(ledgerBefore.ai_jobs.every(job => job.approved_at_ms === null && job.approval_json === null), 'No test job may have a paid approval');
-    assert(ledgerBefore.ai_attempts.every(attempt => attempt.dispatched_at_ms === null && attempt.reserve_microusd === 0 && attempt.charged_microusd === 0), 'Only zero-cost offline fixture attempts are allowed');
+    assertOfflineFixtureLedger(initial, ledgerBefore);
     budgetBefore = initial.budget;
     originalSettings = initial.settings;
     originalTool = initial.tools.find(tool => tool.id === 'ffmpeg');

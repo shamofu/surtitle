@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useRef } from 'react';
+import { StrictMode, useRef } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { AnimatedValue, MotionProvider, MotionRegion, MotionSwap, useMotionChange } from '../shared/motion';
+import { AnimatedValue, MotionProvider, MotionRegion, MotionSwap, useMotionChange, useMotionEntrance } from '../shared/motion';
+import { animateEntrance } from '../shared/motion/surfaces';
 import { AnimatedDetails, openAnimatedDetails } from '../shared/ui/AnimatedDetails';
 
 let reduce: (next: boolean) => void;
@@ -33,7 +34,7 @@ it('enters only current content without cloning, remounting inputs or losing com
   expect(animate).not.toHaveBeenCalled();
   view.rerender(pane('second'));
   expect(clone).not.toHaveBeenCalled();
-  expect(animate).toHaveBeenCalledWith([{ opacity: 0 }, { opacity: 1 }], expect.objectContaining({ duration: 100 }));
+  expect(animate).toHaveBeenCalledWith([{ opacity: 0 }, { opacity: 1 }], expect.objectContaining({ duration: 120 }));
   expect(screen.getByLabelText('Entry')).toBe(input);
   expect(input).toHaveFocus();
   expect(input).toHaveValue('unfinished 日本語');
@@ -163,4 +164,72 @@ it('does not animate unrelated content renders or opted-out updates', () => {
   expect(animate).toHaveBeenCalledOnce();
   view.rerender(content('third', true));
   expect(animate).toHaveBeenCalledOnce();
+});
+
+it('lets one entrance own nested content without replacing focused inputs', () => {
+  const content = (outer: number, inner: number) => <MotionProvider><MotionSwap stateKey={outer}>
+    <MotionSwap stateKey={inner}><input aria-label="Nested draft" defaultValue="日本語" /></MotionSwap>
+  </MotionSwap></MotionProvider>;
+  const view = render(content(0, 0));
+  const input = screen.getByLabelText('Nested draft') as HTMLInputElement;
+  input.focus(); input.setSelectionRange(0, 2);
+  fireEvent.compositionStart(input);
+  view.rerender(content(1, 1));
+  expect(animate).toHaveBeenCalledTimes(2);
+  expect(animate.mock.results[0].value.cancel).toHaveBeenCalledOnce();
+  expect(animate.mock.results[1].value.cancel).not.toHaveBeenCalled();
+  view.rerender(content(1, 2));
+  expect(animate).toHaveBeenCalledTimes(2);
+  expect(screen.getByLabelText('Nested draft')).toBe(input);
+  expect(input).toHaveFocus();
+  expect([input.selectionStart, input.selectionEnd]).toEqual([0, 2]);
+  fireEvent(window, new Event('resize'));
+  view.rerender(content(1, 3));
+  expect(animate).toHaveBeenCalledTimes(3);
+});
+
+it('settles a page entrance on reduction and never replays it when motion returns', () => {
+  function Page() {
+    const ref = useRef<HTMLDivElement>(null);
+    useMotionEntrance(ref);
+    return <div ref={ref}>Page</div>;
+  }
+  render(<StrictMode><MotionProvider><Page /></MotionProvider></StrictMode>);
+  act(() => vi.advanceTimersToNextFrame());
+  expect(animate).toHaveBeenCalledWith(
+    [{ opacity: 0, transform: 'translate(0px, 6px)' }, { opacity: 1, transform: 'none' }],
+    expect.objectContaining({ duration: 160 }),
+  );
+  reduce(true);
+  expect(animate.mock.results[0].value.cancel).toHaveBeenCalledOnce();
+  reduce(false);
+  expect(animate).toHaveBeenCalledOnce();
+});
+
+it('never animates opaque modal shells or native video ancestors', () => {
+  const view = render(<><div data-app-modal="" /><div data-testid="player-parent"><div className="native-player-viewport" /></div></>);
+  animateEntrance(view.container.querySelector('[data-app-modal]') as HTMLElement, 'modal');
+  animateEntrance(screen.getByTestId('player-parent'), 'page');
+  animateEntrance(view.container.querySelector('.native-player-viewport') as HTMLElement, 'swap');
+  expect(animate).not.toHaveBeenCalled();
+});
+
+it('settles disclosures inside opaque modal geometry immediately', () => {
+  const content = (open: boolean) => <MotionProvider><div data-motion-geometry="stable">
+    <AnimatedDetails><summary>Options</summary><div><input aria-label="Modal draft" /></div></AnimatedDetails>
+    <MotionRegion open={open} keepMounted>Conditional fields</MotionRegion>
+  </div></MotionProvider>;
+  const view = render(content(false));
+  const summary = screen.getByText('Options');
+  fireEvent.click(summary);
+  expect(summary.parentElement).toHaveAttribute('open');
+  const input = screen.getByLabelText('Modal draft');
+  view.rerender(content(true));
+  expect(screen.getByText('Conditional fields')).toBeVisible();
+  view.rerender(content(false));
+  expect(screen.getByText('Conditional fields')).not.toBeVisible();
+  fireEvent.click(summary);
+  expect(summary.parentElement).not.toHaveAttribute('open');
+  expect(screen.getByLabelText('Modal draft')).toBe(input);
+  expect(animate).not.toHaveBeenCalled();
 });

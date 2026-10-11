@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
+import { Key } from 'webdriverio';
 import { withReadOnlyDatabase } from '../support/native-e2e-database.mjs';
 
 // These authored subtitles accompany digital silence. This suite verifies local
@@ -77,6 +78,14 @@ async function dismissSuccessToasts() {
 }
 async function scrollVisible(element) {
   await element.waitForExist();
+  // A history disclosure moves its following buttons while height is animated.
+  // WebDriver clickability alone does not wait for that geometry to settle; a
+  // coordinate click can otherwise land on a different history action in WebKit.
+  await browser.waitUntil(async () => browser.execute(node => {
+    const region = node.closest('[role="dialog"], .study-companion') ?? node;
+    return region.getAnimations({ subtree: true }).every(animation =>
+      (!animation.pending && animation.playState !== 'running') || animation.effect?.getTiming().iterations === Infinity);
+  }, await element), { timeoutMsg: 'The target surface did not finish its finite animations before scrolling' });
   // WDIO 9 uses a wheel event at viewport (0,0), which cannot scroll this nested
   // panel in WebKit. Use the DOM scroll API; clicks still go through WebDriver.
   await browser.execute(node => node.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }), await element);
@@ -86,6 +95,17 @@ async function clickVisible(element) {
   await scrollVisible(element);
   await element.waitForClickable();
   await element.click();
+}
+async function replaceValue(element, value) {
+  // Native WebDriver clear() can leave React's controlled value unchanged.
+  // Select and delete through keyboard input, then verify the actual value.
+  await element.waitForEnabled();
+  await clickVisible(element);
+  await browser.keys([Key.Control, 'a']);
+  await browser.keys(Key.Backspace);
+  await expect(element).toHaveValue('');
+  if (value) await element.addValue(value);
+  await expect(element).toHaveValue(value);
 }
 async function openDraft(id = mediaId) {
   await browser.execute(path => { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, `/study/${id}`);
@@ -101,6 +121,7 @@ async function openDraft(id = mediaId) {
   await panel().$('select').waitForDisplayed();
   await scrollVisible(panel().$('select'));
   await panel().$('select').selectByAttribute('value', id === pendingMediaId ? pendingJobId : jobId);
+  await expect(panel().$('select')).toHaveValue(id === pendingMediaId ? pendingJobId : jobId);
 }
 async function openBookmark(selection) {
   await openDraft(selection.mediaId);
@@ -199,8 +220,18 @@ function assertPcm(path, expectedMilliseconds) {
     assert(!Object.hasOwn(selected, 'sourceSnapshot'), 'Opaque source binding must stay native');
     originalBinding = storedSelection(selected.id).sourceSnapshot;
     assert(originalBinding && typeof originalBinding === 'object');
-    await expect(editor().$('button=Confirm this text and audio')).toBeDisabled();
+    // Continuing with valid text confirms this excerpt; merely opening or
+    // editing the unchecked bookmark must not confirm or create anything.
+    await expect(editor().$('button=Create an audio card')).toBeEnabled();
+    const unchanged = storedSelection(selected.id);
+    const text = editor().$('textarea');
+    await replaceValue(text, '');
     await expect(editor().$('button=Create an audio card')).toBeDisabled();
+    await expect(editor().$('button=AI help for this phrase')).toBeDisabled();
+    await replaceValue(text, selected.text);
+    await expect(editor().$('button=Create an audio card')).toBeEnabled();
+    assert.deepEqual(storedSelection(selected.id), unchanged);
+    assert(!(await snapshot()).cards.some(item => item.term === term));
   });
 
   it('03 rejects unconfirmed cards and edits outside the original source interval', async () => {
@@ -225,19 +256,31 @@ function assertPcm(path, expectedMilliseconds) {
     assert.deepEqual((await list()).find(item => item.id === selected.id), selected);
     await openBookmark(selected);
     assert.equal(await editor().$('textarea').getValue(), selected.text);
-    await expect(editor().$('button=Create an audio card')).toBeDisabled();
+    await expect(editor().$('button=Create an audio card')).toBeEnabled();
+    assert.equal((await list()).find(item => item.id === selected.id).confirmed, false);
   });
 
   it('05 explicitly confirms only the authored excerpt and leaves original warnings unresolved', async () => {
-    // Fixed-fixture IPC confirmation is an automated state transition. It is not
+    // Fixed-fixture UI confirmation is an automated state transition. It is not
     // evidence that a person listened to or verified these synthetic words.
-    selected = await update(selected, { confirm: true }); confirmedVersion = selected.version;
+    const uncheckedVersion = selected.version;
+    await clickVisible(editor().$('button=Create an audio card'));
+    const dialog = $('[role="dialog"]');
+    await dialog.$('h2=Keep this phrase').waitForDisplayed();
+    selected = (await list()).find(item => item.id === selected.id);
+    confirmedVersion = selected.version;
+    assert.equal(confirmedVersion, uncheckedVersion + 1);
     assert.equal(selected.confirmed, true); assert.equal(selected.canConfirm, true);
+    assert.equal(selected.text, 'Hello, local learner.');
     assert.deepEqual(storedSelection(selected.id).sourceSnapshot, originalBinding);
     assert.deepEqual(await invoke('list_draft_selection_candidates', { request: { id: selected.id, version: selected.version } }), []);
+    assert(!(await snapshot()).cards.some(item => item.term === term));
+    await expect(dialog.$('button=Save card and audio')).toBeDisabled();
+    await clickVisible(dialog.$('button=Close'));
+    await dialog.waitForExist({ reverse: true });
     await browser.reloadSession(); await ready(); await openBookmark(selected);
     await expect(editor().$('button=Create an audio card')).toBeEnabled();
-    assert((await editor().getText()).includes('This check covers only your excerpt.'));
+    await expect(editor().$('.badge')).toHaveText('Checked for learning');
     await assertOriginals();
   });
 
@@ -247,13 +290,11 @@ function assertPcm(path, expectedMilliseconds) {
     await invoke('set_tool_provider', { request: { toolId: 'ffmpeg', provider: 'external', path: external.path } });
     const before = await snapshot();
     await clickVisible(editor().$('button=Create an audio card'));
-    const dialog = () => $('dialog');
+    const dialog = () => $('[role="dialog"]');
     await dialog().$('h2=Keep this phrase').waitForDisplayed();
-    await scrollVisible(dialog().$('input'));
-    await dialog().$('input').setValue(term);
+    await replaceValue(dialog().$('input'), term);
     const textareas = await dialog().$$('textarea');
-    await scrollVisible(textareas[0]);
-    await textareas[0].setValue('An authored local transport example; no AI explanation.');
+    await replaceValue(textareas[0], 'An authored local transport example; no AI explanation.');
     await clickVisible(dialog().$('button=Save card and audio'));
     await dialog().waitForExist({ reverse: true, timeout: 180000 });
     const added = (await snapshot()).cards.filter(item => !before.cards.some(previous => previous.id === item.id));

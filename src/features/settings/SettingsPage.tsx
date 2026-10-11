@@ -50,7 +50,7 @@ import { LanguageInput } from '../../shared/ui/LanguageInput';
 import { TransferDialog } from '../transfer/TransferDialog';
 
 import { ModelEditor, emptyModel, validOutputTokens, validTokenInput, type ModelInputDraft } from '../ai/ModelEditor';
-import { AnimatedValue, MotionRegion, MotionSwap, useAppMotion } from '../../shared/motion';
+import { AnimatedValue, MotionRegion, MotionSwap, useAppMotion, useMotionEntrance } from '../../shared/motion';
 
 const learningLevels = [
   ['A1', '挨拶や簡単な自己紹介ができる', 'Greetings and simple introductions'],
@@ -93,6 +93,7 @@ export function SettingsPage() {
   const priceRequests = useRef(new Set<AiPurpose>());
   const [pricing, setPricing] = useState(false);
   const page = useRef<HTMLDivElement>(null);
+  useMotionEntrance(page);
   const [scanning, setScanning] = useState(false);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [candidates, setCandidates] = useState<ExternalToolCandidate[]>([]);

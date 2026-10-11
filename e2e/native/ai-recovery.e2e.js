@@ -1,23 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { withReadOnlyDatabase } from '../support/native-e2e-database.mjs';
 
 const mediaId = 'e2e-ai-recovery';
 const invoke = (command, args = {}) => browser.execute(async (name, parameters) => window.__TAURI_INTERNALS__.invoke(name, parameters), command, args);
 const snapshot = () => invoke('get_app_snapshot');
 const segments = () => invoke('list_segments', { mediaId });
+const dialog = () => $('[role="dialog"].modal');
 let jobId;
 let ledgerBefore;
 
 function attempts() {
-  const db = new DatabaseSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'charges.sqlite'), { readOnly: true });
-  try {
-    // The application may be finishing its startup WAL write after refresh.
-    // Wait for that writer while keeping this observer strictly read-only.
-    db.exec('PRAGMA busy_timeout = 10000');
-    return db.prepare('SELECT id,job_id,state,reserve_microusd,charged_microusd,usage_json FROM ai_attempts ORDER BY id').all();
-  } finally { db.close(); }
+  return withReadOnlyDatabase(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'charges.sqlite'),
+    db => db.prepare('SELECT id,job_id,state,reserve_microusd,charged_microusd,usage_json FROM ai_attempts ORDER BY id').all());
 }
 async function ready() {
   await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__), { timeoutMsg: 'Native IPC not ready' });
@@ -59,9 +55,10 @@ async function settings() {
     assert.equal(pending[0].canApply, true);
     await settings();
     await $('button=Review saved translations').click();
-    await $('dialog').waitForDisplayed();
-    assert((await $('dialog').getText()).includes('こんにちは。'));
-    await $('button[aria-label="Close"]').click();
+    await dialog().waitForDisplayed();
+    assert.equal(await dialog().$('h2').getText(), 'Review saved translations');
+    assert((await dialog().getText()).includes('こんにちは。'));
+    await dialog().$('button[aria-label="Close"]').click();
     await invoke('edit_segment', { segment: { ...source, text: 'An edited source.' } });
     try {
       const stale = await invoke('list_saved_ai_results', { jobId });
@@ -100,7 +97,7 @@ async function settings() {
     await browser.waitUntil(async () => (await segments())[0].translation === 'こんにちは。');
     assert.deepEqual((await segments()).map(cue => cue.translation), ['こんにちは。', 'また明日。']);
     // With no pending results, the settings row and its modal unmount together.
-    await expect($('dialog')).not.toExist();
+    await expect(dialog()).not.toExist();
     // A new WebDriver session terminates and relaunches Tauri, unlike webview refresh.
     await browser.reloadSession();
     await ready();

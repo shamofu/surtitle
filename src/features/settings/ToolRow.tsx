@@ -16,6 +16,7 @@ import { Badge, Button, Field } from '../../shared/ui/index';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { useActivities } from '../../app/providers/Activities';
 import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
+import { SelectionIndicator } from '../../shared/motion/SelectionIndicator';
 
 export function ToolRow({
   tool,
@@ -104,6 +105,7 @@ export function ToolRow({
       <MotionRegion mode="status" open={busy}><ProgressStatus label={tool.name} phase={operation?.phase || 'preparing'} completed={operation?.completed} total={operation?.total} unit={operation?.unit} /></MotionRegion>
       <div className="tool-actions">
         <div className="segmented-control compact" role="group" aria-label={t(`${tool.name}の取得方法`, `${tool.name} source`)}>
+          <SelectionIndicator variant="pill" />
           <button
             type="button"
             aria-pressed={tool.provider === 'managed' && !chooseExternal}

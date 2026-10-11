@@ -143,6 +143,8 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
+      - name: Prepare hosted Windows desktop capacity
+        run: node e2e/support/prepare-ci-desktop.mjs
       - name: Read the native Rust toolchain pin
         id: rust
         shell: bash
@@ -183,8 +185,12 @@ jobs:
           native/windows/package-installer-smoke.test.mjs
           native/windows/package-production-smoke.test.mjs
           e2e/support/native-e2e-database.test.mjs
+          e2e/support/prepare-ci-desktop.test.mjs
+          e2e/support/native-window.test.mjs
+          e2e/support/native-window-resize.test.mjs
           native/build/native-ci-artifact.test.mjs
           native/windows/native-installer-prepare.test.mjs
+          e2e/support/frontend-bundle.test.mjs
       - run: pnpm build
       - run: pnpm test:rust
       - name: Verify ordinary builds cannot bypass evaluation accounting
@@ -208,7 +214,10 @@ jobs:
           & pwsh -NoProfile -File e2e/support/run-windows-standard-user.ps1 -Application "$PWD/target/debug/examples/seed_fixture.exe" -ArgumentsBase64 $seedArgumentsBase64
           if ($LASTEXITCODE -ne 0) { throw 'Windows E2E learning fixture preparation failed.' }
       - name: Build actual Windows native E2E binary
-        run: pnpm build:native:e2e
+        run: |
+          $frontendScript = node e2e/support/frontend-bundle.mjs
+          pnpm build:native:e2e
+          "SURTITLE_E2E_FRONTEND_SCRIPT=$frontendScript" >> $env:GITHUB_ENV
       - name: Required FFmpeg, libmpv and Silero regressions
         run: |
           $env:SURTITLE_TEST_FFMPEG = (Get-Command ffmpeg -CommandType Application).Source
@@ -248,6 +257,8 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
+      - name: Prepare hosted Windows desktop capacity
+        run: node e2e/support/prepare-ci-desktop.mjs
       - name: Read the native Rust toolchain pin
         id: rust
         shell: bash
@@ -307,6 +318,7 @@ jobs:
           path: |
             artifacts/*.json
             work/webdriver/receipt.json
+            test-results/windows-desktop.json
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: release-${{ github.sha }}

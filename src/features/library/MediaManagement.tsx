@@ -17,6 +17,7 @@ import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { useActivities } from '../../app/providers/Activities';
 import { AnimatedValue, MotionRegion, MotionSwap } from '../../shared/motion';
+import { SelectionIndicator } from '../../shared/motion/SelectionIndicator';
 
 export function DownloadJobs() {
   const { activities } = useActivities();
@@ -249,7 +250,8 @@ export function SubtitleSourceDialog({
       closeDisabled={busy || exit.exiting}
       onClose={close}
     >
-      <div className="segmented-control">
+      <div className="segmented-control" role="group" aria-label={t('字幕の取得方法', 'Subtitle source')}>
+        <SelectionIndicator variant="pill" />
         {(
           [
             ['embedded', t('埋め込み字幕', 'Embedded')],
@@ -262,6 +264,7 @@ export function SubtitleSourceDialog({
             key={id}
             disabled={busy}
             className={mode === id ? 'selected' : ''}
+            aria-pressed={id === 'transcribe' ? undefined : mode === id}
             onClick={() => {
               if (id === 'transcribe' && onTranscribe) { void exit.close(onTranscribe); return; }
               setMode(id);

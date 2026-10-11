@@ -24,6 +24,7 @@ import { useAppearance } from '../../app/runtime';
 import { timestamp } from '../../shared/format';
 import { Badge, Button, EmptyState, IconButton } from '../../shared/ui/index';
 import { AnimatedValue, MotionRegion, MotionSwap, useAppMotion } from '../../shared/motion';
+import { SelectionIndicator } from '../../shared/motion/SelectionIndicator';
 import { DraftStudyPanel } from './drafts/DraftStudyPanel';
 import type { PlayRange } from './drafts/lifecycle';
 import { StudyRegion } from './StudyPresence';
@@ -188,6 +189,7 @@ export function StudyTranscript({
         role="tablist"
         aria-label={t('字幕の表示内容', 'Transcript content')}
       >
+        <SelectionIndicator />
         {tabs.map(([id, label], index) => (
           <button
             key={id}

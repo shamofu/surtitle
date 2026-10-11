@@ -70,6 +70,13 @@ pub struct Bounds {
     #[serde(default)]
     pub occlusions: Vec<SurfaceRect>,
     #[serde(default)]
+    #[cfg_attr(
+        not(target_os = "windows"),
+        allow(
+            dead_code,
+            reason = "Native child-window input blocking is Windows-only"
+        )
+    )]
     pub input_blocked: bool,
 }
 #[derive(Debug, Clone, Deserialize)]

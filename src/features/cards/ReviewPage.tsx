@@ -21,7 +21,7 @@ import {
 import { shouldIgnoreShortcut } from '../../shared/keyboard';
 import { dueCards, languageName } from '../../shared/format';
 import { Badge, Button } from '../../shared/ui/index';
-import { AnimatedValue, MotionSwap } from '../../shared/motion';
+import { AnimatedValue, MotionSwap, useMotionEntrance } from '../../shared/motion';
 
 export type Rating = 'again' | 'hard' | 'good' | 'easy';
 
@@ -191,6 +191,8 @@ export function ReviewCard({
 }
 
 export function ReviewPage() {
+  const page = useRef<HTMLDivElement>(null);
+  useMotionEntrance(page);
   const { data } = useSnapshot();
   const { t } = useAppearance();
   const [reviewed, setReviewed] = useState<string[]>([]);
@@ -217,7 +219,7 @@ export function ReviewPage() {
   const card = due[0];
   const total = reviewed.length + due.length;
   return (
-    <div className="review-page page-enter">
+    <div className="review-page" ref={page}>
       <div className="review-page-header">
         <Link to="/" className="back-link">
           <ArrowLeft size={15} />
@@ -242,9 +244,10 @@ export function ReviewPage() {
         />
       </div>
       <div className="review-session">
-        <div className="review-transition" key={card ? revision(card) : 'complete'}>
+        <MotionSwap className="review-transition" stateKey={card ? revision(card) : 'complete'}>
           {card ? (
             <ReviewCard
+              key={revision(card)}
               card={card}
               onRated={() => setReviewed((items) => [...items, revision(card)])}
             />
@@ -282,7 +285,7 @@ export function ReviewPage() {
           </div>
         </div>
           )}
-        </div>
+        </MotionSwap>
       </div>
     </div>
   );
