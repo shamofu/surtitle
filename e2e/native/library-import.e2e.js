@@ -36,6 +36,13 @@ async function syntheticTauriDrag(event, payload) {
   }, event, payload);
 }
 
+const importRevision = async () => (await invoke('get_ui_draft', { kind: 'import', entityId: 'default' }))?.revision ?? 0;
+async function waitForImportDelivery(previousRevision) {
+  await browser.waitUntil(async () => (await importRevision()) > previousRevision
+    && await $('[role="dialog"] .import-drop').isEnabled(),
+  { timeoutMsg: 'The delivered import was not persisted and settled' });
+}
+
 (process.platform === 'win32' ? describe : describe.skip)('native library import and synthetic Tauri drag delivery', () => {
   let originalSettings, temporaryDirectory, apiFile, droppedFile, invalidFile, apiCanonical;
   const createdMediaIds = new Set();
@@ -116,7 +123,7 @@ async function syntheticTauriDrag(event, payload) {
     assert.notEqual(differentLanguage.mediaId, imported.mediaId);
   });
 
-  it('reviews synthetic Tauri drops, deduplicates the queue, and imports only after explicit confirmation', async () => {
+  it('imports valid synthetic Tauri drops immediately, retains invalid rows, and deduplicates repeated delivery', async () => {
     await browser.waitUntil(async () => browser.execute(() =>
       !!window.__internal_unstable_listeners_object_id__?.['tauri://drag-drop']));
     const before = (await snapshot()).media.length;
@@ -126,40 +133,52 @@ async function syntheticTauriDrag(event, payload) {
     await syntheticTauriDrag('tauri://drag-leave', null);
     await $('.library-drop-overlay').waitForExist({ reverse: true });
     await syntheticTauriDrag('tauri://drag-drop', payload);
-    await $('dialog').waitForDisplayed();
-    await browser.waitUntil(async () => (await $$('dialog .import-file-row')).length === 2);
-    const add = $('dialog').$('button=Add 1 file to library');
-    await add.waitForEnabled();
-    assert.equal((await snapshot()).media.length, before, 'Dropping files imported them before confirmation');
-    assert.match(await $('dialog .import-file-list').getText(), /Ready to add/);
-
-    await syntheticTauriDrag('tauri://drag-enter', { paths: [droppedFile], position: payload.position });
-    await $('dialog .import-drop.is-dragging').waitForDisplayed();
-    await syntheticTauriDrag('tauri://drag-drop', { paths: [droppedFile], position: payload.position });
-    await browser.waitUntil(async () => (await $('dialog').getText()).includes('1 repeated file skipped.'));
-    await add.waitForEnabled();
-    assert.equal((await $$('dialog .import-file-row')).length, 2, 'Repeated drop added duplicate queue entries');
-
-    await add.click();
-    const open = $('dialog a[aria-label="Open Drop 日本語 & video.mp4"]');
+    await $('[role="dialog"]').waitForDisplayed();
+    await browser.waitUntil(async () => (await $$('[role="dialog"] .import-file-row')).length === 2);
+    const open = $('[role="dialog"] a[aria-label="Open Drop 日本語 & video.mp4"]');
     await open.waitForDisplayed();
+    await $('[role="dialog"] .import-drop').waitForEnabled();
+    assert.equal((await $$('[role="dialog"] .import-file-row.imported')).length, 1);
+    assert.equal((await $$('[role="dialog"] .import-file-row.invalid')).length, 1);
+    assert.match(await $('[role="dialog"] .import-file-row.invalid').getText(), /This file cannot be imported/);
+    assert.equal(await $('[role="dialog"]').$('button=Add 1 file to library').isExisting(), false,
+      'Local import must not require a second confirmation');
     const current = await snapshot();
     const imported = current.media.find(media => media.title === 'Drop 日本語 & video');
-    assert(imported, 'Confirmed import is missing from the real native snapshot');
+    assert(imported, 'The selected valid file did not import into the native library');
     createdMediaIds.add(imported.id);
-    assert.equal(current.media.length, before + 1);
+    assert.equal(current.media.length, before + 1, 'Invalid files must not enter the library');
     assert((await open.getAttribute('href')).endsWith(`/study/${imported.id}`));
     assert.equal(await browser.execute(() => location.pathname), '/', 'Import completion unexpectedly navigated to playback');
-    await browser.saveScreenshot(resolve('test-results/native/library-import-review.png'));
-    await $('dialog').$('button=Return to library').click();
-    await $('dialog').waitForExist({ reverse: true });
 
+    await syntheticTauriDrag('tauri://drag-enter', { paths: [droppedFile], position: payload.position });
+    await $('[role="dialog"] .import-drop.is-dragging').waitForDisplayed();
+    const repeatRevision = await importRevision();
     await syntheticTauriDrag('tauri://drag-drop', { paths: [droppedFile], position: payload.position });
-    await $('dialog').waitForDisplayed();
-    await browser.waitUntil(async () => (await $('dialog .import-file-list').getText()).includes('Already in your library with these languages'));
-    assert.equal((await snapshot()).media.length, before + 1);
-    await $('dialog [aria-label="Close"]').click();
-    await $('dialog').waitForExist({ reverse: true });
+    await waitForImportDelivery(repeatRevision);
+    assert.equal((await $$('[role="dialog"] .import-file-row')).length, 2, 'Repeated drop added duplicate queue entries');
+    assert.equal((await snapshot()).media.length, before + 1, 'Repeated delivery duplicated native media');
+    assert((await open.getAttribute('href')).endsWith(`/study/${imported.id}`));
+    await browser.saveScreenshot(resolve('test-results/native/library-import-results.png'));
+    await $('[role="dialog"] .modal-footer').$('button=Close').click();
+    await $('[role="dialog"]').waitForExist({ reverse: true });
+
+    const reopenRevision = await importRevision();
+    await syntheticTauriDrag('tauri://drag-drop', { paths: [droppedFile], position: payload.position });
+    await $('[role="dialog"]').waitForDisplayed();
+    await waitForImportDelivery(reopenRevision);
+    assert.equal((await $$('[role="dialog"] .import-file-row')).length, 2, 'Closing the panel discarded its app-owned import results');
+    assert((await $('[role="dialog"] .import-file-row.imported a').getAttribute('href')).endsWith(`/study/${imported.id}`));
+    // Clear only the view, then revalidate the same file against native storage.
+    await $('[role="dialog"]').$('button=Clear list').click();
+    await $('[role="dialog"] .import-file-row').waitForExist({ reverse: true });
+    await syntheticTauriDrag('tauri://drag-drop', { paths: [droppedFile], position: payload.position });
+    await $('[role="dialog"] .import-file-row.existing').waitForDisplayed();
+    assert.match(await $('[role="dialog"] .import-file-row.existing').getText(), /Already in library/);
+    assert.equal((await snapshot()).media.length, before + 1, 'Revalidating an existing file duplicated media');
+    assert((await $('[role="dialog"] .import-file-row.existing a').getAttribute('href')).endsWith(`/study/${imported.id}`));
+    await $('[role="dialog"] [aria-label="Close"]').click();
+    await $('[role="dialog"]').waitForExist({ reverse: true });
   });
 
   it('preserves paused and playing state when the real native player moves between captions', async () => {
@@ -173,13 +192,13 @@ async function syntheticTauriDrag(event, payload) {
     await control({ action: 'sentence-pause', value: 0 });
     await control({ action: 'seek', value: 2200 });
     await browser.waitUntil(async () => (await $('.current-caption-text').getText()).includes('Practice sentence 2.'));
-    await $('.current-caption').$('button=Previous subtitle').click();
+    await $('.current-caption [aria-label="Previous subtitle"]').click();
     await browser.waitUntil(async () => {
       const state = await player();
       return state.paused && state.positionMs >= 990 && state.positionMs < 1150;
     }, { timeoutMsg: 'Previous caption did not seek to 1 second while preserving pause' });
-    await $('.current-caption').$('button=Next subtitle').waitForEnabled();
-    await $('.current-caption').$('button=Next subtitle').click();
+    await $('.current-caption [aria-label="Next subtitle"]').waitForEnabled();
+    await $('.current-caption [aria-label="Next subtitle"]').click();
     await browser.waitUntil(async () => {
       const state = await player();
       return state.paused && state.positionMs >= 1990 && state.positionMs < 2150;
@@ -190,7 +209,7 @@ async function syntheticTauriDrag(event, payload) {
     await control({ action: 'seek', value: 200 });
     await browser.waitUntil(async () => (await $('.current-caption-text').getText()).includes('Make yourself at home.'));
     await control({ action: 'play' });
-    await $('.current-caption').$('button=Next subtitle').click();
+    await $('.current-caption [aria-label="Next subtitle"]').click();
     await browser.waitUntil(async () => {
       const state = await player();
       return !state.paused && state.positionMs >= 990 && state.positionMs < 1900;

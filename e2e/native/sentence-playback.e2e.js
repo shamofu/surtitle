@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { assertOfflineFixtureLedger, readFeeLedger } from '../support/native-e2e-ledger.mjs';
 
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
 const mediaId = fixture.mediaId || 'fixture-media';
@@ -12,64 +12,8 @@ const player = () => invoke('get_player_state');
 const toggle = () => $('//label[contains(., "Pause at the end of a caption group")]/input[@type="checkbox"]');
 let originals = [], originalSettings, isolationVerified = false, ledgerBefore;
 
-function ledger() {
-  // The path comes only from the explicitly seeded test directory, never from
-  // the application profile. Matching its job IDs also proves IPC isolation.
-  const database = new DatabaseSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'charges.sqlite'), { readOnly: true });
-  try {
-    return {
-      jobs: database.prepare('SELECT id,plan_json,state,approved_at_ms,approval_json FROM ai_jobs ORDER BY id').all(),
-      attempts: database.prepare('SELECT id,job_id,ordinal,state,reserve_microusd,charged_microusd,dispatched_at_ms,usage_json FROM ai_attempts ORDER BY id').all(),
-      requests: database.prepare('SELECT job_id,ordinal,state,response_json,error_code FROM ai_requests ORDER BY job_id,ordinal').all(),
-      limits: database.prepare('SELECT limits_json FROM ai_settings WHERE id=1').get().limits_json,
-    };
-  } finally { database.close(); }
-}
-function assertOfflineFixtures(snapshot, stored) {
-  const expected = new Map();
-  if (process.env.SURTITLE_E2E_AI_RECOVERY === 'translation') expected.set('E2E saved translation recovery', { media: 'e2e-ai-recovery', kind: 'translation', requests: 1, received: 1 });
-  if (process.env.SURTITLE_E2E_TRANSCRIPT_REVIEW === 'boundary') {
-    expected.set('E2E / e2e-transcript-review', { media: 'e2e-transcript-review', kind: 'transcribe_preview', requests: 2, received: 2 });
-    expected.set('E2E / e2e-transcript-pending', { media: 'e2e-transcript-pending', kind: 'transcribe_preview', requests: 2, received: 1 });
-    expected.set('E2E transcript repair', { media: 'e2e-transcript-review', kind: 'transcribe_preview', requests: 1, received: 0 });
-  }
-  assert.equal(stored.jobs.length, expected.size, 'Only the explicitly enabled offline fixture jobs are allowed');
-  assert.deepEqual(snapshot.jobs.map(job => job.id).sort(), stored.jobs.map(job => job.id).sort(), 'IPC must use the exact disposable ledger');
-  const seen = new Set();
-  for (const job of stored.jobs) {
-    const plan = JSON.parse(job.plan_json), allowed = expected.get(plan.title);
-    assert(allowed && !seen.has(plan.title), 'Unexpected or duplicate fixture plan');
-    seen.add(plan.title);
-    assert.equal(plan.project_id, 'e2e-project');
-    assert.equal(plan.credential_id, 'unused-e2e-fixture');
-    assert.equal(plan.binding.media_id, allowed.media);
-    assert.equal(plan.requests.length, allowed.requests);
-    assert(plan.requests.every(request => request.kind === allowed.kind));
-    assert.equal(job.approved_at_ms, null, 'No test job may have a paid approval');
-    assert.equal(job.approval_json, null, 'No test job may have an approval payload');
-    const attempts = stored.attempts.filter(attempt => attempt.job_id === job.id);
-    assert.equal(attempts.length, allowed.received, 'Unexpected fixture execution history');
-    assert.deepEqual(attempts.map(attempt => attempt.ordinal).sort(), Array.from({ length: allowed.received }, (_, index) => index));
-    const requests = stored.requests.filter(request => request.job_id === job.id);
-    assert.equal(requests.length, allowed.requests);
-    for (const request of requests) {
-      assert.equal(request.state, request.ordinal < allowed.received ? 'completed' : 'pending');
-      assert.equal(request.error_code, null);
-      assert.equal(request.response_json !== null, request.ordinal < allowed.received);
-    }
-  }
-  assert.equal(stored.attempts.length, [...expected.values()].reduce((sum, value) => sum + value.received, 0));
-  for (const attempt of stored.attempts) {
-    assert.equal(attempt.state, 'settled');
-    assert.equal(attempt.reserve_microusd, 0);
-    assert.equal(attempt.charged_microusd, 0);
-    assert.equal(attempt.dispatched_at_ms, null, 'Offline fixtures must never reach the provider');
-    const usage = JSON.parse(attempt.usage_json);
-    assert.equal(usage.offlineFixture, true);
-    assert.equal(usage.paidRequests, 0);
-  }
-  assert.deepEqual(JSON.parse(stored.limits), { per_job_microusd: 0, daily_microusd: 0, monthly_microusd: 0 });
-}
+// Only inspect the explicitly seeded directory, including hidden prepared jobs.
+const ledger = () => readFeeLedger(process.env.SURTITLE_E2E_DATA_DIR);
 
 async function openStudy() {
   await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__));
@@ -97,7 +41,7 @@ async function pausedNear(expected) {
     assert.equal(initial.budget.unpricedAttempts ?? 0, 0, 'Expected no unpriced attempts');
     assert(initial.media.some(media => media.id === mediaId && media.path === fixture.mediaPath), 'Refusing to mutate a profile without the exact disposable fixture');
     ledgerBefore = ledger();
-    assertOfflineFixtures(initial, ledgerBefore);
+    assertOfflineFixtureLedger(initial, ledgerBefore);
     isolationVerified = true;
     originalSettings = initial.settings;
     await invoke('update_settings', { settings: { ...originalSettings, locale: 'en', sentencePause: false } });
