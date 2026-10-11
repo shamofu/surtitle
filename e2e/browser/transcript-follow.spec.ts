@@ -6,11 +6,37 @@ type FixtureWindow = Window & {
   __learningFixture: {
     call: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
   };
+  __heldPlayerEvents: { hold: () => void; release: () => void; pending: Map<unknown, unknown> };
+  __jumpScroll: { start: number; positions: number[]; stop: () => void };
 };
 
-async function openTranscript(page: Page, reducedMotion: 'no-preference' | 'reduce' = 'no-preference') {
+async function openTranscript(page: Page, reducedMotion: 'no-preference' | 'reduce' = 'no-preference', delayPlayerEvents = false) {
   await page.emulateMedia({ reducedMotion });
   await installLearningFixture(page, 'en', 'light');
+  if (delayPlayerEvents) {
+    // Native commands can acknowledge before the next periodic position event.
+    // Keep command success real while controlling event delivery independently.
+    await page.route(/\/src\/shared\/native\/events\.ts(?:\?|$)/, route => route.fulfill({
+      contentType: 'application/javascript',
+      body: `const gate = window.__heldPlayerEvents = {
+        held: false, pending: new Map(),
+        hold() { this.held = true; },
+        release() {
+          this.held = false;
+          const pending = [...this.pending];
+          this.pending.clear();
+          for (const [callback, event] of pending) callback(event);
+        }
+      };
+      export const subscribeNative = (name, callback) => {
+        const stop = window.__learningFixture.subscribe(name, event => {
+          if (name === 'player-state' && gate.held) gate.pending.set(callback, event);
+          else callback(event);
+        });
+        return () => { gate.pending.delete(callback); stop(); };
+      };`,
+    }));
+  }
   await page.goto('/study/visual-fixture');
   await page.waitForLoadState('networkidle');
   await expect(page.getByRole('button', { name: 'Inspect this subtitle', exact: true })).toBeEnabled();
@@ -113,6 +139,68 @@ test('manual scrolling interrupts smooth follow and later playback cannot pull t
 });
 
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(`far transcript jumps never scroll back to the old playback position (${reducedMotion})`, async ({ page }) => {
+    await openTranscript(page, reducedMotion, true);
+    const list = page.getByLabel('Subtitle list', { exact: true });
+    let playingIndex = 10;
+
+    for (const direction of [1, -1]) {
+      await list.hover();
+      await page.mouse.wheel(0, direction * 4500);
+      await expect(page.getByRole('button', { name: 'Show current subtitle', exact: true })).toBeVisible();
+      const findDistantRow = () => list.evaluate((element, { playingIndex, direction }) => {
+        const viewport = element.getBoundingClientRect();
+        return [...element.querySelectorAll<HTMLElement>('.transcript-row')]
+          .filter(row => {
+            const bounds = row.getBoundingClientRect();
+            return bounds.top >= viewport.top && bounds.bottom <= viewport.bottom &&
+              (Number(row.dataset.index) - playingIndex) * direction >= 20;
+          })
+          .sort((left, right) => {
+            const distance = (row: HTMLElement) => Math.abs(row.getBoundingClientRect().top +
+              row.getBoundingClientRect().bottom - viewport.top - viewport.bottom);
+            return distance(left) - distance(right);
+          }).map(row => Number(row.dataset.index))[0] ?? -1;
+      }, { playingIndex, direction });
+      await expect.poll(findDistantRow).toBeGreaterThanOrEqual(0);
+      const targetIndex = await findDistantRow();
+
+      await list.evaluate(element => {
+        const fixtureWindow = window as FixtureWindow;
+        fixtureWindow.__heldPlayerEvents.hold();
+        const positions = [element.scrollTop];
+        let frame = 0;
+        const sample = () => positions.push(element.scrollTop);
+        const tick = () => { sample(); frame = requestAnimationFrame(tick); };
+        element.addEventListener('scroll', sample);
+        frame = requestAnimationFrame(tick);
+        fixtureWindow.__jumpScroll = {
+          start: element.scrollTop, positions,
+          stop: () => { cancelAnimationFrame(frame); element.removeEventListener('scroll', sample); },
+        };
+      });
+      await list.locator(`.transcript-row[data-index="${targetIndex}"] .segment-time`).click();
+      await expect(page.getByRole('button', { name: 'Following playback', exact: true })).toBeVisible();
+      await expect.poll(() => page.evaluate(() => (window as FixtureWindow).__heldPlayerEvents.pending.size)).toBeGreaterThan(0);
+      // Observe complete rendered frames while the player still reports the old
+      // position; a successful jump must already follow the clicked subtitle.
+      const observed = await list.evaluate(async element => {
+        for (let frame = 0; frame < 24; frame += 1) await new Promise(requestAnimationFrame);
+        const observation = (window as FixtureWindow).__jumpScroll;
+        observation.stop();
+        return { start: observation.start, positions: observation.positions, height: element.clientHeight };
+      });
+      expect(Math.max(...observed.positions.map(top => Math.abs(top - observed.start)))).toBeLessThan(observed.height);
+      await expectCentered(page, targetIndex);
+
+      await page.evaluate(() => (window as FixtureWindow).__heldPlayerEvents.release());
+      await expectCentered(page, targetIndex);
+      await observePlaybackScroll(page, targetIndex + 1);
+      await expectCentered(page, targetIndex + 1);
+      playingIndex = targetIndex + 1;
+    }
+  });
+
   test(`jumping from a transcript timestamp resumes follow until another manual scroll (${reducedMotion})`, async ({ page }) => {
     await openTranscript(page, reducedMotion);
     const list = page.getByLabel('Subtitle list', { exact: true });

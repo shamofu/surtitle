@@ -1059,6 +1059,7 @@ describe('study sentence and source playback', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show translations' }));
     fireEvent.wheel(screen.getByLabelText('Subtitle list'));
     vi.mocked(playerApi.player).mockClear();
+    fixture.scroll.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Play from subtitle 0:01' }));
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' }));
     expect(vi.mocked(playerApi.player).mock.calls.map(([request]) => request)).toEqual([
@@ -1069,6 +1070,13 @@ describe('study sentence and source playback', () => {
     expect(screen.getByLabelText('Search transcript')).toHaveValue('');
     expect(screen.getByRole('button', { name: 'Hide translations' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Following playback' })).toBeVisible();
+    // Native position events can arrive after the command completes. Resuming
+    // follow must target the clicked cue even before that notification arrives.
+    expect(fixture.scroll.mock.calls.length).toBeGreaterThan(0);
+    expect(fixture.scroll.mock.calls.every(([index]) => index === 1)).toBe(true);
+    expect(document.querySelector('.current-caption-text')).toHaveTextContent(cues[1].text);
+    await emit({ positionMs: 1000 });
+    expect(fixture.scroll.mock.calls.every(([index]) => index === 1)).toBe(true);
     const followed = fixture.scroll.mock.calls.length;
     await emit({ positionMs: 2600 });
     expect(fixture.scroll.mock.calls.length).toBeGreaterThan(followed);

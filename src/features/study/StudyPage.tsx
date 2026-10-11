@@ -524,8 +524,9 @@ function StudySession({ mediaId }: { mediaId: string }) {
         if (!alive.current) return;
         await playerApi.player({ action: 'play' });
         if (!alive.current) return;
-        // Continuing from a list timestamp returns the transcript to playback;
-        // clear search so the next subtitle can also remain in view.
+        // Resume follow at the selected cue before delayed native position events
+        // arrive, and clear search so subsequent subtitles can remain in view.
+        setPositionMs(source.startMs);
         setTranscriptView(view => ({ ...view, search: '', following: true }));
         returnPosition.current = undefined;
         setInspection(undefined);
