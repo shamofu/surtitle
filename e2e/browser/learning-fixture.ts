@@ -7,7 +7,9 @@ import type { EditorDraft, EditorDraftInput, EditorDraftReference } from '../../
 
 // This fixture is installed only by Playwright through request interception.
 // The ordinary browser preview continues to have no fabricated native state.
-export async function installLearningFixture(page: Page, locale: 'ja' | 'en', theme: 'light' | 'dark') {
+export async function installLearningFixture(page: Page, locale: 'ja' | 'en', theme: 'light' | 'dark', options: {
+  segmentOverrides?: Record<number, Partial<SubtitleSegment>>;
+} = {}) {
   const media = {
     id: 'visual-fixture', title: 'A walk along the coast', path: 'test-fixture.mp4',
     kind: 'video' as const, durationMs: 840000, lastPositionMs: 76000,
@@ -22,6 +24,7 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
     ][index % 4],
     translation: index === 10 ? '少し寄り道をすることが、自分の道を見つける一番の方法になることもある。' : '海岸に沿った小道を歩きました。',
     status: 'confirmed',
+    ...options.segmentOverrides?.[index],
   }));
   const snapshot: AppSnapshot = {
     media: [media, { ...media, id: 'audio-fixture', title: 'Coffee and a conversation', kind: 'audio', lastPositionMs: 0, cardCount: 0 }],

@@ -33,13 +33,23 @@
 .study-grid { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1; min-height: 400px; gap: 24px; }
 .has-companion .study-grid { grid-template-columns: minmax(0, 1fr) minmax(320px, 360px); }
 .study-left { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.current-caption { flex: 0 1 208px; padding: 18px 20px 0; min-height: 152px; max-height: 264px; overflow: auto; overscroll-behavior: contain; }
+.current-caption { display: flex; flex-direction: column; flex: 0 1 clamp(264px, 36dvh, 360px); padding: 18px 20px 0; min-height: 220px; min-width: 0; }
+.caption-body { display: grid; grid-template-rows: minmax(0, 1fr); flex: 1; gap: 8px; min-height: 0; min-width: 0; overflow: hidden; }
+.caption-body:has(> .caption-translation-region:not([hidden])) { grid-template-rows: repeat(2, minmax(0, 1fr)); }
+.caption-source-scroll, .caption-translation-scroll { min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 2px 4px; }
+.caption-body > .caption-translation-region { overflow: hidden; border-top: 1px solid var(--border); }
+/* Keep equal text panes through the fade; only the inner scroll areas can grow. */
+.caption-body > .caption-translation-region[data-exiting] { position: static; }
+.caption-translation-scroll { flex: 1; }
+.caption-source-scroll:focus-visible, .caption-translation-scroll:focus-visible { outline-offset: -2px; }
+.caption-controls { flex: 0 0 auto; }
 .current-caption-text { font-size: clamp(24px, 2vw, 28px); line-height: 1.55; max-width: 65ch; white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 450; user-select: text; }
-.caption-translation { font-size: 15px; line-height: 1.7; color: var(--muted); margin-top: 8px; overflow-wrap: anywhere; }
-.caption-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
+.caption-translation { font-size: 15px; line-height: 1.7; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.caption-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; margin-top: 10px; }
 .caption-actions .button { font-size: 13px; }
 .caption-navigation { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 10px; padding-bottom: 4px; }
 .caption-navigation .button { font-size: 12px; padding-inline: 10px; }
+.caption-navigation-slot { min-height: 54px; display: flow-root; }
 .caption-empty { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 96px; color: var(--muted); font-size: 14px; line-height: 1.8; }
 .study-companion { min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--surface); border-radius: 8px; overflow: hidden; }
 .study-transcript, .transcript-view, .transcription-view, .transcript-draft-view { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
@@ -80,6 +90,9 @@
 .transcript-tools { display: flex; align-items: center; gap: 8px; padding: 12px; flex-shrink: 0; }
 .transcript-tools .search-box { flex: 1; min-width: 0; }
 .transcript-tools .search-box input { width: 100%; }
+.transcript-marked-filter { display: flex; flex: 0 0 auto; align-items: flex-start; gap: 9px; min-width: 0; margin: 0; padding: 4px 12px 12px; font-size: 12px; line-height: 1.8; color: var(--muted); }
+.transcript-marked-filter input { width: 18px; height: 18px; min-height: 18px; padding: 0; margin: 2px 0; flex: 0 0 18px; }
+.transcript-marked-filter span { min-width: 0; overflow-wrap: anywhere; }
 .transcript-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; position: relative; }
 .virtual-transcript { position: relative; width: 100%; }
 .transcript-row { position: absolute; left: 0; top: 0; width: 100%; display: flex; align-items: flex-start; gap: 12px; padding: 16px 12px; border-left: 3px solid transparent; border-bottom: 1px solid var(--border); }

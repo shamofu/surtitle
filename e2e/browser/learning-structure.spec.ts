@@ -69,7 +69,8 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
     const caption = page.getByRole('region', { name: captionName, exact: true });
     await expect(caption).toMatchAriaSnapshot(`
       - region "${captionName}":
-        - paragraph: ${sentence}
+        - region "${t('字幕の原文', 'Subtitle source')}":
+          - paragraph: ${sentence}
         - button "${t('訳を表示', 'Show translation')}"
         - button "${inspect}"
         - group "${t('字幕の再生操作', 'Subtitle playback')}":

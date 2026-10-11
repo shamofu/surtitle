@@ -313,7 +313,7 @@ export function StudyTranscript({
                   <Languages size={18} />
                 </IconButton>
               </div>
-              {segments.some(cue => cue.status === 'generated_review' || cue.timingPrecision === 'source_block') && <label className="check-field source-block-note"><input type="checkbox" checked={markedOnly} onChange={event => setMarkedOnly(event.target.checked)} />{t('注意のある箇所だけ表示', 'Show marked passages only')}</label>}
+              {segments.some(cue => cue.status === 'generated_review' || cue.timingPrecision === 'source_block') && <label className="transcript-marked-filter"><input type="checkbox" checked={markedOnly} onChange={event => setMarkedOnly(event.target.checked)} /><span>{t('注意のある箇所だけ表示', 'Show marked passages only')}</span></label>}
               <MotionRegion open={!!error}>{error && <p
                 className="notice warning"
                 role="alert"
