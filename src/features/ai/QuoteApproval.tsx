@@ -128,12 +128,12 @@ export function QuoteApproval({
         )}
       </dl>
       </AnimatedDetails>
-      <MotionSwap stateKey={quote.warnings.join('|')}>{quote.warnings.map((warning, index) => (
+      <MotionSwap disabled stateKey={quote.warnings.join('|')}>{quote.warnings.map((warning, index) => (
         <p className="notice warning" key={index}>
           {warning}
         </p>
       ))}</MotionSwap>
-      <MotionRegion open={!quote.canApprove || expired}><MotionSwap stateKey={expired ? 'expired' : quote.blockedReason ?? 'blocked'}>
+      <MotionRegion mode="status" open={!quote.canApprove || expired}><MotionSwap disabled stateKey={expired ? 'expired' : quote.blockedReason ?? 'blocked'}>
         <p className="notice warning" role="status">
           {expired
             ? t(
@@ -170,13 +170,13 @@ export function QuoteApproval({
               )}
         </span>
       </label></MotionRegion>
-      <MotionRegion open={automaticRetries}><p className="notice" data-testid="automatic-retry-policy">
+      <MotionRegion mode="status" open={automaticRetries}><p className="notice" data-testid="automatic-retry-policy">
         {t(
           `サービスが混雑した場合（HTTP 429）だけ、各区間を最大${quote.retryPolicy?.maxRetries ?? 0}回、自動で再試行します（最大${quote.maximumRequestCount}回の送信）。${unpriced ? '表示した送信上限には再試行を含みます。' : '予約額と送信上限は再試行を含みます。'}通信結果が不明な場合は停止します。`,
           `Only when the service is busy (HTTP 429), each audio range may be retried automatically up to ${quote.retryPolicy?.maxRetries ?? 0} times (${quote.maximumRequestCount} requests maximum). ${unpriced ? 'The displayed sending limits include retries.' : 'The reservation and maximum sending limits include retries.'} An unknown outcome stops the job.`,
         )}
       </p></MotionRegion>
-      <MotionRegion open={transcription}><p className="helper-text" data-testid="transcription-pacing-policy">
+      <MotionRegion mode="status" open={transcription}><p className="helper-text" data-testid="transcription-pacing-policy">
         {t('音声は順に送信し、送信開始の間隔を10秒以上空けます。混雑時は間隔を延ばします。', 'Audio is sent one range at a time, with at least 10 seconds between request starts. Congestion increases the interval.')}
       </p></MotionRegion>
       <Button
@@ -189,7 +189,7 @@ export function QuoteApproval({
         <Check size={16} />
         {transcription ? t('この内容で文字起こしを開始', 'Start transcription') : t('この実行を承認する', 'Approve this job')}
       </Button>
-      <MotionRegion open={!transcription}><p className="helper-text centered">
+      <MotionRegion mode="status" open={!transcription}><p className="helper-text centered">
         <ShieldCheck size={13} />
         {t(
           '以後の実行や結果不明の再試行を、自動で承認することはありません。',

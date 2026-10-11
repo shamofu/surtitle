@@ -1,13 +1,14 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 :root {
-  --motion-swap: 140ms;
+  --motion-swap: 100ms;
+  --motion-reveal: 180ms;
   --motion-fast: 160ms;
   --motion-enter: 300ms;
   --motion-exit: 220ms;
   --motion-ease: cubic-bezier(.22, .61, .36, 1);
 }
 
-/* Properties are explicit: focus and native video geometry always remain immediate. */
+/* Color feedback is separate from measured disclosure and drawer geometry. */
 :where(html, body, body *) {
   transition: background-color var(--motion-fast) var(--motion-ease),
     border-color var(--motion-fast) var(--motion-ease),
@@ -23,21 +24,8 @@
 :where(.button, .icon-button, .locale-button, .rating-button):active:not(:disabled):not([aria-disabled='true']) {
   scale: .98;
 }
-.page-enter, .library-page, .study-top, .study-secondary-tools, .current-caption, .player-controls {
-  animation: page-arrive var(--motion-enter) var(--motion-ease);
-}
-/* Animate one group, not every result on each search or snapshot update. */
-.library-empty, .empty-state, .review-complete {
-  animation: content-arrive var(--motion-enter) var(--motion-ease);
-}
-.rating-area, .rating-area .rating-buttons {
-  transition: opacity var(--motion-fast) var(--motion-ease);
-}
 .session-progress > span { transition: width var(--motion-swap) var(--motion-ease); }
 .toast { animation: none; }
-.phrase-saved {
-  animation: content-arrive var(--motion-enter) var(--motion-ease);
-}
 .progress-status progress::-webkit-progress-value {
   transition: width var(--motion-swap) var(--motion-ease);
 }
@@ -47,28 +35,16 @@
 .motion-swap-live { min-width: 0; }
 .motion-swap-inline { display: inline-grid; vertical-align: baseline; }
 .motion-swap-inline > .motion-swap-live { display: inline-flex; align-items: center; gap: inherit; }
-[data-motion-snapshot] {
-  position: absolute !important; inset: 0; width: 100%; height: 100%;
-  pointer-events: none !important; user-select: none !important; overflow: hidden;
-}
-[data-motion-snapshot], [data-motion-snapshot] * { animation: none !important; transition: none !important; }
 .animated-value { font-variant-numeric: tabular-nums; white-space: inherit; max-width: 100%; }
 .button > .motion-region { display: inline-flex; align-items: center; }
-.button > .motion-region:not([hidden]) { animation: busy-arrive var(--motion-swap) var(--motion-ease); }
-@keyframes busy-arrive { from { width: 0; opacity: 0; } to { width: 16px; opacity: 1; } }
 .notification-portal { display: contents; }
 details[data-motion-state='exiting'] > :not(summary) { pointer-events: none; }
-@keyframes page-arrive {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes content-arrive {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
 :root[data-motion='reduce'] *,
 :root[data-motion='reduce'] *::before,
-:root[data-motion='reduce'] *::after {
+:root[data-motion='reduce'] *::after,
+:root[data-visibility='hidden'] *,
+:root[data-visibility='hidden'] *::before,
+:root[data-visibility='hidden'] *::after {
   animation: none !important;
   transition: none !important;
   scroll-behavior: auto !important;

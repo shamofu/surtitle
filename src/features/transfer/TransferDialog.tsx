@@ -206,7 +206,7 @@ export function TransferDialog({
           {t('復元', 'Restore')}
         </button>
       </div>
-      <MotionRegion open={busy}><ProgressStatus label={phase === 'exporting' ? t('学習データの書き出し', 'Export learning data') : phase === 'reading_backup' ? t('バックアップの確認', 'Review backup') : t('学習データの復元', 'Restore learning data')} phase={phase} /></MotionRegion>
+      <MotionRegion mode="status" open={busy}><ProgressStatus label={phase === 'exporting' ? t('学習データの書き出し', 'Export learning data') : phase === 'reading_backup' ? t('バックアップの確認', 'Review backup') : t('学習データの復元', 'Restore learning data')} phase={phase} /></MotionRegion>
       <MotionSwap stateKey={tab === 'export' ? exportedPaths.length ? 'exported' : 'export' : `restore:${preview?.token || 'choose'}`}>
       {tab === 'export' && exportedPaths.length > 0 ? <section aria-label={t('書き出し完了', 'Export complete')}>
         <p role="status">{t('書き出しました。', 'Your export is ready.')}</p>
@@ -214,7 +214,7 @@ export function TransferDialog({
         <footer className="modal-footer"><Button onClick={() => setExportedPaths([])}>{t('別の形式で書き出す', 'Export another format')}</Button><Button variant="primary" onClick={close}>{t('完了', 'Done')}</Button></footer>
       </section> : tab === 'export' ? (
         <>
-          <p className="notice" role="status"><MotionSwap as="span" stateKey={format === 'srt' || format === 'vtt' ? 'subtitles' : format === 'csv' || format === 'tsv' ? 'phrases' : 'all'}>{format === 'srt' || format === 'vtt'
+          <p className="notice" role="status"><MotionSwap disabled as="span" stateKey={format === 'srt' || format === 'vtt' ? 'subtitles' : format === 'csv' || format === 'tsv' ? 'phrases' : 'all'}>{format === 'srt' || format === 'vtt'
             ? t('対象：この作品の字幕（翻訳があれば別ファイルも作成）', 'Scope: subtitles for this media, plus a separate translation file when available')
             : format === 'csv' || format === 'tsv'
               ? t('対象：すべての作品のフレーズ', 'Scope: phrases from all media')
@@ -234,7 +234,7 @@ export function TransferDialog({
                   <small>{item.description}</small>
                 </span>
                 <span className="radio-indicator">
-                  <MotionRegion as="span" open={format === item.id}><Check size={12} /></MotionRegion>
+                  <MotionRegion mode="status" as="span" open={format === item.id}><Check size={12} /></MotionRegion>
                 </span>
               </button>
             ))}

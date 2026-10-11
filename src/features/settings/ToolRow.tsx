@@ -69,7 +69,7 @@ export function ToolRow({
                     : 'neutral'
               }
             >
-              <MotionSwap as="span" stateKey={tool.status}>{ready
+              <MotionSwap disabled as="span" stateKey={tool.status}>{ready
                 ? t('利用可能', 'Ready')
                 : tool.status === 'installing'
                   ? t('準備中', 'Installing')
@@ -79,13 +79,13 @@ export function ToolRow({
           <p>
             <AnimatedValue value={tool.version || t('未インストール', 'Not installed')} />
             <span>·</span>
-            <MotionSwap as="span" stateKey={tool.provider}>{tool.provider === 'managed'
+            <MotionSwap disabled as="span" stateKey={tool.provider}>{tool.provider === 'managed'
               ? t('Surtitle が管理', 'Managed by Surtitle')
               : t('外部ツール', 'External tool')}</MotionSwap>
           </p>
         </div>
       </div>
-      <MotionRegion open={!!tool.updateAvailable}>
+      <MotionRegion mode="status" open={!!tool.updateAvailable}>
         <p className="notice">
           <Download size={15} />
           <AnimatedValue value={t(
@@ -94,14 +94,14 @@ export function ToolRow({
           )} />
         </p>
       </MotionRegion>
-      <MotionRegion open={!!tool.path}>
+      <MotionRegion mode="status" open={!!tool.path}>
         <div className="tool-current-path">
           <span>{t('現在使用中のパス', 'Currently used path')}</span>
-          <code className="tool-path" title={tool.path}><MotionSwap as="span" stateKey={tool.path || ''}>{tool.path}</MotionSwap></code>
+          <code className="tool-path" title={tool.path}><MotionSwap disabled as="span" stateKey={tool.path || ''}>{tool.path}</MotionSwap></code>
         </div>
       </MotionRegion>
-      <MotionRegion open={!!tool.error}><p className="field-error"><MotionSwap as="span" stateKey={tool.error || ''}>{tool.error}</MotionSwap></p></MotionRegion>
-      <MotionRegion open={busy}><ProgressStatus label={tool.name} phase={operation?.phase || 'preparing'} completed={operation?.completed} total={operation?.total} unit={operation?.unit} /></MotionRegion>
+      <MotionRegion mode="status" open={!!tool.error}><p className="field-error"><MotionSwap disabled as="span" stateKey={tool.error || ''}>{tool.error}</MotionSwap></p></MotionRegion>
+      <MotionRegion mode="status" open={busy}><ProgressStatus label={tool.name} phase={operation?.phase || 'preparing'} completed={operation?.completed} total={operation?.total} unit={operation?.unit} /></MotionRegion>
       <div className="tool-actions">
         <div className="segmented-control compact" role="group" aria-label={t(`${tool.name}の取得方法`, `${tool.name} source`)}>
           <button
@@ -165,7 +165,7 @@ export function ToolRow({
                   ? t('更新する', 'Update tool')
                   : t('ダウンロード', 'Download')}</MotionSwap>
               </Button>
-              <MotionRegion as="span" open={!!tool.canRollback}>
+              <MotionRegion mode="status" as="span" open={!!tool.canRollback}>
                 <Button
                   disabled={busy}
                   onClick={() =>
@@ -187,7 +187,7 @@ export function ToolRow({
         <div className="external-picker">
           <h4>{t('PATHで見つかった候補', 'Candidates found on PATH')}</h4>
           <p className="helper-text">{t('候補を選ぶと下の入力欄にパスが入ります。「検証してこのパスを使用」で確認・適用します。', 'Select a candidate to fill the path below, then verify and use it.')}</p>
-          <MotionSwap stateKey={available.map(candidate => candidate.path).join('|')}>
+          <MotionSwap disabled stateKey={available.map(candidate => candidate.path).join('|')}>
           {available.length > 0 ? (
             <div className="candidate-list">
               {available.map((candidate) => (
@@ -197,8 +197,8 @@ export function ToolRow({
                     <small>{t('未検証・選択後に機能互換性を確認します。', 'Unverified; capabilities are checked when selected.')}{candidate.reason ? ` ${candidate.reason}` : ''}</small>
                   </div>
                   <Button disabled={busy || !candidate.selectable} aria-label={t(`候補を選択 ${candidate.path}`, `Select candidate ${candidate.path}`)} aria-pressed={externalPath === candidate.path} onClick={() => setExternalPath(candidate.path)}>
-                    <MotionRegion as="span" open={externalPath === candidate.path}><Check size={14} /></MotionRegion>
-                    <MotionSwap as="span" stateKey={externalPath === candidate.path ? 'selected' : 'select'}>{externalPath === candidate.path ? t('選択中', 'Selected') : t('選択', 'Select')}</MotionSwap>
+                    <MotionRegion mode="status" as="span" open={externalPath === candidate.path}><Check size={14} /></MotionRegion>
+                    <MotionSwap disabled as="span" stateKey={externalPath === candidate.path ? 'selected' : 'select'}>{externalPath === candidate.path ? t('選択中', 'Selected') : t('選択', 'Select')}</MotionSwap>
                   </Button>
                 </div>
               ))}

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import * as m from 'motion/react-m';
 import { Check, FileCheck2, Pause, RotateCw, Square } from 'lucide-react';
 import { aiApi } from './api';
 import type { AiQuote } from '../../shared/contracts/ai';
@@ -13,7 +12,8 @@ import {
   useSnapshot,
 } from '../../app/runtime';
 import { Button, Modal, useModalExit } from '../../shared/ui/index';
-import { AnimatedValue, MotionRegion, MotionSwap, motionDurations, motionEase, useAppMotion } from '../../shared/motion';
+import { AnimatedValue, MotionRegion, MotionSwap, useAppMotion } from '../../shared/motion';
+import { animateHeight, canAnimate } from '../../shared/motion/surfaces';
 import { QuoteApproval } from './QuoteApproval';
 import { timestamp } from '../../shared/format';
 import { UnknownAttempt } from '../settings/PausedJobs';
@@ -97,7 +97,7 @@ export function JobActions({
   }
   return (
     <>
-      <MotionSwap className="job-actions-motion" stateKey={`${job.status}:${job.issue?.nextAction ?? ''}:${!!(job.hasTranscriptResult ?? job.transcriptReview)}:${!!job.pendingResults}:${job.progress < 1}:${job.retry?.state ?? ''}:${job.resultState ?? ''}`}><div className="inline-actions job-actions" inert={exiting}>
+      <MotionSwap disabled className="job-actions-motion" stateKey={`${job.status}:${job.issue?.nextAction ?? ''}:${!!(job.hasTranscriptResult ?? job.transcriptReview)}:${!!job.pendingResults}:${job.progress < 1}:${job.retry?.state ?? ''}:${job.resultState ?? ''}`}><div className="inline-actions job-actions" inert={exiting}>
         {job.issue?.nextAction === 'retry_local' && <Button busy={busy} onClick={() => void perform(() => mutate(() => aiApi.retryAiApplication(job.id), { kind: 'snapshot' }))}>{t('保存結果の反映を再試行', 'Retry applying saved results')}</Button>}
         {job.status === 'queued' && <Button busy={busy} onClick={() => void openQuote()}>{t('見積もりを開く', 'Open estimate')}</Button>}
         {(job.hasTranscriptResult ?? job.transcriptReview) && onReviewTranscript && (
@@ -166,7 +166,7 @@ export function JobActions({
               'Apply received results to your subtitles without sending an API request or adding a charge. Applying a result again preserves later manual edits.',
             )}
           </p>
-          <MotionSwap stateKey={saved.map(result => result.ordinal).join('|') || 'empty'}>{saved.map((result) => (
+          <MotionSwap disabled stateKey={saved.map(result => result.ordinal).join('|') || 'empty'}>{saved.map((result) => (
             <section className="saved-ai-result" key={result.ordinal}>
               <div className="saved-translations">
                 {result.translations.map((translation, index) => (
@@ -179,7 +179,7 @@ export function JobActions({
                   </div>
                 ))}
               </div>
-              <MotionRegion open={!!result.blockedReason}><MotionSwap stateKey={result.blockedReason ?? ''}>
+              <MotionRegion mode="status" open={!!result.blockedReason}><MotionSwap disabled stateKey={result.blockedReason ?? ''}>
                 <p className="notice warning" role="status">
                   {result.blockedReason}
                 </p>
@@ -189,7 +189,7 @@ export function JobActions({
                 disabled={busy || !result.canApply}
                 onClick={() => void applySaved(result)}
               >
-                <MotionSwap as="span" stateKey={result.applied ? 'applied' : 'pending'}>{result.applied ? (
+                <MotionSwap disabled as="span" stateKey={result.applied ? 'applied' : 'pending'}>{result.applied ? (
                   <>
                     <Check size={14} />
                     {t('適用済み', 'Applied')}
@@ -212,13 +212,13 @@ export function JobActions({
             if (!busy) closeQuote();
           }}
         >
-          <MotionRegion open={!!quote.isRetry}><p className="notice">
+          <MotionRegion mode="status" open={!!quote.isRetry}><p className="notice">
             {t(
               '未完了の処理だけを新しく承認します。結果不明の送信は、利用額の確認を済ませるまで再実行できません。',
               'This new approval covers unfinished work only. Unknown attempts must be accounted for before retrying.',
             )}
           </p></MotionRegion>
-          <MotionSwap stateKey={(data?.budget.unknownAttempts || []).map(attempt => attempt.id).join('|')}>{(data?.budget.unknownAttempts || []).map(attempt => <div key={attempt.id}>
+          <MotionSwap disabled stateKey={(data?.budget.unknownAttempts || []).map(attempt => attempt.id).join('|')}>{(data?.budget.unknownAttempts || []).map(attempt => <div key={attempt.id}>
             {attempt.jobId !== job.id && <p>{t('別の処理の結果確認が必要です。', 'Another job has an unknown outcome to acknowledge.')}</p>}
             <UnknownAttempt attempt={attempt} onResolved={() => void openQuote()} />
           </div>)}</MotionSwap>
@@ -240,22 +240,22 @@ function JobQuoteSurface({ inline, title, onClose, children, busy, modalProps }:
   const { reducedMotion } = useAppMotion();
   const { open, onExited } = modalProps;
   const revision = useRef(0);
+  const panel = useRef<HTMLElement>(null);
+  const interruptedHeight = useRef<number | undefined>(undefined);
   useLayoutEffect(() => {
     const generation = ++revision.current;
-    if (!inline || open) return;
-    const finish = () => { if (generation === revision.current) onExited(); };
-    if (reducedMotion) { finish(); return; }
-    // Keep completion bounded even when WebView animation frames are suspended.
-    const timer = window.setTimeout(finish, motionDurations.exit * 1000 + 100);
-    return () => { ++revision.current; window.clearTimeout(timer); };
+    const node = panel.current;
+    if (!inline || !node) return;
+    const finish = () => { if (!open && generation === revision.current) onExited(); };
+    if (!canAnimate(node, reducedMotion)) { finish(); return; }
+    const height = node.getBoundingClientRect().height;
+    const stop = animateHeight(node, interruptedHeight.current ?? (open ? 0 : height), open ? height : 0, finish);
+    interruptedHeight.current = undefined;
+    return () => { ++revision.current; interruptedHeight.current = stop(); };
   }, [inline, open, reducedMotion, onExited]);
-  return inline ? <m.section aria-label={title} data-state={open ? 'open' : 'closing'} inert={!open} aria-hidden={!open || undefined}
-    initial={reducedMotion ? false : 'hidden'} animate={open ? 'shown' : 'hidden'}
-    variants={{ shown: { opacity: 1, y: 0 }, hidden: { opacity: 0, y: reducedMotion ? 0 : 8 } }}
-    transition={{ duration: reducedMotion ? 0 : open ? motionDurations.enter : motionDurations.exit, ease: motionEase }}
-    onAnimationComplete={definition => { if (definition === 'hidden' && !open) onExited(); }}
+  return inline ? <section ref={panel} aria-label={title} data-state={open ? 'open' : 'closing'} inert={!open} aria-hidden={!open || undefined}
     onClickCapture={event => { if (!open) { event.preventDefault(); event.stopPropagation(); } }}
     onKeyDownCapture={event => { if (!open) { event.preventDefault(); event.stopPropagation(); } }}
-  ><h4>{title}</h4>{children}<Button variant="ghost" disabled={busy || !open} onClick={onClose}>{t('閉じる', 'Close')}</Button></m.section>
+  ><h4>{title}</h4>{children}<Button variant="ghost" disabled={busy || !open} onClick={onClose}>{t('閉じる', 'Close')}</Button></section>
     : <Modal {...modalProps} title={title} eyebrow="A NEW QUOTE, A NEW DECISION" closeDisabled={busy} onClose={onClose}>{children}</Modal>;
 }

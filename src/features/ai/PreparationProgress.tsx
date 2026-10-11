@@ -10,6 +10,6 @@ export function PreparationProgress({ operationId, label }: { operationId?: stri
   const dependency = operationId ? activities.find(item => item.source === 'native' && item.parentId === operationId && item.status === 'running') : undefined;
   return <>
     <ProgressStatus label={label} phase={operation?.phase ?? 'setup'} completed={operation?.completed} total={operation?.total} unit={operation?.unit} status={operation?.status ?? 'running'} error={operation?.error} />
-    <MotionRegion open={!!dependency}><MotionSwap stateKey={dependency?.id ?? 'none'}>{dependency && <ProgressStatus label={dependency.label} phase={dependency.phase} completed={dependency.completed} total={dependency.total} unit={dependency.unit} status={dependency.status} compact />}</MotionSwap></MotionRegion>
+    <MotionRegion mode="status" open={!!dependency}><MotionSwap disabled stateKey={dependency?.id ?? 'none'}>{dependency && <ProgressStatus label={dependency.label} phase={dependency.phase} completed={dependency.completed} total={dependency.total} unit={dependency.unit} status={dependency.status} compact />}</MotionSwap></MotionRegion>
   </>;
 }

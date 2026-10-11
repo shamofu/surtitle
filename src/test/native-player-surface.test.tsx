@@ -8,6 +8,7 @@ import type { PlayerState } from '../shared/contracts/player';
 
 const fixture = vi.hoisted(() => ({
   hidden: false, notify: vi.fn(), ready: vi.fn(), position: vi.fn(),
+  viewportWidth: 320,
   listeners: new Set<(event: { payload: PlayerState }) => void>(),
   surfaceListeners: new Set<(event: { payload: void }) => void>(),
 }));
@@ -58,6 +59,17 @@ function clickSurface(source: 'native' | 'DOM') {
 function toggleRequests() {
   return vi.mocked(playerApi.player).mock.calls.map(([request]) => request).filter(request => request.action === 'toggle-pause');
 }
+function placementRequests() {
+  return vi.mocked(playerApi.player).mock.calls.map(([request]) => request)
+    .filter(request => request.action === 'bounds' || request.action === 'hide');
+}
+async function resizeSurface(width: number) {
+  fixture.viewportWidth = width;
+  await act(async () => {
+    fireEvent.resize(window);
+    await new Promise(requestAnimationFrame);
+  });
+}
 async function renderPlaying() {
   vi.mocked(playerApi.playerState).mockResolvedValue({ ...playerState, paused: false, positionMs: 1000 });
   render(player());
@@ -72,12 +84,13 @@ function seekRequests() {
 }
 beforeEach(() => {
   fixture.hidden = false;
+  fixture.viewportWidth = 320;
   fixture.listeners.clear();
   fixture.surfaceListeners.clear();
   vi.mocked(playerApi.loadMedia).mockResolvedValue();
   vi.mocked(playerApi.player).mockResolvedValue();
   vi.mocked(playerApi.playerState).mockResolvedValue(playerState);
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, top: 0, left: 0, width: 320, height: 200, bottom: 200, right: 320, toJSON: () => ({}) });
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ x: 0, y: 0, top: 0, left: 0, width: fixture.viewportWidth, height: 200, bottom: 200, right: fixture.viewportWidth, toJSON: () => ({}) }));
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('PointerEvent', MouseEvent);
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
@@ -217,6 +230,83 @@ it('hides video for a modal and restores the same bounds afterward', async () =>
   fixture.hidden = false;
   view.rerender(player());
   await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith(expect.objectContaining({ action: 'bounds' })));
+});
+
+it('coalesces animated bounds while one placement is pending and sends the final width', async () => {
+  const pending = deferred<void>();
+  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
+  render(player());
+  await waitFor(() => expect(placementRequests().filter(request => request.action === 'bounds')).toHaveLength(1));
+  await resizeSurface(280);
+  await resizeSurface(240);
+  expect(placementRequests().filter(request => request.action === 'bounds')).toHaveLength(1);
+  await act(async () => pending.resolve());
+  await waitFor(() => expect(placementRequests().filter(request => request.action === 'bounds').map(request => request.bounds?.width)).toEqual([320, 240]));
+});
+
+it('replaces pending resized bounds with a modal hide before restoring the final geometry', async () => {
+  const pending = deferred<void>();
+  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
+  const view = render(player());
+  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+  vi.mocked(playerApi.player).mockClear();
+  await resizeSurface(240);
+  fixture.hidden = true;
+  view.rerender(player());
+  expect(placementRequests()).toEqual([]);
+  await act(async () => pending.resolve());
+  await waitFor(() => expect(placementRequests()).toEqual([{ action: 'hide' }]));
+  fixture.hidden = false;
+  view.rerender(player());
+  await waitFor(() => expect(placementRequests().at(-1)).toEqual(expect.objectContaining({ action: 'bounds', bounds: expect.objectContaining({ width: 240 }) })));
+});
+
+it('keeps a hide barrier when a modal reopens the same geometry before the old placement settles', async () => {
+  const pending = deferred<void>();
+  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
+  const view = render(player());
+  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+  vi.mocked(playerApi.player).mockClear();
+  fixture.hidden = true;
+  view.rerender(player());
+  fixture.hidden = false;
+  view.rerender(player());
+  await resizeSurface(320);
+  expect(placementRequests()).toEqual([]);
+  await act(async () => pending.resolve());
+  await waitFor(() => expect(placementRequests().map(request => request.action)).toEqual(['hide', 'bounds']));
+  expect(placementRequests().at(-1)?.bounds?.width).toBe(320);
+});
+
+it('hides after an in-flight placement on unmount without sending its queued resize', async () => {
+  const pending = deferred<void>();
+  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
+  const view = render(player());
+  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+  vi.mocked(playerApi.player).mockClear();
+  await resizeSurface(240);
+  view.unmount();
+  await act(async () => pending.resolve());
+  await waitFor(() => expect(placementRequests()).toEqual([{ action: 'hide' }]));
+});
+
+it('serializes a replacement player behind the departing surface hide', async () => {
+  const pending = deferred<void>();
+  let deferBounds = true;
+  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' && deferBounds ? pending.promise : Promise.resolve());
+  const previous = render(player());
+  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+  vi.mocked(playerApi.player).mockClear();
+  previous.unmount();
+  fixture.viewportWidth = 210;
+  render(player({ media: { ...media, id: 'replacement' } }));
+  await screen.findByRole('button', { name: 'Play video' });
+  await resizeSurface(210);
+  expect(placementRequests()).toEqual([]);
+  deferBounds = false;
+  await act(async () => pending.resolve());
+  await waitFor(() => expect(placementRequests().map(request => request.action)).toEqual(['hide', 'bounds']));
+  expect(placementRequests().at(-1)?.bounds?.width).toBe(210);
 });
 
 it('offers embedded tracks as study sources and explains that captions appear below the video', async () => {

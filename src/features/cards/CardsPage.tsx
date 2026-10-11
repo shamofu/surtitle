@@ -103,7 +103,7 @@ export function CardsPage() {
         <Link to="/review" className="button primary">
           <BookOpen size={17} />
           {t('復習する', 'Start review')}
-          <MotionRegion open={due.length > 0} as="span"><span className="button-count"><AnimatedValue value={due.length} /></span></MotionRegion>
+          <MotionRegion mode="status" open={due.length > 0} as="span"><span className="button-count"><AnimatedValue value={due.length} /></span></MotionRegion>
         </Link>
       </PageTitle>
       <div className="library-toolbar">
@@ -134,13 +134,13 @@ export function CardsPage() {
               placeholder={t('フレーズを検索', 'Search your phrases')}
               aria-label={t('フレーズを検索', 'Search your phrases')}
             />
-            <MotionRegion open={!!search} as="span"><IconButton label={t('検索をクリア', 'Clear search')} onClick={() => {
+            <MotionRegion mode="status" open={!!search} as="span"><IconButton label={t('検索をクリア', 'Clear search')} onClick={() => {
               setSearch(''); searchInput.current?.focus();
             }}><X size={15} /></IconButton></MotionRegion>
           </div>
         </div>
       </div>
-      <MotionSwap stateKey={!data && loading ? 'loading' : !data && error ? 'error' : `${language}:${filtered.map(card => card.id).join('|')}`}>
+      <MotionSwap disabled stateKey={!data && loading ? 'loading' : !data && error ? 'error' : `${language}:${filtered.map(card => card.id).join('|')}`}>
       {!data && loading ? <p role="status">{t('フレーズを読み込み中…', 'Loading your phrases…')}</p>
       : !data && error ? <div className="notice warning" role="alert">
         <span>{t('フレーズを読み込めませんでした。', 'Could not load your phrases.')} {error.message}</span>
@@ -181,7 +181,7 @@ export function CardsPage() {
             return (
               <article className="phrase-card" key={card.id}>
                 <header>
-                  <h3><MotionSwap as="span" stateKey={card.term}>{card.term}</MotionSwap></h3>
+                  <h3><MotionSwap disabled as="span" stateKey={card.term}>{card.term}</MotionSwap></h3>
                   <div className="phrase-controls">
                     <Button
                       variant="ghost"
@@ -239,8 +239,8 @@ export function CardsPage() {
                     </AnimatedDetails>
                   </div>
                 </header>
-                <p className="phrase-meaning"><MotionSwap as="span" stateKey={card.meaning}>{card.meaning}</MotionSwap></p>
-                <blockquote><MotionSwap as="span" stateKey={card.example}>{card.example}</MotionSwap></blockquote>
+                <p className="phrase-meaning"><MotionSwap disabled as="span" stateKey={card.meaning}>{card.meaning}</MotionSwap></p>
+                <blockquote><MotionSwap disabled as="span" stateKey={card.example}>{card.example}</MotionSwap></blockquote>
                 <footer>
                   {media ? (
                     <Link
@@ -257,7 +257,7 @@ export function CardsPage() {
                         t('除外した教材の文脈', 'Context from removed media')}
                     </span>
                   )}
-                  <MotionSwap as="span" stateKey={`${card.suspended}:${isDue}:${card.language}`}><Badge tone={isDue ? 'accent' : 'neutral'}>
+                  <MotionSwap disabled as="span" stateKey={`${card.suspended}:${isDue}:${card.language}`}><Badge tone={isDue ? 'accent' : 'neutral'}>
                     {card.suspended
                       ? t('復習を停止中', 'Reviews suspended')
                       : isDue

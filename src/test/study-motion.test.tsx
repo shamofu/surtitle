@@ -1,37 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect, useState, type HTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { StudyRegion, useStudyPresence, useStudyRegionActive } from '../features/study/StudyPresence';
-import { motionDurations } from '../shared/motion';
 
-const fixture = vi.hoisted(() => ({ reducedMotion: false, completions: [] as ((definition: unknown) => void)[] }));
+const fixture = vi.hoisted(() => ({ reducedMotion: false }));
 vi.mock('../shared/motion', async importOriginal => ({
   ...await importOriginal<typeof import('../shared/motion')>(),
   useAppMotion: () => ({ reducedMotion: fixture.reducedMotion }),
 }));
-vi.mock('motion/react-m', () => ({
-  div: ({ animate, initial: _initial, variants: _variants, transition: _transition, onAnimationComplete, ...props }: HTMLAttributes<HTMLDivElement> & {
-    animate: string; initial: unknown; variants: unknown; transition: unknown; onAnimationComplete: (definition: unknown) => void;
-  }) => {
-    fixture.completions.push(onAnimationComplete);
-    return <div {...props} data-animation={animate} />;
-  },
-}));
-
-beforeEach(() => { fixture.reducedMotion = false; fixture.completions = []; });
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+beforeEach(() => { fixture.reducedMotion = false; });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 function Panel({ open, children }: { open: boolean; children: ReactNode }) {
   const presence = useStudyPresence(open);
-  return <div data-testid="grid" className={presence.visible ? 'has-companion' : ''}>
-    <button>Outside</button>
-    <StudyRegion open={open}>{children}</StudyRegion>
-    <button onClick={() => presence.motionProps.onAnimationComplete('hidden')}>Finish geometry exit</button>
+  return <div data-testid="dock" {...presence.dockProps}>
+    <StudyRegion open={open} retain={presence.visible} animate={!presence.moving}>{children}</StudyRegion>
   </div>;
 }
 
-it('deactivates an exiting panel immediately while keeping its last form and geometry until completion', () => {
+it('deactivates a closing drawer while retaining its last form until geometry finishes', () => {
   function Session() {
     const [open, setOpen] = useState(true);
     return <><button onClick={() => setOpen(false)}>Close</button><Panel open={open}>
@@ -48,73 +36,64 @@ it('deactivates an exiting panel immediately while keeping its last form and geo
   expect(region).not.toHaveAttribute('hidden');
   expect(field).toHaveValue('edited phrase');
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-  expect(screen.getByTestId('grid')).toHaveClass('has-companion');
-  act(() => fixture.completions.at(-1)!('hidden'));
-  expect(region).toHaveAttribute('hidden');
-  fireEvent.click(screen.getByText('Finish geometry exit'));
-  expect(screen.getByTestId('grid')).not.toHaveClass('has-companion');
-});
-
-it('ignores an obsolete exit after reopening and closing again', () => {
-  const view = render(<StudyRegion open><p>Panel</p></StudyRegion>);
-  view.rerender(<StudyRegion open={false}><p>Panel</p></StudyRegion>);
-  const oldCompletion = fixture.completions.at(-1)!;
-  view.rerender(<StudyRegion open><p>Reopened panel</p></StudyRegion>);
-  view.rerender(<StudyRegion open={false}><p>Reopened panel</p></StudyRegion>);
-  const region = screen.getByText('Reopened panel').parentElement!;
-  act(() => oldCompletion('hidden'));
-  expect(region).not.toHaveAttribute('hidden');
-  act(() => fixture.completions.at(-1)!('hidden'));
+  expect(screen.getByTestId('dock')).toHaveAttribute('data-moving', 'true');
+  const transition = new Event('transitionend', { bubbles: true });
+  Object.defineProperty(transition, 'propertyName', { value: 'width' });
+  fireEvent(screen.getByTestId('dock'), transition);
   expect(region).toHaveAttribute('hidden');
 });
 
-it('keeps a hidden transcription workspace mounted and gives it current logical activity', () => {
+it('reverses toward the latest target without an obsolete timeout closing it', () => {
+  vi.useFakeTimers();
+  const view = render(<Panel open><p>Panel</p></Panel>);
+  view.rerender(<Panel open={false}><p>Panel</p></Panel>);
+  act(() => vi.advanceTimersByTime(150));
+  view.rerender(<Panel open><p>Panel</p></Panel>);
+  act(() => vi.advanceTimersByTime(200));
+  expect(screen.getByTestId('dock')).toHaveAttribute('data-open', 'true');
+  expect(screen.getByText('Panel').parentElement).not.toHaveAttribute('hidden');
+  act(() => vi.advanceTimersByTime(120));
+  expect(screen.getByTestId('dock')).toHaveAttribute('data-moving', 'false');
+});
+
+it('keeps a hidden transcription workspace mounted and logically inactive', () => {
   const mounted = vi.fn();
   const unmounted = vi.fn();
-  function Workspace({ active }: { active: boolean }) {
+  const stop = vi.fn();
+  function Workspace() {
+    const active = useStudyRegionActive();
     useEffect(() => { mounted(); return unmounted; }, []);
+    useEffect(() => { if (active) return stop; }, [active]);
     return <p>{active ? 'Active workspace' : 'Inactive workspace'}</p>;
   }
-  const view = render(<StudyRegion open keepMounted freezeOnExit={false}><Workspace active /></StudyRegion>);
-  view.rerender(<StudyRegion open={false} keepMounted freezeOnExit={false}><Workspace active={false} /></StudyRegion>);
-  expect(screen.getByText('Inactive workspace')).toBeInTheDocument();
-  act(() => fixture.completions.at(-1)!('hidden'));
-  view.rerender(<StudyRegion open keepMounted freezeOnExit={false}><Workspace active /></StudyRegion>);
+  const view = render(<StudyRegion open keepMounted freezeOnExit={false}><Workspace /></StudyRegion>);
+  view.rerender(<StudyRegion open={false} keepMounted freezeOnExit={false}><Workspace /></StudyRegion>);
+  expect(screen.getByText('Inactive workspace').parentElement).toHaveAttribute('hidden');
+  expect(stop).toHaveBeenCalledTimes(1);
+  view.rerender(<StudyRegion open keepMounted freezeOnExit={false}><Workspace /></StudyRegion>);
   expect(mounted).toHaveBeenCalledTimes(1);
   expect(unmounted).not.toHaveBeenCalled();
 });
 
-it('deactivates background work even when the outgoing child props are retained', () => {
-  const stop = vi.fn();
-  const start = vi.fn(() => stop);
-  function Work() {
-    const active = useStudyRegionActive();
-    useEffect(() => { if (active) return start(); }, [active]);
-    return <p>Retained work</p>;
-  }
-  const view = render(<StudyRegion open><Work /></StudyRegion>);
-  view.rerender(<StudyRegion open={false}>{null}</StudyRegion>);
-  expect(screen.getByText('Retained work')).toBeInTheDocument();
-  expect(start).toHaveBeenCalledTimes(1);
-  expect(stop).toHaveBeenCalledTimes(1);
-});
-
-it('finishes reduced-motion exits immediately without waiting for animation callbacks', () => {
-  const view = render(<StudyRegion open><p>Panel</p></StudyRegion>);
-  fixture.reducedMotion = true;
-  view.rerender(<StudyRegion open={false}><p>Panel</p></StudyRegion>);
-  expect(screen.queryByText('Panel')).not.toBeInTheDocument();
+it('switches tab content without retaining an outgoing view', () => {
+  const view = render(<StudyRegion open><p>Old tab</p></StudyRegion>);
+  view.rerender(<StudyRegion open={false}><p>Old tab</p></StudyRegion>);
+  expect(screen.queryByText('Old tab')).not.toBeInTheDocument();
   expect(document.querySelector('.study-motion-region')).toHaveAttribute('hidden');
 });
 
-it('releases retained geometry when a WebView never delivers animation completion', () => {
+it.each(['reduce', 'hidden', 'resize', 'timeout'])('settles a closing drawer on %s', reason => {
   vi.useFakeTimers();
-  const view = render(<StudyRegion open><p>Panel</p></StudyRegion>);
-  view.rerender(<StudyRegion open={false}><p>Panel</p></StudyRegion>);
-  expect(screen.getByText('Panel')).toBeInTheDocument();
-  act(() => vi.advanceTimersByTime(motionDurations.exit * 1000 + 99));
-  expect(screen.getByText('Panel')).toBeInTheDocument();
-  act(() => vi.advanceTimersByTime(1));
-  expect(screen.queryByText('Panel')).not.toBeInTheDocument();
+  const view = render(<Panel open><p>Panel</p></Panel>);
+  view.rerender(<Panel open={false}><p>Panel</p></Panel>);
+  if (reason === 'reduce') {
+    fixture.reducedMotion = true;
+    view.rerender(<Panel open={false}><p>Panel</p></Panel>);
+  } else if (reason === 'hidden') {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    fireEvent(document, new Event('visibilitychange'));
+  } else if (reason === 'resize') fireEvent(window, new Event('resize'));
+  else act(() => vi.advanceTimersByTime(320));
   expect(document.querySelector('.study-motion-region')).toHaveAttribute('hidden');
+  expect(screen.getByTestId('dock')).toHaveAttribute('data-moving', 'false');
 });

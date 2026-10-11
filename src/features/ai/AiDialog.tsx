@@ -250,12 +250,12 @@ export function AiDialog({
         if (!busy && !preparing) void exit.close(onClose);
       }}
     >
-      <MotionRegion open={restored}><p className="notice" role="status">{t('データを復元しました。対象を確認してから見積もりを準備してください。', 'Data was restored. Check the source and prepare a new estimate.')}</p></MotionRegion>
-      <MotionRegion open={kind === 'transcribe' && mediaChanged}><div className="notice warning" role="alert">
+      <MotionRegion mode="status" open={restored}><p className="notice" role="status">{t('データを復元しました。対象を確認してから見積もりを準備してください。', 'Data was restored. Check the source and prepare a new estimate.')}</p></MotionRegion>
+      <MotionRegion mode="status" open={kind === 'transcribe' && mediaChanged}><div className="notice warning" role="alert">
         <p>{t('教材か言語設定が変わったため、以前の音声準備と見積もりを使わず、現在の対象で準備し直します。', 'The material or language settings changed. A new estimate will use the current source shown below.')}</p>
         <p>{media.title} · {media.path} · {t('音声トラック', 'Audio track')}: {media.audioStreamIndex ?? t('既定', 'Default')} · {media.learningLanguage} → {media.explanationLanguage}</p>
       </div></MotionRegion>
-      <MotionRegion open={invalidSource}><div className="notice warning" role="alert">
+      <MotionRegion mode="status" open={invalidSource}><div className="notice warning" role="alert">
         <p>{t('出典の字幕が変わったか見つかりません。入力は保持しています。字幕を選び直してから見積もりを確認してください。', 'The source subtitles changed or are missing. Your input is kept. Select the subtitles again before reviewing an estimate.')}</p>
         {onReselectSource && <Button disabled={busy || preparing} onClick={() => void reselectSource()}>{t('字幕を選び直す', 'Select subtitles again')}</Button>}
       </div></MotionRegion>
@@ -298,7 +298,7 @@ export function AiDialog({
               </button>
             ))}
           </div>
-          <MotionRegion open={!data?.settings.credentialConfigured || !modelValid || !data?.settings.vertexProject}><div className="notice warning">
+          <MotionRegion mode="status" open={!data?.settings.credentialConfigured || !modelValid || !data?.settings.vertexProject}><div className="notice warning">
             <p>{t('AIを使うための設定が必要です。入力と対象範囲を残して設定へ進めます。', 'Finish AI setup. Your input and selected scope will be kept.')}</p>
             <Button disabled={busy || preparing} onClick={() => void openSettings()}>{t('設定してこの操作に戻る', 'Set up and return here')}</Button>
           </div></MotionRegion>
@@ -377,7 +377,7 @@ export function AiDialog({
               />
             </Field>
           </div></MotionRegion>
-          <MotionRegion open={!valid && !(kind === 'transcribe' && wholeMedia && !media.durationMs)}>
+          <MotionRegion mode="status" open={!valid && !(kind === 'transcribe' && wholeMedia && !media.durationMs)}>
             <p className="field-error">
               {t(
                 '動画内の有効な開始・終了時刻を入力してください。',
@@ -433,7 +433,7 @@ export function AiDialog({
                   'Prepare audio locally first, then review the model and scope before approving cloud requests.',
                 )}
               </p>
-              <MotionRegion open={!!preparation}>{preparation && (
+              <MotionRegion mode="status" open={!!preparation}>{preparation && (
                 <p className="notice">
                   <AnimatedValue value={t(
                     `${preparation.chunkCount} 個の音声区間を準備しました（送信予定音声 ${timestamp(preparation.sendDurationMs)}）。クラウドには送信していません。`,
@@ -441,7 +441,7 @@ export function AiDialog({
                   )} />
                 </p>
               )}</MotionRegion>
-              <MotionRegion open={preparing}>
+              <MotionRegion mode="status" open={preparing}>
                 <div className="job-status">
                   <PreparationProgress operationId={preparationSession.session?.operationId} label={media.title} />
                   <Button
@@ -479,7 +479,7 @@ export function AiDialog({
               )}
             </span>
           </div>
-          <MotionRegion open={!data?.settings.credentialConfigured && !preparing}>
+          <MotionRegion mode="status" open={!data?.settings.credentialConfigured && !preparing}>
             <p className="helper-text">
               {t(
                 'AI を使うにはサービスアカウントの設定が必要です。',
@@ -525,7 +525,7 @@ export function AiDialog({
           />
         </>
       )}</MotionSwap>
-      <MotionRegion open={busy && !preparing}><ProgressStatus label={media.title} phase={busyPhase} status="running" /></MotionRegion>
+      <MotionRegion mode="status" open={busy && !preparing}><ProgressStatus label={media.title} phase={busyPhase} status="running" /></MotionRegion>
     </Modal>
   );
 }

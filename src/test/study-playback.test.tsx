@@ -418,7 +418,8 @@ describe('watching and inspecting phrases', () => {
     await ready();
     expect(document.querySelector('.current-caption-text')).toHaveTextContent(cues[0].text);
     expect(screen.getByLabelText('Search transcript')).not.toBeVisible();
-    expect(screen.queryByText('お願いします。')).not.toBeInTheDocument();
+    expect(screen.getByText('お願いします。').closest('.caption-translation-region')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.queryByRole('region', { name: 'Subtitle translation' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Show translation' }));
     expect(screen.getByText('お願いします。')).toBeVisible();
     await emit({ positionMs: 2600 });

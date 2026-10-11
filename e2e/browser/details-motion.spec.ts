@@ -6,6 +6,75 @@ import { motionDurations } from '../../src/shared/motion';
 // Outlive the configured exit and its bounded completion fallback.
 const obsoleteExitDeadline = motionDurations.exit * 1000 + 150;
 
+test('disclosure animates actual height and following content, then reverses with the same draft', async ({ page }, info) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await installLearningFixture(page, 'en', 'light');
+  await page.goto('/settings');
+  await page.waitForLoadState('networkidle');
+  const details = page.locator('.budget-details');
+  await details.scrollIntoViewIfNeeded();
+  const observe = (reverse = false) => details.evaluate(async (element, reverse) => {
+    const summary = element.querySelector('summary')!;
+    const text = element.querySelector('.helper-text')!;
+    const following = element.nextElementSibling!;
+    const start = performance.now();
+    const read = () => ({ at: performance.now() - start, height: element.getBoundingClientRect().height,
+      following: following.getBoundingClientRect().y, summary: summary.textContent, text: text.textContent,
+      font: getComputedStyle(text).fontSize, transform: getComputedStyle(text).transform,
+      opacity: getComputedStyle(text).opacity, inert: !!text.closest('[inert]'),
+      open: (element as HTMLDetailsElement).open });
+    const frames = [read()];
+    let reversed = false;
+    summary.click();
+    while (performance.now() - start < 420) {
+      await new Promise(requestAnimationFrame);
+      frames.push(read());
+      if (reverse && !reversed && performance.now() - start >= 60) {
+        summary.click();
+        reversed = true;
+      }
+    }
+    return frames;
+  }, reverse);
+  const opening = await observe();
+  const daily = page.getByRole('spinbutton', { name: 'Daily limit (USD)', exact: true });
+  await daily.fill('12.5');
+  // Editing a limit also updates a summary above this disclosure; let that independent change settle.
+  await page.waitForTimeout(240);
+  const original = await daily.elementHandle();
+  const closing = await observe();
+  expect(closing.some(frame => frame.inert)).toBe(true);
+  for (const [name, frames, increasing] of [['open', opening, true], ['close', closing, false]] as const) {
+    await info.attach(`disclosure-${name}-geometry.json`, { body: JSON.stringify(frames), contentType: 'application/json' });
+    const first = frames[0], last = frames.at(-1)!;
+    const low = Math.min(first.height, last.height), high = Math.max(first.height, last.height);
+    expect(high - low).toBeGreaterThan(100);
+    expect(new Set(frames.filter(frame => frame.height > low + 2 && frame.height < high - 2).map(frame => Math.round(frame.height))).size).toBeGreaterThan(1);
+    for (let index = 0; index < frames.length; index++) {
+      const frame = frames[index];
+      expect(frame.font).toBe(first.font);
+      expect(frame.text).toBe(first.text);
+      expect(frame.summary).toBe(first.summary);
+      expect(frame.transform).toBe('none');
+      expect(frame.opacity).toBe('1');
+      expect(Math.abs((frame.following - first.following) - (frame.height - first.height))).toBeLessThan(1);
+      if (index > 0) expect((frame.height - frames[index - 1].height) * (increasing ? 1 : -1)).toBeGreaterThanOrEqual(-1);
+    }
+  }
+  await expect(details).not.toHaveAttribute('open');
+  await details.locator('summary').click();
+  await page.waitForTimeout(240);
+  const reversing = await observe(true);
+  const heights = reversing.map(frame => frame.height);
+  expect(Math.min(...heights)).toBeGreaterThan(closing.at(-1)!.height + 2);
+  expect(Math.min(...heights)).toBeLessThan(heights[0] - 10);
+  expect(Math.abs(heights.at(-1)! - heights[0])).toBeLessThan(1);
+  await expect(details).toHaveAttribute('open', '');
+  await expect(daily).toHaveValue('12.5');
+  expect(await original!.evaluate(element => element.isConnected)).toBe(true);
+  await info.attach('disclosure-reversal-geometry.json', { body: JSON.stringify(reversing), contentType: 'application/json' });
+});
+
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {
   test(`validation reopens a closing disclosure before focusing its field (${reducedMotion})`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion });

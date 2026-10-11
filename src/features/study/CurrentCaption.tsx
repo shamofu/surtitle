@@ -5,8 +5,7 @@ import { ChevronLeft, ChevronRight, Languages, RotateCcw } from 'lucide-react';
 import { useAppearance } from '../../app/runtime';
 import type { SubtitleSegment } from '../../shared/contracts/media';
 import { Button } from '../../shared/ui/index';
-import { MotionRegion, MotionSwap, useMotionChange } from '../../shared/motion';
-import { StudyRegion } from './StudyPresence';
+import { MotionRegion } from '../../shared/motion';
 
 export function CurrentCaption({
   active, language, loading, hasSubtitles, draftMode, enabled, error,
@@ -33,15 +32,11 @@ export function CurrentCaption({
   const [showTranslation, setShowTranslation] = useState(false);
   const [gestureSource, setGestureSource] = useState<SubtitleSegment>();
   const caption = useRef<HTMLParagraphElement>(null);
-  const translation = useRef<HTMLParagraphElement>(null);
   const sourceScroll = useRef<HTMLDivElement>(null);
   const translationScroll = useRef<HTMLDivElement>(null);
   const handled = useRef(false);
   const source = gestureSource || active;
-  // Keep the selectable paragraph alive while changing only its presentation.
-  // gestureSource deliberately freezes this key until selection is released.
-  useMotionChange(caption, `${source?.id ?? ''}:${source?.text ?? ''}`, !!gestureSource);
-  useMotionChange(translation, source?.translation ?? '');
+  const translationOpen = !!source && !draftMode && showTranslation;
   useLayoutEffect(() => {
     // A new subtitle starts at its beginning, but selection keeps its frozen source.
     if (sourceScroll.current) sourceScroll.current.scrollTop = 0;
@@ -76,9 +71,8 @@ export function CurrentCaption({
 
   return (
     <section className="current-caption" aria-label={t('いまの字幕', 'Current subtitle')}>
-      <div className="caption-body">
+      <div className="caption-body" data-translation-open={translationOpen}>
         <div ref={sourceScroll} className="caption-source-scroll" role="region" aria-label={t('字幕の原文', 'Subtitle source')} tabIndex={0}>
-          <MotionSwap stateKey={draftMode ? 'draft' : source ? 'caption' : loading ? 'loading' : hasSubtitles ? 'gap' : 'empty'}>
             {draftMode ? (
               <div className="caption-empty">
                 <p>{t('下書きの区間を確認しています。選んだ原文は字幕パネルに表示します。', 'Checking a draft passage. Its source text is shown in the transcript panel.')}</p>
@@ -97,23 +91,22 @@ export function CurrentCaption({
                 {!hasSubtitles && <Button variant="ghost" onClick={onImport}>{t('音声から字幕を作成', 'Create subtitles from audio')}</Button>}
               </div>
             )}
-          </MotionSwap>
-          <MotionRegion open={!!error}>{error && <p className="notice warning" role="alert">{error.message}</p>}</MotionRegion>
+          <MotionRegion mode="status" open={!!error}>{error && <p className="notice warning" role="alert">{error.message}</p>}</MotionRegion>
         </div>
-        <StudyRegion open={!!source && !draftMode && showTranslation} className="caption-translation-region">
+        <div className="caption-translation-region" data-open={translationOpen} inert={!translationOpen} aria-hidden={!translationOpen}>
           <div ref={translationScroll} className="caption-translation-scroll" role="region" aria-label={t('字幕の訳', 'Subtitle translation')} tabIndex={0}>
-            <p ref={translation} className="caption-translation">
+            <p className="caption-translation">
               {source?.translation || t('翻訳はまだありません。言葉を確認して翻訳を見積もれます。', 'No translation yet. Inspect this phrase to estimate one.')}
             </p>
           </div>
-        </StudyRegion>
+        </div>
       </div>
       <div className="caption-controls">
         <div className="caption-actions">
           {source && !draftMode && <>
             <Button variant="ghost" aria-pressed={showTranslation} onClick={() => setShowTranslation(value => !value)}>
               <Languages size={17} />
-              <MotionSwap as="span" stateKey={String(showTranslation)}>{showTranslation ? t('訳を隠す', 'Hide translation') : t('訳を表示', 'Show translation')}</MotionSwap>
+              {showTranslation ? t('訳を隠す', 'Hide translation') : t('訳を表示', 'Show translation')}
             </Button>
             <button ref={inspectButton} type="button" className="button secondary" disabled={!enabled} onClick={() => onInspect(source)}>
               {t('この字幕を確認', 'Inspect this subtitle')}
@@ -121,7 +114,7 @@ export function CurrentCaption({
           </>}
         </div>
         <div className="caption-navigation-slot">
-          <MotionRegion open={hasSubtitles && !draftMode} className="caption-navigation" role="group" aria-label={t('字幕の再生操作', 'Subtitle playback')}>
+          <MotionRegion mode="status" open={hasSubtitles && !draftMode} className="caption-navigation" role="group" aria-label={t('字幕の再生操作', 'Subtitle playback')}>
             <Button variant="ghost" disabled={!enabled || !hasPrevious} onClick={onPrevious}>
               <ChevronLeft size={16} />{t('前の字幕', 'Previous subtitle')}
             </Button>

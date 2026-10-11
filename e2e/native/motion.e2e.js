@@ -3,13 +3,25 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
-import { assertNativeVideoBounds, resizeNativeWindow, saveNativeScreenshot } from '../support/native-window.mjs';
+import { assertNativeVideoBounds, resizeNativeWindow, sampleNativeVideoBounds, saveNativeScreenshot } from '../support/native-window.mjs';
 
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
 const invoke = (command, args = {}) => browser.execute(async (name, parameters) => window.__TAURI_INTERNALS__.invoke(name, parameters), command, args);
 const control = request => invoke('player_control', { request });
 const player = () => invoke('get_player_state');
 const navigate = path => browser.execute(next => { history.pushState({}, '', next); dispatchEvent(new PopStateEvent('popstate')); }, path);
+const assertContinuousNativeResize = trace => {
+  const widths = trace.samples.map(sample => {
+    const root = sample.windows[0];
+    const video = sample.windows.find(window => window.visible && window.parent === root.handle && window.className.toLowerCase() === 'static');
+    assert(video, 'The decoded native video disappeared during the drawer movement');
+    return video.screen.Right - video.screen.Left;
+  });
+  const minimum = Math.min(...widths);
+  const maximum = Math.max(...widths);
+  assert(new Set(widths.filter(width => width > minimum + 2 && width < maximum - 2)).size > 2,
+    'The actual native video HWND did not resize through intermediate drawer positions');
+};
 
 (process.platform === 'win32' ? describe : describe.skip)('motion with the real Windows video surface', () => {
   let originalSettings;
@@ -49,15 +61,23 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
         reduced = await browser.execute(() => document.documentElement.dataset.motion === 'reduce');
       });
 
-      it('retains video geometry through panel exit and keeps player ancestors unanimated', async () => {
-        await $('button=Transcript').click();
-        await $('[aria-label="Subtitle list"]').waitForDisplayed();
-        await browser.waitUntil(async () => (await player()).surfaceVisible);
+      it('resizes the video continuously with the subtitle drawer and keeps player ancestors unanimated', async () => {
+        const openingTrace = await sampleNativeVideoBounds(async () => {
+          await $('button=Transcript').click();
+          await $('[aria-label="Subtitle list"]').waitForDisplayed();
+          await browser.waitUntil(async () => (await player()).surfaceVisible);
+        }, `motion-${preference}-native-drawer-open.json`);
+        if (!reduced) assertContinuousNativeResize(openingTrace);
         const initialState = await player();
         await assertNativeVideoBounds();
         await saveNativeScreenshot(resolve(`test-results/native/motion-${preference}-panel.png`));
-        const observed = await browser.execute(async () => {
+        const nativeTrace = await sampleNativeVideoBounds(async () => {
+          // Keep the WebDriver command short: waiting inside execute for the
+          // animation can delay WebView IPC delivery on Windows.
+          await browser.execute(() => {
           const panel = document.querySelector('.study-companion');
+          const dock = document.querySelector('.study-companion-dock');
+          const rail = document.querySelector('.study-transcript-rail');
           const viewport = document.querySelector('[data-testid="native-player-viewport"]');
           const rectangle = () => {
             const { x, y, width, height } = viewport.getBoundingClientRect();
@@ -72,35 +92,59 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
             return values;
           };
           const before = rectangle();
+          const dockRight = dock.getBoundingClientRect().right;
+          const paneWidth = panel.getBoundingClientRect().width;
+          const started = performance.now();
+          const frameState = () => ({ rect: rectangle(), ancestors: ancestors(), dockRight: dock.getBoundingClientRect().right,
+            at: performance.now() - started, railLeft: rail.getBoundingClientRect().left, paneWidth: panel.getBoundingClientRect().width });
           const frames = [];
-          return new Promise((resolveObservation, reject) => {
+          window.__surtitleNativeDrawerObservation = undefined;
+          {
             let frame = 0;
             const cleanup = () => { clearTimeout(timeout); cancelAnimationFrame(frame); observer.disconnect(); };
             const sample = () => {
-              if (panel.inert && !panel.hidden) frames.push({ rect: rectangle(), ancestors: ancestors() });
+              if (panel.inert && !panel.hidden) frames.push(frameState());
               if (!panel.hidden) frame = requestAnimationFrame(sample);
             };
             const observer = new MutationObserver(() => {
-              if (panel.inert && !panel.hidden) frames.push({ rect: rectangle(), ancestors: ancestors() });
+              if (panel.inert && !panel.hidden) frames.push(frameState());
               if (panel.hidden) {
                 cleanup();
-                resolveObservation({ before, after: rectangle(), frames, finalAncestors: ancestors(), inert: panel.inert });
+                window.__surtitleNativeDrawerObservation = { before, after: rectangle(), dockRight, paneWidth, frames, finalAncestors: ancestors(), inert: panel.inert };
               }
             });
-            const timeout = setTimeout(() => { cleanup(); reject(new Error('Study panel did not finish exiting within five seconds')); }, 5000);
+            const timeout = setTimeout(() => { cleanup(); window.__surtitleNativeDrawerObservation = { error: 'Study panel did not finish exiting within five seconds' }; }, 5000);
             observer.observe(panel, { attributes: true });
             frame = requestAnimationFrame(sample);
-            document.querySelector('.study-transcript-toggle').click();
+          }
           });
-        });
+          await $('.study-transcript-toggle').click();
+          await browser.waitUntil(() => browser.execute(() => !!window.__surtitleNativeDrawerObservation));
+          const observation = await browser.execute(() => {
+            const value = window.__surtitleNativeDrawerObservation;
+            delete window.__surtitleNativeDrawerObservation;
+            return value;
+          });
+          assert(!observation.error, observation.error);
+          return observation;
+        }, `motion-${preference}-native-drawer.json`);
+        const observed = nativeTrace.result;
         assert.equal(observed.inert, true);
-        if (!reduced) assert(observed.frames.length > 0, 'Expected to observe the animated exit before the panel disappeared');
-        for (const frame of observed.frames) assert.deepEqual(frame.rect, observed.before, 'Video bounds moved while the outgoing panel was still displayed');
+        if (!reduced) {
+          const intermediate = observed.frames.filter(frame => frame.rect.width > observed.before.width + 2 && frame.rect.width < observed.after.width - 2);
+          assert(new Set(intermediate.map(frame => Math.round(frame.rect.width))).size > 2, 'Native video must resize through intermediate drawer positions');
+          assertContinuousNativeResize(nativeTrace);
+        }
+        for (const frame of observed.frames) {
+          assert(frame.rect.x + frame.rect.width <= frame.railLeft + 1, 'The subtitle rail overlapped the native video during resize');
+          assert(Math.abs(frame.dockRight - observed.dockRight) < 1, 'The drawer right edge moved');
+          assert(Math.abs(frame.paneWidth - observed.paneWidth) < 1, 'The subtitle text pane changed width during the animation');
+        }
         for (const ancestor of [...observed.frames.flatMap(frame => frame.ancestors), ...observed.finalAncestors]) {
           assert.equal(ancestor.transform, 'none', `${ancestor.name} transformed the native video ancestor`);
           assert.equal(ancestor.opacity, '1', `${ancestor.name} faded the native video ancestor`);
         }
-        assert(observed.after.width > observed.before.width, 'The video column must expand after the panel is removed');
+        assert(observed.after.width > observed.before.width, 'The video column must finish expanded when the drawer closes');
         await browser.waitUntil(async () => (await player()).surfaceVisible);
         const finalState = await player();
         assert.equal(finalState.ready, true);
@@ -118,9 +162,16 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
         await opener.click();
         await $('dialog').waitForDisplayed();
         await browser.waitUntil(async () => !(await player()).surfaceVisible);
-        await browser.execute(() => document.querySelector('dialog').focus());
-        await browser.keys(Key.Space);
-        assert.equal((await player()).paused, true, 'A modal keyboard event started background playback');
+        const hiddenTrace = await sampleNativeVideoBounds(async () => {
+          await browser.execute(() => document.querySelector('dialog').focus());
+          await browser.keys(Key.Space);
+          assert.equal((await player()).paused, true, 'A modal keyboard event started background playback');
+        }, `motion-${preference}-native-modal.json`);
+        for (const sample of hiddenTrace.samples) {
+          const root = sample.windows[0];
+          assert(!sample.windows.some(window => window.visible && window.parent === root.handle && window.className.toLowerCase() === 'static'),
+            'A stale bounds update made the native video reappear above the modal');
+        }
         await assertNativeVideoBounds(false);
         await saveNativeScreenshot(resolve(`test-results/native/motion-${preference}-modal.png`));
         const closing = await browser.execute(async () => {

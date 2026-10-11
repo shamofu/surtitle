@@ -234,7 +234,7 @@ export function ModelEditor({
           ))}
         </datalist>
       </Field>
-      <MotionRegion open={candidates === undefined}>
+      <MotionRegion mode="status" open={candidates === undefined}>
         <div className="inline-actions model-discovery-actions">
           <Button
             disabled={frozen || !nativeAvailable()}
@@ -422,7 +422,7 @@ export function ModelEditor({
             <Button disabled={frozen} onClick={() => setManual(!manual)}>
               {t('単価を手動設定', 'Set rates manually')}
             </Button>
-            <MotionRegion as="span" open={!!value.price}>
+            <MotionRegion mode="status" as="span" open={!!value.price}>
               <Button
                 disabled={frozen}
                 onClick={() => {
@@ -483,7 +483,7 @@ export function ModelEditor({
               'Pricing is unset: approve the request scope to use this model. A dollar limit cannot be calculated.',
             )} />
       </p>
-      <MotionRegion open={!!notice}><MotionSwap stateKey={notice}>
+      <MotionRegion mode="status" open={!!notice}><MotionSwap disabled stateKey={notice}>
         <p className="notice" role="status">
           {notice}
         </p>

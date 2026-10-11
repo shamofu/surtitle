@@ -295,6 +295,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
     expect(await page.locator('.study-auxiliary').evaluate(element => element.clientHeight <= 180 && element.scrollHeight > element.clientHeight)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath('study-expanded-history.png'), animations: 'disabled' });
     await page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true }).click();
+    await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
     for (const control of [
       page.getByRole('button', { name: locale === 'ja' ? '次の字幕' : 'Next subtitle', exact: true }),
       page.getByRole('button', { name: locale === 'ja' ? '自動追従中' : 'Following playback', exact: true }),

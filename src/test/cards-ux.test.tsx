@@ -116,7 +116,7 @@ it('clears just the query and resets both filters from the empty results state',
   expect(screen.getByRole('heading', { name: 'look into' })).toBeInTheDocument();
 });
 
-it('keeps IME input and retained rows in place while rapid animated filters hide stale actions', () => {
+it('keeps IME input and retained rows in place while filters remove stale actions immediately', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }));
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
   const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'animate');
@@ -134,9 +134,8 @@ it('keeps IME input and retained rows in place while rapid animated filters hide
     expect(search).toHaveValue('調');
     expect(screen.getByRole('heading', { name: '調べる' }).closest('article')).toBe(japaneseRow);
     expect(screen.queryByRole('heading', { name: 'look into' })).not.toBeInTheDocument();
-    const outgoing = document.querySelector('[data-motion-snapshot] .phrase-options-panel button');
-    expect(outgoing).not.toBeNull();
-    fireEvent.click(outgoing!);
+    expect(document.querySelector('[data-motion-snapshot]')).toBeNull();
+    expect(screen.queryByLabelText('Actions for look into')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Edit phrase' })).not.toBeInTheDocument();
     fireEvent.change(search, { target: { value: '調べる' } });
     fireEvent.compositionEnd(search);

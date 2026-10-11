@@ -250,25 +250,25 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
         <Field label={t('学習する言語', 'Learning language')}><LanguageInput value={learningLanguage} onChange={setLearningLanguage} disabled={busy && phase !== 'languages'} /></Field>
         <Field label={t('説明・翻訳の言語', 'Explanation language')}><LanguageInput value={explanationLanguage} onChange={setExplanationLanguage} disabled={busy && phase !== 'languages'} /></Field>
       </div>
-      <MotionRegion open={dragging && mode === 'url'}><p className="import-drag-notice" role="status">{t('ドロップするとファイルの追加に切り替わります。入力中の URL は残ります。', 'Drop to add local files. Your URL will be kept.')}</p></MotionRegion>
+      <MotionRegion mode="status" open={dragging && mode === 'url'}><p className="import-drag-notice" role="status">{t('ドロップするとファイルの追加に切り替わります。入力中の URL は残ります。', 'Drop to add local files. Your URL will be kept.')}</p></MotionRegion>
       <MotionSwap stateKey={mode}>
       {mode === 'local' ? <>
         <button className={`import-drop ${dragging ? 'is-dragging' : ''} ${rows.length ? 'has-files' : ''}`} onClick={() => void selectFiles()} disabled={busy}>
           <span className="drop-icon"><Upload size={26} strokeWidth={1.5} /></span>
-          <strong><MotionSwap as="span" stateKey={dragging ? 'dragging' : rows.length ? 'more' : 'choose'}>{dragging ? t('ここにドロップしてファイルを確認', 'Drop to review these files') : rows.length ? t('ファイルを追加で選択', 'Choose more files') : t('動画・音声ファイルを選択', 'Choose a video or audio file')}</MotionSwap></strong>
+          <strong><MotionSwap disabled as="span" stateKey={dragging ? 'dragging' : rows.length ? 'more' : 'choose'}>{dragging ? t('ここにドロップしてファイルを確認', 'Drop to review these files') : rows.length ? t('ファイルを追加で選択', 'Choose more files') : t('動画・音声ファイルを選択', 'Choose a video or audio file')}</MotionSwap></strong>
           <span>{t('ここへドラッグ＆ドロップ、またはクリックして選択。複数のファイルをまとめて追加できます。', 'Drag and drop here, or click to choose. You can add several files together.')}</span>
           <small>MP4 · MKV · WEBM · MOV · AVI · M4V · MP3 · WAV · FLAC · M4A · OGG · OPUS</small>
         </button>
-        <MotionRegion open={!!rows.length}><section className="import-selection" aria-label={t('選択したファイル', 'Selected files')}>
+        <MotionRegion mode="status" open={!!rows.length}><section className="import-selection" aria-label={t('選択したファイル', 'Selected files')}>
           <div className="import-selection-heading"><strong><AnimatedValue value={t(`${rows.length} 件のファイル`, `${rows.length} files`)} /></strong><Button variant="ghost" disabled={busy} onClick={() => { updateRows(() => []); setDuplicates(0); setAttempted(false); }}>{t('一覧をクリア', 'Clear list')}</Button></div>
-          <MotionSwap stateKey={rows.map(row => row.id).join('|')}>
+          <MotionSwap disabled stateKey={rows.map(row => row.id).join('|')}>
           <ul className="import-file-list">{rows.map(row => {
             const status = queueStatus(row, pair);
             return <li key={row.id} className={`import-file-row ${status}`}>
-              <MotionSwap as="span" className="import-file-icon" stateKey={status === 'imported' || status === 'existing' ? 'complete' : 'file'}>{status === 'imported' || status === 'existing' ? <Check size={18} aria-hidden="true" /> : <FileVideo2 size={18} aria-hidden="true" />}</MotionSwap>
-              <div className="import-file-copy"><strong title={row.inputPath}>{fileName(row.inputPath)}</strong><small className="import-file-path">{row.inputPath}</small><p><MotionSwap as="span" stateKey={statusText(row)}>{statusText(row)}</MotionSwap></p></div>
+              <MotionSwap disabled as="span" className="import-file-icon" stateKey={status === 'imported' || status === 'existing' ? 'complete' : 'file'}>{status === 'imported' || status === 'existing' ? <Check size={18} aria-hidden="true" /> : <FileVideo2 size={18} aria-hidden="true" />}</MotionSwap>
+              <div className="import-file-copy"><strong title={row.inputPath}>{fileName(row.inputPath)}</strong><small className="import-file-path">{row.inputPath}</small><p><MotionSwap disabled as="span" stateKey={statusText(row)}>{statusText(row)}</MotionSwap></p></div>
               <div className="import-file-actions">
-                <MotionRegion as="span" open={!!row.mediaId && (status === 'imported' || status === 'existing') && !busy}>{row.mediaId && <Link to="/study/$mediaId" params={{ mediaId: row.mediaId }} className="button secondary" aria-label={t(`${fileName(row.inputPath)} を開く`, `Open ${fileName(row.inputPath)}`)} onClick={event => {
+                <MotionRegion mode="status" as="span" open={!!row.mediaId && (status === 'imported' || status === 'existing') && !busy}>{row.mediaId && <Link to="/study/$mediaId" params={{ mediaId: row.mediaId }} className="button secondary" aria-label={t(`${fileName(row.inputPath)} を開く`, `Open ${fileName(row.inputPath)}`)} onClick={event => {
                   if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
                   event.preventDefault();
                   void report(() => exit.close(async () => { onClose(); await navigate({ to: '/study/$mediaId', params: { mediaId: row.mediaId! } }); }));
@@ -279,24 +279,24 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
           })}</ul>
           </MotionSwap>
         </section></MotionRegion>
-        <MotionRegion open={duplicates > 0}><p className="helper-text" role="status"><MotionSwap as="span" stateKey={duplicates}>{t(`同じファイル ${duplicates} 件をまとめました。`, `${duplicates} repeated file${duplicates === 1 ? '' : 's'} skipped.`)}</MotionSwap></p></MotionRegion>
-        <MotionRegion open={attempted}><p className="import-results" role="status"><MotionSwap as="span" stateKey={`${addedCount}:${existingCount}:${failedCount}:${invalidCount}`}>{t(`追加 ${addedCount} 件・追加済み ${existingCount} 件・失敗 ${failedCount} 件・対象外 ${invalidCount} 件`, `${addedCount} added · ${existingCount} already in library · ${failedCount} failed · ${invalidCount} unsupported or unavailable`)}</MotionSwap></p></MotionRegion>
+        <MotionRegion mode="status" open={duplicates > 0}><p className="helper-text" role="status"><MotionSwap disabled as="span" stateKey={duplicates}>{t(`同じファイル ${duplicates} 件をまとめました。`, `${duplicates} repeated file${duplicates === 1 ? '' : 's'} skipped.`)}</MotionSwap></p></MotionRegion>
+        <MotionRegion mode="status" open={attempted}><p className="import-results" role="status"><MotionSwap disabled as="span" stateKey={`${addedCount}:${existingCount}:${failedCount}:${invalidCount}`}>{t(`追加 ${addedCount} 件・追加済み ${existingCount} 件・失敗 ${failedCount} 件・対象外 ${invalidCount} 件`, `${addedCount} added · ${existingCount} already in library · ${failedCount} failed · ${invalidCount} unsupported or unavailable`)}</MotionSwap></p></MotionRegion>
       </> : <div className="url-import">
         <Field label={t('動画・音声の URL', 'Video or audio URL')} hint={t('公開 YouTube 動画、またはメディアファイルへの直接リンク。プレイリスト・ライブには対応しません。', 'A public YouTube video or direct media link. Playlists and live streams are not supported.')}><input value={url} disabled={busy} onChange={event => setUrl(event.target.value)} placeholder="https://www.youtube.com/watch?v=…" type="url" autoFocus /></Field>
         <p className="notice"><ArrowDownToLine size={16} />{t('ダウンロード完了後に再生できます。', 'Playback starts after the complete download.')}</p>
       </div>}
       </MotionSwap>
-      <MotionRegion open={!languagesValid}><p className="helper-text">{t('追加する前に、学習言語と説明・翻訳の言語を指定してください。', 'Choose both languages before adding files.')}</p></MotionRegion>
-      <MotionRegion open={!!problem}><p className="notice warning" role="alert"><MotionSwap as="span" stateKey={problem}>{problem}</MotionSwap></p></MotionRegion>
-      <MotionRegion open={!!phase}><MotionSwap stateKey={phase === 'picking' ? 'picking' : 'progress'}>
+      <MotionRegion mode="status" open={!languagesValid}><p className="helper-text">{t('追加する前に、学習言語と説明・翻訳の言語を指定してください。', 'Choose both languages before adding files.')}</p></MotionRegion>
+      <MotionRegion mode="status" open={!!problem}><p className="notice warning" role="alert"><MotionSwap disabled as="span" stateKey={problem}>{problem}</MotionSwap></p></MotionRegion>
+      <MotionRegion mode="status" open={!!phase}><MotionSwap disabled stateKey={phase === 'picking' ? 'picking' : 'progress'}>
       {phase === 'picking' ? <p className="helper-text" role="status">{t('ファイルを選択してください…', 'Choose your files…')}</p> : phase && <ProgressStatus label={phase === 'url' ? t('ダウンロードの準備', 'Prepare download') : t('ファイルをライブラリに追加', 'Add files to library')} phase={phase === 'validating' || phase === 'languages' || (phase === 'importing' && !fileProgress) ? 'checking_files' : phase === 'url' ? 'preparing' : 'importing'} completed={phase === 'importing' ? fileProgress?.completed : undefined} total={phase === 'importing' ? fileProgress?.total : undefined} unit="items" />}
       </MotionSwap></MotionRegion>
       <p className="helper-text"><Sparkles size={13} />{t('追加だけでは AI を実行しません。使う範囲と金額を後から選べます。', 'Importing does not run AI. Choose its scope and cost when you need it.')}</p>
       </div>
       <footer className="modal-footer import-footer">
-        <Button onClick={() => void exit.close(attempted || addedCount || existingCount ? onReturnToLibrary : onClose)} disabled={busy || exit.exiting}><MotionSwap as="span" stateKey={attempted || addedCount || existingCount ? 'return' : 'cancel'}>{attempted || addedCount || existingCount ? t('ライブラリに戻る', 'Return to library') : t('キャンセル', 'Cancel')}</MotionSwap></Button>
-        <MotionRegion as="span" open={mode === 'local' && failedCount > 0}><Button disabled={busy || !languagesValid} onClick={() => void submitLocal(true)}><RefreshCw size={16} />{t('失敗したファイルだけ再試行', 'Retry failed files')}</Button></MotionRegion>
-        <MotionRegion as="span" open={mode === 'url' || readyCount > 0 || !rows.length}><Button variant="primary" busy={busy} disabled={!languagesValid || (mode === 'local' ? !readyCount : !validUrl)} onClick={() => void (mode === 'local' ? submitLocal() : submitUrl())}><Plus size={16} /><AnimatedValue value={mode === 'local' && readyCount ? t(`${readyCount} 件をライブラリに追加`, `Add ${readyCount} ${readyCount === 1 ? 'file' : 'files'} to library`) : t('ライブラリに追加', 'Add to library')} /></Button></MotionRegion>
+        <Button onClick={() => void exit.close(attempted || addedCount || existingCount ? onReturnToLibrary : onClose)} disabled={busy || exit.exiting}><MotionSwap disabled as="span" stateKey={attempted || addedCount || existingCount ? 'return' : 'cancel'}>{attempted || addedCount || existingCount ? t('ライブラリに戻る', 'Return to library') : t('キャンセル', 'Cancel')}</MotionSwap></Button>
+        <MotionRegion mode="status" as="span" open={mode === 'local' && failedCount > 0}><Button disabled={busy || !languagesValid} onClick={() => void submitLocal(true)}><RefreshCw size={16} />{t('失敗したファイルだけ再試行', 'Retry failed files')}</Button></MotionRegion>
+        <MotionRegion mode="status" as="span" open={mode === 'url' || readyCount > 0 || !rows.length}><Button variant="primary" busy={busy} disabled={!languagesValid || (mode === 'local' ? !readyCount : !validUrl)} onClick={() => void (mode === 'local' ? submitLocal() : submitUrl())}><Plus size={16} /><AnimatedValue value={mode === 'local' && readyCount ? t(`${readyCount} 件をライブラリに追加`, `Add ${readyCount} ${readyCount === 1 ? 'file' : 'files'} to library`) : t('ライブラリに追加', 'Add to library')} /></Button></MotionRegion>
       </footer>
     </div>
   </Modal>;

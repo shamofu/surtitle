@@ -50,7 +50,7 @@ export function DraftCues({
                 <Play size={12} />
                 <AnimatedValue value={timestamp(cue.startMs, true)} />
               </button>
-              <MotionSwap stateKey={`${cue.text}:${cue.status}`}>
+              <MotionSwap disabled stateKey={`${cue.text}:${cue.status}`}>
                 <p>{cue.text}</p>
                 {cue.status === 'provisional' && (
                   <Badge tone="warning">
@@ -81,7 +81,7 @@ export function Alternatives({
   return (
     <section className="boundary-alternative">
       <h4>{title}</h4>
-      <MotionSwap stateKey={JSON.stringify(segments)}>{segments.length ? (
+      <MotionSwap disabled stateKey={JSON.stringify(segments)}>{segments.length ? (
         segments.map((cue, index) => (
           <div key={index}>
             <button

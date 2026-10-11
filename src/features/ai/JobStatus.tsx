@@ -42,8 +42,8 @@ export function JobStatusMessage({ job }: { job: JobSummary }) {
   }
   const seconds = Math.max(0, Math.ceil((deadline - now) / 1000));
   return <>
-    <MotionSwap as="span" stateKey={message} role="status">{message}</MotionSwap>
-    <MotionRegion as="span" open={Number.isFinite(deadline)}><span className="retry-countdown">
+    <MotionSwap disabled as="span" stateKey={message} role="status">{message}</MotionSwap>
+    <MotionRegion mode="status" as="span" open={Number.isFinite(deadline)}><span className="retry-countdown">
       {' '}<AnimatedValue value={waiting
         ? seconds > 0 ? t(`${seconds}秒後に再試行`, `Retrying in ${seconds}s`) : t('再送を準備中', 'Preparing to retry')
         : seconds > 0 ? t(`${seconds}秒後に次の区間を送信`, `Next request in ${seconds}s`) : t('次の送信を準備中', 'Preparing the next request')} />
@@ -58,7 +58,7 @@ export function JobProcessingDetails({ job }: { job: JobSummary }) {
   const ordinal = job.retry?.ordinal ?? pacing?.ordinal ?? issue?.ordinal;
   const range = ordinal == null ? undefined : job.transcriptionRanges?.[ordinal];
   const httpStatus = issue?.httpStatus ?? (job.retry ? 429 : undefined);
-  return <MotionSwap stateKey={`${httpStatus ?? ''}:${ordinal ?? ''}:${job.retry?.state ?? ''}:${!!pacing}`}><dl className="details-list">
+  return <MotionSwap disabled stateKey={`${httpStatus ?? ''}:${ordinal ?? ''}:${job.retry?.state ?? ''}:${!!pacing}`}><dl className="details-list">
     {httpStatus != null && <div><dt>{t('応答', 'Response')}</dt><dd>HTTP {httpStatus}</dd></div>}
     {ordinal != null && <div><dt>{pacing ? t('次の区間', 'Next range') : t('対象区間', 'Affected range')}</dt><dd>
       <AnimatedValue value={`${t(`区間 ${ordinal + 1}`, `Range ${ordinal + 1}`)}${range ? ` · ${timestamp(range.startMs)}–${timestamp(range.endMs)}` : ''}`} />

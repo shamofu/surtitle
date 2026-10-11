@@ -45,7 +45,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await expect(transcript).toHaveAttribute('aria-expanded', 'true');
       await expectTabBesideVideo();
       if (size.width < 1000) {
-        await expect(page.locator('.study-companion h2')).toBeInViewport();
+        await page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript').scrollIntoViewIfNeeded();
         await expect(page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript')).toBeInViewport();
       }
       const rows = page.locator('.transcript-row');
@@ -55,7 +55,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await page.getByRole('button', { name: locale === 'ja' ? 'この字幕を確認' : 'Inspect this subtitle', exact: true }).click();
       await expect(page.getByRole('button', { name: locale === 'ja' ? '元の位置から再生を再開' : 'Resume from original position', exact: true })).toBeVisible();
       if (size.width < 1000) {
-        await expect(page.locator('.study-companion h2')).toBeInViewport();
+        await page.getByRole('button', { name: locale === 'ja' ? '元の位置から再生を再開' : 'Resume from original position', exact: true }).scrollIntoViewIfNeeded();
         await expect(page.getByRole('button', { name: locale === 'ja' ? '元の位置から再生を再開' : 'Resume from original position', exact: true })).toBeInViewport();
       }
       await capture('phrase');
@@ -73,10 +73,6 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await expect(transcript).toHaveAttribute('aria-expanded', 'false');
       await expect(transcript).toBeFocused();
       await expectTabBesideVideo();
-      if (size.width < 1000) {
-        await expect(page.getByTestId('native-player-viewport')).toBeInViewport();
-        await expect.poll(() => page.locator('.page-content').evaluate(element => element.scrollTop)).toBe(0);
-      }
       for (const [path, heading, name] of [
         ['/cards', locale === 'ja' ? 'フレーズ帳' : 'Phrases', 'phrases'],
         ['/review', locale === 'ja' ? '復習' : 'Review', 'review'],

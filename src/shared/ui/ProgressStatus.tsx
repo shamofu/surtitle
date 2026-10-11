@@ -58,9 +58,9 @@ export function ProgressStatus({ label, phase, completed, total, unit, status = 
   const ratioOnly = exact && total === 1 && !unit;
   const count = ratioOnly ? `${Math.floor(bounded * 100)}%` : exact ? `${format(bounded)} / ${format(total)}` : completed !== undefined ? format(value) : undefined;
   return <div className={`progress-status${compact ? ' compact' : ''}`} data-status={status} aria-busy={active}>
-    <div className="progress-status-copy"><strong>{label}</strong><span role="status"><MotionSwap as="span" stateKey={progressPhaseLabel(state, t)}>{progressPhaseLabel(state, t)}</MotionSwap></span></div>
-    <MotionRegion open={active}><progress aria-label={label} {...(exact ? { value: bounded, max: total } : {})} /></MotionRegion>
-    <MotionRegion open={!!count}><p className="progress-status-count">{unit === 'bytes' && !exact ? `${t('保存中の容量', 'Stored size')}: ` : ''}<AnimatedValue value={`${count ?? ''}${exact && active && !ratioOnly ? ` · ${Math.floor(bounded / total * 100)}%` : ''}`} /></p></MotionRegion>
-    <MotionRegion open={!!error}><p className="progress-status-error"><MotionSwap as="span" stateKey={error ?? ''}>{error}</MotionSwap></p></MotionRegion>
+    <div className="progress-status-copy"><strong>{label}</strong><span role="status"><MotionSwap disabled as="span" stateKey={progressPhaseLabel(state, t)}>{progressPhaseLabel(state, t)}</MotionSwap></span></div>
+    <MotionRegion mode="status" open={active}><progress aria-label={label} {...(exact ? { value: bounded, max: total } : {})} /></MotionRegion>
+    <MotionRegion mode="status" open={!!count}><p className="progress-status-count">{unit === 'bytes' && !exact ? `${t('保存中の容量', 'Stored size')}: ` : ''}<AnimatedValue value={`${count ?? ''}${exact && active && !ratioOnly ? ` · ${Math.floor(bounded / total * 100)}%` : ''}`} /></p></MotionRegion>
+    <MotionRegion mode="status" open={!!error}><p className="progress-status-error"><MotionSwap disabled as="span" stateKey={error ?? ''}>{error}</MotionSwap></p></MotionRegion>
   </div>;
 }

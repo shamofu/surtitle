@@ -36,9 +36,13 @@ beforeEach(() => {
   fixture.errors = [];
   vi.mocked(aiApi.createRetryQuote).mockResolvedValue(quote);
   vi.mocked(aiApi.reapproveQuote).mockResolvedValue(undefined);
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, value: vi.fn(() => ({
+    cancel: vi.fn(), finished: new Promise<void>(() => {}),
+  })) });
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
-const exitFallbackMs = motionDurations.exit * 1000 + 100;
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); vi.restoreAllMocks(); delete (HTMLElement.prototype as Partial<HTMLElement>).animate; });
+const exitFallbackMs = motionDurations.reveal * 1000 + 100;
 
 async function openQuote() {
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Resume remaining work' })); });

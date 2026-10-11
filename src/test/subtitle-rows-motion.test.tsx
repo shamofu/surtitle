@@ -42,7 +42,7 @@ it('keeps the surviving textarea, focus, selection and composition when an earli
   expect(screen.getByDisplayValue('Editing this line')).toBe(field);
   expect(field).toHaveFocus();
   expect([field.selectionStart, field.selectionEnd]).toEqual([3, 9]);
-  expect(screen.getByDisplayValue('Earlier line').closest('.motion-region')).toHaveAttribute('inert');
+  expect(screen.queryByDisplayValue('Earlier line')).not.toBeInTheDocument();
   expect(screen.getAllByRole('button', { name: 'Remove row' })).toHaveLength(1);
   fireEvent.compositionEnd(field, { data: '編集中' });
   fireEvent.change(field, { target: { value: '編集中の字幕' } });
@@ -51,7 +51,7 @@ it('keeps the surviving textarea, focus, selection and composition when an earli
   expect(screen.getByDisplayValue('編集中の字幕')).toBe(field);
 });
 
-it('keeps new row identities while deletions exit and drops retained rows when motion is reduced', () => {
+it('keeps new row identities after immediate deletion and a motion preference change', () => {
   const view = render(<Editor />);
   fireEvent.click(screen.getAllByRole('button', { name: 'Remove row' })[0]);
   fireEvent.click(screen.getByRole('button', { name: 'Add row' }));

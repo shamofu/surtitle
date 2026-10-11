@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('inspect', 'resize', 'capture')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('inspect', 'resize', 'capture', 'sample')][string]$Action,
     [Parameter(Mandatory)][string]$Application,
     [int]$Width,
     [int]$Height,
-    [string]$Screenshot
+    [string]$Screenshot,
+    [ValidateRange(100, 5000)][int]$DurationMs = 1500,
+    [ValidateRange(5, 100)][int]$IntervalMs = 10
 )
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows) { throw 'Native window inspection requires Windows.' }
@@ -16,6 +18,21 @@ $apps = @(Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($expected)) 
 if ($apps.Count -ne 1) { throw "Expected exactly one window for the configured test executable, found $($apps.Count)." }
 $window = $apps[0].MainWindowHandle
 Add-Type -Path (Join-Path $PSScriptRoot 'native-window.cs')
+if ($Action -eq 'sample') {
+    # Warm the interop process before the test triggers its short animation.
+    # Only the configured test application's HWND tree is inspected.
+    $samples = [Collections.Generic.List[object]]::new()
+    $samples.Add(@{ elapsedMs = 0; windows = [SurtitleNativeWindow]::Inspect($window) })
+    [Console]::Out.WriteLine('SURTITLE_NATIVE_SAMPLE_READY')
+    [Console]::Out.Flush()
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($clock.ElapsedMilliseconds -lt $DurationMs) {
+        Start-Sleep -Milliseconds $IntervalMs
+        $samples.Add(@{ elapsedMs = $clock.Elapsed.TotalMilliseconds; windows = [SurtitleNativeWindow]::Inspect($window) })
+    }
+    @{ durationMs = $clock.Elapsed.TotalMilliseconds; samples = $samples } | ConvertTo-Json -Depth 8 -Compress
+    exit 0
+}
 if ($Action -eq 'resize') {
     if ($Width -lt 1024 -or $Width -gt 8192 -or $Height -lt 700 -or $Height -gt 8192) { throw 'Client size must be within 1024..8192 by 700..8192 logical pixels.' }
     [SurtitleNativeWindow]::ResizeClient($window, $Width, $Height)

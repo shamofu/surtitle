@@ -3,7 +3,7 @@ import { createContext, useContext, useLayoutEffect, useMemo, useSyncExternalSto
 import { domAnimation, LazyMotion, MotionConfig } from 'motion/react';
 import type { MotionPreference } from '../contracts/settings';
 
-export const motionDurations = { swap: 0.14, fast: 0.16, enter: 0.3, exit: 0.22 } as const;
+export const motionDurations = { swap: 0.1, reveal: 0.18, fast: 0.16, enter: 0.3, exit: 0.22 } as const;
 export const motionEase = [0.22, 0.61, 0.36, 1] as const;
 export const motionCssEase = `cubic-bezier(${motionEase.join(', ')})`;
 
@@ -28,6 +28,17 @@ export function MotionProvider({ children, preference = 'system' }: { children: 
   useLayoutEffect(() => {
     document.documentElement.dataset.motion = reducedMotion ? 'reduce' : 'full';
   }, [reducedMotion]);
+  useLayoutEffect(() => {
+    const updateVisibility = () => {
+      document.documentElement.dataset.visibility = document.hidden ? 'hidden' : 'visible';
+    };
+    updateVisibility();
+    document.addEventListener('visibilitychange', updateVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', updateVisibility);
+      delete document.documentElement.dataset.visibility;
+    };
+  }, []);
 
   return (
     <MotionContext.Provider value={value}>

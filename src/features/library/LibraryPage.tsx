@@ -35,7 +35,7 @@ function MediaRow({ media }: { media: Media }) {
           <p className="media-row-source">
             <span>{media.kind === 'audio' ? t('音声', 'Audio') : t('動画', 'Video')}</span>
             <span>{media.sourceUrl ? t('URL から追加', 'Imported from URL') : t('ローカルファイル', 'Local file')}</span>
-            <MotionSwap as="span" stateKey={media.status}>{status && <Badge tone={media.status === 'importing' ? 'neutral' : 'warning'}>{status}</Badge>}</MotionSwap>
+            <MotionSwap disabled as="span" stateKey={media.status}>{status && <Badge tone={media.status === 'importing' ? 'neutral' : 'warning'}>{status}</Badge>}</MotionSwap>
           </p>
         </div>
       </div>
@@ -127,12 +127,12 @@ export function LibraryPage() {
         </Button>
       </PageTitle>
       <p className="library-drop-hint"><Upload size={15} aria-hidden="true" />{t('動画・音声ファイルをここへドロップして追加できます。', 'Drop video or audio files here to add them.')}</p>
-      <MotionRegion open={dragging && !importOpen}><div className="library-drop-overlay" role="status"><div><Upload size={34} aria-hidden="true" /><strong>{t('ドロップして教材を追加', 'Drop to add your materials')}</strong><p>{t('ファイルと言語を確認してから、ライブラリに追加します。', 'Review the files and languages before adding them to your library.')}</p></div></div></MotionRegion>
+      <MotionRegion mode="status" open={dragging && !importOpen}><div className="library-drop-overlay" role="status"><div><Upload size={34} aria-hidden="true" /><strong>{t('ドロップして教材を追加', 'Drop to add your materials')}</strong><p>{t('ファイルと言語を確認してから、ライブラリに追加します。', 'Review the files and languages before adding them to your library.')}</p></div></div></MotionRegion>
       <DownloadJobs />
-      <MotionRegion open={continuing.length > 0}>
+      <MotionRegion mode="status" open={continuing.length > 0}>
         <section className="continue-section" aria-labelledby="continue-title">
           <h2 id="continue-title">{t('視聴途中', 'Continue watching')}</h2>
-          <MotionSwap className="continue-list" stateKey={continuing.map(item => item.id).join('|')}>
+          <MotionSwap disabled className="continue-list" stateKey={continuing.map(item => item.id).join('|')}>
             {continuing.map((item) => (
               <Link key={item.id} className="continue-row" to="/study/$mediaId" params={{ mediaId: item.id }}>
                 <span className="continue-play" aria-hidden="true"><Play size={19} fill="currentColor" /></span>
@@ -150,7 +150,7 @@ export function LibraryPage() {
         <div className="library-toolbar">
           <div className="section-heading">
             <h2 id="library-list-title">{t('教材一覧', 'Your materials')}</h2>
-            <MotionRegion open={!!data} as="span"><span className="count-pill"><AnimatedValue value={media.length} /></span></MotionRegion>
+            <MotionRegion mode="status" open={!!data} as="span"><span className="count-pill"><AnimatedValue value={media.length} /></span></MotionRegion>
           </div>
           <div className="library-tools">
             <div className="filter-tabs" role="group" aria-label={t('コンテンツの種類', 'Content type')}>
@@ -165,11 +165,11 @@ export function LibraryPage() {
             <div className="search-box">
               <Search size={17} aria-hidden="true" />
               <input placeholder={t('タイトルで検索', 'Search titles')} value={search} onChange={(event) => setSearch(event.target.value)} aria-label={t('ライブラリを検索', 'Search your library')} />
-              <MotionRegion open={!!search} as="span"><button aria-label={t('検索をクリア', 'Clear search')} onClick={() => setSearch('')}><X size={16} /></button></MotionRegion>
+              <MotionRegion mode="status" open={!!search} as="span"><button aria-label={t('検索をクリア', 'Clear search')} onClick={() => setSearch('')}><X size={16} /></button></MotionRegion>
             </div>
           </div>
         </div>
-        <MotionSwap stateKey={loading ? 'loading' : !data && error ? 'error' : `${filter}:${filtered.map(item => item.id).join('|')}`}>
+        <MotionSwap disabled stateKey={loading ? 'loading' : !data && error ? 'error' : `${filter}:${filtered.map(item => item.id).join('|')}`}>
         {loading ? (
           <div className="media-list" aria-label={t('読み込み中', 'Loading')} aria-busy="true">
             {[0, 1, 2].map((item) => <div className="skeleton media-skeleton" key={item} />)}

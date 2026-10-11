@@ -23,7 +23,7 @@ import { resolveSourceSelection } from './source-selection';
 import { useAppearance } from '../../app/runtime';
 import { timestamp } from '../../shared/format';
 import { Badge, Button, EmptyState, IconButton } from '../../shared/ui/index';
-import { AnimatedValue, MotionRegion, MotionSwap, useAppMotion, useMotionChange } from '../../shared/motion';
+import { AnimatedValue, MotionRegion, MotionSwap, useAppMotion } from '../../shared/motion';
 import { DraftStudyPanel } from './drafts/DraftStudyPanel';
 import type { PlayRange } from './drafts/lifecycle';
 import { StudyRegion } from './StudyPresence';
@@ -117,13 +117,8 @@ export function StudyTranscript({
     onViewStateChange(next);
   }, [onViewStateChange]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const suggestions = useRef<HTMLDivElement>(null);
   const followedSubtitle = useRef<string | undefined>(undefined);
   const filtered = segments.filter(item => (!markedOnly || item.status === 'generated_review' || item.timingPrecision === 'source_block' || !!item.reviewIssues?.length) && `${item.text} ${item.translation || ''}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
-  // Fade semantic filtering/list changes without cloning a virtual viewport or
-  // replaying entrance effects when scrolling recycles rows.
-  useMotionChange(scrollRef, filtered.map(segment => segment.id).join(','));
-  useMotionChange(suggestions, JSON.stringify(candidates.map(candidate => [candidate.id, candidate.term, candidate.meaning, candidate.example])));
   const cached = viewState.measurementCache;
   const initialMeasurements = cached?.search === search && cached.showTranslations === showTranslations ? cached : undefined;
   const previousLayout = useRef({ search, showTranslations, width: initialMeasurements?.width });
@@ -233,14 +228,14 @@ export function StudyTranscript({
           </div>
       </StudyRegion>
       <StudyRegion open={tab === 'vocabulary'}>
-            <div ref={suggestions} className="suggestions-panel" role="tabpanel" id={`${tabsId}-vocabulary-panel`} aria-labelledby={`${tabsId}-vocabulary-tab`}>
+            <div className="suggestions-panel" role="tabpanel" id={`${tabsId}-vocabulary-panel`} aria-labelledby={`${tabsId}-vocabulary-tab`}>
               <div className="suggestions-actions">
                 <Button onClick={() => onEstimate('vocabulary')}>
                   <Sparkles size={16} />
                   {t('AIで語彙・表現を調べる', 'Explore words with AI')}
                 </Button>
               </div>
-              <MotionRegion open={!!candidatesError}>{candidatesError &&
+              <MotionRegion mode="status" open={!!candidatesError}>{candidatesError &&
                 <p
                   className="notice warning"
                   role="alert"
@@ -303,7 +298,7 @@ export function StudyTranscript({
                     value={search}
                     onChange={event => updateView({ search: event.target.value, scrollOffset: 0 })}
                   />
-                  <MotionRegion as="span" open={!!search}>{search &&
+                  <MotionRegion mode="status" as="span" open={!!search}>{search &&
                     <IconButton
                       label={t('検索をクリア', 'Clear search')}
                       onClick={() => updateView({ search: '', scrollOffset: 0 })}
@@ -327,7 +322,7 @@ export function StudyTranscript({
                 </Button>
               </div>
               {segments.some(cue => cue.status === 'generated_review' || cue.timingPrecision === 'source_block') && <label className="transcript-marked-filter"><input type="checkbox" checked={markedOnly} onChange={event => setMarkedOnly(event.target.checked)} /><span>{t('注意のある箇所だけ表示', 'Show marked passages only')}</span></label>}
-              <MotionRegion open={!!error}>{error && <p
+              <MotionRegion mode="status" open={!!error}>{error && <p
                 className="notice warning"
                 role="alert"
               >
@@ -398,7 +393,7 @@ export function StudyTranscript({
                                 <MotionSwap as="span" stateKey={activeId === segment.id ? 'playing' : 'idle'}>{activeId === segment.id ? <AudioLines size={16} /> : <Play size={15} />}</MotionSwap>
                                 <AnimatedValue value={timestamp(segment.startMs)} />
                               </button>
-                              <TranscriptContent stateKey={JSON.stringify([segment.text, showTranslations && segment.translation, segment.timingPrecision, segment.status])}>
+                              <div className="segment-content">
                                 <button
                                   type="button"
                                   className="segment-text"
@@ -444,7 +439,7 @@ export function StudyTranscript({
                                     {t('確認・保存', 'Review and save')}
                                   </Button>
                                 </div>
-                              </TranscriptContent>
+                              </div>
                             </article>
                           );
                         })}
@@ -473,11 +468,4 @@ export function StudyTranscript({
       </div>
     </>
   );
-}
-
-/** Virtual rows appear without an entrance animation; only their content changes fade. */
-function TranscriptContent({ stateKey, children }: { stateKey: string; children: ReactNode }) {
-  const content = useRef<HTMLDivElement>(null);
-  useMotionChange(content, stateKey);
-  return <div ref={content} className="segment-content">{children}</div>;
 }

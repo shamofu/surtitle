@@ -34,7 +34,7 @@ export function AppShell() {
             <Link to="/review" activeProps={{ className: 'active', 'aria-current': 'page' }}>
               <BookOpen size={18} aria-hidden="true" />
               <span>{t('復習', 'Review')}</span>
-              <MotionRegion as="span" open={due !== null && due > 0}><span className="nav-count"><AnimatedValue value={due ?? 0} /></span></MotionRegion>
+              <MotionRegion mode="status" as="span" open={due !== null && due > 0}><span className="nav-count"><AnimatedValue value={due ?? 0} /></span></MotionRegion>
             </Link>
             <Link to="/settings" activeProps={{ className: 'active', 'aria-current': 'page' }}>
               <Settings2 size={18} aria-hidden="true" />
@@ -57,9 +57,9 @@ export function AppShell() {
             <span>{t('ブラウザーで UI をプレビュー中です。動画の読み込み・AI・保存はデスクトップアプリで利用できます。', 'Browser UI preview. Import, AI, and persistence are available in the desktop app.')}</span>
           </div>
         )}
-        <MotionRegion open={!!error}>
+        <MotionRegion mode="status" open={!!error}>
           <div className="error-banner" role="alert">
-            <MotionSwap as="span" stateKey={error?.message ?? ''}>{error?.message}</MotionSwap>
+            <MotionSwap disabled as="span" stateKey={error?.message ?? ''}>{error?.message}</MotionSwap>
             <button onClick={() => void refresh()}>{t('再試行', 'Retry')}<RefreshCw size={14} aria-hidden="true" /></button>
           </div>
         </MotionRegion>

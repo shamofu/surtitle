@@ -116,7 +116,7 @@ function DraftStudyContent({
         </div>
         <Badge tone="warning">{t('下書き', 'Draft')}</Badge>
       </header>
-      <MotionRegion open={!!error}>{error && (
+      <MotionRegion mode="status" open={!!error}>{error && (
         <p className="notice warning" role="status">
           {t('下書きの更新に失敗しました。', 'Could not refresh drafts.')}{' '}
           {error}{' '}
@@ -143,7 +143,7 @@ function DraftStudyContent({
           </select>
         </Field>
       )}
-      <MotionRegion open={loading && !view}>
+      <MotionRegion mode="status" open={loading && !view}>
         <p role="status">{t('下書きを読み込み中…', 'Loading drafts…')}</p>
       </MotionRegion>
       {view && (
@@ -166,7 +166,7 @@ function DraftStudyContent({
               )}
             </p>
           )}
-          <MotionSwap stateKey={`${effectivePage}:${cues.map(cue => cue.id).join(',')}`}
+          <MotionSwap disabled stateKey={`${effectivePage}:${cues.map(cue => cue.id).join(',')}`}
             className="draft-study-cues"
             role="list"
             aria-label={t('利用できる下書き字幕', 'Available draft subtitles')}

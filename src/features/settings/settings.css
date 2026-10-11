@@ -435,7 +435,6 @@ body:has(.settings-page) .toast-stack { bottom: 112px; }
   font-size: 12px;
   line-height: 1.8;
   overflow-wrap: anywhere;
-  animation: toast-in 0.2s ease-out;
 }
 .toast.error {
   border-left-color: var(--danger);
@@ -446,33 +445,5 @@ body:has(.settings-page) .toast-stack { bottom: 112px; }
 @keyframes spin {
   to {
     transform: rotate(360deg);
-  }
-}
-@keyframes enter {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-@keyframes shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
   }
 }

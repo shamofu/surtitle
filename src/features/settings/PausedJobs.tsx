@@ -61,7 +61,7 @@ export function UnknownAttempt({
           : money(attempt.heldUsd)} />
       </h3>
       <p>
-        <MotionSwap as="span" stateKey={unpriced ? 'unpriced' : 'reserved'}>{unpriced
+        <MotionSwap disabled as="span" stateKey={unpriced ? 'unpriced' : 'reserved'}>{unpriced
           ? t(
               '応答と金額を確認できません。料金未算定の送信記録を保持します。了承しても再送されません。',
               'The outcome and cost are unknown. The unpriced request remains recorded. Acknowledging does not resend it.',
@@ -79,7 +79,7 @@ export function UnknownAttempt({
           onChange={(event) => setAcknowledged(event.target.checked)}
         />
         <span>
-          <MotionSwap as="span" stateKey={unpriced ? 'unpriced' : money(attempt.heldUsd)}>{unpriced
+          <MotionSwap disabled as="span" stateKey={unpriced ? 'unpriced' : money(attempt.heldUsd)}>{unpriced
             ? t(
                 '金額不明の課金が発生した可能性を了承します。',
                 'I acknowledge that an unknown charge may have occurred.',
@@ -116,7 +116,7 @@ export function PausedJobs() {
     ) || [];
   return (
     <>
-    <MotionRegion open={!!attempts.length || !!jobs.length}>
+    <MotionRegion mode="status" open={!!attempts.length || !!jobs.length}>
     <section className="settings-card">
       <div className="settings-section-title">
         <ShieldCheck size={20} />
@@ -132,13 +132,13 @@ export function PausedJobs() {
           </p>
         </div>
       </div>
-      <MotionSwap stateKey={`${attempts.map(attempt => attempt.id).join('|')}:${jobs.map(job => job.id).join('|')}`}>
+      <MotionSwap disabled stateKey={`${attempts.map(attempt => attempt.id).join('|')}:${jobs.map(job => job.id).join('|')}`}>
       {attempts.map((attempt) => (
         <UnknownAttempt key={attempt.id} attempt={attempt} />
       ))}
       {jobs.map((job) => (
         <div className="job-status" key={job.id}>
-          <MotionSwap as="span" stateKey={job.message || job.kind}>{job.message || job.kind}</MotionSwap>
+          <MotionSwap disabled as="span" stateKey={job.message || job.kind}>{job.message || job.kind}</MotionSwap>
           <JobActions job={job} onReviewTranscript={setReviewJob} />
         </div>
       ))}

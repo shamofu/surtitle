@@ -256,7 +256,7 @@ export function SettingsPage() {
   const continuation = continuations.find(item => item.id === resume) || continuations[0];
   return (
     <div ref={page} className="settings-page page-enter">
-      <MotionRegion open={!!continuation}>{continuation && <div className="notice"><span>{t('途中のAI依頼に戻れます。', 'You can return to your unfinished AI request.')}</span><Button disabled={!valid || credentialBusy || pricing} busy={busy} onClick={async () => { if (await save()) { exitGuard.allowSavedNavigation(); void navigate({ to: '/study/$mediaId', params: { mediaId: continuation.mediaId }, search: { resume: continuation.id } }); } }}>{t('保存して元の操作に戻る', 'Save and return to your request')}</Button></div>}</MotionRegion>
+      <MotionRegion mode="status" open={!!continuation}>{continuation && <div className="notice"><span>{t('途中のAI依頼に戻れます。', 'You can return to your unfinished AI request.')}</span><Button disabled={!valid || credentialBusy || pricing} busy={busy} onClick={async () => { if (await save()) { exitGuard.allowSavedNavigation(); void navigate({ to: '/study/$mediaId', params: { mediaId: continuation.mediaId }, search: { resume: continuation.id } }); } }}>{t('保存して元の操作に戻る', 'Save and return to your request')}</Button></div>}</MotionRegion>
       <PageTitle
         title={t('設定', 'Settings')}
         description={t(
@@ -491,7 +491,7 @@ export function SettingsPage() {
               <span
                 className={`credential-icon ${data?.settings.credentialConfigured ? 'ready' : ''}`}
               >
-                <MotionSwap as="span" stateKey={data?.settings.credentialConfigured ? 'ready' : 'missing'}>{data?.settings.credentialConfigured ? (
+                <MotionSwap disabled as="span" stateKey={data?.settings.credentialConfigured ? 'ready' : 'missing'}>{data?.settings.credentialConfigured ? (
                   <CheckCircle2 size={21} />
                 ) : (
                   <KeyRound size={21} />
@@ -499,7 +499,7 @@ export function SettingsPage() {
               </span>
               <div>
                 <strong>
-                  <MotionSwap as="span" stateKey={data?.settings.credentialConfigured ? 'ready' : 'missing'}>{data?.settings.credentialConfigured
+                  <MotionSwap disabled as="span" stateKey={data?.settings.credentialConfigured ? 'ready' : 'missing'}>{data?.settings.credentialConfigured
                     ? t('認証情報を設定済み', 'Credential configured')
                     : t('サービスアカウント未設定', 'No service account yet')}</MotionSwap>
                 </strong>
@@ -541,9 +541,9 @@ export function SettingsPage() {
                 {t('Vertexからモデル候補を取得', 'Fetch Vertex model candidates')}
               </Button>
               <p>{t('一度取得すると、以下のすべての用途で選べます。モデルIDを直接入力することもできます。', 'Fetch once to use the candidates for every purpose below. You can also enter a model ID directly.')}</p>
-              <MotionRegion open={!data?.settings.credentialConfigured}><p>{t('先にサービスアカウントのJSONを読み込んでください。', 'Import a service-account JSON key first.')}</p></MotionRegion>
-              <MotionRegion open={!!modelNotice}><p role="status"><MotionSwap as="span" stateKey={modelNotice}>{modelNotice}</MotionSwap></p></MotionRegion>
-              <MotionRegion open={modelsBusy}><ProgressStatus label={t('AIモデルの候補', 'AI model candidates')} phase="discovering_models" /></MotionRegion>
+              <MotionRegion mode="status" open={!data?.settings.credentialConfigured}><p>{t('先にサービスアカウントのJSONを読み込んでください。', 'Import a service-account JSON key first.')}</p></MotionRegion>
+              <MotionRegion mode="status" open={!!modelNotice}><p role="status"><MotionSwap disabled as="span" stateKey={modelNotice}>{modelNotice}</MotionSwap></p></MotionRegion>
+              <MotionRegion mode="status" open={modelsBusy}><ProgressStatus label={t('AIモデルの候補', 'AI model candidates')} phase="discovering_models" /></MotionRegion>
             </div>
             <ModelSetup models={draft?.aiModels || {}} location={draft?.vertexLocation || 'global'} candidates={modelCatalogue.key === catalogueKey ? modelCatalogue.models : []} disabled={!draft || busy || credentialBusy} onChange={aiModels => change('aiModels', aiModels)} />
             <AnimatedDetails><summary>{t('用途ごとの詳細設定', 'Detailed settings by purpose')}</summary>
@@ -619,9 +619,9 @@ export function SettingsPage() {
                 <strong><AnimatedValue value={data ? data.budget.limitUsd === 0 ? t('上限なし', 'Unlimited') : money(data.budget.limitUsd) : '—'} /></strong>
               </div>
             </div>
-            <MotionRegion open={data?.budget.monetaryTotalsComplete === false}>
+            <MotionRegion mode="status" open={data?.budget.monetaryTotalsComplete === false}>
               <p className="notice warning">
-                <MotionSwap as="span" stateKey={data?.budget.unpricedAttempts || 0}>{t(
+                <MotionSwap disabled as="span" stateKey={data?.budget.unpricedAttempts || 0}>{t(
                   `料金未算定の要求が ${data?.budget.unpricedAttempts || 0} 件あります。上の金額には含まれず、請求総額ではありません。`,
                   `${data?.budget.unpricedAttempts || 0} requests have uncalculated costs. They are excluded from the amounts above, which are not your total bill.`,
                 )}</MotionSwap>
@@ -653,7 +653,7 @@ export function SettingsPage() {
                 />
               </div>
             </Field>
-            <MotionRegion open={customBudget}><p className="budget-custom-summary"><MotionSwap as="span" stateKey={`${money(draft?.dailyBudgetUsd ?? 0)}:${money(perJobBudget)}`}>{t(
+            <MotionRegion mode="status" open={customBudget}><p className="budget-custom-summary"><MotionSwap disabled as="span" stateKey={`${money(draft?.dailyBudgetUsd ?? 0)}:${money(perJobBudget)}`}>{t(
               `詳細の上限を設定済み：1日 ${money(draft?.dailyBudgetUsd ?? 0)}、1処理 ${money(perJobBudget)}。月額と異なる上限だけを維持し、同じ上限は月額の変更に合わせます。`,
               `Advanced limits: ${money(draft?.dailyBudgetUsd ?? 0)} per day and ${money(perJobBudget)} per job. Independent limits are kept when the monthly budget changes.`,
             )}</MotionSwap></p></MotionRegion>
@@ -717,8 +717,8 @@ export function SettingsPage() {
                 </Button>
               </div>
             </div>
-            <MotionRegion open={checkingUpdates}><ProgressStatus label={t('ツールの更新確認', 'Check tool updates')} phase="checking_updates" /></MotionRegion>
-            <MotionRegion open={scanning}><ProgressStatus label={t('外部ツールの検索', 'Find external tools')} phase="checking_tools" /></MotionRegion>
+            <MotionRegion mode="status" open={checkingUpdates}><ProgressStatus label={t('ツールの更新確認', 'Check tool updates')} phase="checking_updates" /></MotionRegion>
+            <MotionRegion mode="status" open={scanning}><ProgressStatus label={t('外部ツールの検索', 'Find external tools')} phase="checking_tools" /></MotionRegion>
             <Field
               label={t('yt-dlp の更新チャンネル', 'yt-dlp update channel')}
               hint={t(
@@ -749,7 +749,7 @@ export function SettingsPage() {
                 )}
               </span>
             </div>
-            <MotionSwap stateKey={data?.tools.map(tool => tool.id).join('|') || 'empty'}>
+            <MotionSwap disabled stateKey={data?.tools.map(tool => tool.id).join('|') || 'empty'}>
             {data?.tools.length ? (
               data.tools.map((tool) => (
                 <ToolRow
@@ -804,11 +804,11 @@ export function SettingsPage() {
       </div>
       <div className="settings-save">
         <div>
-          <strong role="status"><MotionSwap as="span" stateKey={busy ? 'saving' : !draft ? 'unavailable' : dirty ? 'dirty' : 'saved'}>{busy ? t('保存中…', 'Saving…') : !draft ? t('デスクトップアプリで設定できます', 'Settings are available in the desktop app') : dirty ? t('未保存の変更があります', 'You have unsaved changes') : t('設定は保存済みです', 'Settings are saved')}</MotionSwap></strong>
-          <p><MotionSwap as="span" stateKey={pricing ? 'pricing' : draft && !valid ? 'invalid' : 'ready'}>{pricing ? t('モデルの料金を取得中です。取得が終わると保存できます。', 'Retrieving model prices. You can save when the requests finish.') : draft && !valid ? t('入力内容を確認してください。', 'Check the entered values.') : t('学習・AI・更新チャンネルの変更は保存すると反映されます。', 'Save to apply learning, AI, and update-channel changes.')}</MotionSwap></p>
+          <strong role="status"><MotionSwap disabled as="span" stateKey={busy ? 'saving' : !draft ? 'unavailable' : dirty ? 'dirty' : 'saved'}>{busy ? t('保存中…', 'Saving…') : !draft ? t('デスクトップアプリで設定できます', 'Settings are available in the desktop app') : dirty ? t('未保存の変更があります', 'You have unsaved changes') : t('設定は保存済みです', 'Settings are saved')}</MotionSwap></strong>
+          <p><MotionSwap disabled as="span" stateKey={pricing ? 'pricing' : draft && !valid ? 'invalid' : 'ready'}>{pricing ? t('モデルの料金を取得中です。取得が終わると保存できます。', 'Retrieving model prices. You can save when the requests finish.') : draft && !valid ? t('入力内容を確認してください。', 'Check the entered values.') : t('学習・AI・更新チャンネルの変更は保存すると反映されます。', 'Save to apply learning, AI, and update-channel changes.')}</MotionSwap></p>
         </div>
         <div className="settings-save-actions">
-          <MotionRegion as="span" open={!!draft && !valid}><Button disabled={busy} onClick={reviewErrors}>{t('入力エラーを確認', 'Review errors')}</Button></MotionRegion>
+          <MotionRegion mode="status" as="span" open={!!draft && !valid}><Button disabled={busy} onClick={reviewErrors}>{t('入力エラーを確認', 'Review errors')}</Button></MotionRegion>
           <Button variant="primary" busy={busy} disabled={!valid || !dirty || credentialBusy || pricing} onClick={() => void save()}>
             <Save size={16} />
             {t('変更を保存', 'Save changes')}
@@ -817,9 +817,9 @@ export function SettingsPage() {
       </div>
       {exitGuard.open && <Modal {...exitGuard.modalProps} title={t('変更を保存しますか？', 'Save your changes?')} onClose={exitGuard.keepEditing} closeDisabled={exitGuard.busy}>
         <p>{t('設定に未保存の変更があります。保存してから移動するか、変更を破棄できます。', 'Your settings have unsaved changes. Save them before leaving, or discard them.')}</p>
-        <MotionRegion open={!!exitGuard.error}><p className="notice warning" role="alert">{exitGuard.error}</p></MotionRegion>
-        <MotionRegion open={pricing}><p role="status">{t('モデルの料金を取得中です。取得が終わると保存できます。', 'Retrieving model prices. You can save when the requests finish.')}</p></MotionRegion>
-        <MotionRegion open={!valid}><p className="helper-text">{t('入力内容を修正するには「編集を続ける」を選んでください。', 'Choose Keep editing to correct the values before saving.')}</p></MotionRegion>
+        <MotionRegion mode="status" open={!!exitGuard.error}><p className="notice warning" role="alert">{exitGuard.error}</p></MotionRegion>
+        <MotionRegion mode="status" open={pricing}><p role="status">{t('モデルの料金を取得中です。取得が終わると保存できます。', 'Retrieving model prices. You can save when the requests finish.')}</p></MotionRegion>
+        <MotionRegion mode="status" open={!valid}><p className="helper-text">{t('入力内容を修正するには「編集を続ける」を選んでください。', 'Choose Keep editing to correct the values before saving.')}</p></MotionRegion>
         <footer className="modal-footer settings-exit-actions">
           <Button disabled={exitGuard.busy} onClick={exitGuard.keepEditing}>{t('編集を続ける', 'Keep editing')}</Button>
           <Button variant="danger" disabled={exitGuard.busy} onClick={() => void exitGuard.discardAndLeave()}>{t('破棄して移動', 'Discard and leave')}</Button>

@@ -26,7 +26,7 @@ import { VolumeControl } from './VolumeControl';
 import { nativeAvailable } from '../../../shared/native/transport';
 
 import type { Media } from '../../../shared/contracts/media';
-import type { PlayerState } from '../../../shared/contracts/player';
+import type { PlayerControlRequest, PlayerState } from '../../../shared/contracts/player';
 import type { SubtitleSegment } from '../../../shared/contracts/media';
 
 import {
@@ -39,6 +39,51 @@ import { timestamp } from '../../../shared/format';
 import { AnimatedValue, MotionRegion, MotionSwap } from '../../../shared/motion';
 import { shouldIgnoreShortcut } from '../../../shared/keyboard';
 import { Button, IconButton, Modal, useModalExit } from '../../../shared/ui/index';
+
+type SurfacePlacement = {
+  owner: object;
+  request: PlayerControlRequest & { action: 'bounds' | 'hide' };
+  signature: string;
+  complete?: (error?: unknown) => void;
+};
+
+// One native HWND is shared across player mounts. Serialize its placements so an
+// old bounds acknowledgement cannot overtake a modal/unmount hide or newer media.
+const surfacePlacement = (() => {
+  let wanted: SurfacePlacement | undefined;
+  let hide: SurfacePlacement | undefined;
+  let active = false;
+  let confirmed: SurfacePlacement | undefined;
+  const same = (a: SurfacePlacement | undefined, b: SurfacePlacement) =>
+    a?.owner === b.owner && a.signature === b.signature;
+  const flush = () => {
+    if (active) return;
+    const next = hide || wanted;
+    if (!next) return;
+    if (hide === next) hide = undefined;
+    if (same(confirmed, next)) {
+      if (same(wanted, next)) wanted = undefined;
+      flush();
+      return;
+    }
+    active = true;
+    void playerApi.player(next.request).then(() => {
+      confirmed = next;
+      if (!hide && same(wanted, next)) { wanted?.complete?.(); wanted = undefined; }
+    }, error => {
+      confirmed = undefined;
+      if (!hide && same(wanted, next)) { wanted?.complete?.(error); wanted = undefined; }
+    }).finally(() => { active = false; flush(); });
+  };
+  return (owner: object, request: SurfacePlacement['request'], complete?: SurfacePlacement['complete']) => {
+    const next = { owner, request, complete, signature: JSON.stringify(request) };
+    wanted = next;
+    // A hide is a barrier: reopening may replace desired bounds, but must never
+    // cancel the hide already requested by a modal or a departing player.
+    if (request.action === 'hide') hide = next;
+    flush();
+  };
+})();
 
 export function NativePlayer({
   media,
@@ -73,6 +118,7 @@ export function NativePlayer({
   const { refresh } = useDataActions();
   const settingsExit = useModalExit(settingsOpen);
   const viewport = useRef<HTMLDivElement>(null);
+  const surfaceOwner = useRef({});
   const surfaceButton = useRef<HTMLButtonElement>(null);
   const [state, setState] = useState<PlayerState>();
   const playerRevision = useRef(-1);
@@ -250,7 +296,7 @@ export function NativePlayer({
       seekOperation.current += 1;
       volumeOperation.current += 1;
       stop();
-      void playerApi.player({ action: 'hide' }).catch(() => {});
+      surfacePlacement(surfaceOwner.current, { action: 'hide' });
     };
   }, [media.id, media.path, onReady, loadAttempt, acceptState]);
   function retryLoad() {
@@ -265,15 +311,14 @@ export function NativePlayer({
   useEffect(() => {
     if (state) onPosition(state.positionMs);
   }, [state?.positionMs, onPosition]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!nativeAvailable()) return;
     let frame = 0;
-    let last = '';
     let disposed = false;
     setSurfaceError('');
-    const update = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
+    const measure = () => {
+        frame = 0;
+        if (disposed) return;
         const rect = viewport.current?.getBoundingClientRect();
         const main = viewport.current
           ?.closest('.page-content')
@@ -300,18 +345,23 @@ export function NativePlayer({
                 scaleFactor: window.devicePixelRatio,
               },
             };
-        const signature = JSON.stringify(request);
-        if (signature !== last) {
-          last = signature;
-          void playerApi.player(request).then(() => {
-            if (!disposed && !hidden) setSurfaceError('');
-          }).catch(error => {
-            if (disposed) return;
-            last = '';
-            setSurfaceError(String(error));
-          });
-        }
-      });
+        surfacePlacement(surfaceOwner.current, request, error => {
+          if (disposed) return;
+          if (error) setSurfaceError(String(error));
+          else if (!hidden) setSurfaceError('');
+        });
+    };
+    const update = () => {
+      // Do not postpone a scheduled measurement on every ResizeObserver tick.
+      // The last animation frame is measured even when an older IPC is pending.
+      if (!frame) frame = window.requestAnimationFrame(measure);
+    };
+    const visibility = () => {
+      if (document.hidden) {
+        window.cancelAnimationFrame(frame);
+        frame = 0;
+        surfacePlacement(surfaceOwner.current, { action: 'hide' });
+      } else update();
     };
     const observer = new ResizeObserver(update);
     if (viewport.current) observer.observe(viewport.current);
@@ -319,15 +369,18 @@ export function NativePlayer({
     if (scrollContainer) observer.observe(scrollContainer);
     window.addEventListener('resize', update);
     window.addEventListener('scroll', update, true);
-    document.addEventListener('visibilitychange', update);
-    update();
+    document.addEventListener('visibilitychange', visibility);
+    // A modal or failed load must enqueue its hide before a pending placement
+    // can finish; waiting for RAF here can leave the HWND above the dialog.
+    if (surfaceHidden || !loaded || document.hidden) measure();
+    else update();
     return () => {
       disposed = true;
       window.cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener('resize', update);
       window.removeEventListener('scroll', update, true);
-      document.removeEventListener('visibilitychange', update);
+      document.removeEventListener('visibilitychange', visibility);
     };
   }, [loaded, surfaceHidden, media.id, surfaceAttempt]);
   useEffect(() => {
@@ -460,7 +513,7 @@ export function NativePlayer({
     <>
       <section className="player-card" aria-label={t('メディアプレイヤー', 'Media player')}>
         <div ref={viewport} className="native-player-viewport" data-testid="native-player-viewport">
-          <MotionSwap stateKey={`${loadStatus}:${loadError}`} className="video-placeholder">
+          <MotionSwap stateKey={`${loadStatus}:${loadError}`} className="video-placeholder" disabled>
             {media.kind === 'audio' && <Headphones size={32} aria-hidden="true" />}
             <p role={loadStatus === 'error' ? 'alert' : 'status'}>
               {loadError || (!nativeAvailable()
@@ -538,7 +591,7 @@ export function NativePlayer({
           <MotionRegion open={!repeatTarget && draftMode && !!selected}>{repeatButton}</MotionRegion>
         </fieldset>
       </section>
-      <MotionRegion open={!!surfaceError}>{surfaceError && <div className="notice warning" role="alert">
+      <MotionRegion open={!!surfaceError} mode="status">{surfaceError && <div className="notice warning" role="alert">
         <span>{t('映像を表示できませんでした。', 'The video could not be displayed.')} {surfaceError}</span>
         <Button onClick={() => setSurfaceAttempt(value => value + 1)}>{t('映像表示を再試行', 'Retry video display')}</Button>
       </div>}</MotionRegion>

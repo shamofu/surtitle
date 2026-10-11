@@ -48,6 +48,7 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 700 }, 
     if (size.width >= 1000) {
       await page.getByRole('button', { name: 'Transcript', exact: true }).click();
       await expect(page.locator('.transcript-scroll')).toBeVisible();
+      await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
     }
     const source = page.locator('.caption-source-scroll');
     const translation = page.locator('.caption-translation-scroll');
@@ -86,7 +87,9 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 700 }, 
 
     await expectStableControls(page, { click: toggle });
     await expect(page.locator(toggle)).toHaveAttribute('aria-pressed', 'false');
-    await expect(translation).toBeHidden();
+    await expect(page.locator('.caption-translation-region')).toBeHidden();
+    await expect(page.locator('.caption-translation-region')).toHaveAttribute('aria-hidden', 'true');
+    await expect(page.locator('.caption-translation-region')).toHaveAttribute('inert');
     expect(await source.evaluate(element => element.clientHeight)).toBe(closedHeight);
     await expectStableControls(page, { cue: 10 });
     await expect(page.locator('.current-caption-text')).toHaveText(shortSource);

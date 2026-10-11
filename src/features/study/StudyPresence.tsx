@@ -1,66 +1,73 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { createContext, useContext, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import * as m from 'motion/react-m';
-import { motionDurations, motionEase, useAppMotion } from '../../shared/motion';
+import { createContext, useContext, useLayoutEffect, useRef, useState, type ReactNode, type TransitionEvent } from 'react';
+import { MotionRegion, useAppMotion, useMotionChange } from '../../shared/motion';
 
 const StudyRegionActivity = createContext(true);
 export const useStudyRegionActive = () => useContext(StudyRegionActivity);
 
-/** Retain geometry until the visual exit finishes; logical activity changes immediately. */
+/** CSS owns the continuous, reversible geometry; React owns activity and lifetime. */
 export function useStudyPresence(open: boolean) {
   const { reducedMotion } = useAppMotion();
-  const [retained, setRetained] = useState(open);
-  const latest = useRef({ open, revision: 0 });
-  if (latest.current.open !== open) latest.current = { open, revision: latest.current.revision + 1 };
-  const revision = latest.current.revision;
+  const [state, setState] = useState({ target: open, retained: open, moving: false });
+  const latest = useRef(open);
+  latest.current = open;
+  if (state.target !== open) {
+    setState({ target: open, retained: open || state.retained, moving: !reducedMotion && !document.hidden });
+  }
+  const finish = () => setState({ target: latest.current, retained: latest.current, moving: false });
   useLayoutEffect(() => {
-    if (open) { setRetained(true); return; }
-    if (reducedMotion || document.hidden) { setRetained(false); return; }
-    if (!retained) return;
-    const finish = () => {
-      if (!latest.current.open && revision === latest.current.revision) setRetained(false);
-    };
-    // A throttled/hidden WebView may never deliver animation completion.
-    const timer = window.setTimeout(finish, motionDurations.exit * 1000 + 100);
+    if (reducedMotion || document.hidden || !state.moving) {
+      if (state.retained !== open || state.moving) finish();
+      return;
+    }
+    // WebViews can omit transitionend when hidden or resized. Settle to the latest
+    // target in those cases, and let the native surface observe the final layout.
+    const timer = window.setTimeout(finish, 320);
     const visibility = () => { if (document.hidden) finish(); };
     document.addEventListener('visibilitychange', visibility);
-    return () => { window.clearTimeout(timer); document.removeEventListener('visibilitychange', visibility); };
-  }, [open, reducedMotion, retained, revision]);
+    window.addEventListener('resize', finish);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('resize', finish);
+    };
+  }, [open, state.moving, state.retained, reducedMotion]);
   return {
-    visible: open || (retained && !reducedMotion),
-    motionProps: {
-      initial: false as const,
-      animate: reducedMotion ? undefined : open ? 'shown' : 'hidden',
-      style: reducedMotion ? { opacity: open ? 1 : 0 } : undefined,
-      variants: reducedMotion ? undefined : { shown: { opacity: 1 }, hidden: { opacity: 0 } },
-      transition: { duration: reducedMotion ? 0 : open ? motionDurations.enter : motionDurations.exit, ease: motionEase },
-      onAnimationComplete: (definition: unknown) => {
-        if (definition === 'hidden' && !latest.current.open && revision === latest.current.revision) setRetained(false);
+    visible: open || (state.retained && !reducedMotion),
+    moving: state.moving && !reducedMotion,
+    dockProps: {
+      'data-open': open,
+      'data-moving': state.moving && !reducedMotion,
+      onTransitionEnd: (event: TransitionEvent<HTMLDivElement>) => {
+        if (event.target === event.currentTarget && (event.propertyName === 'width' || event.propertyName === 'height')) finish();
       },
     },
   };
 }
 
-/** Keep the same subtree while it fades out, including unsaved form controls. */
-export function StudyRegion({ open, children, keepMounted = false, freezeOnExit = true, className = '' }: {
+/** Tab content changes immediately, with only the incoming view fading in. */
+export function StudyRegion({ open, children, keepMounted = false, freezeOnExit = true, className = '', retain = false, animate = true }: {
   open: boolean;
   children: ReactNode;
   keepMounted?: boolean;
   freezeOnExit?: boolean;
   className?: string;
+  retain?: boolean;
+  animate?: boolean;
 }) {
-  const presence = useStudyPresence(open);
   const parentActive = useStudyRegionActive();
   const previous = useRef(children);
+  const ref = useRef<HTMLDivElement>(null);
+  const inline = className.split(' ').includes('study-motion-inline');
+  useMotionChange(ref, Number(open), inline || !animate || !open);
   useLayoutEffect(() => { if (open) previous.current = children; }, [open, children]);
-  return <m.div
-    {...presence.motionProps}
-    className={`study-motion-region ${className}`}
-    data-exiting={!open && presence.visible ? '' : undefined}
-    hidden={!presence.visible}
-    inert={!open}
-    aria-hidden={!open || undefined}
-  ><StudyRegionActivity.Provider value={parentActive && open}>
-    {open ? children : presence.visible && freezeOnExit ? previous.current : keepMounted ? children : null}
-  </StudyRegionActivity.Provider></m.div>;
+  const contents = <StudyRegionActivity.Provider value={parentActive && open}>
+    {open ? children : retain && freezeOnExit ? previous.current : keepMounted ? children : null}
+  </StudyRegionActivity.Provider>;
+  if (inline) return <MotionRegion open={open} keepMounted={keepMounted} className={`study-motion-region ${className}`}>
+    <StudyRegionActivity.Provider value={parentActive && open}>{children}</StudyRegionActivity.Provider>
+  </MotionRegion>;
+  return <div ref={ref} className={`study-motion-region ${className}`} hidden={!open && !retain} inert={!open} aria-hidden={!open || undefined}>
+    {contents}
+  </div>;
 }
