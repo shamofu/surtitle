@@ -234,6 +234,12 @@ export function StudyTranscript({
       </StudyRegion>
       <StudyRegion open={tab === 'vocabulary'}>
             <div ref={suggestions} className="suggestions-panel" role="tabpanel" id={`${tabsId}-vocabulary-panel`} aria-labelledby={`${tabsId}-vocabulary-tab`}>
+              <div className="suggestions-actions">
+                <Button onClick={() => onEstimate('vocabulary')}>
+                  <Sparkles size={16} />
+                  {t('AIで語彙・表現を調べる', 'Explore words with AI')}
+                </Button>
+              </div>
               <MotionRegion open={!!candidatesError}>{candidatesError &&
                 <p
                   className="notice warning"
@@ -250,9 +256,7 @@ export function StudyTranscript({
                       '区間を選んで、表現の解説や語彙の提案を見積もれます。',
                       'Choose a passage to estimate explanations or vocabulary suggestions.'
                     )}
-                  >
-                    <Button onClick={() => onEstimate('vocabulary')}>{t('区間を選んで見積もる', 'Choose a range')}</Button>
-                  </EmptyState>
+                  />
                 )
                 : candidates.map(candidate => {
                   const ids = candidate.sourceCueIds?.length ? candidate.sourceCueIds : [candidate.segmentId];
@@ -307,13 +311,20 @@ export function StudyTranscript({
                       <X size={14} />
                     </IconButton>}</MotionRegion>
                 </div>
-                <IconButton
-                  label={t('翻訳を表示・非表示', 'Toggle translations')}
+              </div>
+              <div className="transcript-actions">
+                <Button variant="ghost" onClick={onImport}>
+                  <Subtitles size={16} />
+                  {t('字幕を追加・切り替え', 'Add or switch subtitles')}
+                </Button>
+                <Button
+                  variant="ghost"
                   aria-pressed={showTranslations}
                   onClick={() => updateView({ showTranslations: !showTranslations })}
                 >
-                  <Languages size={18} />
-                </IconButton>
+                  <Languages size={16} />
+                  {showTranslations ? t('訳を隠す', 'Hide translations') : t('訳を表示', 'Show translations')}
+                </Button>
               </div>
               {segments.some(cue => cue.status === 'generated_review' || cue.timingPrecision === 'source_block') && <label className="transcript-marked-filter"><input type="checkbox" checked={markedOnly} onChange={event => setMarkedOnly(event.target.checked)} /><span>{t('注意のある箇所だけ表示', 'Show marked passages only')}</span></label>}
               <MotionRegion open={!!error}>{error && <p
@@ -332,13 +343,7 @@ export function StudyTranscript({
                       'Import subtitles to inspect a phrase while you watch.'
                     )}
                   >
-                    <Button onClick={() => onEstimate('transcribe')}>{t('字幕を作成', 'Create subtitles')}</Button>
-                    <Button
-                      variant="ghost"
-                      onClick={onImport}
-                    >
-                      {t('字幕を読み込む', 'Import subtitles')}
-                    </Button>
+                    <Button onClick={() => onEstimate('transcribe')}>{t('音声から字幕を作成', 'Create subtitles from audio')}</Button>
                   </EmptyState>
                 )
                 : !filtered.length
@@ -416,20 +421,28 @@ export function StudyTranscript({
                                 {(segment.status === 'generated_review' || !subtitleUsable(segment)) &&
                                   <Badge tone="warning">{t('要確認', 'Needs review')}</Badge>}
                                 <div className="segment-actions">
-                                  {onTranscribeRange && <IconButton label={t('この区間を再文字起こし', 'Transcribe this range again')} onClick={() => onTranscribeRange({ startMs: segment.startMs, endMs: segment.endMs })}><RefreshCw size={15} /></IconButton>}
-                                  <IconButton
-                                    label={t('字幕を編集', 'Edit subtitle')}
+                                  {onTranscribeRange && <Button
+                                    variant="ghost"
+                                    aria-label={t('この区間を再文字起こし', 'Retranscribe this range')}
+                                    onClick={() => onTranscribeRange({ startMs: segment.startMs, endMs: segment.endMs })}
+                                  ><RefreshCw size={15} />{t('再文字起こし', 'Retranscribe')}</Button>}
+                                  <Button
+                                    variant="ghost"
+                                    aria-label={t('字幕を編集', 'Edit subtitle')}
                                     onClick={() => onEdit(segment)}
                                   >
                                     <Edit3 size={16} />
-                                  </IconButton>
-                                  <IconButton
-                                    label={t('フレーズを保存', 'Save phrase')}
+                                    {t('編集', 'Edit')}
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    aria-label={t('フレーズを確認・保存', 'Review and save phrase')}
                                     disabled={!ready || !subtitleUsable(segment)}
                                     onClick={() => onInspect(segment, '', undefined, true)}
                                   >
                                     <BookmarkPlus size={16} />
-                                  </IconButton>
+                                    {t('確認・保存', 'Review and save')}
+                                  </Button>
                                 </div>
                               </TranscriptContent>
                             </article>
@@ -451,8 +464,8 @@ export function StudyTranscript({
                 >
                   <Crosshair size={15} />
                   <MotionSwap as="span" stateKey={following && !search ? 'following' : 'manual'}>{following && !search
-                    ? t('再生に追従中', 'Following playback')
-                    : t('再生に戻る', 'Follow playback')}</MotionSwap>
+                    ? t('自動追従中', 'Following playback')
+                    : t('再生中の字幕へ', 'Show current subtitle')}</MotionSwap>
                 </button>
               </footer>
             </div>

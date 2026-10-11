@@ -90,7 +90,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
             const timeout = setTimeout(() => { cleanup(); reject(new Error('Study panel did not finish exiting within five seconds')); }, 5000);
             observer.observe(panel, { attributes: true });
             frame = requestAnimationFrame(sample);
-            panel.querySelector('[aria-label="Close panel"]').click();
+            document.querySelector('.study-transcript-toggle').click();
           });
         });
         assert.equal(observed.inert, true);
@@ -113,7 +113,6 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
       it('retains the native modal top layer through exit and restores video visibility and focus', async () => {
         await $('button=Transcript').click();
         await $('[aria-label="Subtitle list"]').waitForDisplayed();
-        await $('button=More').click();
         const opener = $('button=Playback settings');
         await opener.waitForDisplayed();
         await opener.click();

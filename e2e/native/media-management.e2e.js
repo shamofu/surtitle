@@ -18,12 +18,13 @@ async function playerReady() {
     return state.ready === true && state.surfaceVisible && state.videoWidth > 0 && state.videoHeight > 0;
   }, { timeout: 15000, timeoutMsg: 'Player did not decode video into its visible native surface' });
 }
-async function openMore() {
-  if (!(await $('.study-secondary-tools').isExisting())) await $('button=More').click();
+async function openManagement() {
+  if (!(await $('.study-secondary-tools').isExisting())) await $('button=Export and manage').click();
 }
 async function openSubtitles() {
-  await openMore();
-  await $('button=Prepare subtitles').click();
+  const toggle = $('.study-transcript-toggle');
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+  await $('button=Add or switch subtitles').click();
   await $('dialog').waitForDisplayed();
   await $('dialog').$('button=Embedded').click();
   await $('dialog select').waitForDisplayed();
@@ -62,7 +63,6 @@ async function cardArticle() { await navigate('/cards'); await $('[aria-label="S
     const tracks = (await invoke('get_player_state')).tracks;
     const english = tracks.find(track => track.kind === 'audio' && track.ffIndex === 2);
     assert(english && english.id !== english.ffIndex, 'Fixture must distinguish mpv ID from FFmpeg index');
-    await openMore();
     await $('button=Playback settings').click();
     await $('[aria-label="Audio track"]').selectByAttribute('value', String(english.id));
     await browser.waitUntil(async () => (await snapshot()).media.find(item => item.id === mediaId).audioStreamIndex === 2);
@@ -91,7 +91,9 @@ async function cardArticle() { await navigate('/cards'); await $('[aria-label="S
     await dialogClosed();
     const versions = await invoke('list_subtitle_versions', { mediaId }); assert.equal(versions.length, 1);
     assert.equal(versions[0].streamIndex, 3); assert.equal(versions[0].segments[0].text, '日本語の字幕を編集しました。');
-    await $('button=Versions').click(); await chooseSubtitle(versions[0].id);
+    await $('button=Add or switch subtitles').click();
+    await $('dialog').$('button=Saved subtitles').click();
+    await chooseSubtitle(versions[0].id);
     await $('dialog input[type="checkbox"]').click(); await $('button=Use these subtitles').click();
     await browser.waitUntil(async () => (await invoke('list_segments', { mediaId }))[0]?.text === '日本語の字幕を編集しました。', { timeout: 60000 });
     await dialogClosed();
@@ -123,7 +125,7 @@ async function cardArticle() { await navigate('/cards'); await $('[aria-label="S
     const changed = (await snapshot()).cards.find(item => item.id === cardId);
     assert.equal(changed.dueAt, rated.dueAt); assert.equal(changed.reviewCount, rated.reviewCount); assert.equal(hash(savedAudioPath), savedAudioHash);
 
-    await navigate(`/study/${mediaId}`); await openMore(); await $('button=Remove from library').click();
+    await navigate(`/study/${mediaId}`); await openManagement(); await $('button=Remove from library').click();
     await $('dialog').$('button=Remove from library').click();
     await dialogClosed();
     await browser.waitUntil(async () => !(await snapshot()).media.some(item => item.id === mediaId));

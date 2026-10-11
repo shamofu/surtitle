@@ -136,8 +136,8 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
         };
       });
       expect(containment).toEqual({ checkbox: true, focus: true, label: true, noHorizontalScroll: true });
-      const chrome = ['.transcript-tools', '.transcript-marked-filter', '.transcript-footer', ...controls];
-      const transcriptToggle = '.transcript-tools button[aria-pressed]';
+      const chrome = ['.transcript-tools', '.transcript-actions', '.transcript-marked-filter', '.transcript-footer', ...controls];
+      const transcriptToggle = '.transcript-actions button[aria-pressed]';
       const wasShowing = await page.locator(transcriptToggle).getAttribute('aria-pressed');
       await expectStableControls(page, { click: transcriptToggle }, chrome);
       await expect(page.locator(transcriptToggle)).toHaveAttribute('aria-pressed', wasShowing === 'true' ? 'false' : 'true');

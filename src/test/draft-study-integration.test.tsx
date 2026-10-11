@@ -363,7 +363,7 @@ describe('draft study in the real study page', () => {
     );
     vi.mocked(playerApi.player).mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Transcript' }));
-    fireEvent.click(screen.getByRole('tab', { name: 'Transcription' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Transcription' }));
     fireEvent.click(screen.getByText('Transcription history'));
     fireEvent.click(screen.getByRole('button', { name: 'Open earlier drafts' }));
     await screen.findByRole('list', { name: 'Available draft subtitles' });
@@ -375,7 +375,6 @@ describe('draft study in the real study page', () => {
     );
     expect(document.querySelector('.context-sentence')).toBeNull();
     expect(screen.queryByText(canonical.text)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'More' }));
     fireEvent.click(screen.getByRole('button', { name: 'Playback settings' }));
     expect(
       screen.getByRole('checkbox', {
@@ -432,7 +431,7 @@ describe('draft study in the real study page', () => {
     await waitFor(() =>
       expect(
         screen.getByRole('button', {
-          name: 'Inspect this phrase',
+          name: 'Inspect this subtitle',
         }),
       ).toBeEnabled(),
     );
@@ -489,8 +488,8 @@ describe('draft study in the real study page', () => {
     // the companion must clear it even though the active tab is no longer draft.
     vi.mocked(playerApi.player).mockClear();
     fireEvent.click(within(document.querySelector('.transcript-tabs') as HTMLElement).getByRole('tab', { name: 'Transcript' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Close panel' })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Transcript' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Transcript' })).toHaveAttribute('aria-expanded', 'false'));
     expect(playerApi.player).toHaveBeenCalledWith({ action: 'pause' });
     expect(playerApi.player).toHaveBeenCalledWith(expect.objectContaining({ action: 'seek' }));
     expect(playerApi.player).not.toHaveBeenCalledWith({ action: 'play' });

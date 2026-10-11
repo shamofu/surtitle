@@ -9,10 +9,11 @@ import {
   BookmarkPlus,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Edit3,
   FolderOpen,
   Play,
-  Settings2,
   Sparkles,
   Subtitles,
   Trash2,
@@ -190,6 +191,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const inspectButton = useRef<HTMLButtonElement>(null);
   const restoreFocus = useRef(false);
   const panelTitle = useRef<HTMLHeadingElement>(null);
+  const transcriptToggle = useRef<HTMLButtonElement>(null);
   const trigger = useRef<HTMLElement | null>(null);
   const [repeatTarget, setRepeatTarget] = useState<HTMLDivElement | null>(null);
   const [more, setMore] = useState(false);
@@ -335,7 +337,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
     if (!surfaceHidden) {
       const element = trigger.current;
       if (element?.isConnected && element !== document.body) element.focus({ preventScroll: true });
-      else inspectButton.current?.focus({ preventScroll: true });
+      else transcriptToggle.current?.focus({ preventScroll: true });
       if (window.innerWidth < 1000) {
         const container = element?.closest('.page-content') ||
           inspectButton.current?.closest('.page-content');
@@ -552,7 +554,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
     });
   }
 
-  async function closePanel(resume = false, destination: 'transcript' | null = null) {
+  async function closePanel(resume = false, destination: 'transcript' | null = null, destinationTab?: TranscriptTab) {
     await run(async () => {
       if (playerReady && (inspection || draftPlayback || returnPosition.current !== undefined)) {
         const state = await playerApi.playerState();
@@ -569,6 +571,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
       if (!alive.current) return;
       restoreFocus.current = destination === null;
       setPanel(destination);
+      if (destinationTab) setTab(destinationTab);
       setInspection(undefined);
       setInvalidated(false);
       setDraftPlayback(undefined);
@@ -582,7 +585,13 @@ function StudySession({ mediaId }: { mediaId: string }) {
   useEffect(
     () => {
       const escape = (event: KeyboardEvent) => {
-        if (!shouldIgnoreShortcut(event) && event.key === 'Escape' && panel && !surfaceHidden && !busy && !saveBusy) {
+        if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || event.keyCode === 229 ||
+          event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+        const target = event.target instanceof Element ? event.target : null;
+        // Panel buttons and tabs may dismiss the panel; text fields and selects
+        // keep their own Escape behavior, as do controls outside the companion.
+        const panelControl = target?.closest('button, [role="tab"]')?.closest('.study-companion, .study-transcript-toggle');
+        if ((!shouldIgnoreShortcut(event) || panelControl) && panel && !surfaceHidden && !busy && !saveBusy) {
           event.preventDefault();
           void closePanel();
         }
@@ -658,23 +667,11 @@ function StudySession({ mediaId }: { mediaId: string }) {
             <AnimatedValue value={t(`入力途中のフレーズ (${dirtyDrafts.length})`, `Unfinished phrases (${dirtyDrafts.length})`)} />
           </Button>}</MotionRegion>
           <Button
-            aria-expanded={panel === 'transcript'}
-            disabled={busy || saveBusy}
-            onClick={() => {
-              if (panel === 'transcript') void closePanel(); else {
-                rememberTrigger();
-                setPanel('transcript');
-              }
-            }}
-          >
-            <Subtitles size={17} />
-            {t('字幕一覧', 'Transcript')}
-          </Button>
-          <Button
             aria-expanded={more}
+            aria-controls="study-management"
             onClick={() => setMore(value => !value)}
           >
-            {t('その他', 'More')}
+            {t('書き出し・管理', 'Export and manage')}
             <ChevronDown size={15} />
           </Button>
         </div>
@@ -710,24 +707,17 @@ function StudySession({ mediaId }: { mediaId: string }) {
         </div>)}
       </section></StudyRegion>
       <StudyRegion open={more} className="study-motion-inline">
-        <div className="study-secondary-tools">
-          <Button onClick={() => setPlaybackSettings(true)}>
-            <Settings2 size={16} />
-            {t('再生設定', 'Playback settings')}
-          </Button>
-          <Button onClick={() => { setSubtitleStreamIndex(undefined); setSubtitleSource('choose'); }}>{t('字幕を用意する', 'Prepare subtitles')}</Button>
-          <Button onClick={() => setSubtitleSource('versions')}>{t('旧版', 'Versions')}</Button>
-          <Button onClick={() => openAi(segments.length ? 'vocabulary' : 'transcribe')}>
-            <Sparkles size={16} />
-            {t('AI で学ぶ', 'Learn with AI')}
-          </Button>
-          <Button onClick={() => setTransfer(true)}>{t('書き出す', 'Export')}</Button>
-          <Button
-            variant="ghost"
-            onClick={() => setRemoving(true)}
-          >
-            {t('ライブラリから除外', 'Remove from library')}
-          </Button>
+        <div className="study-secondary-tools" id="study-management">
+          <div>
+            <Button aria-describedby="study-export-description" onClick={() => setTransfer(true)}>{t('字幕・学習データを書き出す', 'Export subtitles and learning data')}</Button>
+            <p id="study-export-description">{t('この教材の字幕、または全教材の学習データを書き出します。バックアップの復元もできます。', 'Export subtitles for this media or learning data from all media. You can also restore a backup.')}</p>
+          </div>
+          <div>
+            <Button variant="ghost" aria-describedby="study-remove-description" onClick={() => setRemoving(true)}>
+              {t('ライブラリから除外', 'Remove from library')}
+            </Button>
+            <p id="study-remove-description">{t('元のファイルと保存したフレーズは残ります。', 'Your original file and saved phrases are kept.')}</p>
+          </div>
         </div></StudyRegion>
       {jobs.length > 0 &&
         <AnimatedDetails open={jobs.some(job => job.status === 'running') || needsAttention} className={`study-jobs ${needsAttention ? 'needs-attention' : ''}`}>
@@ -779,6 +769,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             draftMode={draftMode}
             repeatTarget={repeatTarget}
             settingsOpen={playbackSettings}
+            onSettingsOpen={() => setPlaybackSettings(true)}
             onSettingsClose={() => setPlaybackSettings(false)}
             onUseStudySubtitles={streamIndex => { setSubtitleStreamIndex(streamIndex); setSubtitleSource('embedded'); }}
             interactionsDisabled={busy || saveBusy}
@@ -801,8 +792,30 @@ function StudySession({ mediaId }: { mediaId: string }) {
             onReplay={() => void moveCaption(active, true)}
           />
         </div>
+        <div className="study-companion-dock">
+          <div className="study-transcript-rail">
+            <button
+              ref={transcriptToggle}
+              type="button"
+              className="study-transcript-toggle"
+              aria-expanded={panel === 'transcript'}
+              aria-controls="study-companion"
+              title={panel === 'transcript' ? t('字幕パネルを閉じる', 'Close transcript panel') : t('字幕パネルを開く', 'Open transcript panel')}
+              disabled={busy || saveBusy}
+              onClick={() => {
+                trigger.current = transcriptToggle.current;
+                if (panel === 'transcript') void closePanel();
+                else if (panel === 'phrase') void closePanel(false, 'transcript', 'transcript');
+                else setPanel('transcript');
+              }}
+            >
+              {panel === 'transcript' ? <ChevronRight size={18} aria-hidden="true" /> : <ChevronLeft size={18} aria-hidden="true" />}
+              <span>{t('字幕一覧', 'Transcript')}</span>
+            </button>
+          </div>
           {/* Keep setup and estimates alive while inspecting a phrase or closing the panel. */}
           <m.aside
+            id="study-companion"
             {...companion.motionProps}
             hidden={!companion.visible}
             inert={!panel}
@@ -817,13 +830,13 @@ function StudySession({ mediaId }: { mediaId: string }) {
               >
                 {presentedPanel === 'phrase' ? t('言葉を確認', 'Inspect phrase') : t('字幕', 'Transcript')}
               </h2>
-              <IconButton
+              {presentedPanel === 'phrase' && <IconButton
                 label={t('パネルを閉じる', 'Close panel')}
                 disabled={busy || saveBusy}
                 onClick={() => void closePanel()}
               >
                 <X size={19} />
-              </IconButton>
+              </IconButton>}
             </header>
             <div className="study-companion-body">
             <StudyRegion className="study-transcript" open={panel === 'transcript'} keepMounted freezeOnExit={false}>
@@ -897,13 +910,13 @@ function StudySession({ mediaId }: { mediaId: string }) {
                     <p className="context-time">{timestamp(selected.startMs)}–{timestamp(selected.endMs)}</p>
                     <p className="context-sentence">{selected.text}</p>
                     {inspection?.term && <p className="inspected-term">{inspection.term}</p>}
-                    <Button
+                    {hasMeaning && <Button
                       variant="ghost"
                       aria-expanded={showMeaning}
-                      onClick={() => hasMeaning ? setShowMeaning(value => !value) : openAi('vocabulary')}
+                      onClick={() => setShowMeaning(value => !value)}
                     >
-                      {hasMeaning ? showMeaning ? t('意味を閉じる', 'Hide meaning') : t('意味を見る', 'Show meaning') : t('意味を調べる', 'Find the meaning')}
-                    </Button>
+                      {showMeaning ? t('意味を閉じる', 'Hide meaning') : t('意味を見る', 'Show meaning')}
+                    </Button>}
                     <StudyRegion open={showMeaning} className="study-motion-inline">
                       <div className="context-meaning">
                         {matchingCandidate?.meaning && <p>{matchingCandidate.meaning}</p>}
@@ -924,7 +937,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                     title={t('この区間だけ再生', 'Play only this passage')}
                   >
                     <Play size={16} />
-                    {t('もう一度聴く', 'Listen again')}
+                    {t('この区間を再生', 'Play this passage')}
                   </Button>
                   <div
                     className="repeat-slot"
@@ -940,7 +953,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                         onClick={() => openAi('vocabulary')}
                       >
                         <Sparkles size={16} />
-                        {t('解説を見積もる', 'Estimate explanation')}
+                        {t('AIで解説を見積もる', 'Estimate explanation with AI')}
                       </Button>
                       {!selected.translation &&
                         <Button
@@ -948,7 +961,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                           disabled={busy || saveBusy}
                           onClick={() => openAi('translate')}
                         >
-                          {t('翻訳を見積もる', 'Estimate translation')}
+                          {t('AIで翻訳を見積もる', 'Estimate translation with AI')}
                         </Button>}
                       <Button
                         variant="ghost"
@@ -1001,7 +1014,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                     onClick={() => inspection && prepareForm({ ...inspection, candidate: matchingCandidate })}
                   >
                     <BookmarkPlus size={17} />
-                    {t('フレーズを保存', 'Save a phrase')}
+                    {t('フレーズを確認・保存', 'Review and save phrase')}
                   </Button>}</MotionSwap>
                 <StudyRegion open={saved} className="study-motion-inline">
                   <p
@@ -1018,12 +1031,13 @@ function StudySession({ mediaId }: { mediaId: string }) {
                   onClick={() => void closePanel(true, fromTranscript ? 'transcript' : null)}
                 >
                   <Play size={17} />
-                  {t('視聴に戻る', 'Return to watching')}
+                  {t('元の位置から再生を再開', 'Resume from original position')}
                 </Button>
               </div>}
             </StudyRegion>
             </div>
           </m.aside>
+        </div>
       </div>
       <StudyExitDialog guard={exitGuard} saving={saveBusy} />
       {draftReview &&

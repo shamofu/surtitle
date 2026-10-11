@@ -59,7 +59,7 @@ test('activity on Study requests native surface hiding and restores bounds throu
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await installLearningFixture(page, 'en', 'dark');
   await page.goto('/study/visual-fixture');
-  const inspect = page.getByRole('button', { name: 'Inspect this phrase', exact: true });
+  const inspect = page.getByRole('button', { name: 'Inspect this subtitle', exact: true });
   await expect(inspect).toBeEnabled();
   // This verifies the browser-to-native contract using fixture calls, not native video rendering.
   const lastSurfaceAction = () => page.evaluate(() => (window as any).__learningFixture.calls

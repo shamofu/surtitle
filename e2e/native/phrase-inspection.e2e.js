@@ -73,25 +73,25 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
     await control({ action: 'pause' });
     await control({ action: 'seek', value: 200 });
     await browser.waitUntil(async () => (await player()).positionMs < 500);
-    await $('button=Inspect this phrase').waitForEnabled();
-    await $('button=Inspect this phrase').click();
-    await $('button=Return to watching').waitForDisplayed();
+    await $('button=Inspect this subtitle').waitForEnabled();
+    await $('button=Inspect this subtitle').click();
+    await $('button=Resume from original position').waitForDisplayed();
     assert.equal((await player()).paused, true);
     const returnPosition = (await player()).positionMs;
     const originalContext = await $('.phrase-panel .context-sentence').getText();
-    await $('.phrase-panel').$('button=Listen again').click();
+    await $('.phrase-panel').$('button=Play this passage').click();
     await browser.waitUntil(async () => !(await player()).paused);
     await browser.waitUntil(async () => (await player()).paused, { timeout: 12000 });
     assert.equal(await $('.phrase-panel .context-sentence').getText(), originalContext);
     await $('[aria-label="Repeat selected segment"]').click();
     await $('[aria-label="Repeat selected segment"]').waitForDisplayed();
-    await $('button=Return to watching').click();
+    await $('button=Resume from original position').click();
     await browser.waitUntil(async () => { const state = await player(); return !state.paused && state.positionMs >= returnPosition; });
     await browser.waitUntil(async () => (await player()).positionMs > 1600, { timeout: 6000, timeoutMsg: 'Returning retained the old range stop or repeat' });
     await control({ action: 'pause' });
     assert.equal((await invoke('get_app_snapshot')).budget.spentUsd, 0);
   });
-  it('keeps video and controls inside a compact window with long subtitles and More expanded', async () => {
+  it('keeps video and controls inside a compact window with long subtitles and export management expanded', async () => {
     const original = (await invoke('list_segments', { mediaId }))[0];
     try {
       await invoke('edit_segment', { segment: { ...original, text: 'Sometimes a longer sentence needs more space to stay readable. We can take a little detour, listen again, and discover how the same words fit into the world around us without losing the picture or the playback controls.' } });
@@ -101,7 +101,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
       await control({ action: 'pause' });
       await control({ action: 'seek', value: original.startMs });
       await browser.waitUntil(async () => (await $('.current-caption-text').getText()).startsWith('Sometimes a longer sentence'));
-      await $('button=More').click();
+      await $('button=Export and manage').click();
       await browser.waitUntil(async () => (await player()).surfaceVisible);
       const inside = await browser.execute(() => {
         const page = document.querySelector('.page-content').getBoundingClientRect();
@@ -109,7 +109,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
         const controls = document.querySelector('.player-controls').getBoundingClientRect();
         return video.top >= page.top && video.bottom <= page.bottom && controls.bottom <= Math.min(page.bottom, innerHeight);
       });
-      assert(inside, 'A long current subtitle or expanded More toolbar clipped the native video or controls');
+      assert(inside, 'A long current subtitle or expanded export management toolbar clipped the native video or controls');
       await assertNativeVideoBounds();
       await saveNativeScreenshot(resolve('test-results/native/learning-long-caption-more.png'));
     } finally {
@@ -126,10 +126,10 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
     await control({ action: 'seek', value: 200 });
     const firstCue = (await invoke('list_segments', { mediaId }))[0];
     await browser.waitUntil(async () => (await $('.current-caption-text').getText()) === firstCue.text);
-    await $('button=Inspect this phrase').waitForEnabled();
-    await $('button=Inspect this phrase').click();
-    await $('button=Save a phrase').waitForEnabled();
-    await $('button=Save a phrase').click();
+    await $('button=Inspect this subtitle').waitForEnabled();
+    await $('button=Inspect this subtitle').click();
+    await $('button=Review and save phrase').waitForEnabled();
+    await $('button=Review and save phrase').click();
     await expect($('dialog')).not.toExist();
     await $('.save-phrase-form input').setValue('native inline phrase');
     await $('.save-phrase-form textarea').setValue('Saved through the phrase panel');
@@ -146,16 +146,15 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
     assert(statSync(saved.audioPath).size > 44);
     await expect($('.save-phrase-form')).not.toExist();
     await expect($('.phrase-saved')).toBeDisplayed();
-    await $('button=Return to watching').click();
+    await $('button=Resume from original position').click();
     await browser.waitUntil(async () => !(await player()).paused);
     await control({ action: 'pause' });
   });
   it('hides native video for playback settings and restores focus without closing the background panel on Escape', async () => {
     await control({ action: 'pause' });
-    const transcript = $('.study-top-actions button');
+    const transcript = $('.study-transcript-toggle');
     if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
     await $('.transcript-panel').waitForDisplayed();
-    if (!(await $('button=Playback settings').isDisplayed())) await $('button=More').click();
     await $('button=Playback settings').click();
     await $('dialog').waitForDisplayed();
     await browser.waitUntil(async () => !(await player()).surfaceVisible);
@@ -267,7 +266,7 @@ const navigate = path => browser.execute(next => { history.pushState({}, '', nex
       await control({ action: 'pause' });
       const transcription = job.kind === 'transcribe' || job.automaticTranscript;
       if (transcription) {
-        const transcript = $('.study-top-actions button');
+        const transcript = $('.study-transcript-toggle');
         if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
         await $('.transcript-tabs').$('button=Transcription').click();
         await $('.transcription-workspace').waitForDisplayed();

@@ -20,12 +20,12 @@ type DraftSaveGateWindow = FixtureWindow & {
 async function openStudy(page: Page, locale: 'en' | 'ja' = 'en', theme: 'light' | 'dark' = 'light') {
   await installLearningFixture(page, locale, theme);
   await page.goto('/study/visual-fixture');
-  await expect(page.getByRole('button', { name: locale === 'ja' ? 'この言葉を確認' : 'Inspect this phrase', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: locale === 'ja' ? 'この字幕を確認' : 'Inspect this subtitle', exact: true })).toBeEnabled();
 }
 
 async function createDraft(page: Page, locale: 'en' | 'ja' = 'en') {
-  await page.getByRole('button', { name: locale === 'ja' ? 'この言葉を確認' : 'Inspect this phrase', exact: true }).click();
-  await page.getByRole('button', { name: locale === 'ja' ? 'フレーズを保存' : 'Save a phrase', exact: true }).click();
+  await page.getByRole('button', { name: locale === 'ja' ? 'この字幕を確認' : 'Inspect this subtitle', exact: true }).click();
+  await page.getByRole('button', { name: locale === 'ja' ? 'フレーズを確認・保存' : 'Review and save phrase', exact: true }).click();
   await page.getByLabel(locale === 'ja' ? '語彙・フレーズ' : 'Word or phrase', { exact: true }).fill('take a little detour');
   await page.getByLabel(locale === 'ja' ? '意味' : 'Meaning', { exact: true }).fill('少し寄り道をする');
 }
@@ -42,6 +42,36 @@ async function blockDraftSaves(page: Page) {
       if (command === 'save_editor_draft') { gate.pending = true; await saved; }
       return original(command, args);
     };
+  });
+}
+
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(`subtitle side tab supports keyboard opening and focus return (${reducedMotion})`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion });
+    await openStudy(page);
+    const toggle = page.getByRole('button', { name: 'Transcript', exact: true });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).toHaveAttribute('aria-controls', 'study-companion');
+    expect(await toggle.evaluate(element => !element.closest('.study-companion, [inert], [hidden]'))).toBe(true);
+    await toggle.focus();
+    await toggle.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('.study-companion h2')).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Close panel', exact: true })).toHaveCount(0);
+    await page.getByLabel('Search transcript').fill('coast');
+    await page.getByRole('button', { name: 'Show translations', exact: true }).click();
+    await page.getByRole('tab', { name: 'Suggestions', exact: true }).click();
+    await page.keyboard.press('Escape');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).toBeFocused();
+    await toggle.press('Space');
+    await expect(page.getByRole('tab', { name: 'Suggestions', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('tab', { name: 'Transcript', exact: true }).click();
+    await expect(page.getByLabel('Search transcript')).toHaveValue('coast');
+    await expect(page.getByRole('button', { name: 'Hide translations', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await toggle.click();
+    await expect(toggle).toBeFocused();
+    await expect(toggle).toBeVisible();
   });
 }
 
@@ -96,7 +126,7 @@ test('real virtualized transcript restores its search, translations and scroll a
   await openStudy(page);
   await page.getByRole('button', { name: 'Transcript', exact: true }).click();
   await page.getByLabel('Search transcript').fill('coast');
-  await page.getByRole('button', { name: 'Toggle translations' }).click();
+  await page.getByRole('button', { name: 'Show translations' }).click();
   const list = page.getByLabel('Subtitle list', { exact: true });
   await list.dispatchEvent('wheel', { deltaY: 1200 });
   await list.evaluate(element => { element.scrollTop = 1200; element.dispatchEvent(new Event('scroll', { bubbles: true })); });
@@ -114,10 +144,10 @@ test('real virtualized transcript restores its search, translations and scroll a
   await expect(page.getByRole('button', { name: 'Back to transcript', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Back to transcript', exact: true }).click();
   await expect(page.getByLabel('Search transcript')).toHaveValue('coast');
-  await expect(page.getByRole('button', { name: 'Toggle translations' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'Follow playback', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Hide translations' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Show current subtitle', exact: true })).toBeVisible();
   await expect.poll(async () => Math.abs(await list.evaluate(element => element.scrollTop) - offset)).toBeLessThan(2);
-  await page.getByRole('button', { name: 'Follow playback', exact: true }).click();
+  await page.getByRole('button', { name: 'Show current subtitle', exact: true }).click();
   await expect(page.getByLabel('Search transcript')).toHaveValue('');
   await expect(page.locator('.transcript-row.playing')).toBeInViewport();
 });
@@ -127,7 +157,7 @@ for (const locale of ['en', 'ja'] as const) {
     await openStudy(page, locale);
     await page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true }).click();
     const search = page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript');
-    const translations = page.getByRole('button', { name: locale === 'ja' ? '翻訳を表示・非表示' : 'Toggle translations' });
+    const translations = page.locator('.study-transcript').getByRole('button', { name: locale === 'ja' ? /訳を表示|訳を隠す/ : /Show translations|Hide translations/ });
     const list = page.getByLabel(locale === 'ja' ? '字幕一覧' : 'Subtitle list', { exact: true });
     const back = page.getByRole('button', { name: locale === 'ja' ? '字幕一覧へ戻る' : 'Back to transcript', exact: true });
     await search.fill('coast');
@@ -169,7 +199,7 @@ for (const locale of ['en', 'ja'] as const) {
     await row.locator('.segment-text').click();
     await expect(back).toBeVisible();
     const callsBeforeReplay = await page.evaluate(() => (window as FixtureWindow).__learningFixture.calls.length);
-    await page.locator('.context-actions').getByRole('button', { name: locale === 'ja' ? 'もう一度聴く' : 'Listen again', exact: true }).click();
+    await page.locator('.context-actions').getByRole('button', { name: locale === 'ja' ? 'この区間を再生' : 'Play this passage', exact: true }).click();
     await expect.poll(() => playbackRequestsSince(callsBeforeReplay)).toEqual([
       { action: 'source-seek', startMs, endMs: startMs + 7000 },
     ]);
@@ -199,7 +229,7 @@ test('caption navigation preserves playback state and inspector input without AI
   await page.getByRole('button', { name: 'Next subtitle', exact: true }).click();
   await expect(page.locator('.context-sentence')).toHaveText(original!);
   await expect(page.getByLabel('Word or phrase', { exact: true })).toHaveValue('take a little detour');
-  await page.locator('.caption-navigation').getByRole('button', { name: 'Listen again', exact: true }).click();
+  await page.locator('.caption-navigation').getByRole('button', { name: 'Replay this subtitle', exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as FixtureWindow).__learningFixture.calls.filter(call => call.command === 'player_control' && call.args.request?.action === 'source-seek').at(-1)?.args.request)).toEqual({ action: 'source-seek', startMs: 77000, endMs: 84000 });
   expect(await page.evaluate(() => (window as FixtureWindow).__learningFixture.calls.some(call => /quote|start_ai|approve_ai/.test(call.command)))).toBe(false);
 });
@@ -249,7 +279,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
     await page.getByLabel(locale === 'ja' ? '語彙・フレーズ' : 'Word or phrase', { exact: true }).fill(longTerm);
     await page.getByRole('button', { name: locale === 'ja' ? 'あとで続ける' : 'Continue later', exact: true }).click();
     await page.getByRole('button', { name: locale === 'ja' ? 'パネルを閉じる' : 'Close panel', exact: true }).click();
-    await page.getByRole('button', { name: locale === 'ja' ? 'その他' : 'More', exact: true }).click();
+    await page.getByRole('button', { name: locale === 'ja' ? '書き出し・管理' : 'Export and manage', exact: true }).click();
     await page.getByRole('button', { name: locale === 'ja' ? '入力途中のフレーズ (1)' : 'Unfinished phrases (1)', exact: true }).click();
     const draft = page.locator('.study-phrase-draft');
     await draft.scrollIntoViewIfNeeded();
@@ -267,7 +297,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
     await page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true }).click();
     for (const control of [
       page.getByRole('button', { name: locale === 'ja' ? '次の字幕' : 'Next subtitle', exact: true }),
-      page.getByRole('button', { name: locale === 'ja' ? '再生に追従中' : 'Following playback', exact: true }),
+      page.getByRole('button', { name: locale === 'ja' ? '自動追従中' : 'Following playback', exact: true }),
     ]) {
       await control.scrollIntoViewIfNeeded();
       expect(await control.evaluate(element => {

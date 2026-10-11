@@ -94,6 +94,20 @@ afterEach(() => {
 });
 
 describe('player loading and recovery', () => {
+  it('opens playback settings directly from the player controls', async () => {
+    const openSettings = vi.fn();
+    render(<NativePlayer media={media} selected={cues[0]} selectionRevision={0}
+      onReady={fixture.onReady} onPosition={fixture.onPosition} onSettingsOpen={openSettings} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Play' })).toBeEnabled());
+    const settings = screen.getByRole('button', { name: 'Playback settings' });
+    expect(settings.closest('.player-control-row')).not.toBeNull();
+    fireEvent.click(settings);
+    expect(openSettings).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: 'Back 5 seconds' })).toHaveTextContent('5s');
+    expect(screen.getByRole('button', { name: 'Forward 5 seconds' })).toHaveTextContent('5s');
+    expect(screen.getByText('Speed')).toBeVisible();
+  });
+
   it('shows a load failure inline and retries only once while pending', async () => {
     const retry = deferred<void>();
     vi.mocked(playerApi.loadMedia).mockRejectedValueOnce(new Error('Cannot open media')).mockReturnValueOnce(retry.promise);
@@ -183,7 +197,7 @@ describe('current subtitle controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Previous subtitle' }));
     fireEvent.click(screen.getByRole('button', { name: 'Next subtitle' }));
     expect(previous).toHaveBeenCalledOnce(); expect(next).toHaveBeenCalledOnce();
-    expect(screen.getByRole('button', { name: 'Listen again' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Replay this subtitle' })).toBeDisabled();
     view.rerender(<CurrentCaption language="en" active={cues[0]} loading={false} hasSubtitles draftMode enabled
       inspectButton={createRef()} onInspect={vi.fn()} onImport={vi.fn()} onPrevious={previous} onNext={next}
       onReplay={vi.fn()} hasPrevious hasNext />);
@@ -205,14 +219,14 @@ describe('transcript session state', () => {
     render(<Session />);
     fireEvent.wheel(screen.getByRole('generic', { name: 'Subtitle list' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Search transcript' }), { target: { value: 'subtitle' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle translations' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show translations' }));
     fireEvent.scroll(screen.getByRole('generic', { name: 'Subtitle list' }), { target: { scrollTop: 180 } });
     fireEvent.click(screen.getByRole('button', { name: 'Toggle inspector' }));
     fixture.scrollToOffset.mockClear();
     fixture.scrollToIndex.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Toggle inspector' }));
     expect(screen.getByRole('textbox', { name: 'Search transcript' })).toHaveValue('subtitle');
-    expect(screen.getByRole('button', { name: 'Toggle translations' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Hide translations' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText('最初の字幕')).toBeInTheDocument();
     expect(fixture.scrollToOffset).toHaveBeenLastCalledWith(180, { behavior: 'auto' });
     expect(fixture.scrollToIndex).not.toHaveBeenCalled();
@@ -223,7 +237,7 @@ describe('transcript session state', () => {
     expect(screen.getByRole('tab', { name: 'Suggestions' })).toHaveAttribute('aria-selected', 'true');
     fireEvent.click(screen.getByRole('tab', { name: 'Transcript' }));
     expect(fixture.scrollToOffset).toHaveBeenLastCalledWith(180, { behavior: 'auto' });
-    fireEvent.click(screen.getByRole('button', { name: 'Follow playback' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show current subtitle' }));
     expect(screen.getByRole('textbox', { name: 'Search transcript' })).toHaveValue('');
     expect(fixture.scrollToIndex).toHaveBeenLastCalledWith(0, { align: 'center', behavior: 'auto' });
   });

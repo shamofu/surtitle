@@ -54,7 +54,7 @@ for (const locale of ['ja', 'en'] as const) {
     await page.setViewportSize({ width: 1024, height: 700 });
     await installTranscriptionFixture(page, locale);
     await page.goto('/study/visual-fixture');
-    await page.getByRole('button', { name: locale === 'ja' ? '字幕を用意する' : 'Prepare subtitles', exact: true }).click();
+    await page.getByRole('button', { name: locale === 'ja' ? '音声から字幕を作成' : 'Create subtitles from audio', exact: true }).click();
     const start = page.getByRole('button', { name: locale === 'ja' ? 'この内容で文字起こしを開始' : 'Start transcription', exact: true });
     await expect(start).toBeEnabled();
     await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -107,12 +107,12 @@ test('transcription inputs and quote survive tab switches, inspection, and closi
   await page.getByRole('textbox', { name: 'From', exact: true }).fill('0:12');
   await page.getByRole('textbox', { name: 'To', exact: true }).fill('0:42');
   await page.getByRole('tab', { name: 'Transcript', exact: true }).click();
-  await page.getByRole('button', { name: 'Inspect this phrase', exact: true }).click();
+  await page.getByRole('button', { name: 'Inspect this subtitle', exact: true }).click();
   await page.getByRole('button', { name: 'Back to transcript', exact: true }).click();
   await page.getByRole('tab', { name: 'Transcription', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'From', exact: true })).toHaveValue('0:12');
   await expect(page.getByRole('textbox', { name: 'To', exact: true })).toHaveValue('0:42');
-  await page.getByRole('button', { name: 'Close panel', exact: true }).click();
+  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
   await page.getByRole('button', { name: 'Transcript', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'From', exact: true })).toHaveValue('0:12');
   await expect(page.getByRole('textbox', { name: 'To', exact: true })).toHaveValue('0:42');
@@ -126,7 +126,7 @@ for (const locale of ['ja', 'en'] as const) {
     await page.setViewportSize({ width: 1024, height: 700 });
     await installTranscriptionFixture(page, locale, false, true);
     await page.goto('/study/visual-fixture');
-    await page.getByRole('button', { name: locale === 'ja' ? '字幕を用意する' : 'Prepare subtitles', exact: true }).click();
+    await page.getByRole('button', { name: locale === 'ja' ? '音声から字幕を作成' : 'Create subtitles from audio', exact: true }).click();
     await expect(page.getByTestId('transcription-pacing-policy')).toBeVisible();
     await page.getByRole('button', { name: locale === 'ja' ? 'この内容で文字起こしを開始' : 'Start transcription', exact: true }).click();
     await page.evaluate(() => {
@@ -173,7 +173,7 @@ for (const locale of ['ja', 'en'] as const) {
     await page.setViewportSize({ width: 1024, height: 700 });
     await installTranscriptionFixture(page, locale, false, true);
     await page.goto('/study/visual-fixture');
-    await page.getByRole('button', { name: locale === 'ja' ? '字幕を用意する' : 'Prepare subtitles', exact: true }).click();
+    await page.getByRole('button', { name: locale === 'ja' ? '音声から字幕を作成' : 'Create subtitles from audio', exact: true }).click();
     await expect(page.getByTestId('automatic-retry-policy')).toBeVisible();
     await expect(page.getByTestId('automatic-retry-policy')).toContainText(locale === 'ja' ? '最大15回の送信' : '15 requests maximum');
     await page.getByRole('button', { name: locale === 'ja' ? 'この内容で文字起こしを開始' : 'Start transcription', exact: true }).click();

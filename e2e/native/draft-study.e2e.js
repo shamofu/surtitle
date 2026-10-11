@@ -89,7 +89,7 @@ async function clickVisible(element) {
 }
 async function openDraft(id = mediaId) {
   await browser.execute(path => { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, `/study/${id}`);
-  const transcript = $('.study-top-actions button');
+  const transcript = $('.study-transcript-toggle');
   await transcript.waitForClickable();
   if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
   await clickVisible($('.transcript-tabs').$('button=Transcription'));

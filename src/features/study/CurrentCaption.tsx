@@ -94,7 +94,7 @@ export function CurrentCaption({
                 <p>{loading ? t('字幕を読み込み中…', 'Loading subtitles…') : hasSubtitles
                   ? t('音声に合わせて、ここに字幕を表示します。', 'Subtitles appear here as you watch.')
                   : t('字幕を追加すると、気になる言葉を選んで確認できます。', 'Add subtitles to inspect a phrase while you watch.')}</p>
-                {!hasSubtitles && <Button variant="ghost" onClick={onImport}>{t('字幕を用意する', 'Prepare subtitles')}</Button>}
+                {!hasSubtitles && <Button variant="ghost" onClick={onImport}>{t('音声から字幕を作成', 'Create subtitles from audio')}</Button>}
               </div>
             )}
           </MotionSwap>
@@ -113,10 +113,10 @@ export function CurrentCaption({
           {source && !draftMode && <>
             <Button variant="ghost" aria-pressed={showTranslation} onClick={() => setShowTranslation(value => !value)}>
               <Languages size={17} />
-              <MotionSwap as="span" stateKey={String(showTranslation)}>{showTranslation ? t('訳を閉じる', 'Hide translation') : t('訳を表示', 'Show translation')}</MotionSwap>
+              <MotionSwap as="span" stateKey={String(showTranslation)}>{showTranslation ? t('訳を隠す', 'Hide translation') : t('訳を表示', 'Show translation')}</MotionSwap>
             </Button>
             <button ref={inspectButton} type="button" className="button secondary" disabled={!enabled} onClick={() => onInspect(source)}>
-              {t('この言葉を確認', 'Inspect this phrase')}
+              {t('この字幕を確認', 'Inspect this subtitle')}
             </button>
           </>}
         </div>
@@ -126,7 +126,7 @@ export function CurrentCaption({
               <ChevronLeft size={16} />{t('前の字幕', 'Previous subtitle')}
             </Button>
             <Button variant="secondary" disabled={!enabled || !active} onClick={onReplay}>
-              <RotateCcw size={16} />{t('もう一度聴く', 'Listen again')}
+              <RotateCcw size={16} />{t('この字幕をもう一度', 'Replay this subtitle')}
             </Button>
             <Button variant="ghost" disabled={!enabled || !hasNext} onClick={onNext}>
               {t('次の字幕', 'Next subtitle')}<ChevronRight size={16} />

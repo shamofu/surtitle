@@ -52,7 +52,7 @@ async function expectFooterActions(footer: Locator, count: number) {
 
 for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
   const t = (ja: string, en: string) => locale === 'ja' ? ja : en;
-  const inspect = t('この言葉を確認', 'Inspect this phrase');
+  const inspect = t('この字幕を確認', 'Inspect this subtitle');
   const captionName = t('いまの字幕', 'Current subtitle');
   const label = `${locale} ${theme} 1024x700`;
 
@@ -75,7 +75,7 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
         - button "${inspect}"
         - group "${t('字幕の再生操作', 'Subtitle playback')}":
           - button "${t('前の字幕', 'Previous subtitle')}"
-          - button "${t('もう一度聴く', 'Listen again')}"
+          - button "${t('この字幕をもう一度', 'Replay this subtitle')}"
           - button "${t('次の字幕', 'Next subtitle')}"
     `);
     await expect(caption.locator('.current-caption-text')).toHaveAttribute('lang', 'en');
@@ -101,7 +101,7 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
     await panel.getByRole('button', { name: t('意味を見る', 'Show meaning'), exact: true }).click();
     await expect(panel.getByRole('button', { name: t('意味を閉じる', 'Hide meaning'), exact: true })).toHaveAttribute('aria-expanded', 'true');
     await expect(panel.locator('.context-translation')).toHaveText(translation);
-    await panel.getByRole('button', { name: t('フレーズを保存', 'Save a phrase'), exact: true }).click();
+    await panel.getByRole('button', { name: t('フレーズを確認・保存', 'Review and save phrase'), exact: true }).click();
     const form = panel.locator('.save-phrase-form');
     const term = form.getByRole('textbox', { name: t('語彙・フレーズ', 'Word or phrase'), exact: true });
     const meaning = form.getByRole('textbox', { name: t('意味', 'Meaning'), exact: true });

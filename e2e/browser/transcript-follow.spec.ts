@@ -13,7 +13,7 @@ async function openTranscript(page: Page, reducedMotion: 'no-preference' | 'redu
   await installLearningFixture(page, 'en', 'light');
   await page.goto('/study/visual-fixture');
   await page.waitForLoadState('networkidle');
-  await expect(page.getByRole('button', { name: 'Inspect this phrase', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Inspect this subtitle', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Transcript', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Following playback', exact: true })).toBeVisible();
   await expectCentered(page, 10);
@@ -74,7 +74,7 @@ async function startScrollAndWaitForMovement(page: Page, index: number) {
 
 test('playback smoothly centers measured subtitle rows, including translations', async ({ page }) => {
   await openTranscript(page);
-  await page.getByRole('button', { name: 'Toggle translations' }).click();
+  await page.getByRole('button', { name: 'Show translations' }).click();
   await expectCentered(page, 10);
 
   for (const index of [11, 12]) {
@@ -93,7 +93,7 @@ test('manual scrolling interrupts smooth follow and later playback cannot pull t
   await list.hover();
   expect(await startScrollAndWaitForMovement(page, 15)).toBe(true);
   await page.mouse.wheel(0, -180);
-  await expect(page.getByRole('button', { name: 'Follow playback', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Show current subtitle', exact: true })).toBeVisible();
 
   // Observe actual browser frames after the user's wheel movement settles.
   const stopped = await list.evaluate(async element => {
@@ -109,7 +109,7 @@ test('manual scrolling interrupts smooth follow and later playback cannot pull t
     const observed = await observePlaybackScroll(page, index, 12);
     expect(observed.samples.every(sample => Math.abs(sample.top - stopped.at(-1)!) < 2)).toBe(true);
   }
-  await expect(page.getByRole('button', { name: 'Follow playback', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Show current subtitle', exact: true })).toBeVisible();
 });
 
 test('reduced motion immediately follows the active subtitle without intermediate movement', async ({ page }) => {

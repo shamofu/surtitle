@@ -245,7 +245,7 @@ export function SubtitleSourceDialog({
   return (
     <Modal
       {...exit.modalProps}
-      title={t('字幕を用意する', 'Set up study subtitles')}
+      title={t('字幕を追加・切り替え', 'Add or switch subtitles')}
       closeDisabled={busy || exit.exiting}
       onClose={close}
     >
@@ -255,7 +255,7 @@ export function SubtitleSourceDialog({
             ['embedded', t('埋め込み字幕', 'Embedded')],
             ...(onTranscribe ? [['transcribe', t('全編を文字起こし', 'Transcribe full media')]] as const : []),
             ['file', t('字幕ファイル', 'Subtitle file')],
-            ['versions', t('保存した旧版', 'Saved versions')],
+            ['versions', t('保存した字幕', 'Saved subtitles')],
           ] as const
         ).map(([id, title]) => (
           <button

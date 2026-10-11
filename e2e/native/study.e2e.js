@@ -70,11 +70,11 @@ describe('real native learning workflow (no cloud requests)', () => {
     const rows = await $$('.transcript-row');
     assert(rows.length > 0 && rows.length < 80, `Expected virtualized DOM, got ${rows.length} rows`);
     await browser.execute(() => document.querySelector('.transcript-scroll').dispatchEvent(new WheelEvent('wheel', { deltaY: 650, bubbles: true })));
-    await expect($('button=Follow playback')).toBeDisplayed();
+    await expect($('button=Show current subtitle')).toBeDisplayed();
     await $('[aria-label="Search transcript"]').setValue('19999');
     await browser.waitUntil(async () => (await $$('.transcript-row')).length === 1);
     await expect($('.transcript-row')).toHaveText(expect.stringContaining('Practice sentence 19999. Repeat repeat.'));
-    await clickInView('button=Follow playback');
+    await clickInView('button=Show current subtitle');
     await expect($('[aria-label="Search transcript"]')).toHaveValue('');
     await expect($('button=Following playback')).toBeDisplayed();
     await browser.saveScreenshot(resolve('test-results/native/study.png'));
@@ -131,7 +131,6 @@ describe('real native learning workflow (no cloud requests)', () => {
     await browser.waitUntil(async () => { const state = await invoke('get_player_state'); return state.paused && state.positionMs >= 1400; }, { timeout: 12000, timeoutMsg: 'Selected interval did not stop at its end' });
     await invoke('player_control', { request: { action: 'rate', value: 1.25 } });
     assert.equal((await invoke('get_player_state')).rate, 1.25);
-    await $('button=More').click();
     await $('button=Playback settings').click();
     await expect($('dialog')).toBeDisplayed();
     await browser.waitUntil(async () => !(await invoke('get_player_state')).surfaceVisible, { timeoutMsg: 'Native child window remained visible over the modal' });

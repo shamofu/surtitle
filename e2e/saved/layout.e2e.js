@@ -72,7 +72,7 @@ describe('saved draft layout geometry without learning mutations', () => {
     assert.equal(originalSelections.length, 5, 'Use the existing completed v2 saved-study profile');
     await capture('initial');
     await browser.execute(path => { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, `/study/${profile.mediaId}`);
-    const transcript = $('.study-top-actions button');
+    const transcript = $('.study-transcript-toggle');
     await transcript.waitForClickable();
     if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
     const tab = $('button=Study a draft');

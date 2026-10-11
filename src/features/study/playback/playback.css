@@ -7,21 +7,23 @@
 .video-placeholder p { font-size: 13px; line-height: 1.7; max-width: 60ch; text-align: center; overflow-wrap: anywhere; }
 .video-placeholder > .motion-swap-live { display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .video-placeholder.motion-swap { position: absolute; }
-.player-controls { flex-shrink: 0; padding: 6px 12px 8px; background: var(--surface); }
+.player-controls { flex-shrink: 0; min-width: 0; padding: 6px 12px 8px; background: var(--surface); }
 .seek-control { display: flex; align-items: center; height: 18px; }
 @property --playback-progress { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
 .seek-control input { width: 100%; height: 18px; margin: 0; border: 0; border-radius: 2px; padding: 0; appearance: none; background: linear-gradient(to right, var(--accent) var(--playback-progress), var(--border) var(--playback-progress)) center / calc(100% - 12px) 4px no-repeat; cursor: pointer; touch-action: none; transition: --playback-progress var(--motion-swap) var(--motion-ease); }
 .seek-control input[data-motion-immediate] { transition: none; }
 .seek-control input::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; background: var(--accent); border-radius: 50%; }
 .player-control-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; }
-.control-cluster { display: flex; align-items: center; gap: 2px; color: var(--muted); }
+.control-cluster { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; gap: 2px; color: var(--muted); }
+.player-options { justify-content: flex-end; margin-left: auto; }
+.player-skip.button, .player-settings.button { flex-shrink: 0; min-height: 40px; padding: 6px 8px; gap: 5px; font-size: 12px; }
 .play-button { color: var(--text); }
 .player-time { font-family: inherit; font-variant-numeric: tabular-nums; font-size: 12px; white-space: nowrap; margin: 0 8px; color: var(--text); }
 .player-time > .player-duration { color: var(--muted); }
-.speed-select { position: relative; display: flex; align-items: center; }
+.speed-select { position: relative; display: flex; flex-shrink: 0; align-items: center; font-size: 12px; }
 .speed-select select { font-size: 13px; border: 0; background: transparent; padding: 8px 20px 8px 6px; height: 40px; appearance: none; }
 .speed-select svg { position: absolute; right: 4px; pointer-events: none; }
-.volume-control { display: flex; align-items: center; gap: 6px; height: 32px; margin-right: 6px; }
+.volume-control { display: flex; flex-shrink: 0; align-items: center; gap: 6px; height: 32px; margin-right: 6px; }
 .volume-control svg { flex-shrink: 0; }
 .volume-slider { width: 58px; height: 4px; border: 0; padding: 0; margin: 0; accent-color: var(--accent); }
 .volume-value { min-width: 4ch; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; color: var(--text); }

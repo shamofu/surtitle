@@ -75,7 +75,6 @@ async function openStudy() {
   await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__));
   await browser.execute(path => { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, `/study/${mediaId}`);
   await browser.waitUntil(async () => { const state = await player(); return state.ready && state.surfaceVisible && state.videoWidth > 0; });
-  await $('button=More').click();
   await $('button=Playback settings').click();
   await toggle().waitForEnabled();
 }

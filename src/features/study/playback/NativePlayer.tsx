@@ -18,6 +18,7 @@ import {
   Repeat2,
   RotateCcw,
   RotateCw,
+  Settings2,
 } from 'lucide-react';
 import { playerApi } from './api';
 import { VolumeControl } from './VolumeControl';
@@ -48,6 +49,7 @@ export function NativePlayer({
   draftMode = false,
   repeatTarget = null,
   settingsOpen = false,
+  onSettingsOpen,
   onSettingsClose = () => {},
   onUseStudySubtitles,
   interactionsDisabled = false,
@@ -56,6 +58,7 @@ export function NativePlayer({
   draftMode?: boolean;
   repeatTarget?: HTMLElement | null;
   settingsOpen?: boolean;
+  onSettingsOpen?: () => void;
   onSettingsClose?: () => void;
   onUseStudySubtitles?: (streamIndex: number) => void;
   interactionsDisabled?: boolean;
@@ -450,7 +453,7 @@ export function NativePlayer({
       onClick={() => void toggleLoop()}
     >
       <Repeat2 size={18} />
-      {t('繰り返す', 'Repeat')}
+      {t('区間リピート', 'Repeat range')}
     </Button>
   );
   return (
@@ -497,28 +500,32 @@ export function NativePlayer({
             />
           </div>
           <div className="player-control-row">
-            <div className="control-cluster">
-              <IconButton label={t('5 秒戻る', 'Back 5 seconds')} disabled={!loaded} onClick={() => void control({ action: 'seek', value: Math.max(0, position - 5000) })}>
-                <RotateCcw size={18} />
-              </IconButton>
+            <div className="control-cluster player-transport">
+              <Button className="player-skip" variant="ghost" aria-label={t('5 秒戻る', 'Back 5 seconds')} disabled={!loaded} onClick={() => void control({ action: 'seek', value: Math.max(0, position - 5000) })}>
+                <RotateCcw size={18} />{t('5秒', '5s')}
+              </Button>
               <IconButton className="play-button" label={state?.paused !== false ? t('再生', 'Play') : t('一時停止', 'Pause')} disabled={!loaded} onClick={() => void control({ action: state?.paused ? 'play' : 'pause' })}>
                 <MotionSwap as="span" stateKey={state?.paused !== false ? 'play' : 'pause'}>{state?.paused !== false ? <Play size={19} fill="currentColor" /> : <Pause size={19} fill="currentColor" />}</MotionSwap>
               </IconButton>
-              <IconButton label={t('5 秒進む', 'Forward 5 seconds')} disabled={!loaded} onClick={() => void control({ action: 'seek', value: Math.min(duration, position + 5000) })}>
-                <RotateCw size={18} />
-              </IconButton>
+              <Button className="player-skip" variant="ghost" aria-label={t('5 秒進む', 'Forward 5 seconds')} disabled={!loaded} onClick={() => void control({ action: 'seek', value: Math.min(duration, position + 5000) })}>
+                <RotateCw size={18} />{t('5秒', '5s')}
+              </Button>
               <span className="player-time"><AnimatedValue value={timestamp(position)} immediate={seekDraft !== null} /> <span className="player-duration">/ <AnimatedValue value={timestamp(duration)} /></span></span>
             </div>
-            <div className="control-cluster">
+            <div className="control-cluster player-options">
               <label className="speed-select">
-                <span className="sr-only">{t('再生速度', 'Playback speed')}</span>
-                <select value={state?.rate || 1} disabled={!loaded} onChange={(event) => void control({ action: 'rate', value: Number(event.target.value) })}>
+                <span aria-hidden="true">{t('速度', 'Speed')}</span>
+                <select aria-label={t('再生速度', 'Playback speed')} value={state?.rate || 1} disabled={!loaded} onChange={(event) => void control({ action: 'rate', value: Number(event.target.value) })}>
                   {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((rate) => <option key={rate} value={rate}>{rate}×</option>)}
                 </select>
                 <ChevronDown size={12} />
               </label>
               <VolumeControl key={media.id} value={state?.volume ?? 80} disabled={controlsDisabled}
                 label={t('音量', 'Volume')} onChange={changeVolume} />
+              {onSettingsOpen && <Button className="player-settings" variant="ghost" aria-haspopup="dialog"
+                disabled={interactionsDisabled} onClick={onSettingsOpen}>
+                <Settings2 size={16} />{t('再生設定', 'Playback settings')}
+              </Button>}
               <IconButton label={t('全画面表示を切り替える', 'Toggle fullscreen')} aria-pressed={fullscreen} disabled={!loaded} onClick={() => {
                 const next = !fullscreen;
                 setFullscreen(next);

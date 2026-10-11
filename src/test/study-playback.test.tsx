@@ -286,22 +286,22 @@ afterEach(async () => {
   vi.resetAllMocks();
 });
 
-const inspectButton = () => screen.getByRole('button', { name: 'Inspect this phrase' });
-const inspectReplay = () => within(document.querySelector('.phrase-inspector') as HTMLElement).getByRole('button', { name: 'Listen again' });
+const inspectButton = () => screen.getByRole('button', { name: 'Inspect this subtitle' });
+const inspectReplay = () => within(document.querySelector('.phrase-inspector') as HTMLElement).getByRole('button', { name: 'Play this passage' });
 async function ready() {
   await waitFor(() => expect(inspectButton()).toBeEnabled());
 }
-function openTranscript() {
-  fireEvent.click(within(document.querySelector('.study-top') as HTMLElement).getByRole('button', { name: 'Transcript' }));
+async function openTranscript() {
+  fireEvent.click(screen.getByRole('button', { name: 'Transcript' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Transcript' })).toHaveAttribute('aria-expanded', 'true'));
 }
 function openPlaybackSettings() {
-  fireEvent.click(screen.getByRole('button', { name: 'More' }));
   fireEvent.click(screen.getByRole('button', { name: 'Playback settings' }));
 }
 async function inspectCurrent() {
   await ready();
   fireEvent.click(inspectButton());
-  await screen.findByRole('button', { name: 'Return to watching' });
+  await screen.findByRole('button', { name: 'Resume from original position' });
 }
 
 describe('watching and inspecting phrases', () => {
@@ -309,10 +309,10 @@ describe('watching and inspecting phrases', () => {
     const block: SubtitleSegment = { ...cues[0], endMs: 4000, text: 'Text without word timing', status: 'generated_review', timingPrecision: 'source_block' };
     vi.mocked(studyApi.segments).mockResolvedValue([block]);
     mount();
-    openTranscript();
+    await openTranscript();
     const play = await screen.findByRole('button', { name: 'Play from source audio range 0:00' });
     await waitFor(() => expect(play).toBeEnabled());
-    expect(screen.queryByRole('button', { name: 'Inspect this phrase' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Inspect this subtitle' })).not.toBeInTheDocument();
     expect(screen.getByText(/Text received · subtitle timing unavailable/)).toBeVisible();
     fireEvent.click(play);
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' }));
@@ -321,11 +321,11 @@ describe('watching and inspecting phrases', () => {
     expect(document.querySelector('.phrase-panel')).toBeNull();
     await waitFor(() => expect(screen.getByRole('button', { name: block.text })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: block.text }));
-    await screen.findByRole('button', { name: 'Return to watching' });
+    await screen.findByRole('button', { name: 'Resume from original position' });
     fireEvent.click(inspectReplay());
     await waitFor(() => expect(playerApi.playSourceRange).toHaveBeenCalledWith('media', ['a']));
-    expect(screen.getByRole('button', { name: 'Estimate explanation' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Save a phrase' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Estimate explanation with AI' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Review and save phrase' })).toBeEnabled();
   });
 
   it('trims a long source-block recording in the normal card form and keeps the exact chosen range', async () => {
@@ -334,8 +334,8 @@ describe('watching and inspecting phrases', () => {
     const block: SubtitleSegment = { ...cues[0], endMs: 186000, text: 'Long source text', status: 'generated', timingPrecision: 'source_block' };
     vi.mocked(studyApi.segments).mockResolvedValue([block]);
     mount();
-    openTranscript();
-    const save = await screen.findByRole('button', { name: 'Save phrase' });
+    await openTranscript();
+    const save = await screen.findByRole('button', { name: 'Review and save phrase' });
     await waitFor(() => expect(save).toBeEnabled());
     fireEvent.click(save);
     await screen.findByLabelText('Audio from');
@@ -358,7 +358,7 @@ describe('watching and inspecting phrases', () => {
     vi.mocked(studyApi.segments).mockResolvedValue([{ ...cues[0], status: 'generated' }]);
     const client = mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'would like' } });
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'want politely' } });
     await act(async () => client.setQueryData(queryKeys.segments('media'), [{ ...cues[0], status: 'generated' }, { ...cues[1], status: 'generated' }]));
@@ -426,6 +426,42 @@ describe('watching and inspecting phrases', () => {
     expect(aiApi.createQuote).not.toHaveBeenCalled();
   });
 
+  it('keeps the subtitle toggle outside the hidden panel and restores focus and transcript state on Escape', async () => {
+    mount();
+    await ready();
+    const toggle = screen.getByRole('button', { name: 'Transcript' });
+    const panel = document.getElementById(toggle.getAttribute('aria-controls')!)!;
+    expect(toggle).toHaveAttribute('type', 'button');
+    expect(toggle).not.toHaveAttribute('role', 'tab');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(panel).not.toContainElement(toggle);
+    expect(toggle.closest('[inert], [hidden], [aria-hidden="true"]')).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.queryByRole('button', { name: 'Close panel' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Search transcript'), { target: { value: 'like' } });
+    screen.getByLabelText('Search transcript').focus();
+    fireEvent.keyDown(screen.getByLabelText('Search transcript'), { key: 'Escape' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('Search transcript')).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Show translations' }));
+    fireEvent.wheel(screen.getByLabelText('Subtitle list'));
+    fireEvent.scroll(screen.getByLabelText('Subtitle list'), { target: { scrollTop: 120 } });
+    const suggestions = screen.getByRole('tab', { name: 'Suggestions' });
+    fireEvent.click(suggestions);
+    suggestions.focus();
+    fireEvent.keyDown(suggestions, { key: 'Escape' });
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+    await waitFor(() => expect(toggle).toHaveFocus());
+    expect(toggle.closest('[inert], [hidden], [aria-hidden="true"]')).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByRole('tab', { name: 'Suggestions' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('tab', { name: 'Transcript' }));
+    expect(screen.getByLabelText('Search transcript')).toHaveValue('like');
+    expect(screen.getByRole('button', { name: 'Hide translations' })).toHaveAttribute('aria-pressed', 'true');
+    expect(fixture.scrollOffset).toHaveBeenLastCalledWith(120, { behavior: 'auto' });
+  });
+
   it('pauses and freezes the inspected source while playback moves to a different caption', async () => {
     state = { ...state, paused: false, positionMs: 300 };
     mount();
@@ -448,9 +484,9 @@ describe('watching and inspecting phrases', () => {
     range.setEnd(caption.firstChild!, 12);
     window.getSelection()!.addRange(range);
     fireEvent.pointerUp(caption);
-    await screen.findByRole('button', { name: 'Return to watching' });
+    await screen.findByRole('button', { name: 'Resume from original position' });
     window.getSelection()!.removeAllRanges();
-    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
     expect(screen.getByLabelText('Word or phrase')).toHaveValue('would like');
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'want politely' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save phrase' }));
@@ -472,11 +508,11 @@ describe('watching and inspecting phrases', () => {
     range.setEnd(caption.firstChild!, 12);
     window.getSelection()!.addRange(range);
     fireEvent.pointerUp(caption);
-    await screen.findByRole('button', { name: 'Return to watching' });
+    await screen.findByRole('button', { name: 'Resume from original position' });
     expect(document.querySelector('.phrase-panel .context-sentence')).toHaveTextContent(cues[0].text);
     expect(document.querySelector('.current-caption-text')).toHaveTextContent(cues[2].text);
       expect(document.querySelector('.current-caption-text')).toBe(caption);
-    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
     expect(screen.getByLabelText('Word or phrase')).toHaveValue('would like');
   });
 
@@ -492,9 +528,9 @@ describe('watching and inspecting phrases', () => {
     range.setEnd(caption.firstChild!, 12);
     window.getSelection()!.addRange(range);
     fireEvent.pointerUp(caption);
-    await screen.findByRole('button', { name: 'Return to watching' });
+    await screen.findByRole('button', { name: 'Resume from original position' });
     expect(screen.getByText('The source subtitles changed. Select the subtitles or phrase again.')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Save a phrase' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Review and save phrase' })).toBeDisabled();
     expect(cardsApi.saveCard).not.toHaveBeenCalled();
   });
 
@@ -504,7 +540,7 @@ describe('watching and inspecting phrases', () => {
     if (source === 'file') fixture.media.path = 'C:/replacement.mkv';
     else fixture.media.audioStreamIndex = 2;
     await emit({ positionMs: 2600 });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save a phrase' })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Review and save phrase' })).toBeDisabled());
     expect(inspectReplay()).toBeDisabled();
     expect(cardsApi.saveCard).not.toHaveBeenCalled();
   });
@@ -513,7 +549,7 @@ describe('watching and inspecting phrases', () => {
     vi.mocked(cardsApi.saveCard).mockRejectedValue(new Error('Could not save audio'));
     mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'would like' } });
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'want politely' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save phrase' }));
@@ -530,7 +566,7 @@ describe('watching and inspecting phrases', () => {
     await inspectCurrent();
     await emit({ positionMs: 2600 });
     vi.mocked(playerApi.player).mockClear();
-    fireEvent.click(screen.getByRole('button', { name: 'Return to watching' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resume from original position' }));
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' }));
     const requests = vi.mocked(playerApi.player).mock.calls.map(([request]) => request).filter(request => ['pause', 'seek', 'play'].includes(request.action));
     expect(requests).toEqual([{ action: 'pause' }, { action: 'seek', value: 400 }, { action: 'play' }]);
@@ -540,17 +576,17 @@ describe('watching and inspecting phrases', () => {
     mount();
     await inspectCurrent();
     vi.mocked(playerApi.player).mockImplementation(async request => { if (request.action === 'seek') throw new Error('Seek failed'); });
-    fireEvent.click(screen.getByRole('button', { name: 'Return to watching' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resume from original position' }));
     await waitFor(() => expect(fixture.notify).toHaveBeenCalledWith(expect.stringContaining('Seek failed'), 'error'));
     expect(playerApi.player).not.toHaveBeenCalledWith({ action: 'play' });
-    expect(screen.getByRole('button', { name: 'Return to watching' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Resume from original position' })).toBeVisible();
   });
 
   it('does not offer saving a provisional subtitle', async () => {
     vi.mocked(studyApi.segments).mockResolvedValue([{ ...cues[0], status: 'provisional' }]);
     mount();
     await inspectCurrent();
-    expect(screen.getByRole('button', { name: 'Save a phrase' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Review and save phrase' })).toBeDisabled();
     expect(cardsApi.saveCard).not.toHaveBeenCalled();
   });
 
@@ -558,7 +594,7 @@ describe('watching and inspecting phrases', () => {
     vi.mocked(studyApi.candidates).mockResolvedValue([]);
     const client = mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Find the meaning' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Estimate explanation with AI' }));
     const requested = { id: 'new-meaning', mediaId: 'media', segmentId: 'a', sourceCueIds: ['a'],
       term: cues[0].text, meaning: 'A polite way of saying what you want', example: cues[0].text,
       explanation: 'Use this to make a courteous request.', startMs: 0, endMs: 1000 };
@@ -569,7 +605,7 @@ describe('watching and inspecting phrases', () => {
     expect(screen.getByText(requested.explanation)).toBeVisible();
     expect(document.querySelector('.phrase-panel .context-sentence')).toHaveTextContent(cues[0].text);
     expect(screen.getByRole('button', { name: 'Hide meaning' })).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
     expect(screen.getByLabelText('Meaning')).toHaveValue(requested.meaning);
     expect(screen.getByLabelText('Explanation or notes (optional)')).toHaveValue(requested.explanation);
   });
@@ -581,7 +617,7 @@ describe('watching and inspecting phrases', () => {
     await inspectCurrent();
     vi.mocked(playerApi.player).mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Return to watching' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Resume from original position' })).not.toBeInTheDocument());
     expect(playerApi.player).not.toHaveBeenCalledWith({ action: 'play' });
     expect(inspectButton()).toHaveFocus();
   });
@@ -589,11 +625,11 @@ describe('watching and inspecting phrases', () => {
   it('leaves empty subtitles actionable without fabricating a current phrase or requesting AI', async () => {
     vi.mocked(studyApi.segments).mockResolvedValue([]);
     mount();
-    await screen.findByRole('button', { name: 'Prepare subtitles' });
-    expect(screen.queryByRole('button', { name: 'Inspect this phrase' })).not.toBeInTheDocument();
-    openTranscript();
-    expect(screen.getByRole('button', { name: 'Import subtitles' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Create subtitles' })).toBeEnabled();
+    await screen.findByRole('button', { name: 'Create subtitles from audio' });
+    expect(screen.queryByRole('button', { name: 'Inspect this subtitle' })).not.toBeInTheDocument();
+    await openTranscript();
+    expect(screen.getByRole('button', { name: 'Add or switch subtitles' })).toBeEnabled();
+    expect(within(document.querySelector('.study-transcript') as HTMLElement).getByRole('button', { name: 'Create subtitles from audio' })).toBeEnabled();
     expect(aiApi.createQuote).not.toHaveBeenCalled();
   });
 
@@ -604,13 +640,13 @@ describe('watching and inspecting phrases', () => {
     await screen.findByText('Passages without subtitles to check (1)');
     fireEvent.click(screen.getByText('Passages without subtitles to check (1)'));
     await waitFor(() => expect(screen.getByRole('button', { name: '0:00–0:04' })).toBeEnabled());
-    expect(screen.queryByRole('button', { name: 'Inspect this phrase' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Inspect this subtitle' })).not.toBeInTheDocument();
     vi.mocked(playerApi.player).mockClear();
     fireEvent.click(screen.getByRole('button', { name: '0:00–0:04' }));
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' }));
     expect(playerApi.player).toHaveBeenCalledWith({ action: 'seek', value: 0 });
     expect(aiApi.createQuote).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Prepare subtitles' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Create subtitles from audio' })).toBeEnabled();
   });
 
   it('does not issue stale seek or play commands after leaving during a pending pause', async () => {
@@ -650,7 +686,7 @@ describe('study navigation and unfinished phrases', () => {
     await ready();
     await emit({ positionMs: 2100 });
     const actions = within(screen.getByRole('group', { name: 'Subtitle playback' }));
-    expect(actions.getByRole('button', { name: 'Listen again' })).toBeDisabled();
+    expect(actions.getByRole('button', { name: 'Replay this subtitle' })).toBeDisabled();
     fireEvent.click(actions.getByRole('button', { name: 'Previous subtitle' }));
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'seek', value: 1000 }));
     await waitFor(() => expect(actions.getByRole('button', { name: 'Next subtitle' })).toBeEnabled());
@@ -663,10 +699,10 @@ describe('study navigation and unfinished phrases', () => {
   it('direct caption replay retains the inspected source and unsaved form', async () => {
     mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'my phrase' } });
     await emit({ positionMs: 2600 });
-    fireEvent.click(within(screen.getByRole('group', { name: 'Subtitle playback' })).getByRole('button', { name: 'Listen again' }));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Subtitle playback' })).getByRole('button', { name: 'Replay this subtitle' }));
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'source-seek', startMs: 2500, endMs: 3200 }));
     expect(screen.getByLabelText('Word or phrase')).toHaveValue('my phrase');
     expect(document.querySelector('.context-sentence')).toHaveTextContent(cues[0].text);
@@ -674,12 +710,12 @@ describe('study navigation and unfinished phrases', () => {
     expect(aiApi.createQuote).not.toHaveBeenCalled();
   });
 
-  it.each(['Back to transcript', 'Return to watching'])('restores searched transcript settings and offset with %s after replaying a result', async returnAction => {
+  it.each(['Back to transcript', 'Resume from original position'])('restores searched transcript settings and offset with %s after replaying a result', async returnAction => {
     mount();
     await ready();
-    openTranscript();
+    await openTranscript();
     fireEvent.change(screen.getByLabelText('Search transcript'), { target: { value: 'like' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle translations' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show translations' }));
     const list = screen.getByLabelText('Subtitle list');
     fireEvent.wheel(list);
     fireEvent.scroll(list, { target: { scrollTop: 120 } });
@@ -691,23 +727,23 @@ describe('study navigation and unfinished phrases', () => {
     fireEvent.click(screen.getByRole('button', { name: returnAction }));
     await waitFor(() => expect(screen.getByLabelText('Search transcript')).toBeVisible());
     expect(screen.getByLabelText('Search transcript')).toHaveValue('like');
-    expect(screen.getByRole('button', { name: 'Toggle translations' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Hide translations' })).toHaveAttribute('aria-pressed', 'true');
     expect(fixture.scrollOffset).toHaveBeenLastCalledWith(120, { behavior: 'auto' });
-    expect(screen.getByRole('button', { name: 'Follow playback' })).toBeVisible();
-    if (returnAction === 'Return to watching') expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' });
+    expect(screen.getByRole('button', { name: 'Show current subtitle' })).toBeVisible();
+    if (returnAction === 'Resume from original position') expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' });
   });
 
   it('retains separate source drafts after Escape and clears only the saved draft', async () => {
     mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'first phrase' } });
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'first meaning' } });
     fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByLabelText('Word or phrase')).not.toBeInTheDocument());
     await emit({ positionMs: 2600 });
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'second phrase' } });
     fireEvent.click(screen.getByRole('button', { name: 'Unfinished phrases (2)' }));
     fireEvent.click(screen.getByRole('button', { name: /first phrase 0:00/ }));
@@ -735,7 +771,7 @@ describe('study navigation and unfinished phrases', () => {
     });
     mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'restart phrase' } });
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'meaning before restart' } });
     fireEvent.change(screen.getByLabelText('Original context'), { target: { value: 'my retained context' } });
@@ -775,9 +811,9 @@ describe('study navigation and unfinished phrases', () => {
     vi.mocked(studyApi.segments).mockResolvedValue([generated, ...cues.slice(1)]);
     mount();
     await inspectCurrent();
-    expect(screen.getByRole('button', { name: 'Save a phrase' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Review and save phrase' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Edit subtitle' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'would like' } });
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'want politely' } });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save phrase' })).toBeEnabled());
@@ -803,7 +839,7 @@ describe('study navigation and unfinished phrases', () => {
   it('retains edited text but blocks saving after the source changes', async () => {
     const client = mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'do not lose me' } });
     fireEvent.change(screen.getByLabelText('Meaning'), { target: { value: 'a meaning' } });
     await act(async () => client.setQueryData(['media', 'media', 'segments'], [{ ...cues[0], text: 'Changed' }, ...cues.slice(1)]));
@@ -822,7 +858,7 @@ describe('study navigation and unfinished phrases', () => {
   it.each(['button', 'Escape'])('can close an unfinished form with %s after player failure without losing its input', async close => {
     mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'keep after failure' } });
     await emit({ ready: false, error: 'Player failed' });
     vi.mocked(playerApi.player).mockClear();
@@ -840,7 +876,7 @@ describe('study navigation and unfinished phrases', () => {
   it('keeps notes and the exit confirmation accessible if the material disappears', async () => {
     mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'orphan notes' } });
     fixture.hasMedia = false;
     fixture.blockerStatus = 'blocked';
@@ -901,7 +937,7 @@ describe('study sentence and source playback', () => {
     async (changedSource) => {
       const client = mount();
       await ready();
-      openTranscript();
+      await openTranscript();
       let releasePosition!: (value: PlayerState) => void;
       const position = new Promise<PlayerState>(resolve => {
         releasePosition = resolve;
@@ -945,7 +981,7 @@ describe('study sentence and source playback', () => {
     mount();
     await waitFor(() => expect(playerApi.playerState).toHaveBeenCalled());
     expect(inspectButton()).toBeDisabled();
-    openTranscript();
+    await openTranscript();
     fireEvent.click(screen.getByRole('tab', { name: 'Suggestions' }));
     expect(await screen.findByRole('button', { name: 'Listen to source' })).toBeDisabled();
     openPlaybackSettings();
@@ -964,7 +1000,7 @@ describe('study sentence and source playback', () => {
   it('plays a whole source group by IDs and repeats its complete cue range without saving or sending', async () => {
     mount();
     await ready();
-    openTranscript();
+    await openTranscript();
     fireEvent.click(screen.getByRole('tab', { name: 'Suggestions' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Listen to source' }));
     await waitFor(() => expect(playerApi.playSourceRange).toHaveBeenCalledExactlyOnceWith('media', ['a', 'b']));
@@ -987,7 +1023,7 @@ describe('study sentence and source playback', () => {
       request.action === 'source-loop' ? loopResponse : control(request));
     mount();
     await ready();
-    openTranscript();
+    await openTranscript();
     fireEvent.click(screen.getByRole('tab', { name: 'Suggestions' }));
     const source = await screen.findByRole('button', { name: 'Listen to source' });
     let clicked = false;
@@ -1017,9 +1053,9 @@ describe('study sentence and source playback', () => {
     state = { ...state, paused };
     mount();
     await ready();
-    openTranscript();
+    await openTranscript();
     fireEvent.change(screen.getByLabelText('Search transcript'), { target: { value: 'home' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle translations' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show translations' }));
     fireEvent.wheel(screen.getByLabelText('Subtitle list'));
     vi.mocked(playerApi.player).mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Play from subtitle 0:01' }));
@@ -1030,8 +1066,8 @@ describe('study sentence and source playback', () => {
     expect(state.paused).toBe(false);
     expect(screen.getByLabelText('Search transcript')).toBeVisible();
     expect(screen.getByLabelText('Search transcript')).toHaveValue('home');
-    expect(screen.getByRole('button', { name: 'Toggle translations' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'Follow playback' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Hide translations' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Show current subtitle' })).toBeVisible();
     expect(document.querySelector('.phrase-panel')).toBeNull();
     expect(playerApi.playSourceRange).not.toHaveBeenCalled();
     expect(aiApi.createQuote).not.toHaveBeenCalled();
@@ -1040,7 +1076,7 @@ describe('study sentence and source playback', () => {
   it('does not start playback if the list seek fails', async () => {
     mount();
     await ready();
-    openTranscript();
+    await openTranscript();
     vi.mocked(playerApi.player).mockClear();
     vi.mocked(playerApi.player).mockRejectedValueOnce(new Error('Seek failed'));
     fireEvent.click(screen.getByRole('button', { name: 'Play from subtitle 0:01' }));
@@ -1053,21 +1089,28 @@ describe('study sentence and source playback', () => {
   it('clears the previous inspection when resuming from the list without discarding its draft', async () => {
     mount();
     await inspectCurrent();
-    fireEvent.click(screen.getByRole('button', { name: 'Save a phrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review and save phrase' }));
     fireEvent.change(screen.getByLabelText('Word or phrase'), { target: { value: 'unfinished wording' } });
     fireEvent.click(screen.getByRole('button', { name: 'Repeat selected segment' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Repeat selected segment' })).toHaveAttribute('aria-pressed', 'true'));
-    openTranscript();
+    vi.mocked(playerApi.player).mockClear();
+    await openTranscript();
+    expect(screen.getByRole('tab', { name: 'Transcript' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('button', { name: 'Close panel' })).not.toBeInTheDocument();
+    expect(playerApi.player).toHaveBeenCalledWith({ action: 'pause' });
+    expect(playerApi.player).toHaveBeenCalledWith(expect.objectContaining({ action: 'seek' }));
+    expect(playerApi.player).not.toHaveBeenCalledWith({ action: 'play' });
+    expect(editorDraftApi.save).toHaveBeenCalledWith(expect.objectContaining({ fields: expect.objectContaining({ term: 'unfinished wording' }) }));
     vi.mocked(playerApi.player).mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Play from subtitle 0:01' }));
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' }));
     expect(vi.mocked(playerApi.player).mock.calls.map(([request]) => request)).toEqual([
       { action: 'seek', value: 1000 }, { action: 'play' },
     ]);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Close panel' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Transcript' })).toBeEnabled());
     vi.mocked(playerApi.player).mockClear();
-    fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Close panel' })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Transcript' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Transcript' })).toHaveAttribute('aria-expanded', 'false'));
     expect(playerApi.player).not.toHaveBeenCalled();
     expect(state.paused).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Unfinished phrases (1)' }));
@@ -1079,7 +1122,7 @@ describe('study sentence and source playback', () => {
   it('keeps timestamp continuation explicit and suspends transcript follow for keyboard scrolling', async () => {
     mount();
     await ready();
-    openTranscript();
+    await openTranscript();
     const play = await screen.findByRole('button', { name: 'Play from subtitle 0:00' });
     fireEvent.click(play);
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'play' }));
@@ -1089,16 +1132,16 @@ describe('study sentence and source playback', () => {
     const previous = fixture.scroll.mock.calls.length;
     await emit({ positionMs: 2600 });
     expect(fixture.scroll).toHaveBeenCalledTimes(previous);
-    fireEvent.click(screen.getByRole('button', { name: 'Follow playback' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show current subtitle' }));
     await waitFor(() => expect(fixture.scroll.mock.calls.length).toBeGreaterThan(previous));
   });
 
   it('inspects transcript text without initiating range playback', async () => {
     mount();
     await ready();
-    openTranscript();
+    await openTranscript();
     fireEvent.click(screen.getByRole('button', { name: cues[1].text }));
-    await screen.findByRole('button', { name: 'Return to watching' });
+    await screen.findByRole('button', { name: 'Resume from original position' });
     expect(playerApi.player).toHaveBeenCalledWith({ action: 'pause' });
     expect(playerApi.player).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'source-seek' }));
     expect(playerApi.playSourceRange).not.toHaveBeenCalled();
@@ -1109,7 +1152,7 @@ describe('study sentence and source playback', () => {
     vi.mocked(playerApi.playSourceRange).mockRejectedValue(new Error('Source subtitles are no longer adjacent'));
     mount();
     await ready();
-    openTranscript();
+    await openTranscript();
     fireEvent.click(screen.getByRole('tab', { name: 'Suggestions' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Listen to source' }));
     await waitFor(() => expect(fixture.notify).toHaveBeenCalledWith(expect.stringContaining('no longer adjacent'), 'error'));
@@ -1126,7 +1169,7 @@ describe('study sentence and source playback', () => {
   ])('invalidates the frozen source and clears a native loop after %s', async (_name, changedCues) => {
     const client = mount();
     await ready();
-    openTranscript();
+    await openTranscript();
     fireEvent.click(screen.getByRole('tab', { name: 'Suggestions' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Listen to source' }));
     const repeat = await screen.findByRole('button', { name: 'Repeat selected segment' });
@@ -1137,13 +1180,14 @@ describe('study sentence and source playback', () => {
     vi.mocked(playerApi.playSourceRange).mockClear();
     await act(async () => client.setQueryData(['media', 'media', 'segments'], changedCues));
     await waitFor(() => expect(inspectReplay()).toBeDisabled());
-    expect(screen.getByRole('button', { name: 'Save a phrase' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Review and save phrase' })).toBeDisabled();
     expect(screen.getByText('The source subtitles changed. Select the subtitles or phrase again.')).toBeVisible();
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'loop' }));
     expect(playerApi.playSourceRange).not.toHaveBeenCalled();
     await act(async () => client.setQueryData(['media', 'media', 'segments'], cues));
     expect(inspectReplay()).toBeDisabled();
-    openTranscript();
+    await openTranscript();
+    fireEvent.click(screen.getByRole('tab', { name: 'Suggestions' }));
     fireEvent.click(screen.getByRole('button', { name: 'Listen to source' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Repeat selected segment' })).toBeEnabled());
     expect(playerApi.playSourceRange).toHaveBeenCalledExactlyOnceWith('media', ['a', 'b']);

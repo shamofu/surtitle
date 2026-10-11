@@ -55,7 +55,7 @@ async function openWorkspace(mediaId) {
     window.history.pushState({}, '', path);
     window.dispatchEvent(new PopStateEvent('popstate'));
   }, `/study/${mediaId}`);
-  const panel = $('.study-top-actions button');
+  const panel = $('.study-transcript-toggle');
   await panel.waitForClickable();
   if ((await panel.getAttribute('aria-expanded')) !== 'true') await panel.click();
   await clickVisible($('.transcript-tabs').$('button=Transcription'));

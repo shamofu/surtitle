@@ -56,8 +56,8 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     await search.fill('coast');
     const originalSearch = await search.elementHandle();
     await expect(page.getByTestId('native-player-viewport')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Close panel', exact: true })).toBeEnabled();
-    const during = await page.getByRole('button', { name: 'Close panel', exact: true }).evaluate(async element => {
+    await expect(page.getByRole('button', { name: 'Transcript', exact: true })).toBeEnabled();
+    const during = await page.getByRole('button', { name: 'Transcript', exact: true }).evaluate(async element => {
       const viewport = document.querySelector('.native-player-viewport')!;
       const panel = document.querySelector('.study-companion') as HTMLElement;
       const before = viewport.getBoundingClientRect().toJSON();
@@ -83,8 +83,8 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     await transcript.click();
     await expect(search).toHaveValue('coast');
     expect(await originalSearch!.evaluate(element => element === document.querySelector('input[aria-label="Search transcript"]'))).toBe(true);
-    await expect(page.getByRole('button', { name: 'Close panel', exact: true })).toBeEnabled();
-    await page.getByRole('button', { name: 'Close panel', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Transcript', exact: true })).toBeEnabled();
+    await page.getByRole('button', { name: 'Transcript', exact: true }).click();
     await expect(page.locator('.study-companion')).toBeHidden();
     await transcript.click();
     await expect(search).toHaveValue('coast');
@@ -131,7 +131,7 @@ test('live OS reduction keeps the shown study region opaque and finishes an acti
   await expect(page.getByLabel('Search transcript')).toBeVisible();
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
-  const closing = await page.getByRole('button', { name: 'Close panel', exact: true }).evaluate(async button => {
+  const closing = await page.getByRole('button', { name: 'Transcript', exact: true }).evaluate(async button => {
     const panel = document.querySelector('.study-companion') as HTMLElement;
     await new Promise<void>(resolve => {
       const observer = new MutationObserver(() => {
@@ -240,10 +240,10 @@ test.describe('recorded motion walkthrough', () => {
     await page.getByRole('button', { name: 'Transcript', exact: true }).click();
     await expect(page.getByLabel('Search transcript')).toBeVisible();
     await scenePause();
-    await page.getByRole('button', { name: 'Close panel', exact: true }).click();
+    await page.getByRole('button', { name: 'Transcript', exact: true }).click();
     await expect(page.locator('.study-companion')).toBeHidden();
-    await page.getByRole('button', { name: 'Inspect this phrase', exact: true }).click();
-    await page.getByRole('button', { name: 'Save a phrase', exact: true }).click();
+    await page.getByRole('button', { name: 'Inspect this subtitle', exact: true }).click();
+    await page.getByRole('button', { name: 'Review and save phrase', exact: true }).click();
     await page.getByLabel('Word or phrase', { exact: true }).fill('A phrase to revisit');
     await scenePause();
     await page.getByRole('button', { name: 'Continue later', exact: true }).click();
