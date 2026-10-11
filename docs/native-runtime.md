@@ -6,7 +6,7 @@ The Windows x64 payload contains source-built `mpv-2.dll` and the official CPU O
 
 For input ownership and dependency updates, see [updating native dependencies](native-dependencies.md).
 
-The libmpv recipe builds mpv, FFmpeg libraries, dav1d and the selected rendering/subtitle dependencies. FFmpeg programs, network protocols, Vulkan and OpenGL are disabled; Windows D3D11/WASAPI and CPU AV1 decoding remain available. ORT uses the selected official CPU release; its source package retains upstream archives, patches and notices. See [source rebuild instructions](../native/SOURCE-REBUILD.md) for dependency details.
+The libmpv recipe builds mpv, FFmpeg libraries, dav1d and the selected rendering/subtitle dependencies. FFmpeg programs, network protocols, Vulkan and OpenGL are disabled; Windows D3D11/WASAPI and CPU AV1 decoding remain available. The build explicitly enables FFmpeg hardware accelerators, D3D11VA and DXVA2 despite disabled autodetection, and checks decoder configuration before building mpv. A GPU rendering backend alone does not establish hardware decoding. ORT uses the selected official CPU release; its source package retains upstream archives, patches and notices. See [source rebuild instructions](../native/SOURCE-REBUILD.md) for dependency details.
 
 ```sh
 docker buildx build --file native/build/Dockerfile --target export --provenance=false --output type=local,dest=work/native-ci-artifact .
@@ -27,6 +27,8 @@ pwsh -File native/windows/native-smoke.ps1
 Consumption copies the DLL and corresponding source archives into the ignored `work/native-ci-artifact/` directory. It leaves the tracked runtime manifest unchanged, including when a rebuilt DLL differs from a previous build. Preparation stages the DLLs/notices and downloads the selected official ORT archive; development preparation does not require build evidence or source archives. The native smoke test loads the selected DLLs and initializes mpv/ORT. `native-prepare.ps1 -WithDevModel` also installs the development Silero fixture for the explicit integration suites.
 
 Missing DLLs, load failures and initialization errors remain actionable errors. Windows application playback, VAD and installer tests still run even when compilation comes from cache. Native artifact checksums, review evidence and PE dependency audits are not acceptance gates.
+
+The application presents video through a native child window with opaque popup exclusions; see [rendering and monitor fitting](architecture.md#study-surface-and-native-rendering). Validate visible playback, codec/audio-track selection, seeking, repeat and input over video on actual Windows hardware when changing this path. Browser tests and software-rendered E2E do not establish hardware decoding or perceptual A/V synchronization. The [dated evidence index](redesign/acceptance.md) records earlier physical-device comparisons, not acceptance of future builds.
 
 ## Microsoft prerequisites
 

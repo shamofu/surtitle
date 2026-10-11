@@ -24,6 +24,7 @@ export const requiredSuites = Object.freeze({
     test('surtitle', 'player::subtitle_tests::real_mpv_load_restores_position_and_maps_audio_stream'),
     test('surtitle', 'application::transfer::restore_tests::real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks'),
     test('surtitle-ai', 'prepare::tests::real_silero_and_ffmpeg_preserve_selection_time'),
+    test('surtitle-ai', 'prepare::tests::real_preparation_failures_remove_receipts_and_temporary_files', minutes(5)),
   ] },
   'windows-spoken': { platform: 'win32', tests: [
     test('surtitle-ai', 'prepare::spoken_pause_test::real_spoken_audio_and_interior_pause_require_only_local_warning_review', minutes(5)),

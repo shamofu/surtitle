@@ -1,20 +1,6 @@
-# Study from received text and earlier draft bookmarks
+# Earlier draft bookmarks and recovery
 
-New transcription jobs put received text directly into the Study page's
-**Transcript** list while remaining audio is processed. Use those rows for
-reading, replay, explanations, translation and cards without a draft-confirmation
-or complete-transcript adoption step. Whole-recording, selected-range and
-re-transcription jobs use the same flow. Embedded captions and SRT/VTT imports
-also remain available without cloud transcription.
-
-Rows marked **Audio range** contain Transcribe text whose word timings were
-unusable. Their bounds are the actual submitted source audio, including context,
-and do not imply sentence or word synchronization. They remain readable in the
-ordinary list and are omitted from synchronized captions, caption-group pause
-and SRT/VTT. The card form lets you choose audio inside this original range;
-card audio must span at most 180 seconds, and unfinished range input is saved
-with the phrase draft. A saved card retains the original text and bounds as well
-as its selected audio subrange.
+New transcription jobs publish received text directly into the ordinary subtitle list. For progressive transcription and untimed **Audio range** rows, see [AI behavior](ai.md#transcript-review-and-learning-content). This guide covers the older excerpt-bookmark workflow and local recovery.
 
 ## Earlier draft bookmarks
 

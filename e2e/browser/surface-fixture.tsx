@@ -23,6 +23,7 @@ function Surfaces() {
     <button onClick={() => { setLong(false); setOuter(true); }}>Open editor</button>
     <button onClick={() => { setLong(true); setOuter(true); }}>Open long editor</button>
     {outer && <Modal {...outerExit.modalProps} title="Editor" closeDisabled={locked} onClose={() => void outerExit.close(() => setOuter(false))}>
+      {!long && <Field label="Phrase"><input defaultValue="Take a little detour" /></Field>}
       <button onClick={() => setInner(true)}>Open confirmation</button>
       <button onClick={() => void report(async () => { throw new Error('Could not save'); })}>Fail save</button>
       <label><input type="checkbox" checked={locked} onChange={event => setLocked(event.target.checked)} />Saving</label>

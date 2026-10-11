@@ -8,6 +8,7 @@ Tests cover application behavior, native dependencies and release packaging. Ord
 pnpm test
 pnpm build
 pnpm test:browser
+pnpm check:ipc
 pnpm fmt:rust:check
 pnpm test:rust
 pnpm test:rust:no-default-features
@@ -25,7 +26,7 @@ The maintained regressions cover:
 
 - Immutable request approval, zero/unknown pricing, concurrent reservations, cancellation before dispatch, communication failure, crash recovery and settlement exactly once.
 - Approval-bound transcription HTTP 429 retries: success and exhaustion, Retry-After timing, retained monetary holds and unpriced counts, legacy approvals, pause/cancel/restart, superseded workers, and retry-aware quotes and Japanese/English progress displays.
-- Transcription pacing: normal and congestion-adjusted intervals, retry timing precedence, Japanese/English countdowns and processing details, pause/cancel while waiting, and preserved received subtitles without a UI-triggered send.
+- Serial native dispatch with interactive priority and bulk fairness; zero-floor pacing, congestion backoff, retry timing precedence, pause/cancel while waiting, and no UI-triggered send.
 - Parser/citation validation, literal source preservation, pending/conflicting transcript ranges, local corrections, stale adoption and saved-card independence.
 - Priced transcription start without duplicate consent, unpriced acknowledgement, automatic preparation, range re-transcription and setup restoration in the shared transcript panel.
 - Transcribe text retained when word timing is missing, reversed, out of range or unaligned; source-block bounds preserve submitted context and never become synchronized captions or subtitle exports.
@@ -33,9 +34,10 @@ The maintained regressions cover:
 - Progressive publication across restart, original-edition saving once, unreceived whole-cue preservation, edit/translation/delete/move protection, newer-request ownership and injected transaction rollback.
 - Source-block card audio subranges, persisted incomplete audio-range input, immutable source snapshots and version-3 archive compatibility with versions 1 and 2.
 - Credential boundaries, learning export/restore, archive size limits, missing audio, atomic destination replacement and original media retention.
-- Restore validation rejection, backup creation failure and an injected write failure after replacement has started, with database reopen and native playback reconciliation.
-- Selected tool/audio-track identity, process cleanup, resource-scoped query invalidation, stale asynchronous results and failed preference writes.
-- UI acknowledgement, asynchronous edits, confirmed-cue validation, replay/confirmation, review scheduling and real native persistence across process restarts.
+- Restore rejection/rollback before commit and explicit warnings after commit, with generation changes, editor invalidation, database reopen and native playback reconciliation.
+- Selected tool/audio-track identity, staged preparation cancellation/source-change cleanup, resource/revision recovery, stale in-flight reads, failed refetch retry and generated IPC contracts.
+- Settings/card autosave, incomplete/conflicting draft recovery, budget-store authority, failed writes and close waiting for detached saves or later input; card audio and review history survive edits/restart.
+- React Aria modal focus/IME/Escape, native popup exclusions, monitor fitting, bounded list rendering, confirmed-cue replay and review scheduling.
 - Native source/artifact integrity, package contents, production features and disposable installer data retention.
 
 Application AI integration tests use the production approval, execution, parser, ledger and result-application paths with real disposable SQLite databases. The `surtitle-ai/test-support` feature replaces authentication and transport with fixed offline responses and bounded synchronization gates. It is enabled only through the desktop crate's development dependency; the production feature check rejects it. These tests cover multi-request execution, conflicting edits, cancellation, application failure and uncertain transport outcomes without cloud calls. They do not evaluate generated-language quality.
@@ -50,7 +52,7 @@ Some Rust tests need real FFmpeg, Windows DLLs or optional speech data and there
 | --- | --- |
 | `linux-ffmpeg` | Linux; card PCM tail/source-clock extraction and selected audio-stream extraction |
 | `windows-ffmpeg` | The same extraction cases on Windows x64 |
-| `windows-native` | Windows extraction plus real mpv load/restore and Silero preparation |
+| `windows-native` | Windows extraction, real mpv load/restore, Silero preparation and cancellation/source-change cleanup |
 | `windows-six-hour` | Optional Windows six-hour streaming/performance acceptance |
 | `windows-spoken` | Local Windows speech/pause review with existing explicit speech fixtures |
 
@@ -62,6 +64,8 @@ pnpm test:rust:required windows-native
 ```
 
 Logs are written under `artifacts/required-rust-tests/<suite>/`; rerunning replaces those logs. Use `--evidence-dir <directory>` to retain another run. The runner bounds each Cargo build/test invocation and terminates only its owned process tree on timeout/interruption.
+
+The Windows native suite includes `prepare::tests::real_preparation_failures_remove_receipts_and_temporary_files`, which exercises real cancellation and source replacement and checks that failed preparation leaves neither a receipt nor temporary output.
 
 The runner selects full Rust test names. When moving an integration test between application modules, update the registry in `e2e/support/run-required-rust-tests.mjs` in the same change, then run the required suite. A normal workspace test run does not execute these ignored native tests.
 
@@ -76,10 +80,12 @@ pnpm test:rust:required windows-six-hour
 
 The runner applies test-only optimization. The test writes its report under `work/ai-six-hour-acceptance/`; the manual native-acceptance workflow runs it separately.
 
-The spoken suite requires `SURTITLE_SPOKEN_FIXTURES` containing the pinned WAV/TextGrid/text files for LibriSpeech `1089-134686-0001` and `1089-134686-0003`. Run `python e2e/evaluation/acquire-spoken-fixtures.py --ffmpeg PATH_TO_FFMPEG` to acquire the six small files from the exact upstream commit into `work/spoken-fixture-acquisition`, retaining source URLs and hashes. It rewraps the original PCM16 audio, verifies byte-identical samples and the existing test hashes, and records the upstream automatic MFA alignment provenance. Set `SURTITLE_SPOKEN_FIXTURES` to that absolute directory before selecting this suite. The test itself never downloads inputs or calls a provider.
+The spoken suite requires `SURTITLE_SPOKEN_FIXTURES` containing the pinned WAV/TextGrid/text files for LibriSpeech `1089-134686-0001` and `1089-134686-0003`. Run `python e2e/support/acquire-spoken-fixtures.py --ffmpeg PATH_TO_FFMPEG` to acquire the six small files from the exact upstream commit into `work/spoken-fixture-acquisition`, retaining source URLs and hashes. It rewraps the original PCM16 audio, verifies byte-identical samples and the existing test hashes, and records the upstream automatic MFA alignment provenance. Set `SURTITLE_SPOKEN_FIXTURES` to that absolute directory before selecting this suite. The test itself never downloads inputs or calls a provider.
 
 ## Live verification and fixtures
 
 Parser/worker tests use authored [fixed responses](../crates/ai/tests/fixtures/README.md). [Saved-response application checks](../e2e/README.md#saved-response-local-checks) require an explicitly prepared local profile. [CLI tool verification](tools.md#verification) includes opt-in tests of installed executables and managed downloads.
 
 [Credential-based verification](vertex-verification.md) describes the development CLI and application workflow for explicitly approved Vertex requests. Inspect generated text and timing against the source; a valid API response, passing mock or automated player event does not establish model quality.
+
+Historical hardware/IME/DPI comparisons and the identified installed package are indexed in [redesign evidence](redesign/acceptance.md). Their counts and timing observations describe the recorded source, not the current suite. Use current commands above for new verification; retained historical paths are not supported test entry points.

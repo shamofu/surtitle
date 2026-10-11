@@ -36,7 +36,8 @@ or distribution. Source archive pins still identify dependency download inputs.
 - **VC Runtime:** edit its minimum / URL / required files in the runtime
   manifest and run installer preparation.
 - **Installer / Rust:** edit source and notice pins in `installer-inputs.json`.
-  CI / Dev Container follow the Rust pin. Tauri owns the standard installer
+  Keep `rust-toolchain.toml` and the workspace `rust-version` requirement consistent
+  with the selected compiler; CI / Dev Container follow the installer Rust pin. Tauri owns the standard installer
   tooling; choose matching source records when updating Tauri.
 
 ## Build and test
@@ -61,7 +62,12 @@ pnpm test:scripts
 Finish the standard Tauri build and `package-verify.ps1` checks in
 [native runtime and packaging](native-runtime.md), using a disposable Windows
 profile for lifecycle checks. Cached artifacts still need current application
-playback and installation validation.
+playback and installation validation. FFmpeg updates must preserve the explicit
+D3D11VA/DXVA2 build configuration and its decoder checks. Compare audio extraction
+and hardware playback separately: the selected external/managed CLI and the
+source-built libraries inside libmpv are different products. Runtime/model
+replacements also need unchanged VAD/chunk boundaries and source/sample coverage;
+a version number or one timing run alone is not adoption evidence.
 
 Docker separates libmpv and ORT acquisition inputs. Runtime / notice / packaging
 changes rerun ORT packaging while reusing acquisition. The runtime manifest is

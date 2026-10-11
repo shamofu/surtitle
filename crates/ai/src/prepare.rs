@@ -216,34 +216,9 @@ pub fn prepare_audio(
         options,
         cancel,
         progress,
-        true,
     )
 }
 
-/// Retained only for reproducible local comparisons with the previous serial path.
-#[cfg(feature = "development-validation")]
-pub fn prepare_audio_serial(
-    source: &Path,
-    output_root: &Path,
-    ffmpeg: &ToolSnapshot,
-    assets: VadAssets,
-    options: AudioPreparationOptions,
-    cancel: Arc<AtomicBool>,
-    progress: impl FnMut(PreparationProgress),
-) -> Result<AudioPreparationReceipt> {
-    prepare_audio_inner(
-        source,
-        output_root,
-        ffmpeg,
-        assets,
-        options,
-        cancel,
-        progress,
-        false,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
 fn prepare_audio_inner(
     source: &Path,
     output_root: &Path,
@@ -252,7 +227,6 @@ fn prepare_audio_inner(
     options: AudioPreparationOptions,
     cancel: Arc<AtomicBool>,
     mut progress: impl FnMut(PreparationProgress),
-    staged: bool,
 ) -> Result<AudioPreparationReceipt> {
     let audio_stream_index = options
         .audio_stream_index
@@ -353,41 +327,39 @@ fn prepare_audio_inner(
     let mut encoded_chunks = Vec::<AudioChunk>::new();
     // This is declared after the temp directory and decoder. Error unwinding
     // cancels/joins every encoder before either can be removed.
-    let mut encoders = Encoders::new(cancel.clone(), if staged { 2 } else { 1 });
+    let mut encoders = Encoders::new(cancel.clone(), 2);
     let analysis = vad.analyze_pcm16_staged(&mut recording, &cancel, |samples, pauses| {
         encoders.reap_ready()?;
-        if staged {
-            let pauses = pauses
-                .iter()
-                .map(|p| crate::Pause {
-                    start_sample: p.start_sample + start_sample,
-                    end_sample: p.end_sample + start_sample,
-                })
-                .collect::<Vec<_>>();
-            loop {
-                let next = encoded_chunks
-                    .last()
-                    .map_or(start_sample, |c| c.core_end_sample);
-                let Some(chunk) = next_mature_chunk(
-                    start_sample,
-                    next,
-                    start_sample + samples,
-                    &pauses,
-                    options.chunks,
-                    encoded_chunks.len() as u32,
-                )?
-                else {
-                    break;
-                };
-                if encoded_chunks.len() >= 5000 {
-                    return Err(local_error(
-                        "selection exceeds 5000 bounded requests; prepare a smaller interval",
-                    ));
-                }
-                writer.borrow_mut().flush()?;
-                encoders.enqueue(&spool_path, temporary.path(), start_sample, &chunk, ffmpeg)?;
-                encoded_chunks.push(chunk);
+        let pauses = pauses
+            .iter()
+            .map(|p| crate::Pause {
+                start_sample: p.start_sample + start_sample,
+                end_sample: p.end_sample + start_sample,
+            })
+            .collect::<Vec<_>>();
+        loop {
+            let next = encoded_chunks
+                .last()
+                .map_or(start_sample, |c| c.core_end_sample);
+            let Some(chunk) = next_mature_chunk(
+                start_sample,
+                next,
+                start_sample + samples,
+                &pauses,
+                options.chunks,
+                encoded_chunks.len() as u32,
+            )?
+            else {
+                break;
+            };
+            if encoded_chunks.len() >= 5000 {
+                return Err(local_error(
+                    "selection exceeds 5000 bounded requests; prepare a smaller interval",
+                ));
             }
+            writer.borrow_mut().flush()?;
+            encoders.enqueue(&spool_path, temporary.path(), start_sample, &chunk, ffmpeg)?;
+            encoded_chunks.push(chunk);
         }
         progress(PreparationProgress {
             phase: "detecting_speech".into(),
@@ -453,16 +425,6 @@ fn prepare_audio_inner(
     });
     for chunk in chunks.iter().skip(encoded_chunks.len()) {
         encoders.enqueue(&spool_path, temporary.path(), start_sample, chunk, ffmpeg)?;
-        if !staged {
-            encoders.wait_one()?;
-            progress(PreparationProgress {
-                phase: "extracting".into(),
-                processed_ms: chunk.core_end_ms().saturating_sub(options.start_ms),
-                total_ms,
-                completed_chunks: encoders.completed(),
-                total_chunks,
-            });
-        }
     }
     let audio = encoders.finish(|completed_chunks| {
         progress(PreparationProgress {
@@ -670,6 +632,159 @@ mod tests {
     fn source_time_decimal_is_exact() {
         assert_eq!(seconds(120_003), "120.003");
         assert_eq!(seconds(1), "0.001");
+    }
+    #[test]
+    #[ignore = "requires pinned native fixtures and explicit SURTITLE_TEST_FFMPEG path; never calls Vertex"]
+    fn real_preparation_failures_remove_receipts_and_temporary_files() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let assets = VadAssets {
+            runtime_path: repo.join("src-tauri/resources/native/onnxruntime.dll"),
+            model_path: repo.join("work/native-fixtures/silero_vad.onnx"),
+            model_sha256: SILERO_MODEL_SHA256.into(),
+        };
+        let ffmpeg = ToolSnapshot::capture(
+            surtitle_tools::resolve_external(
+                ToolKind::FfmpegPair,
+                &PathBuf::from(
+                    std::env::var_os("SURTITLE_TEST_FFMPEG").expect("explicit FFmpeg path"),
+                ),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("six-minute-silence.wav");
+        let data_len = 360 * 16_000 * 2_u32;
+        let mut wav = Vec::new();
+        wav.extend(b"RIFF");
+        wav.extend((36 + data_len).to_le_bytes());
+        wav.extend(b"WAVEfmt ");
+        wav.extend(16_u32.to_le_bytes());
+        wav.extend(1_u16.to_le_bytes());
+        wav.extend(1_u16.to_le_bytes());
+        wav.extend(16_000_u32.to_le_bytes());
+        wav.extend(32_000_u32.to_le_bytes());
+        wav.extend(2_u16.to_le_bytes());
+        wav.extend(16_u16.to_le_bytes());
+        wav.extend(b"data");
+        wav.extend(data_len.to_le_bytes());
+        wav.resize(wav.len() + data_len as usize, 0);
+        std::fs::write(&source, wav).unwrap();
+        let original_hash = hash_file(&source).unwrap();
+        let options = AudioPreparationOptions {
+            media_id: "preparation-failure-fixture".into(),
+            transcript_revision: "fixture".into(),
+            title: "Local preparation cleanup".into(),
+            project_id: String::new(),
+            credential_id: String::new(),
+            language: "en".into(),
+            start_ms: 0,
+            end_ms: 360_000,
+            audio_stream_index: Some(0),
+            chunks: ChunkOptions::default(),
+            provider: AudioTranscriptionProvider::TranscribePreview,
+        };
+
+        let cancelled_output = temp.path().join("cancelled");
+        let cancel = Arc::new(AtomicBool::new(false));
+        let signal = cancel.clone();
+        let mut cancelled_during_analysis = false;
+        let cancelled = prepare_audio(
+            &source,
+            &cancelled_output,
+            &ffmpeg,
+            assets.clone(),
+            options.clone(),
+            cancel,
+            |progress| {
+                if progress.phase == "detecting_speech" && progress.processed_ms >= 200_000 {
+                    cancelled_during_analysis = true;
+                    signal.store(true, Ordering::Relaxed);
+                }
+            },
+        );
+        assert!(
+            cancelled_during_analysis,
+            "must reach the cancellation point"
+        );
+        assert!(cancelled.is_err());
+        assert!(std::fs::read_dir(&cancelled_output)
+            .unwrap()
+            .next()
+            .is_none());
+
+        // Silence keeps its pause open through EOF, so the analysis cancellation
+        // above precedes encoding. Also cancel after real FLAC output exists,
+        // while finish() still owns an unjoined encoder handle. The worker may
+        // already have exited; live-thread cancellation is tested in encoding.rs.
+        let encoding_output = temp.path().join("cancelled-after-encoding");
+        let cancel = Arc::new(AtomicBool::new(false));
+        let signal = cancel.clone();
+        let mut cancelled_after_encoding = false;
+        let cancelled = prepare_audio(
+            &source,
+            &encoding_output,
+            &ffmpeg,
+            assets.clone(),
+            options.clone(),
+            cancel,
+            |progress| {
+                if !cancelled_after_encoding
+                    && progress.phase == "extracting"
+                    && progress.completed_chunks > 0
+                    && progress.completed_chunks < progress.total_chunks
+                {
+                    let preparation_directory = std::fs::read_dir(&encoding_output)
+                        .unwrap()
+                        .next()
+                        .unwrap()
+                        .unwrap()
+                        .path();
+                    let encoded =
+                        std::fs::read(preparation_directory.join("chunk-00000.flac")).unwrap();
+                    assert!(encoded.starts_with(b"fLaC"));
+                    assert!(!preparation_directory.join("receipt.json").exists());
+                    cancelled_after_encoding = true;
+                    signal.store(true, Ordering::Relaxed);
+                }
+            },
+        );
+        assert!(
+            cancelled_after_encoding,
+            "must cancel with encoded output and pending handles"
+        );
+        assert!(cancelled.is_err());
+        assert!(std::fs::read_dir(&encoding_output)
+            .unwrap()
+            .next()
+            .is_none());
+
+        let changed_source = temp.path().join("changed-source.wav");
+        std::fs::copy(&source, &changed_source).unwrap();
+        let changed_output = temp.path().join("changed");
+        let mut changed_after_extraction = false;
+        let changed = prepare_audio(
+            &changed_source,
+            &changed_output,
+            &ffmpeg,
+            assets,
+            options,
+            Arc::new(AtomicBool::new(false)),
+            |progress| {
+                if progress.phase == "verifying" {
+                    changed_after_extraction = true;
+                    std::fs::write(&changed_source, b"changed after extraction").unwrap();
+                }
+            },
+        );
+        assert!(changed_after_extraction, "must reach source verification");
+        assert!(matches!(changed, Err(AiError::PreparationChanged)));
+        assert!(std::fs::read_dir(&changed_output).unwrap().next().is_none());
+        assert_eq!(hash_file(&source).unwrap(), original_hash);
     }
     #[test]
     #[ignore = "explicit six-hour local acceptance; requires pinned fixtures and SURTITLE_LONG_AUDIO_FILE"]

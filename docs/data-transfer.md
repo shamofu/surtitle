@@ -57,7 +57,13 @@ guarantee, not a promise against hardware failure or filesystem corruption.
 Restore previews and validates the archive before applying it, backs up the
 current learning database, and places restored audio in a new managed directory.
 Pending editor changes are saved before restore, and old editing sessions are
-cleared after it succeeds so they cannot overwrite the restored drafts.
+cleared after replacement commits so they cannot overwrite the restored drafts.
+The learning generation advances in that transaction. Device-local settings,
+existing-card and import drafts in `workspace.sqlite` are excluded from backups;
+old card drafts remain readable as stale input but cannot apply over restored data.
+A committed restore can report cleanup or playback warnings. The restored data
+and refresh still take effect; these warnings do not mean rollback and must not
+prompt repeating the restore.
 It does not import credentials, cost ledgers, paid jobs, execution approvals, or
 external-tool selections. Original media files are not bundled in backups.
 Publication sessions and operational transcript-review decisions are excluded

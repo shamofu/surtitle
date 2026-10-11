@@ -64,7 +64,7 @@ paths skip external selections and missing managed tools. yt-dlp metadata is
 keyed by its saved nightly/stable channel and bound to the observed installed
 identity, so another channel's or an older installation's result cannot appear
 as current. Late responses are discarded after an installation/provider/channel
-change. Save a changed channel before checking it. Downloads,
+change. Wait for a changed channel to finish saving before checking it. Downloads,
 installation and applying an update remain explicit actions; discovery never
 automatically applies an update. There is no release catalog or exact-version
 allowlist:

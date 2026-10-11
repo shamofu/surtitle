@@ -7,7 +7,7 @@ adoption, VAD acknowledgement or boundary review is required before learning.
 The default path uses one Transcribe VERBATIM request with word timestamps per
 prepared chunk. New approvals permit at most two retries of that same chunk for
 HTTP 429; other failures do not trigger an automatic paid retry or model switch.
-See [AI behavior](ai.md#application-workflow) for the two-action start flow.
+See [AI behavior](ai.md#application-workflow) for the estimate and single Start action.
 
 Production audio requests retain allowlisted provider evidence in the paid-work
 SQLite database before settlement. The record binds the attempt, ordinal, model,

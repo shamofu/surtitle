@@ -17,7 +17,9 @@ docker build --platform linux/amd64 -f e2e/browser/Dockerfile -t surtitle-browse
 docker run --rm --init --ipc=host surtitle-browser-tests
 ```
 
-The ten UI contracts in `e2e/browser/learning-structure.spec.ts` cover the study screen, phrase save form, partial import failure, transcription tab with its history entry, and the nested unsaved-phrase confirmation, each in Japanese/light and English/dark at 1024×700. They check accessible roles, names and states, form values, visible controls, overflow and element placement. Small inline accessibility snapshots describe meaningful UI structure; they do not serialize the whole DOM or CSS. Run this subset with `pnpm test:structure`, on Windows or Linux. The broader language/theme/viewport coverage remains in the functional suite.
+The ten UI contracts in `e2e/browser/learning-structure.spec.ts` cover the study screen, phrase save form, partial import failure, transcription tab with its history entry, and phrase editing with autosave, each in Japanese/light and English/dark at 1024×700. They check accessible roles, names and states, form values, visible controls, overflow and element placement. Small inline accessibility snapshots describe meaningful UI structure; they do not serialize the whole DOM or CSS. Run this subset with `pnpm test:structure`, on Windows or Linux. The broader language/theme/viewport coverage remains in the functional suite.
+
+`e2e/browser/surface-interactions.spec.ts` exercises the production dialog through a shared test fixture, covering Tab containment, synthetic composing-Escape retention, nested focus restoration, notification access and busy dismissal. It runs with normal and reduced motion. Synthetic composition events do not establish actual Windows IME behavior.
 
 There are no screenshot baselines to regenerate when spacing, colors or controls intentionally change. Update an assertion only when the intended UI contract changes, and inspect the failure first. These checks do not guarantee exact colors, typography or animation quality; review those visually when changing them.
 
@@ -55,7 +57,7 @@ Native tests exercise local imports, 20,000 subtitle rows with bounded rendering
 
 The track/subtitle/card lifecycle is one scenario because each step intentionally verifies the previous step's persisted result. Independent scenarios must set up their own inputs. Transcript search checks both the expected matching text and exclusion of nonmatching rows, so an empty result cannot satisfy the search assertion.
 
-The AI recovery/transcript presets are authored saved results with explicit offline accounting. They protect SQLite/IPC behavior and unchanged charges; they do not test cloud recognition. Windows E2E uses software rendering and null audio, so audible output and hardware decoding need separate checks. Optional AV1 decoding is enabled only by an explicit `SURTITLE_E2E_AV1_FIXTURE`.
+The AI recovery/transcript presets are authored saved results with explicit offline accounting. They protect SQLite/IPC behavior and unchanged charges; they do not test cloud recognition. Windows E2E defaults to software rendering and null audio. Set `SURTITLE_E2E_HARDWARE_RENDERING=1` for a separate hardware-decoding check that forbids WARP; audio output remains disabled. Optional AV1 decoding is enabled only by an explicit `SURTITLE_E2E_AV1_FIXTURE`.
 
 Windows test processes run at restricted medium integrity to support WebView2's driver environment and keep SQLite/WAL readers at the same integrity as the app. The launcher owns its process tree. WebDriver transport retries are disabled so timed-out mutations are not repeated. Script requests have bounded timeouts; failures retain screenshots and player/layout diagnostics under `test-results/native`.
 

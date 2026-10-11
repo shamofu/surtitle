@@ -3,6 +3,8 @@
 /.node-version -text
 /crates/tools/src/ytdlp-checksums.fixture -text
 /crates/tools/src/ytdlp-checksums.fixture.sig -text
+# Generated IPC source is compared byte-for-byte with the LF generator output.
+/src/shared/native/command-registry.ts text eol=lf
 /.devcontainer/*.sh text eol=lf
 /.devcontainer/Dockerfile -text
 /.devcontainer/README.md -text
@@ -41,9 +43,6 @@
 /native/onnxruntime-ActualDependencyNotices.txt -text
 /native/onnxruntime-LICENSE -text
 /native/onnxruntime-ThirdPartyNotices.txt -text
-/native/provider-ffmpeg.cmake -text
-/native/provider-mpv-packaging.cmake -text
-/native/provider-mpv.cmake -text
 /native/reviews/libmpv-dependencies.json -text
 /native/reviews/libmpv.json -text
 /native/reviews/onnxruntime-dependencies.json -text

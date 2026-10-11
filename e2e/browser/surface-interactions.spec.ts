@@ -12,6 +12,34 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
 });
 
+for (const viewport of [{ width: 1024, height: 700 }, { width: 1366, height: 768 }]) {
+  test(`dialog traps Tab and preserves synthetic composing Escape at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const opener = page.getByRole('button', { name: 'Open editor', exact: true });
+    await opener.click();
+    const dialog = page.getByRole('dialog', { name: 'Editor', exact: true });
+    const phrase = dialog.getByRole('textbox', { name: 'Phrase', exact: true });
+    await phrase.fill('寄り道のメモ');
+    for (let index = 0; index < 12; index += 1) {
+      await page.keyboard.press('Tab');
+      await expect.poll(() => dialog.evaluate(element => element.contains(document.activeElement))).toBe(true);
+    }
+    await phrase.focus();
+    // Synthetic composition protects the browser contract; it is not an OS IME test.
+    await phrase.dispatchEvent('compositionstart', { data: 'よ' });
+    await phrase.dispatchEvent('keydown', { key: 'Escape', code: 'Escape', isComposing: true, keyCode: 229, bubbles: true });
+    await expect(dialog).toBeVisible();
+    await expect(phrase).toHaveValue('寄り道のメモ');
+    await expect(page.getByTestId('surface-state')).toHaveText('blocked');
+    await phrase.dispatchEvent('compositionend', { data: 'よ' });
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await expect(page.getByTestId('surface-state')).toHaveText('available');
+    await expect(page.getByTestId('occlusion-count')).toHaveText('0');
+  });
+}
+
 test('nested dialogs own Escape and restore focus in order', async ({ page }) => {
   const opener = page.getByRole('button', { name: 'Open editor' });
   await opener.click();

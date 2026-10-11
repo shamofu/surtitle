@@ -73,9 +73,6 @@ impl Encoders {
         }
         Ok(())
     }
-    pub fn wait_one(&mut self) -> Result<()> {
-        self.reap_one()
-    }
     pub fn reap_ready(&mut self) -> Result<()> {
         while self.active.front().is_some_and(JoinHandle::is_finished) {
             self.reap_one()?;

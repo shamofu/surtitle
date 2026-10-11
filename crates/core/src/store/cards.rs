@@ -189,3 +189,94 @@ impl Store {
         Ok(card)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Duration, TimeZone, Utc};
+
+    #[test]
+    fn review_sequences_preserve_audio_history_and_schedule_after_reopen() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("learning.sqlite");
+        let mut store = Store::open(&path).unwrap();
+        let mut total_reviews = 0;
+        for (case, intervals, ratings) in [
+            ("steady", vec![0, 1, 3, 7, 14, 30, 60, 120], vec!["good"; 8]),
+            (
+                "lapse",
+                vec![0, 1, 2, 0, 1, 4, 30, 90],
+                vec![
+                    "good", "hard", "again", "good", "good", "easy", "again", "good",
+                ],
+            ),
+            (
+                "overdue",
+                vec![0, 14, 90, 365, 700],
+                vec!["easy", "good", "hard", "again", "good"],
+            ),
+        ] {
+            for retention in [0.7_f32, 0.9, 0.97] {
+                let card: StudyCard = serde_json::from_value(serde_json::json!({
+                    "id": format!("{case}-{retention}"), "mediaId": "fixture",
+                    "segmentId": "fixture-cue", "term": "phrase", "meaning": "meaning",
+                    "example": "Example.", "language": "en",
+                    "dueAt": "2026-01-01T00:00:00Z", "createdAt": "2026-01-01T00:00:00Z",
+                    "reviewCount": 0, "audioPath": "fixture-audio.wav", "suspended": false,
+                }))
+                .unwrap();
+                store.put_card(&card).unwrap();
+                let mut at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+                for (ordinal, (&days, &rating)) in intervals.iter().zip(&ratings).enumerate() {
+                    at += if days == 0 && ordinal > 0 {
+                        Duration::minutes(1)
+                    } else {
+                        Duration::days(days)
+                    };
+                    let rated = store.rate_card(&card.id, rating, retention, at).unwrap();
+                    total_reviews += 1;
+                    assert_eq!(rated.review_count, ordinal as u32 + 1);
+                    assert_eq!(rated.last_review, Some(at.to_rfc3339()));
+                    assert_eq!(rated.audio_path, card.audio_path);
+                    let memory = rated.memory.unwrap();
+                    assert!(memory.stability.is_finite() && memory.stability > 0.0);
+                    assert!((1.0..=10.0).contains(&memory.difficulty));
+                    let due = chrono::DateTime::parse_from_rfc3339(&rated.due_at)
+                        .unwrap()
+                        .with_timezone(&Utc);
+                    if rating == "again" {
+                        assert_eq!(due, at + Duration::minutes(1));
+                    } else {
+                        assert!(due >= at + Duration::days(1));
+                    }
+                    let reviews = store.list_reviews().unwrap();
+                    assert_eq!(reviews.len(), total_reviews);
+                    let card_reviews = reviews
+                        .iter()
+                        .filter(|review| review.card_id == card.id)
+                        .collect::<Vec<_>>();
+                    assert_eq!(card_reviews.len(), ordinal + 1);
+                    let review = card_reviews
+                        .iter()
+                        .find(|review| review.reviewed_at == at.to_rfc3339())
+                        .unwrap();
+                    assert_eq!(review.rating, rating);
+                    assert_eq!(review.scheduled_days, (due - at).num_days() as u32);
+                }
+                let before = store.archive().unwrap();
+                drop(store);
+                store = Store::open(&path).unwrap();
+                let after = store.archive().unwrap();
+                assert_eq!(
+                    serde_json::to_value(&before.cards).unwrap(),
+                    serde_json::to_value(&after.cards).unwrap()
+                );
+                assert_eq!(
+                    serde_json::to_value(&before.reviews).unwrap(),
+                    serde_json::to_value(&after.reviews).unwrap()
+                );
+            }
+        }
+        assert_eq!(total_reviews, 63);
+    }
+}
