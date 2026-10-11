@@ -47,7 +47,7 @@ export function publishRelease({ directory = 'artifacts/release', version = JSON
   const payloads = files.filter(file => file.name.endsWith('.exe') || file.name === 'surtitle-source.zip');
   const temporary = mkdtempSync(join(tmpdir(), 'surtitle-public-release-'));
   try {
-    // Keep CI evidence and its complete checksum file intact; stage only the public checksum file.
+    // Checksums accompany the public downloads; they are not a runtime validation gate.
     const checksum = payloads.map(file => `${sha256File(file.path)}  ${file.name}`).join('\n') + '\n';
     const checksumPath = join(temporary, 'SHA256SUMS.txt');
     writeFileSync(checksumPath, checksum);

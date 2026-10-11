@@ -15,11 +15,12 @@ function snapshot() {
     tools: ['ffmpeg', 'yt-dlp', 'deno', 'vad'].map(id => ({ id, status: 'missing', provider: 'managed', path: null, version: id === 'vad' ? '6.2' : null })),
   };
 }
-test('requires explicit application identity and refuses duplicate/unknown probe switches', () => {
+test('requires explicit application paths and refuses duplicate/unknown probe switches', () => {
   const args = ['--application', 'app.exe', '--data-root', 'data', '--fixture', 'sample.mp4', '--driver', 'driver.exe',
-    '--native-driver', 'edge.exe', '--output', 'report.json', '--expected-application-sha256', 'a'.repeat(64)];
-  assert.equal(parseOptions(args)['expected-application-sha256'], 'a'.repeat(64));
-  assert.throws(() => parseOptions(args.slice(0, -2)), /expected-application-sha256/);
+    '--native-driver', 'edge.exe', '--output', 'report.json'];
+  assert.equal(parseOptions(args).application, 'app.exe');
+  assert.throws(() => parseOptions(args.slice(2)), /Missing --application/);
+  assert.throws(() => parseOptions([...args, '--expected-application-sha256', 'a'.repeat(64)]), /Unknown/);
   assert.throws(() => parseOptions([...args, '--application', 'other.exe']), /duplicate/);
   assert.throws(() => parseOptions([...args, '--skip-playback']), /Unknown/);
 });

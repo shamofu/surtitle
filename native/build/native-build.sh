@@ -111,5 +111,4 @@ dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' > "$output/toolchai
 for package in gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix mingw-w64-common mingw-w64-x86-64-dev; do
   cp "/usr/share/doc/$package/copyright" "$output/toolchain-notices/$package-copyright"
 done
-sha256sum "$output/runtime/"*.dll > "$output/runtime-sha256.txt"
-printf 'Build completed; run the separate review, promotion, PE and playback checks.\n'
+printf 'Build completed; run the native smoke and application playback tests.\n'

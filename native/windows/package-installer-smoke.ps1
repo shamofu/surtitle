@@ -27,11 +27,6 @@ foreach ($hive in @('HKCU:', 'HKLM:')) {
     if (Test-Path -LiteralPath $key) { throw 'An existing installation is protected; use a fresh Windows user profile.' }
 }
 $manifest = Get-Content -LiteralPath 'native/runtime-windows-x64.json' -Raw | ConvertFrom-Json
-$installerAudit = Get-Content -LiteralPath 'artifacts/installer-audit.json' -Raw | ConvertFrom-Json
-if ($installerAudit.passed -ne $true -or
-    $installerAudit.installerSha256 -ne (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant() -or
-    $installerAudit.applicationSha256 -notmatch '^[a-f0-9]{64}$') { throw 'The exact installer payload has not passed its audit.' }
-$embeddedApplicationHash = $installerAudit.applicationSha256
 $binary = Join-Path $installRoot 'surtitle.exe'
 function Run-Installer([string]$path, [string[]]$arguments) {
     $process = Start-Process -FilePath $path -ArgumentList $arguments -PassThru -WindowStyle Hidden
@@ -41,18 +36,27 @@ function Run-Installer([string]$path, [string[]]$arguments) {
     }
     if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)" }
 }
+function Assert-InstalledFile([string]$path) {
+    $absolute = [IO.Path]::GetFullPath($path)
+    if (-not $absolute.StartsWith($installRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Installed resource path escapes the test installation.' }
+    $item = Get-Item -LiteralPath $absolute
+    if ($item.PSIsContainer) { throw "Installed resource must be a regular file: $path" }
+    while ($item -and $item.FullName.Length -ge $installRoot.Length) {
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Installed resource path must not traverse links.' }
+        $item = Get-Item -LiteralPath ([IO.Path]::GetDirectoryName($item.FullName))
+    }
+}
 function Assert-Payload {
-    if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw 'Installed app executable is missing.' }
-    if ((Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant() -ne $embeddedApplicationHash) { throw 'Installed application differs from the audited embedded production executable.' }
+    Assert-InstalledFile $binary
     $runtime = Join-Path $installRoot 'native'
     foreach ($component in $manifest.components) {
         foreach ($file in $component.runtimeFiles) {
             $path = Join-Path $runtime $file.target
-            if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $file.sha256) { throw "Installed DLL differs: $($file.target)" }
+            Assert-InstalledFile $path
         }
         foreach ($notice in $component.noticeFiles) {
             $path = Join-Path $runtime ([IO.Path]::GetFileName($notice.path))
-            if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $notice.sha256) { throw "Installed notice differs: $($notice.path)" }
+            Assert-InstalledFile $path
         }
     }
     if (Get-ChildItem -LiteralPath $installRoot -Recurse -File | Where-Object { $_.Name -in @('ffmpeg.exe','ffprobe.exe','yt-dlp.exe','deno.exe') -or $_.Extension -eq '.onnx' }) { throw 'On-demand dependencies were bundled.' }
@@ -72,9 +76,8 @@ function Probe-Production {
     $seedArgumentsBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($seedArguments))
     & pwsh -NoProfile -File e2e/support/run-windows-standard-user.ps1 -Application $seedApplication -ArgumentsBase64 $seedArgumentsBase64
     if ($LASTEXITCODE -ne 0) { throw 'Disposable production learning fixture preparation failed.' }
-    $expected = $embeddedApplicationHash
     $arguments = @('native/windows/package-production-smoke.mjs', '--application', $binary,
-        '--expected-application-sha256', $expected, '--data-root', $localData, '--fixture', $fixture,
+        '--data-root', $localData, '--fixture', $fixture,
         '--driver', (Join-Path $workspace 'work/driver/bin/tauri-driver.exe'),
         '--native-driver', (Join-Path $workspace 'work/webdriver/msedgedriver.exe'),
         '--output', (Join-Path $workspace 'artifacts/production-smoke.json'))
@@ -129,9 +132,6 @@ foreach ($file in $manifest.components.runtimeFiles) {
 Assert-Data $before
 $report = @{
     schemaVersion=1; sha=$env:GITHUB_SHA; testedAt=[DateTime]::UtcNow.ToString('o')
-    installerSha256=(Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    productionSmokeSha256=(Get-FileHash -LiteralPath 'artifacts/production-smoke.json' -Algorithm SHA256).Hash.ToLowerInvariant()
-    productionApplicationSha256=$embeddedApplicationHash
     freshInstallPassed=$true; startupPassed=$true; overwriteInstallPassed=$true
     uninstallPassed=$true; defaultDataRetentionPassed=$true; retainedFileCount=$before.Count
     nonAsciiSpaceAmpersandInstallPath=$true; retainedDataRemoved=$false

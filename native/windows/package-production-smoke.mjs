@@ -3,7 +3,7 @@
 import { execFileSync } from 'node:child_process';
 import { spawnWebDriver, waitForWebDriver } from '../../e2e/support/webdriver-process.mjs';
 import { createServer } from 'node:net';
-import { sha256File as hash, readJson } from '../../scripts/file-content.mjs';
+import { readJson } from '../../scripts/file-content.mjs';
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
@@ -13,9 +13,9 @@ const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const appId = 'app.surtitle.desktop';
 const requireCheck = (value, message) => { if (!value) throw Object.assign(new Error(message), { code: 'ERR_PRODUCTION_CHECK' }); };
 
-const diagnosticStages = new Set(['arguments', 'profile', 'fixture', 'application', 'native-files', 'driver-files',
+const diagnosticStages = new Set(['arguments', 'profile', 'fixture', 'application', 'driver-files',
   'driver-start', 'driver-ready', 'session', 'app-ready', 'initial-snapshot', 'settings', 'media-load', 'metadata',
-  'playback-start', 'playback-advancing', 'interval-stop', 'seek', 'final-snapshot', 'payload-recheck', 'session-close', 'success-write', 'complete']);
+  'playback-start', 'playback-advancing', 'interval-stop', 'seek', 'final-snapshot', 'session-close', 'success-write', 'complete']);
 const diagnosticCodes = new Set(['ERR_PRODUCTION_CHECK', 'ENOENT', 'EACCES', 'EPERM', 'EEXIST', 'EADDRINUSE',
   'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ERR_ASSERTION']);
 function classifiedFailure(error) {
@@ -78,14 +78,13 @@ export function createProductionDiagnostics(directory = join(workspace, 'artifac
 
 export function parseOptions(argv) {
   const options = {};
-  const names = new Set(['application', 'data-root', 'fixture', 'driver', 'native-driver', 'output', 'expected-application-sha256']);
+  const names = new Set(['application', 'data-root', 'fixture', 'driver', 'native-driver', 'output']);
   for (let index = 0; index < argv.length; index++) {
     const key = argv[index].replace(/^--/, '');
     requireCheck(argv[index].startsWith('--') && (names.has(key) || key === 'disposable-profile') && !(key in options), 'Unknown or duplicate production probe argument');
     options[key] = key === 'disposable-profile' ? true : argv[++index];
   }
   for (const name of names) requireCheck(typeof options[name] === 'string' && options[name].length > 0, `Missing --${name}`);
-  requireCheck(/^[a-f0-9]{64}$/.test(options['expected-application-sha256']), 'Expected production executable SHA-256 is required');
   return options;
 }
 
@@ -176,26 +175,14 @@ export async function runProductionProbe(options, diagnostics = createProduction
   const fixture = validateSeededProfile(root, roaming);
   diagnostics.stage('fixture');
   const mediaPath = plainPath(options.fixture, true);
-  const fixtureSha256 = hash(mediaPath);
   requireCheck(fixture.mediaId === 'fixture-media' && fixture.cardId === 'fixture-card' && fixture.segmentCount === 20000
     && plainPath(fixture.mediaPath, true) === mediaPath, 'Fixture receipt does not identify the prepared local media and database');
   diagnostics.stage('application');
   const application = plainPath(options.application, true);
-  requireCheck(hash(application) === options['expected-application-sha256'], 'Installed application differs from the production build');
   const relativeApp = relative(workspace, application);
   requireCheck(!relativeApp.startsWith('..') && !isAbsolute(relativeApp), 'Installed probe binary must remain inside the guarded workspace install directory');
   const output = resolve(options.output);
   requireCheck(!existsSync(output), 'Production evidence must be written to a fresh file');
-  diagnostics.stage('native-files');
-  const manifest = readJson(join(workspace, 'native/runtime-windows-x64.json'));
-  const effectiveManifestSha256 = hash(join(workspace, 'native/runtime-windows-x64.json'));
-  const nativeFiles = manifest.components.flatMap(component => component.runtimeFiles).map(file => {
-    requireCheck(file.target && file.target === file.target.split(/[\\/]/).pop(), 'Invalid native runtime filename');
-    const path = plainPath(join(dirname(application), 'native', file.target), true);
-    const sha256 = hash(path);
-    requireCheck(sha256 === file.sha256, `Installed native DLL differs from the effective manifest: ${file.target}`);
-    return { file: file.target, sha256 };
-  });
   diagnostics.stage('driver-files');
   const driverPath = plainPath(options.driver, true), nativeDriver = plainPath(options['native-driver'], true);
   const port = await freePort();
@@ -278,14 +265,8 @@ export async function runProductionProbe(options, diagnostics = createProduction
     }, { timeout: 10000, interval: 100 });
     diagnostics.stage('final-snapshot');
     const final = validateSnapshot(await invoke('get_app_snapshot'), fixture);
-    diagnostics.stage('payload-recheck');
-    requireCheck(hash(application) === options['expected-application-sha256'], 'Installed production executable changed during testing');
-    requireCheck(hash(mediaPath) === fixtureSha256 && hash(join(workspace, 'native/runtime-windows-x64.json')) === effectiveManifestSha256,
-      'Fixture or effective native manifest changed during production testing');
-    for (const file of nativeFiles) requireCheck(hash(join(dirname(application), 'native', file.file)) === file.sha256, 'Installed native DLL changed during testing');
     const report = { schemaVersion: 1, sha: process.env.GITHUB_SHA ?? null, passed: true, normalBuild: true,
-      applicationSha256: hash(application), effectiveManifestSha256,
-      nativeFiles, fixtureSha256, fixtureMediaId: fixture.mediaId,
+      fixtureMediaId: fixture.mediaId,
       appReady: true, settingsReady: true, nativeMetadataPassed: true, visibleSurfacePassed: true,
       playbackAdvanced: true, intervalStopPassed: true, seekPassed: true, accountingUnchanged: true,
       paidRequests: 0, initial, final, ui, observations: { metadata, advancing, stopped, sought },
@@ -314,7 +295,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   diagnostics.stage('arguments');
   try {
     const report = await runProductionProbe(parseOptions(process.argv.slice(2)), diagnostics);
-    console.log(JSON.stringify({ passed: report.passed, applicationSha256: report.applicationSha256, paidRequests: 0 }));
+    console.log(JSON.stringify({ passed: report.passed, paidRequests: 0 }));
   } catch (error) {
     try { await diagnostics.writeFailure(error); }
     catch (failure) { console.error(`[production-smoke] failure-report-write=${classifiedFailure(failure).code ?? 'unavailable'}`); }

@@ -8,49 +8,40 @@ import { validateRelease } from './release-contract.mjs';
 import { publishRelease } from './release.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
-function sums(directory) {
-  writeFileSync(join(directory, 'SHA256SUMS.txt'), readdirSync(directory).filter(name => name !== 'SHA256SUMS.txt')
-    .map(name => `${digest(readFileSync(join(directory, name)))}  ${name}`).join('\n') + '\n');
-}
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'surtitle-release-'));
   t.onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
   for (const file of ['surtitle.exe', 'surtitle-source.zip', 'native-runtime-manifest.json', 'js-sbom.cdx.json', 'rust-dependencies.json']) writeFileSync(join(directory, file), file);
-  const identity = { installerSha256: digest('surtitle.exe'), applicationSha256: digest('embedded executable') };
-  writeFileSync(join(directory, 'release-manifest.json'), JSON.stringify({ version: '0.1.0', installer: 'surtitle.exe', installerSmokePassed: true, ...identity }));
-  writeFileSync(join(directory, 'installer-audit.json'), JSON.stringify({ passed: true, ...identity }));
-  writeFileSync(join(directory, 'installer-smoke.json'), JSON.stringify({ installerSha256: identity.installerSha256, productionApplicationSha256: identity.applicationSha256 }));
-  sums(directory);
+  writeFileSync(join(directory, 'release-manifest.json'), JSON.stringify({ version: '0.1.0', installer: 'surtitle.exe', installerSmokePassed: true }));
+  writeFileSync(join(directory, 'installer-smoke.json'), JSON.stringify({ passed: true }));
   return directory;
 }
 
-test('accepts checksum-bound assets and the tested installer without UI or build receipt assertions', t => {
+test('accepts release assets without runtime audits or checksum manifests', t => {
   const directory = fixture(t);
   const archive = Buffer.alloc(2 * 1024 * 1024 + 17, 123);
   archive[archive.length - 1] = 255;
   writeFileSync(join(directory, 'surtitle-source.zip'), archive);
-  sums(directory);
-  assert.equal(validateRelease(directory, '0.1.0').length, 9);
+  assert.equal(validateRelease(directory, '0.1.0').length, 7);
 });
 
-test('rejects changed, missing, duplicate and unlisted release assets', t => {
+test('rejects empty, missing and ambiguous release payloads', t => {
   const root = fixture(t), source = join(root, 'surtitle-source.zip');
-  writeFileSync(source, 'altered'); assert.throws(() => validateRelease(root, '0.1.0'), /checksums/);
-  sums(root); writeFileSync(source, ''); assert.throws(() => validateRelease(root, '0.1.0'), /nonempty/);
+  writeFileSync(source, ''); assert.throws(() => validateRelease(root, '0.1.0'), /nonempty/);
   rmSync(source); assert.throws(() => validateRelease(root, '0.1.0'), /incomplete/);
-  writeFileSync(source, 'source'); sums(root);
-  const sumfile = join(root, 'SHA256SUMS.txt'), content = readFileSync(sumfile, 'utf8');
-  writeFileSync(sumfile, content + content.split('\n')[0] + '\n'); assert.throws(() => validateRelease(root, '0.1.0'), /duplicate/);
-  writeFileSync(sumfile, content);
-  writeFileSync(join(root, 'extra.txt'), 'extra'); assert.throws(() => validateRelease(root, '0.1.0'), /checksums/);
+  writeFileSync(source, 'source');
+  writeFileSync(join(root, 'second.exe'), 'another installer');
+  assert.throws(() => validateRelease(root, '0.1.0'), /ambiguous/);
 });
 
-test('rejects wrong version or evidence from a different installer even with updated checksums', t => {
+test('rejects wrong version, installer name and unsuccessful installer smoke', t => {
   const root = fixture(t);
   assert.throws(() => validateRelease(root, '0.2.0'), /version/);
-  const path = join(root, 'installer-smoke.json'), smoke = JSON.parse(readFileSync(path));
-  smoke.installerSha256 = digest('another installer'); writeFileSync(path, JSON.stringify(smoke)); sums(root);
-  assert.throws(() => validateRelease(root, '0.1.0'), /different installer/);
+  const path = join(root, 'release-manifest.json'), manifest = JSON.parse(readFileSync(path));
+  writeFileSync(path, JSON.stringify({ ...manifest, installer: 'missing.exe' }));
+  assert.throws(() => validateRelease(root, '0.1.0'), /installer name/);
+  writeFileSync(path, JSON.stringify({ ...manifest, installerSmokePassed: false }));
+  assert.throws(() => validateRelease(root, '0.1.0'), /smoke result/);
 });
 
 const releaseEnv = { GITHUB_REPOSITORY: 'example/surtitle', GITHUB_REF: 'refs/tags/v0.1.0',
@@ -127,10 +118,9 @@ test.for(['lightweight', 'annotated'])('publishes an existing %s tag when its dr
 
 test('uploads only installer, corresponding source and public checksums while preserving every internal artifact', t => {
   const directory = fixture(t);
-  for (const name of ['native-audit.json', 'native-smoke.json', 'production-smoke.json', 'js-licenses.json', 'extra-private.zip']) {
+  for (const name of ['native-smoke.json', 'production-smoke.json', 'js-licenses.json', 'extra-private.zip']) {
     writeFileSync(join(directory, name), `Internal evidence: ${name}`);
   }
-  sums(directory);
   const before = new Map(readdirSync(directory).map(name => [name, readFileSync(join(directory, name))]));
   const { calls, run, uploads } = publisher(directory);
   assert.equal(publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), 'v0.1.0');
@@ -159,23 +149,22 @@ test('does not upload when full release history is unavailable', t => {
   assert.equal(calls.some(call => call.args[1] === 'create'), false);
 });
 
-test.for([false, true])('rejects tampered internal JSON before upload even with resealed checksums=%s', (reseal, t) => {
-  const directory = fixture(t), path = join(directory, 'installer-audit.json');
-  const audit = JSON.parse(readFileSync(path));
-  audit.passed = false;
-  writeFileSync(path, JSON.stringify(audit));
-  if (reseal) sums(directory);
+test('rejects unsuccessful installer smoke before upload', t => {
+  const directory = fixture(t), path = join(directory, 'release-manifest.json');
+  const manifest = JSON.parse(readFileSync(path));
+  manifest.installerSmokePassed = false;
+  writeFileSync(path, JSON.stringify(manifest));
   assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv,
-    run: () => assert.fail('Internal validation must happen before external commands') }), /checksums|Installer evidence/);
+    run: () => assert.fail('Smoke result must be checked before external commands') }), /smoke result/);
 });
 
 test('removes only temporary public checksums after an upload failure', t => {
-  const directory = fixture(t), internalSums = readFileSync(join(directory, 'SHA256SUMS.txt'));
+  const directory = fixture(t), originalFiles = readdirSync(directory);
   const { calls, run, uploads } = publisher(directory, { createFailure: true });
   assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), /Asset upload failed/);
   assert.equal(existsSync(dirname(uploads.find(file => file.name === 'SHA256SUMS.txt').path)), false);
-  assert.deepEqual(readFileSync(join(directory, 'SHA256SUMS.txt')), internalSums);
-  assert.equal(validateRelease(directory, '0.1.0').length, 9);
+  assert.deepEqual(readdirSync(directory), originalFiles);
+  assert.equal(validateRelease(directory, '0.1.0').length, 7);
   assert.equal(calls.some(call => call.args.includes('--draft=false')), false);
 });
 

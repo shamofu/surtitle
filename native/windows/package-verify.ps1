@@ -8,26 +8,20 @@ Set-Location -LiteralPath $workspace
 if ($LASTEXITCODE -ne 0) { throw 'Release version mismatch.' }
 & node scripts/check-production-features.mjs
 if ($LASTEXITCODE -ne 0) { throw 'Development-only AI code must not be packaged.' }
-& node native/windows/native-audit.mjs --release
-if ($LASTEXITCODE -ne 0) { throw 'Native source and notice verification failed.' }
 $releaseDir = Join-Path $workspace 'artifacts/release'
 $sourceDir = Join-Path $workspace 'work/release-source'
-$sourceCheck = Join-Path $workspace 'work/release-source-check'
-foreach ($path in @($releaseDir, $sourceDir, $sourceCheck)) {
+foreach ($path in @($releaseDir, $sourceDir)) {
     if (Test-Path -LiteralPath $path) { throw "Release verification requires a fresh directory: $path" }
     New-Item -ItemType Directory -Path $path -Force | Out-Null
 }
 $installers = @(Get-ChildItem -LiteralPath 'target/release/bundle/nsis' -Filter '*.exe' -File)
 if ($installers.Count -ne 1) { throw 'Exactly one NSIS installer is required.' }
 $installer = $installers[0]
-# Extract once, then use the observed executable hash throughout the lifecycle test.
-& node native/windows/native-installer-audit.mjs audit $installer.FullName
-if ($LASTEXITCODE -ne 0) { throw 'Installer payload verification failed.' }
 $profileArguments = if ($DisposableProfile) { @('-DisposableProfile') } else { @() }
 & pwsh -NoProfile -File native/windows/package-installer-smoke.ps1 -Installer $installer.FullName -InstallDirectory 'work/installer-test/日本語 & application' @profileArguments
 if ($LASTEXITCODE -ne 0) { throw 'Installer lifecycle or production application verification failed.' }
 Copy-Item -LiteralPath $installer.FullName -Destination $releaseDir
-foreach ($name in @('native-audit.json', 'native-smoke.json', 'installer-smoke.json', 'production-smoke.json', 'installer-audit.json')) {
+foreach ($name in @('native-smoke.json', 'installer-smoke.json', 'production-smoke.json')) {
     Copy-Item -LiteralPath (Join-Path 'artifacts' $name) -Destination $releaseDir
 }
 Copy-Item -LiteralPath 'native/runtime-windows-x64.json' -Destination (Join-Path $releaseDir 'native-runtime-manifest.json')
@@ -51,40 +45,39 @@ Copy-Item -LiteralPath 'artifacts/js-sbom.cdx.json', 'artifacts/js-licenses.json
 Copy-Item -LiteralPath 'work/installer-sources' -Destination (Join-Path $sourceDir 'native-installer-sources') -Recurse
 $nativeManifest = Get-Content -LiteralPath 'native/runtime-windows-x64.json' -Raw | ConvertFrom-Json
 foreach ($component in $nativeManifest.components) {
-    foreach ($field in @('correspondingSource', 'dependencyInventory', 'reviewEvidence')) {
+    if ($component.id -notmatch '^[a-zA-Z0-9_-]+$') { throw 'Native source component ID must be a plain name.' }
+    foreach ($field in @('correspondingSource', 'dependencyInventory')) {
         $evidence = $component.redistribution.$field
         if (-not $evidence) { continue }
+        if ([IO.Path]::IsPathRooted($evidence.path)) { throw 'Native source paths must be relative to the workspace.' }
         $original = [IO.Path]::GetFullPath((Join-Path $workspace $evidence.path))
-        if (-not $original.StartsWith($workspace + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Native source evidence escapes the workspace.' }
+        if (-not $original.StartsWith($workspace + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Native source path escapes the workspace.' }
+        if ($field -eq 'dependencyInventory' -and -not (Test-Path -LiteralPath $original)) {
+            continue
+        }
         $item = Get-Item -LiteralPath $original
-        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Native source evidence must be a regular file.' }
-        if ((Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash -ne $evidence.sha256) { throw 'Native source evidence changed.' }
+        if ($item.PSIsContainer) { throw 'Native sources must be regular files.' }
+        $ancestor = $item
+        while ($ancestor -and $ancestor.FullName.Length -ge $workspace.Length) {
+            if ($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Native source paths must not traverse links.' }
+            $ancestor = Get-Item -LiteralPath ([IO.Path]::GetDirectoryName($ancestor.FullName))
+        }
         $relative = 'native-sources/' + $component.id + '/' + $field + '-' + $item.Name
         $destination = Join-Path $sourceDir $relative
         New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($destination)) -Force | Out-Null
         Copy-Item -LiteralPath $original -Destination $destination
-        $evidence.path = $relative
     }
 }
-$nativeManifest | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath (Join-Path $sourceDir 'native/runtime-windows-x64.json') -Encoding utf8NoBOM
 $sevenZip = (Get-Command 7z.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 Push-Location -LiteralPath $sourceDir
 try {
     & $sevenZip a '-tzip' '-mx=5' (Join-Path $releaseDir 'surtitle-source.zip') '.' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Corresponding-source ZIP creation failed.' }
 } finally { Pop-Location }
-# Verify the actual ZIP's source archives, not just the directory used to create it.
-& $sevenZip x '-y' ('-o' + $sourceCheck) (Join-Path $releaseDir 'surtitle-source.zip') 'native/*' 'native-sources/*' 'native-installer-sources/*' | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Cannot extract the source ZIP for verification.' }
-& node native/build/native-ci-artifact.mjs verify-source $sourceCheck
-if ($LASTEXITCODE -ne 0) { throw 'Native source files are missing or changed in the source ZIP.' }
-& node native/windows/native-installer-audit.mjs source-check $sourceCheck
-if ($LASTEXITCODE -ne 0) { throw 'Installer or Rust source files are missing or changed in the source ZIP.' }
 $version = (Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json).version
-$audit = Get-Content -LiteralPath 'artifacts/installer-audit.json' -Raw | ConvertFrom-Json
-@{ schemaVersion=1; version=$version; installer=$installer.Name; installerSha256=$audit.installerSha256; applicationSha256=$audit.applicationSha256; installerSmokePassed=$true } |
+@{ schemaVersion=1; version=$version; installer=$installer.Name; installerSmokePassed=$true } |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $releaseDir 'release-manifest.json') -Encoding utf8NoBOM
-Get-ChildItem -LiteralPath $releaseDir -File | Sort-Object Name | ForEach-Object {
+@($installer.Name, 'surtitle-source.zip') | Sort-Object | ForEach-Object { Get-Item -LiteralPath (Join-Path $releaseDir $_) } | ForEach-Object {
     "$( (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
 } | Set-Content -LiteralPath (Join-Path $releaseDir 'SHA256SUMS.txt') -Encoding utf8NoBOM
 & node --input-type=module -e 'import { readFileSync } from "node:fs"; import { validateRelease } from "./scripts/release-contract.mjs"; validateRelease("artifacts/release", JSON.parse(readFileSync("package.json", "utf8")).version);'

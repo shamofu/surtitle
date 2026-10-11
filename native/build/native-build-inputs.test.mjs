@@ -73,6 +73,8 @@ test('application and packaging changes do not enter the native Docker stages', 
     'src-tauri/tauri.conf.json', 'Cargo.lock', 'package.json', 'pnpm-lock.yaml',
     'native/windows/package-verify.ps1', 'native/build/native-ci-artifact.mjs',
     'native/installer-inputs.json',
+    'native/reviews/libmpv-dependencies.json', 'native/reviews/onnxruntime-dependencies.json',
+    'native/upstream-evidence/onnxruntime-vcpkg.json',
   ]) assert.deepEqual(affectedStages(path), [], path);
 });
 
@@ -92,17 +94,15 @@ test('ORT source pins and overlays invalidate acquisition, packaging and exporte
   ]) assert.deepEqual(affectedStages(path), ['ort-sources', 'ort-package', 'native-artifact', 'export'], path);
 });
 
-test('ORT runtime, notices and evidence changes reuse the acquired source stage', () => {
+test('ORT version, notices and packaging changes reuse the acquired source stage', () => {
   for (const path of [
     'native/runtime-windows-x64.json', 'native/onnxruntime-LICENSE', 'native/onnxruntime-ThirdPartyNotices.txt',
-    'native/reviews/onnxruntime-dependencies.json', 'native/upstream-evidence/onnxruntime-vcpkg.json',
-    'native/build/native-ort-compare.py', 'native/build/native-ort-generated.py',
-    'native/build/native-ort-package.py', 'native/build/native-ort-evidence.py',
+    'native/build/native-ort-package.py',
   ]) assert.deepEqual(affectedStages(path), ['ort-package', 'native-artifact', 'export'], path);
 });
 
-test('shared archive generation and validation invalidate both native source artifact branches', () => {
-  for (const path of ['native/build/native-source-archive-check.py', 'native/build/native_source_archive.py']) {
+test('shared archive generation invalidates both native source artifact branches', () => {
+  for (const path of ['native/build/native_source_archive.py']) {
     assert.deepEqual(affectedStages(path), ['libmpv-build', 'ort-package', 'native-artifact', 'export']);
   }
 });

@@ -2,7 +2,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -13,6 +13,44 @@ const childTimeoutMs = 15_000;
 // Each test starts one PowerShell process; fixture setup and assertions need
 // their own margin outside its deadline. Cleanup uses a separate hook budget.
 const testTimeoutMs = childTimeoutMs + 5_000;
+
+test.skipIf(process.platform !== 'win32')('installed resource checks require files inside the installation without pinning their contents', t => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'surtitle-installed-resources-')));
+  t.onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+  const install = join(root, 'installed'), outside = join(root, 'outside');
+  mkdirSync(install); mkdirSync(outside);
+  writeFileSync(join(install, 'app.exe'), 'fixture bytes; never executed');
+  writeFileSync(join(outside, 'notice.txt'), 'external notice');
+  symlinkSync(outside, join(install, 'linked'), 'junction');
+  const command = String.raw`
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile($env:SURTITLE_RESOURCE_SCRIPT, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw 'Installer smoke script did not parse' }
+$definition = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-InstalledFile' }, $false))
+if ($definition.Count -ne 1) { throw 'Expected the installed resource path guard' }
+. ([ScriptBlock]::Create($definition[0].Extent.Text))
+$installRoot = $env:SURTITLE_RESOURCE_INSTALL
+$file = Join-Path $installRoot 'app.exe'
+Assert-InstalledFile $file
+[IO.File]::WriteAllText($file, 'new build bytes are accepted without a digest pin')
+Assert-InstalledFile $file
+$rejected = foreach ($relative in @('missing.dll', '../outside/notice.txt', 'linked/notice.txt', '.')) {
+    $failed = $false
+    try { Assert-InstalledFile (Join-Path $installRoot $relative) } catch { $failed = $true }
+    if (-not $failed) { throw "Unsafe or missing resource accepted: $relative" }
+    $relative
+}
+$rejected | ConvertTo-Json -Compress
+`;
+  const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')], {
+    cwd: workspace, encoding: 'utf8', windowsHide: true, timeout: childTimeoutMs,
+    env: { ...process.env, SURTITLE_RESOURCE_SCRIPT: join(workspace, 'native/windows/package-installer-smoke.ps1'), SURTITLE_RESOURCE_INSTALL: install },
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), ['missing.dll', '../outside/notice.txt', 'linked/notice.txt', '.']);
+}, testTimeoutMs);
 
 test.skipIf(process.platform !== 'win32')('installer smoke resolves relative and absolute inputs once and rejects escaped or existing paths before touching the profile', () => {
   const relative = 'work/installer-test/' + randomUUID() + ' 日本語 & application';

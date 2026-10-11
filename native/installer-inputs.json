@@ -8,11 +8,6 @@
   },
   "plugin": {
     "version": "0.5.3",
-    "binary": {
-      "file": "nsis_tauri_utils.dll",
-      "url": "https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.5.3/nsis_tauri_utils.dll",
-      "sha256": "5ba143b5db4a87d32d6e7802e033330aae56cbceabe0d1e3ba41948385ad4709"
-    },
     "sourceArchive": {
       "file": "nsis-tauri-utils-13d9edd27b69310e108d6fbd49f90992f8a05390.tar.gz",
       "url": "https://codeload.github.com/tauri-apps/nsis-tauri-utils/tar.gz/13d9edd27b69310e108d6fbd49f90992f8a05390",
@@ -65,119 +60,91 @@
     },
     "notices": [
       {
-        "file": "COPYRIGHT-library.html",
-        "sha256": "68129500b616d5838629e68f55ff3aed5e096dacf60ce9eb41bbe599a563afa6"
+        "file": "COPYRIGHT-library.html"
       },
       {
-        "file": "licenses/Apache-2.0.txt",
-        "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        "file": "licenses/Apache-2.0.txt"
       },
       {
-        "file": "licenses/BSD-2-Clause.txt",
-        "sha256": "f32fb3b417a194167cfad068223fc975ba96c5960513a10f66a3c28720aec1df"
+        "file": "licenses/BSD-2-Clause.txt"
       },
       {
-        "file": "licenses/CC-BY-SA-4.0.txt",
-        "sha256": "23ee78c8bae49cf08ea2f0c84945c66b987ebe4520881fb51b3dad4fb43d07c2"
+        "file": "licenses/CC-BY-SA-4.0.txt"
       },
       {
-        "file": "licenses/GCC-exception-3.1.txt",
-        "sha256": "a3966c9410ef94a1efbfa9ec04e9c1994026a70623fbf0885ce36737bfba3b54"
+        "file": "licenses/GCC-exception-3.1.txt"
       },
       {
-        "file": "licenses/GPL-2.0-only.txt",
-        "sha256": "54b212ba1f97f6948fa5486239ab505dd820b02e50cbfd296b4062c8609a70af"
+        "file": "licenses/GPL-2.0-only.txt"
       },
       {
-        "file": "licenses/GPL-3.0-or-later.txt",
-        "sha256": "05315fce6c35f79b8a35454828995fa26336f235895ac64557abc028f4ffcea2"
+        "file": "licenses/GPL-3.0-or-later.txt"
       },
       {
-        "file": "licenses/ISC.txt",
-        "sha256": "0ff61769b238634e042ab759dddfd104a8e69d091e3600ae3410e401a6164381"
+        "file": "licenses/ISC.txt"
       },
       {
-        "file": "licenses/LLVM-exception.txt",
-        "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e"
+        "file": "licenses/LLVM-exception.txt"
       },
       {
-        "file": "licenses/MIT.txt",
-        "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+        "file": "licenses/MIT.txt"
       },
       {
-        "file": "licenses/NCSA.txt",
-        "sha256": "39cb0234065c92b9e6cee3830cbb52b1aa289aa8fe9ba2e66730fec5cf05c630"
+        "file": "licenses/NCSA.txt"
       },
       {
-        "file": "licenses/OFL-1.1.txt",
-        "sha256": "8eea8287e5876b539670cadb82e99f9a7afddec6f6730811be1daf25d2e9bcfd"
+        "file": "licenses/OFL-1.1.txt"
       },
       {
-        "file": "licenses/Unicode-3.0.txt",
-        "sha256": "f5062c9a188d81dfe66b56db4182dcf9e4b17c0d9b0d311a8e20b3a1b075c443"
+        "file": "licenses/Unicode-3.0.txt"
       }
     ]
   },
   "notices": [
     {
-      "file": "NSIS-3.11-COPYING.txt",
-      "sha256": "e7dd514003ab96cb3ddccbc028fe5c795fccf57dc41f21cfb9d4dd16ead23bf5"
+      "file": "NSIS-3.11-COPYING.txt"
     },
     {
-      "file": "NSIS-Modern-UI-2-LICENSE.txt",
-      "sha256": "e225ae45f2f92a2ed8922305490432fc1fb2e36c3406a03a1d53af3d684097f9"
+      "file": "NSIS-Modern-UI-2-LICENSE.txt"
     },
     {
-      "file": "NSIS-Modern-UI-LICENSE.txt",
-      "sha256": "75416e94e65b7584ee76e66f7f2f0b087ad8bc1371d3da4486091923076d36b3"
+      "file": "NSIS-Modern-UI-LICENSE.txt"
     },
     {
-      "file": "nsis-tauri-utils-LICENSE-APACHE-2.0.txt",
-      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+      "file": "nsis-tauri-utils-LICENSE-APACHE-2.0.txt"
     },
     {
-      "file": "nsis-tauri-utils-LICENSE-MIT.txt",
-      "sha256": "1c1020fa10a6bf318717e82c911bcc54ebdfb9bb280460ae332bcb2f82f57fbe"
+      "file": "nsis-tauri-utils-LICENSE-MIT.txt"
     },
     {
-      "file": "NSISdl-LICENSE.txt",
-      "sha256": "326e587f36ca58e14bd09cca153f9e69f1c5ed701189aa47d2d0627af7e16280"
+      "file": "NSISdl-LICENSE.txt"
     },
     {
-      "file": "semver-LICENSE-APACHE.txt",
-      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+      "file": "semver-LICENSE-APACHE.txt"
     },
     {
-      "file": "semver-LICENSE-MIT.txt",
-      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+      "file": "semver-LICENSE-MIT.txt"
     },
     {
-      "file": "SOURCE-AVAILABILITY.txt",
-      "sha256": "a600eab2d8be795e53a3f67e0eaf0be6c97d71de1e90bf84eae3e53a6734d220"
+      "file": "SOURCE-AVAILABILITY.txt"
     },
     {
-      "file": "Tauri-LICENSE-APACHE-2.0.txt",
-      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+      "file": "Tauri-LICENSE-APACHE-2.0.txt"
     },
     {
-      "file": "Tauri-LICENSE-MIT.txt",
-      "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
+      "file": "Tauri-LICENSE-MIT.txt"
     },
     {
-      "file": "windows-link-license-apache-2.0.txt",
-      "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+      "file": "windows-link-license-apache-2.0.txt"
     },
     {
-      "file": "windows-link-license-mit.txt",
-      "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+      "file": "windows-link-license-mit.txt"
     },
     {
-      "file": "windows-sys-license-apache-2.0.txt",
-      "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+      "file": "windows-sys-license-apache-2.0.txt"
     },
     {
-      "file": "windows-sys-license-mit.txt",
-      "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+      "file": "windows-sys-license-mit.txt"
     }
   ]
 }

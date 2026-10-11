@@ -54,7 +54,7 @@ jobs:
           path: ${{ steps.pnpm.outputs.store }}
           key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
       - run: pnpm install --frozen-lockfile
-      - name: Prepare the verified native runtime and pinned development model
+      - name: Prepare native runtime and pinned development model
         run: |
           pwsh native/windows/native-prepare.ps1 -WithDevModel
           pwsh native/windows/native-smoke.ps1

@@ -88,7 +88,6 @@ fn real_spoken_audio_and_interior_pause_require_only_local_warning_review() {
     std::fs::write(&source, wav16(&source_pcm)).unwrap();
     let assets = VadAssets {
         runtime_path: repo.join("src-tauri/resources/native/onnxruntime.dll"),
-        runtime_sha256: "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471".into(),
         model_path: repo.join("work/native-fixtures/silero_vad.onnx"),
         model_sha256: SILERO_MODEL_SHA256.into(),
     };
@@ -138,7 +137,7 @@ fn real_spoken_audio_and_interior_pause_require_only_local_warning_review() {
         (16_000, selected_end_sample)
     );
     assert_eq!(evidence.model_sha256, assets.model_sha256);
-    assert_eq!(evidence.runtime_sha256, assets.runtime_sha256);
+    assert!(evidence.runtime_sha256.is_empty());
 
     // Independently saved upstream MFA word spans: 0.330–2.800 s and
     // 0.430–2.460 s, rebased only by the exact composition sample offsets.

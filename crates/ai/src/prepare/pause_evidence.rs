@@ -13,6 +13,8 @@ const MAX_PAUSES: usize = 50_000;
 pub struct VadPauseEvidence {
     pub policy: String,
     pub model_sha256: String,
+    // Preserve historical receipt and warning identities without checking installed DLL bytes.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub runtime_sha256: String,
     pub sample_rate: u32,
     pub source_start_sample: u64,
@@ -49,7 +51,7 @@ impl VadPauseEvidence {
         let evidence = Self {
             policy: PAUSE_POLICY.into(),
             model_sha256: assets.model_sha256.clone(),
-            runtime_sha256: assets.runtime_sha256.clone(),
+            runtime_sha256: String::new(),
             sample_rate: 16_000,
             source_start_sample,
             source_end_sample,
@@ -65,7 +67,6 @@ impl VadPauseEvidence {
         let hash = |s: &str| s.len() == 64 && s.bytes().all(|c| c.is_ascii_hexdigit());
         if self.policy != PAUSE_POLICY
             || !hash(&self.model_sha256)
-            || !hash(&self.runtime_sha256)
             || self.sample_rate != 16_000
             || self.source_start_sample >= self.source_end_sample
             || self.source_end_sample > u64::MAX / 1000
@@ -139,7 +140,6 @@ mod tests {
             model_path: "unused.onnx".into(),
             runtime_path: "unused.dll".into(),
             model_sha256: crate::sha256_bytes(b"vad"),
-            runtime_sha256: crate::sha256_bytes(b"runtime"),
         }
     }
 
@@ -177,7 +177,11 @@ mod tests {
         assert_eq!(evidence.guarded_range(&evidence.pauses[0]), (3299, 4847));
         assert_eq!(evidence.guarded_range(&evidence.pauses[1]).1, 7001);
         assert_eq!(evidence.model_sha256, assets().model_sha256);
-        assert_eq!(evidence.runtime_sha256, assets().runtime_sha256);
+        assert!(evidence.runtime_sha256.is_empty());
+        assert!(serde_json::to_value(&evidence)
+            .unwrap()
+            .get("runtimeSha256")
+            .is_none());
         let encoded = serde_json::to_vec(&evidence).unwrap();
         let saved: VadPauseEvidence = serde_json::from_slice(&encoded).unwrap();
         assert_eq!(saved, evidence);
@@ -196,10 +200,9 @@ mod tests {
             &assets(),
         )
         .unwrap();
-        let mutations: [fn(&mut VadPauseEvidence); 11] = [
+        let mutations: [fn(&mut VadPauseEvidence); 10] = [
             |value| value.policy = "relaxed".into(),
             |value| value.model_sha256.clear(),
-            |value| value.runtime_sha256 = "not-a-hash".into(),
             |value| value.sample_rate = 1000,
             |value| value.minimum_pause_ms = 200,
             |value| value.boundary_guard_ms = 0,
@@ -217,5 +220,24 @@ mod tests {
                 "Accepted invalid evidence: {value:?}"
             );
         }
+    }
+
+    #[test]
+    fn historical_runtime_provenance_roundtrips_without_a_runtime_hash_requirement() {
+        let evidence = VadPauseEvidence::from_analysis(
+            &[Pause {
+                start_sample: 512,
+                end_sample: 65_536,
+            }],
+            16_000,
+            100_000,
+            &assets(),
+        )
+        .unwrap();
+        let mut encoded = serde_json::to_value(&evidence).unwrap();
+        encoded["runtimeSha256"] = serde_json::json!("historical runtime metadata");
+        let restored: VadPauseEvidence = serde_json::from_value(encoded.clone()).unwrap();
+        restored.validate().unwrap();
+        assert_eq!(serde_json::to_value(restored).unwrap(), encoded);
     }
 }

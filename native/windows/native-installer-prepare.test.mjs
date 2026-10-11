@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 
 // Allow the bounded Python subprocess to finish even on a busy hosted runner.
-test('source preparation preserves pinned sources/notices and rejects tampered downloads', () => {
+test('source preparation pins downloaded sources, copies current notices and rejects unsafe paths', () => {
   const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-B', '-c', String.raw`
 import hashlib, importlib.util, io, json, pathlib, tarfile, tempfile
 from unittest.mock import patch
@@ -24,8 +24,8 @@ with tempfile.TemporaryDirectory() as temp:
     item=lambda file:{'file':file,'url':'https://example.invalid/'+file,'sha256':digest(payloads[file])}
     inputs={'sourceArchive':item('nsis-source.tar.bz2'),
       'plugin':{'sourceArchive':item('plugin.tar.gz'),'sourceCrates':[item('dependency.crate')]},
-      'rust':{'sourceArchive':item('rust.tar.xz'),'notices':[{'file':'LICENSE-MIT','sha256':digest(b'rust notice')}]},
-      'notices':[{'file':'NSIS.txt','sha256':digest(b'NSIS notice')}]}
+      'rust':{'sourceArchive':item('rust.tar.xz'),'notices':[{'file':'LICENSE-MIT'}]},
+      'notices':[{'file':'NSIS.txt'}]}
     (root/'native/installer-inputs.json').write_text(json.dumps(inputs))
     runtime={'prerequisites':[{'id':'microsoft-vc-runtime-x64','minimumVersion':'14.44.35211.0','downloadUrl':'https://example.invalid/vc.exe'}]}
     (root/'native/runtime-windows-x64.json').write_text(json.dumps(runtime))
@@ -37,8 +37,19 @@ with tempfile.TemporaryDirectory() as temp:
     assert '!define SURTITLE_VC_MINIMUM_VERSION "14.44.35211"' in generated
     assert '!define SURTITLE_VC_DOWNLOAD_URL "https://example.invalid/vc.exe"' in generated
     assert (notices/'NSIS.txt').read_bytes()==b'NSIS notice'
+    notice.write_bytes(b'updated rust notice')
+    (root/'native/installer-notices/NSIS.txt').write_bytes(b'updated NSIS notice')
     with patch.object(m.urllib.request,'urlopen',response): m.prepare(root,toolchain)
     assert len(requests)==4, 'A retry must reuse verified downloads'
+    assert (notices/'NSIS.txt').read_bytes()==b'updated NSIS notice'
+    assert (notices/'rust-runtime/LICENSE-MIT').read_bytes()==b'updated rust notice'
+    for name in ['../escape', '..\\escape', '/absolute', 'C:\\absolute', 'C:relative']:
+        try: m.notice_file(root, name)
+        except ValueError: pass
+        else: raise AssertionError('unsafe notice path accepted: '+name)
+    try: m.notice_file(root, 'missing-notice')
+    except ValueError: pass
+    else: raise AssertionError('missing required notice accepted')
     assert (root/'src-tauri/resources/notices/installer/rust-runtime/compiler-builtins-LICENSE.txt').read_bytes()==b'builtins'
     sources=json.loads((root/'work/installer-sources/sources.json').read_text())['sources']; assert len(sources)==4
     for source in sources: assert m.digest(root/'work/installer-sources'/source['file'])==source['sha256']

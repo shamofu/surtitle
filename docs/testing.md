@@ -40,7 +40,7 @@ The maintained regressions cover:
 
 Application AI integration tests use the production approval, execution, parser, ledger and result-application paths with real disposable SQLite databases. The `surtitle-ai/test-support` feature replaces authentication and transport with fixed offline responses and bounded synchronization gates. It is enabled only through the desktop crate's development dependency; the production feature check rejects it. These tests cover multi-request execution, conflicting edits, cancellation, application failure and uncertain transport outcomes without cloud calls. They do not evaluate generated-language quality.
 
-The [E2E guide](../e2e/README.md) covers browser and native application setup. [Native runtime and packaging](native-runtime.md) covers DLL smoke tests, source/notices audits and installer lifecycle verification. Installer lifecycle checks require a disposable Windows profile.
+The [E2E guide](../e2e/README.md) covers browser and native application setup. [Native runtime and packaging](native-runtime.md) covers DLL loading/initialization smoke tests and installer lifecycle tests. Installer lifecycle checks require a disposable Windows profile.
 
 ## Explicit Rust integration suites
 

@@ -14,7 +14,6 @@ use std::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VadAssets {
     pub runtime_path: PathBuf,
-    pub runtime_sha256: String,
     pub model_path: PathBuf,
     pub model_sha256: String,
 }
@@ -36,27 +35,22 @@ pub struct SileroVad {
     model_sha256: String,
 }
 
-static RUNTIME: OnceLock<Mutex<Option<(PathBuf, String)>>> = OnceLock::new();
+static RUNTIME: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 
 impl SileroVad {
-    /// The application supplies digests from its pinned asset manifest, never from a
-    /// renderer-selected arbitrary download. Only the verified absolute DLL is loaded.
+    /// Load the application's local runtime by canonical path and verify the downloaded model.
     pub fn open(assets: VadAssets) -> Result<Self> {
         let runtime_path = assets.runtime_path.canonicalize()?;
         let model_path = assets.model_path.canonicalize()?;
-        if hash_file(&runtime_path)? != assets.runtime_sha256
-            || hash_file(&model_path)? != assets.model_sha256
-        {
-            return Err(AiError::Invalid(
-                "VAD runtime/model checksum mismatch".into(),
-            ));
+        if hash_file(&model_path)? != assets.model_sha256 {
+            return Err(AiError::Invalid("VAD model checksum mismatch".into()));
         }
         let mut runtime = RUNTIME
             .get_or_init(|| Mutex::new(None))
             .lock()
             .map_err(|_| vad_error("runtime lock"))?;
-        if let Some((path, hash)) = &*runtime {
-            if path != &runtime_path || hash != &assets.runtime_sha256 {
+        if let Some(path) = &*runtime {
+            if path != &runtime_path {
                 return Err(vad_error("restart required after runtime replacement"));
             }
         } else {
@@ -75,10 +69,10 @@ impl SileroVad {
             .map_err(vad_error)?;
             if !created {
                 return Err(vad_error(
-                    "ONNX environment was initialized outside the verified asset loader",
+                    "ONNX environment was initialized outside the application runtime loader",
                 ));
             }
-            *runtime = Some((runtime_path, assets.runtime_sha256));
+            *runtime = Some(runtime_path);
         }
         drop(runtime);
         // Load model bytes already verified, avoiding a second path-based open in ORT.
@@ -200,7 +194,7 @@ fn preload_windows_runtime(path: &std::path::Path) -> Result<()> {
         LoadLibraryExW, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32,
     };
     let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    // SAFETY: verified canonical absolute path is null terminated and stays alive.
+    // SAFETY: canonical absolute path is null terminated and stays alive.
     // Restrict dependencies to this DLL's directory and Windows System32; exclude
     // process CWD/PATH. Keep one reference for process lifetime, so ort/libloading
     // subsequently opens the already loaded exact module and installed System32 runtime.
@@ -213,7 +207,7 @@ fn preload_windows_runtime(path: &std::path::Path) -> Result<()> {
     };
     if module.is_null() {
         return Err(vad_error(format!(
-            "verified ONNX DLL/dependency load failed: {}",
+            "ONNX DLL/dependency load failed: {}",
             std::io::Error::last_os_error()
         )));
     }
@@ -257,6 +251,39 @@ fn read_pcm_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn downloaded_model_checksum_is_still_required() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime_path = directory.path().join("onnxruntime.dll");
+        let model_path = directory.path().join("model.onnx");
+        std::fs::write(&runtime_path, b"not a library").unwrap();
+        std::fs::write(&model_path, b"changed model").unwrap();
+        let error = SileroVad::open(VadAssets {
+            runtime_path,
+            model_path,
+            model_sha256: crate::sha256_bytes(b"expected model"),
+        })
+        .err()
+        .expect("A changed downloaded model must be rejected");
+        assert!(error.to_string().contains("VAD model checksum mismatch"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn invalid_runtime_reports_the_native_loader_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime_path = directory.path().join("onnxruntime.dll");
+        std::fs::write(&runtime_path, b"not a library").unwrap();
+        let error = preload_windows_runtime(&runtime_path.canonicalize().unwrap())
+            .expect_err("Invalid native bytes must fail to load");
+        assert!(
+            error
+                .to_string()
+                .contains("ONNX DLL/dependency load failed"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn review_pause_ends_at_uncertain_frames_without_changing_chunk_hysteresis() {
         for uncertain in [0.35, 0.4, 0.4999, 0.5] {

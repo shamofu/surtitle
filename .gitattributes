@@ -55,12 +55,9 @@
 /native/vcruntime-LICENSE.rtf -text
 /native/vulkan-LICENSE -text
 /native/windows-prerequisite.nsh -text
-/native/windows/native-audit.mjs -text
 /native/build/native-build-evidence.py -text
 /native/build/native-build.sh -text
 /native/build/native-ci-artifact.mjs -text
-/native/windows/native-installer-audit.mjs -text
-/native/windows/native-installer-audit.test.mjs -text
 /native/windows/native-installer-prepare.py -text
 /native/build/native-ort-*.py -text
 /native/windows/native-prepare.ps1 -text

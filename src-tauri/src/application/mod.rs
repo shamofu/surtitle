@@ -162,20 +162,6 @@ impl Services {
     }
 }
 
-pub fn runtime_hash(name: &str) -> Result<String> {
-    let manifest: serde_json::Value =
-        serde_json::from_str(include_str!("../../../native/runtime-windows-x64.json"))?;
-    manifest["components"]
-        .as_array()
-        .context("invalid runtime manifest")?
-        .iter()
-        .flat_map(|c| c["runtimeFiles"].as_array().into_iter().flatten())
-        .find(|f| f["target"] == name)
-        .and_then(|f| f["sha256"].as_str())
-        .map(str::to_owned)
-        .context("runtime is not in the pinned manifest")
-}
-
 pub fn check_local_file(path: &Path) -> Result<PathBuf> {
     ensure!(
         path.is_absolute() && path.is_file(),

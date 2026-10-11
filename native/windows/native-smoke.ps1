@@ -7,15 +7,9 @@ if (-not $IsWindows -or [Runtime.InteropServices.RuntimeInformation]::OSArchitec
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $runtime = if ($RuntimeDirectory) { [IO.Path]::GetFullPath($RuntimeDirectory) } else { Join-Path $repoRoot 'src-tauri/resources/native' }
 if (-not $runtime.StartsWith($repoRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Native smoke directory must be inside the workspace.' }
-# Verify the complete expected set before allowing executable native code to load.
-& node (Join-Path $PSScriptRoot 'native-audit.mjs')
-if ($LASTEXITCODE -ne 0) { throw 'Native artifact verification failed' }
 $manifest = Get-Content -LiteralPath (Join-Path $repoRoot 'native/runtime-windows-x64.json') -Raw | ConvertFrom-Json
 & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'native/vc-prerequisite.ps1') -CheckOnly
 if ($LASTEXITCODE -ne 0) { throw 'Install the separately managed Microsoft VC x64 Runtime prerequisite before native execution. This check does not install it.' }
-foreach ($file in $manifest.components.runtimeFiles) {
-    if ((Get-FileHash -LiteralPath (Join-Path $runtime $file.target) -Algorithm SHA256).Hash -ne $file.sha256) { throw "Installed native hash mismatch: $($file.target)" }
-}
 Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
@@ -52,13 +46,14 @@ public static class SurtitleNativeSmoke {
         Destroy destroy = null;
         try {
             // Load optional runtimes by full path before their users. DLL search
-            // is restricted to the verified app-local directory and System32.
+            // is restricted to the app-local directory and System32.
             string[] priority = { "vulkan-1.dll" };
             var files = new List<string>();
             foreach (var file in priority) if (Array.Exists(expectedFiles, name => String.Equals(name, file, StringComparison.OrdinalIgnoreCase))) files.Add(file);
             foreach (var file in expectedFiles) if (!files.Contains(file)) files.Add(file);
             foreach (var file in files) {
                 var path = Path.GetFullPath(Path.Combine(directory, file));
+                if (Path.GetFileName(file) != file) throw new ArgumentException("Native target must be a plain filename");
                 var module = LoadLibraryExW(path, IntPtr.Zero, 0x00000100 | 0x00000800);
                 if (module == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot load " + path);
                 order.Add(module);
@@ -105,9 +100,7 @@ public static class SurtitleNativeSmoke {
 '@
 $files = @($manifest.components.runtimeFiles | ForEach-Object { $_.target })
 $result = [SurtitleNativeSmoke]::Run($runtime, $files)
-$result['sha'] = $env:GITHUB_SHA
 $result['testedAt'] = [DateTime]::UtcNow.ToString('o')
-$result['releaseEligible'] = $false
 $artifactDirectory = Join-Path $repoRoot 'artifacts'
 New-Item -ItemType Directory -Path $artifactDirectory -Force | Out-Null
 $json = $result | ConvertTo-Json -Depth 5

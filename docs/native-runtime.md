@@ -1,34 +1,32 @@
 # Native runtime and packaging
 
-The Windows x64 payload contains source-built `mpv-2.dll` and the official CPU ONNX Runtime DLLs, `onnxruntime.dll` and `onnxruntime_providers_shared.dll`. `native/runtime-windows-x64.json` identifies their hashes, notices, sources and prerequisites. CLI FFmpeg/ffprobe, yt-dlp, Deno and the Silero model remain separate managed downloads or explicit existing tools; they are not bundled into these DLL resources.
+The Windows x64 payload contains source-built `mpv-2.dll` and the official CPU ONNX Runtime DLLs, `onnxruntime.dll` and `onnxruntime_providers_shared.dll`. `native/runtime-windows-x64.json` lists their locations, notices, corresponding sources and prerequisites. Runtime DLLs and their build reports are not hash-checked at startup, during preparation, in CI or during packaging. CLI FFmpeg/ffprobe, yt-dlp, Deno and the Silero model remain separate managed downloads with their existing checks; they are not bundled into these DLL resources.
 
 ## Build and prepare native inputs
 
 For input ownership and dependency updates, see [updating native dependencies](native-dependencies.md).
 
-The libmpv recipe builds mpv, FFmpeg libraries, dav1d and the selected rendering/subtitle dependencies. FFmpeg programs, network protocols, Vulkan and OpenGL are disabled; Windows D3D11/WASAPI and CPU AV1 decoding remain available. ORT uses the pinned official CPU release; its source package retains upstream archives, patches, notices and the observed PDB/source comparison. See [source rebuild instructions](../native/SOURCE-REBUILD.md) and `native/reviews/` for dependency details.
+The libmpv recipe builds mpv, FFmpeg libraries, dav1d and the selected rendering/subtitle dependencies. FFmpeg programs, network protocols, Vulkan and OpenGL are disabled; Windows D3D11/WASAPI and CPU AV1 decoding remain available. ORT uses the selected official CPU release; its source package retains upstream archives, patches and notices. See [source rebuild instructions](../native/SOURCE-REBUILD.md) for dependency details.
 
 ```sh
 docker buildx build --file native/build/Dockerfile --target export --provenance=false --output type=local,dest=work/native-ci-artifact .
-node native/build/native-ci-artifact.mjs verify work/native-ci-artifact
 ```
 
-Run from the repository root and use a fresh `work/native-ci-artifact/` directory with regular, non-symlink ancestors. The standard Buildx command uses the multi-stage Dockerfile's `export` target. It exports six files: `mpv-2.dll`, `libmpv-source.tar.gz`, `onnxruntime-source.tar.gz`, `libmpv-build-evidence.json`, `onnxruntime-source-inventory.json` and `SHA256SUMS.txt`. Add standard Buildx flags, such as `--no-cache`, directly to the Docker command when needed.
+Run from the repository root and use a fresh `work/native-ci-artifact/` directory with regular, non-symlink ancestors. The standard Buildx command uses the multi-stage Dockerfile's `export` target. It exports `mpv-2.dll`, `libmpv-source.tar.gz`, `onnxruntime-source.tar.gz` and informational build/source reports. Add standard Buildx flags, such as `--no-cache`, directly to the Docker command when needed.
 
-Docker caches completed native build/source-audit stages using their native source/configuration/script inputs. Frontend and documentation edits reuse those completed outputs. Native input changes invalidate the relevant stages. CI restores and saves the cache within GitHub's branch/ref scope. If acquisition needs a GitHub token, set `SURTITLE_NATIVE_GITHUB_TOKEN` and add `--secret id=github_token,env=SURTITLE_NATIVE_GITHUB_TOKEN` to the Docker command. The token remains a BuildKit secret.
+Docker caches completed native build/source-packaging stages using their native source/configuration/script inputs. Frontend and documentation edits reuse those completed outputs. Native input changes invalidate the relevant stages. CI restores and saves the cache within GitHub's branch/ref scope. If acquisition needs a GitHub token, set `SURTITLE_NATIVE_GITHUB_TOKEN` and add `--secret id=github_token,env=SURTITLE_NATIVE_GITHUB_TOKEN` to the Docker command. The token remains a BuildKit secret.
 
 CI downloads the native output before Windows checks and packaging. For a local checkout, obtain the same output or build it above, then run:
 
 ```powershell
-node native/build/native-ci-artifact.mjs verify work/native-ci-artifact
 node native/build/native-ci-artifact.mjs consume work/native-ci-artifact
 pwsh -File native/windows/native-prepare.ps1
 pwsh -File native/windows/native-smoke.ps1
 ```
 
-Verification checks the file set and hashes. Consumption updates this checkout's runtime manifest to the selected DLL/source paths and hashes; preparation stages the DLLs/notices and downloads the pinned official ORT archive. The native smoke test loads the selected DLLs and initializes mpv/ORT. `native-prepare.ps1 -WithDevModel` also installs the development Silero fixture for the explicit integration suites.
+Consumption copies the DLL and corresponding source archives into the ignored `work/native-ci-artifact/` directory. It leaves the tracked runtime manifest unchanged, including when a rebuilt DLL differs from a previous build. Preparation stages the DLLs/notices and downloads the selected official ORT archive; development preparation does not require build evidence or source archives. The native smoke test loads the selected DLLs and initializes mpv/ORT. `native-prepare.ps1 -WithDevModel` also installs the development Silero fixture for the explicit integration suites.
 
-`node native/windows/native-audit.mjs --release` checks actual DLLs/notices/source evidence and PE dependency closure. Output integrity and Windows application tests still run even when compilation comes from cache. A cache hit does not establish current app playback or installer behavior.
+Missing DLLs, load failures and initialization errors remain actionable errors. Windows application playback, VAD and installer tests still run even when compilation comes from cache. Native artifact checksums, review evidence and PE dependency audits are not acceptance gates.
 
 ## Microsoft prerequisites
 
@@ -59,11 +57,11 @@ pwsh -File native/windows/package-verify.ps1 -DisposableProfile
 
 Preparation collects the pinned NSIS/plugin source, the plugin's locked source crates and the application's Rust runtime source under `work/installer-sources`, and stages installer notices. JavaScript/Rust notices are generated before every package build; these generated resources are not tracked in Git. `pnpm package:app` performs the locked standard Tauri build; Tauri downloads and caches its normal NSIS tools and official plugin.
 
-Package verification extracts the completed installer once, checks its embedded application, DLLs and notices, and tests that same installer in a disposable profile. The lifecycle covers fresh install, installed-production UI/playback readiness, overwrite, uninstall and default learning-data/card-audio retention. Production smoke uses the normal installed binary; broader E2E uses a separate fixture-enabled build.
+Package testing runs the completed installer in a disposable profile. The lifecycle covers fresh install, installed-production UI/playback readiness, overwrite, uninstall and default learning-data/card-audio retention. Production smoke uses the normal installed binary; broader E2E uses a separate fixture-enabled build.
 
-The source ZIP contains the application, Rust and JavaScript dependency sources, native source archives and installer sources/notices. Verification extracts the source ZIP and checks the actual included source hashes. Publication validates the complete asset set, checksums and tested installer identity after the required Linux, Windows and package jobs succeed.
+The source ZIP contains the application, Rust and JavaScript dependency sources, native source archives and installer sources/notices. Publication requires the expected release files and successful installer smoke after the required Linux, Windows and package jobs succeed. Public download checksums are generated for the installer and source ZIP; they do not gate runtime loading or packaging. Pinned source-download checks remain part of dependency acquisition.
 
-Initial releases are unsigned. Verify each release's installer through the package checks above.
+Initial releases are unsigned. Exercise each release's installer through the lifecycle tests above.
 
 ## Local development versus CI
 

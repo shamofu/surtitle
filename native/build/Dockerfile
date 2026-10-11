@@ -14,8 +14,7 @@ RUN python3 native/build/native-source-inputs.py /workspace /build/sources /buil
 
 FROM libmpv-sources AS libmpv-build
 COPY native/build/cross-win64.ini native/build/toolchain-win64.cmake native/build/Dockerfile /workspace/native/build/
-COPY native/reviews/libmpv-dependencies.json /workspace/native/reviews/libmpv-dependencies.json
-COPY native/build/native-build.sh native/build/native-build-evidence.py native/build/native-source-archive-check.py native/build/native_source_archive.py /workspace/native/build/
+COPY native/build/native-build.sh native/build/native-build-evidence.py native/build/native_source_archive.py /workspace/native/build/
 RUN --network=none bash native/build/native-build.sh /workspace /build \
     && python3 native/build/native-build-evidence.py /workspace /build /out/native-build \
     && rm -rf /build /out/native-build/logs /out/native-build/toolchain-notices
@@ -30,21 +29,10 @@ RUN --mount=type=secret,id=github_token,env=SURTITLE_NATIVE_GITHUB_TOKEN \
 
 FROM ort-sources AS ort-package
 COPY native/runtime-windows-x64.json /workspace/native/runtime-windows-x64.json
-COPY native/upstream-evidence/onnxruntime-*.json native/upstream-evidence/onnxruntime-*.txt native/upstream-evidence/onnxruntime-*.cmake /workspace/native/upstream-evidence/
-COPY native/reviews/onnxruntime-dependencies.json /workspace/native/reviews/onnxruntime-dependencies.json
 COPY native/onnxruntime-LICENSE native/onnxruntime-ThirdPartyNotices.txt /workspace/native/
-COPY native/build/native-ort-compare.py native/build/native-ort-generated.py native/build/native-ort-package.py native/build/native-ort-evidence.py native/build/native-source-archive-check.py native/build/native_source_archive.py /workspace/native/build/
-RUN --network=none python3 native/build/native-ort-compare.py /workspace /build/ort-corresponding \
-    && cmake -S /build/ort-corresponding/comparison-sources/protobuf/source/cmake \
-       -B /build/ort-corresponding/protoc-build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-       -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_BUILD_SHARED_LIBS=OFF -Dprotobuf_WITH_ZLIB=OFF \
-       > /build/ort-corresponding/protoc-build.log 2>&1 \
-    && cmake --build /build/ort-corresponding/protoc-build --target protoc --parallel 4 \
-       >> /build/ort-corresponding/protoc-build.log 2>&1 \
-    && python3 native/build/native-ort-generated.py /build/ort-corresponding \
-    && python3 native/build/native-ort-package.py /workspace /build/ort-corresponding /out/ort \
-    && rm -rf /build/ort-corresponding/comparison-sources /build/ort-corresponding/protoc-build \
-       /build/ort-corresponding/generated-header-evidence /out/ort/notices
+COPY native/build/native-ort-package.py native/build/native_source_archive.py /workspace/native/build/
+RUN --network=none python3 native/build/native-ort-package.py /workspace /build/ort-corresponding /out/ort \
+    && rm -rf /out/ort/notices
 
 FROM toolchain AS native-artifact
 WORKDIR /out
@@ -53,8 +41,6 @@ COPY --from=libmpv-build /out/native-build/libmpv-candidate-source.tar.gz ./libm
 COPY --from=libmpv-build /out/native-build/build-evidence.json ./libmpv-build-evidence.json
 COPY --from=ort-package /out/ort/onnxruntime-source.tar.gz ./onnxruntime-source.tar.gz
 COPY --from=ort-package /out/ort/source-package-inventory.json ./onnxruntime-source-inventory.json
-RUN sha256sum mpv-2.dll libmpv-source.tar.gz onnxruntime-source.tar.gz \
-    libmpv-build-evidence.json onnxruntime-source-inventory.json > SHA256SUMS.txt
 
 FROM scratch AS export
 COPY --from=native-artifact /out/ /

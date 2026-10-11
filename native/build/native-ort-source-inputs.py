@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect exact vcpkg archives/patches inside the audit container only."""
+"""Collect pinned vcpkg source archives and port recipes inside the build container."""
 import base64
 import hashlib
 import json
@@ -86,7 +86,7 @@ def main(workspace, root):
     packages = ['abseil', 'cpuinfo', 'onnx', 'protobuf', 're2', 'eigen3', 'nlohmann-json',
                 'boost-config', 'boost-mp11', 'flatbuffers', 'ms-gsl', 'wil', 'safeint']
     result = []
-    (root / 'source-inputs.json').write_text(json.dumps({'schemaVersion': 1, 'sources': [], 'complete': False, 'releaseEligible': False}) + '\n')
+    (root / 'source-inputs.json').write_text(json.dumps({'schemaVersion': 1, 'sources': [], 'complete': False}) + '\n')
     for package in packages:
         port = ports_root / package
         if (overlays / package).is_dir():
@@ -134,10 +134,9 @@ def main(workspace, root):
                 'bytes': archive_path.stat().st_size, 'license': metadata.get('license'), 'recipeOrigin': origin,
                 'recipeFiles': [{'file': path.name, 'sha256': digest(path)} for path in sorted(port.iterdir()) if path.is_file()]}
         result.append(item)
-        (root / 'source-inputs.json').write_text(json.dumps({'schemaVersion': 1, 'sources': result, 'complete': False, 'releaseEligible': False}, indent=2) + '\n')
+        (root / 'source-inputs.json').write_text(json.dumps({'schemaVersion': 1, 'sources': result, 'complete': False}, indent=2) + '\n')
         print(package + ': verified ' + checksum, flush=True)
-    (root / 'source-inputs.json').write_text(json.dumps({'schemaVersion': 1, 'sources': result, 'complete': True, 'releaseEligible': False,
-        'remainingChecks': ['Apply conditional patches and compare PDB source/header checksums', 'Per-component redistribution review and source packaging', 'Microsoft runtime entitlement']}, indent=2) + '\n')
+    (root / 'source-inputs.json').write_text(json.dumps({'schemaVersion': 1, 'sources': result, 'complete': True}, indent=2) + '\n')
 
 
 if __name__ == '__main__':

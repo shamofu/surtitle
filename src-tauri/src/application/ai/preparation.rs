@@ -195,7 +195,6 @@ async fn prepare_transcription_receipt_with_operation(
         let snapshot = lease.get(surtitle_tools::ToolKind::FfmpegPair)?.clone();
         let assets = VadAssets {
             runtime_path: lock(&state.runtime_dir)?.join("onnxruntime.dll"),
-            runtime_sha256: runtime_hash("onnxruntime.dll")?,
             model_path: model,
             model_sha256: SILERO_MODEL_SHA256.into(),
         };

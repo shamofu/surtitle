@@ -184,14 +184,13 @@ jobs:
           native/windows/package-production-smoke.test.mjs
           e2e/support/native-e2e-database.test.mjs
           native/build/native-ci-artifact.test.mjs
-          native/windows/native-installer-audit.test.mjs
           native/windows/native-installer-prepare.test.mjs
       - run: pnpm build
       - run: pnpm test:rust
       - name: Verify ordinary builds cannot bypass evaluation accounting
         run: pnpm test:rust:no-default-features
       - run: pnpm lint:rust
-      - name: Acquire tested native runtime
+      - name: Prepare native runtime and test initialization
         run: |
           pwsh native/windows/native-prepare.ps1 -WithDevModel
           pwsh native/windows/native-smoke.ps1

@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import tarfile
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 
 def digest(path):
@@ -21,12 +21,31 @@ def checked(path, expected):
     return path
 
 
+def contained_path(directory, name):
+    relative = Path(name)
+    windows = PureWindowsPath(name)
+    if not name or relative.is_absolute() or windows.drive or windows.root or '..' in relative.parts or '..' in windows.parts:
+        raise ValueError('Installer resource path must stay inside its directory')
+    path = directory / relative
+    for item in [path, *path.parents]:
+        if item.is_symlink() or getattr(item, 'is_junction', lambda: False)():
+            raise ValueError('Installer resource path must not traverse links')
+    return path
+
+
+def notice_file(directory, name):
+    path = contained_path(directory, name)
+    if not path.is_file():
+        raise ValueError('Installer notice is missing: ' + str(path))
+    return path
+
+
 def download(item, directory):
-    path = directory / item['file']
-    if path.name != item['file']:
+    path = contained_path(directory, item['file'])
+    if path.name != item['file'] or PureWindowsPath(item['file']).name != item['file']:
         raise ValueError('Installer download filename must be plain')
     if not path.exists():
-        temporary = path.with_suffix(path.suffix + '.partial')
+        temporary = contained_path(directory, path.name + '.partial')
         request = urllib.request.Request(item['url'], headers={'User-Agent': 'Surtitle-installer-sources'})
         with urllib.request.urlopen(request, timeout=300) as response, temporary.open('wb') as output:
             shutil.copyfileobj(response, output)
@@ -64,15 +83,15 @@ def prepare(workspace, toolchain, acquire=download):
     files = {item['file']: acquire(item, downloads) for item in sources}
     output.mkdir(parents=True, exist_ok=True)
     for item in sources:
-        shutil.copyfile(files[item['file']], output / item['file'])
+        shutil.copyfile(files[item['file']], contained_path(output, item['file']))
     notices = workspace / 'src-tauri/resources/notices/installer'
     notices.mkdir(parents=True, exist_ok=True)
     for item in inputs['notices']:
-        source = checked(workspace / 'native/installer-notices' / item['file'], item['sha256'])
-        shutil.copyfile(source, notices / item['file'])
+        source = notice_file(workspace / 'native/installer-notices', item['file'])
+        shutil.copyfile(source, contained_path(notices, item['file']))
     for item in inputs['rust']['notices']:
-        source = checked(toolchain / 'share/doc/rust' / item['file'], item['sha256'])
-        destination = notices / 'rust-runtime' / item['file']
+        source = notice_file(toolchain / 'share/doc/rust', item['file'])
+        destination = contained_path(notices / 'rust-runtime', item['file'])
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
     with tarfile.open(files[inputs['rust']['sourceArchive']['file']]) as archive:
@@ -80,7 +99,7 @@ def prepare(workspace, toolchain, acquire=download):
                    if item.isfile() and item.name.endswith('/library/compiler-builtins/LICENSE.txt')]
         if len(members) != 1:
             raise ValueError('Rust source must contain the compiler-builtins license')
-        (notices / 'rust-runtime/compiler-builtins-LICENSE.txt').write_bytes(archive.extractfile(members[0]).read())
+        contained_path(notices, 'rust-runtime/compiler-builtins-LICENSE.txt').write_bytes(archive.extractfile(members[0]).read())
     manifest = {'schemaVersion': 1, 'sources': [{key: item[key] for key in ['file', 'sha256']} for item in sources]}
     (output / 'sources.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
     print('Prepared installer and Rust source archives and notices.')

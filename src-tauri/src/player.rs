@@ -1033,7 +1033,18 @@ mod subtitle_tests {
         };
         assert!(!parent.is_null());
         {
-            let resources = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
+            let bundled = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/native/mpv-2.dll");
+            let resources = temp.path().join("resources");
+            std::fs::create_dir_all(resources.join("native")).unwrap();
+            let runtime = resources.join("native/mpv-2.dll");
+            let mut bytes = std::fs::read(&bundled).unwrap();
+            // A PE overlay changes the DLL digest without changing its exported API or code.
+            bytes.extend_from_slice(b"\nSurtitle native runtime load regression\n");
+            std::fs::write(&runtime, bytes).unwrap();
+            assert_ne!(
+                surtitle_tools::sha256_file(&runtime).unwrap(),
+                surtitle_tools::sha256_file(&bundled).unwrap()
+            );
             let mut reopening = Player::new(&resources, parent as isize).unwrap();
             assert_eq!(reopening.native.number("volume"), Some(80.));
             let invalid = reopening

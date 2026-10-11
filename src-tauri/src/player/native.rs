@@ -73,15 +73,40 @@ pub struct Mpv {
 // libmpv is thread safe; all calls are further serialized by the owning mutex.
 // The child window is created and geometrically updated only on the GUI thread.
 unsafe impl Send for Mpv {}
+
+#[cfg(test)]
+mod loading_tests {
+    use super::*;
+
+    #[test]
+    fn missing_bundled_library_still_reports_the_missing_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let error = Mpv::new(&directory.path().join("mpv-2.dll"), 0)
+            .err()
+            .expect("A missing library must fail");
+        assert!(error.to_string().contains("Bundled libmpv is missing"));
+    }
+
+    #[test]
+    fn invalid_bundled_library_reaches_the_windows_loader() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("mpv-2.dll");
+        std::fs::write(&path, b"not a library").unwrap();
+        let error = Mpv::new(&path, 0)
+            .err()
+            .expect("Invalid native bytes must fail to load");
+        assert!(
+            error.downcast_ref::<libloading::Error>().is_some(),
+            "{error}"
+        );
+    }
+}
+
 impl Mpv {
     pub fn new(path: &Path, parent: isize) -> Result<Self> {
         ensure!(
             path.is_file(),
             "同梱 libmpv がありません。native runtime の準備が必要です / Bundled libmpv is missing"
-        );
-        ensure!(
-            surtitle_tools::sha256_file(path)? == crate::application::runtime_hash("mpv-2.dll")?,
-            "Bundled libmpv hash mismatch"
         );
         let lib: Library = unsafe {
             libloading::os::windows::Library::load_with_flags(

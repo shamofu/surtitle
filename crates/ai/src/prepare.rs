@@ -613,8 +613,6 @@ mod tests {
         );
         let assets = VadAssets {
             runtime_path: repo.join("src-tauri/resources/native/onnxruntime.dll"),
-            runtime_sha256: "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471"
-                .into(),
             model_path: repo.join("work/native-fixtures/silero_vad.onnx"),
             model_sha256: SILERO_MODEL_SHA256.into(),
         };
@@ -731,11 +729,14 @@ mod tests {
             .unwrap();
         let assets = VadAssets {
             runtime_path: repo.join("src-tauri/resources/native/onnxruntime.dll"),
-            runtime_sha256: "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471"
-                .into(),
             model_path: repo.join("work/native-fixtures/silero_vad.onnx"),
             model_sha256: SILERO_MODEL_SHA256.into(),
         };
+        // Older callers may supply a stale DLL digest. It is no longer a load prerequisite.
+        let mut legacy_assets = serde_json::to_value(&assets).unwrap();
+        legacy_assets["runtime_sha256"] = serde_json::json!("0".repeat(64));
+        assert_ne!(hash_file(&assets.runtime_path).unwrap(), "0".repeat(64));
+        let assets: VadAssets = serde_json::from_value(legacy_assets).unwrap();
         let mut vad = SileroVad::open(assets.clone()).unwrap();
         let pcm = vec![0u8; (16000 + 7) * 2];
         let first = vad

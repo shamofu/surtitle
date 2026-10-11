@@ -9,42 +9,27 @@
       "provider": "Surtitle source build in isolated Linux container (MinGW x64)",
       "archiveUrl": null,
       "archiveFile": null,
-      "archiveSha256": null,
-      "digestProvenance": "Locally built candidate; reviewed source/recipe and exact output hashes, with Windows application/AV1 evidence. Future same-SHA CI builds have separate effective hashes.",
       "runtimeFiles": [
         {
           "source": "mpv-2.dll",
-          "target": "mpv-2.dll",
-          "sha256": "6d52b35d9c014b9df432b171523880505a73c3f0425226cf939e64570379be06"
+          "target": "mpv-2.dll"
         }
       ],
       "noticeFiles": [
         {
-          "path": "native/libmpv-ThirdPartyNotices.txt",
-          "sha256": "8c45422d43377c6ecc4711d7db9247a89b2c9a664c26063f98b0c77ec8889740"
+          "path": "native/libmpv-ThirdPartyNotices.txt"
         }
       ],
-      "buildEvidence": [
-        "native/reviews/libmpv-dependencies.json"
-      ],
       "redistribution": {
-        "status": "complete",
-        "reason": "Exact source/notice evidence retained; Microsoft runtimes are an external prerequisite.",
-        "reviewEvidence": {
-          "path": "native/reviews/libmpv.json",
-          "sha256": "f44654b52194d2814d3b9d20515842683518428b95cc2b18c42c9c01ad84cce0"
-        },
         "dependencyInventory": {
-          "path": "native/reviews/libmpv-dependencies.json",
-          "sha256": "a1d58b5e9c33f05908070612e92ce0b6a4e0b961f0c212e48a114152ae9419f7"
+          "path": "work/native-ci-artifact/libmpv-build-evidence.json"
         },
         "correspondingSource": {
-          "path": "work/native-candidate-av1-20260909/libmpv-candidate-source.tar.gz",
-          "sha256": "faef56ae474043a4d8edc5ce2bcdef7691e078d3df337a4c52990ee09c02dc0a"
+          "path": "work/native-ci-artifact/libmpv-source.tar.gz"
         }
       },
       "format": "source-build",
-      "localRuntimePath": "work/native-candidate-av1-20260909/runtime",
+      "localRuntimePath": "work/native-ci-artifact",
       "sourceId": "mpv"
     },
     {
@@ -55,48 +40,33 @@
       "archiveUrl": "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-win-x64-1.29.0.zip",
       "archiveFile": "ort.zip",
       "format": "zip",
-      "archiveSha256": "c9b4b7086b529ad814f428c1bad028e20a25d7dc0699836775faace4ab5b78b2",
-      "digestProvenance": "GitHub release asset digest over HTTPS; not a separate publisher signature",
       "runtimeFiles": [
         {
           "source": "onnxruntime-win-x64-1.29.0/lib/onnxruntime.dll",
-          "target": "onnxruntime.dll",
-          "sha256": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471"
+          "target": "onnxruntime.dll"
         },
         {
           "source": "onnxruntime-win-x64-1.29.0/lib/onnxruntime_providers_shared.dll",
-          "target": "onnxruntime_providers_shared.dll",
-          "sha256": "87f6878cdc1f80b3a9afa5b0c84663315030b4957f5bbb6b66470557cb2f48d8"
+          "target": "onnxruntime_providers_shared.dll"
         }
       ],
       "noticeFiles": [
         {
-          "path": "native/onnxruntime-LICENSE",
-          "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674"
+          "path": "native/onnxruntime-LICENSE"
         },
         {
-          "path": "native/onnxruntime-ThirdPartyNotices.txt",
-          "sha256": "4c5b864d8974c94b37461f38163facef79a1bb5dea461667ee9e5be6a8e73f83"
+          "path": "native/onnxruntime-ThirdPartyNotices.txt"
         },
         {
-          "path": "native/onnxruntime-ActualDependencyNotices.txt",
-          "sha256": "47e9332ddffbbf95316f24e788df3baf77124d8a9ee0ad1d5cde257ba2a1c8fd"
+          "path": "native/onnxruntime-ActualDependencyNotices.txt"
         }
       ],
       "redistribution": {
-        "status": "complete",
-        "reason": "Exact source/notice evidence retained; Microsoft runtimes are an external prerequisite.",
-        "reviewEvidence": {
-          "path": "native/reviews/onnxruntime.json",
-          "sha256": "a59ed08c6873a4f5d3ce78bcbdfbed4aa7708871e840ea7b846c77c40a4e21e5"
-        },
         "dependencyInventory": {
-          "path": "native/reviews/onnxruntime-dependencies.json",
-          "sha256": "cf731b4051a571e05d6f3391c385aded5dfceb6bf1cbc398ac81dd73ac1d3747"
+          "path": "work/native-ci-artifact/onnxruntime-source-inventory.json"
         },
         "correspondingSource": {
-          "path": "work/native-ci-replay-20260909/onnxruntime-source.tar.gz",
-          "sha256": "1daba056b30e7d4b639ef2c44ab8d8dd59af8bbb79388ea1780b4ac8488c851d"
+          "path": "work/native-ci-artifact/onnxruntime-source.tar.gz"
         }
       }
     }
@@ -131,9 +101,7 @@
       ],
       "checkBeforeAppLaunch": true,
       "hookPath": "native/windows-prerequisite.nsh",
-      "helperPath": "native/vc-prerequisite.ps1",
-      "hookSha256": "919e5820e80f495e91b8208175a6d44ea278f784ee2bd3cfda407d098c41ef43",
-      "helperSha256": "f23520f96a08c71fe76a1d6e084e0a6eea6510440c0464723393b8756e61d5d1"
+      "helperPath": "native/vc-prerequisite.ps1"
     }
   ]
 }

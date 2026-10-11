@@ -656,7 +656,6 @@ fn refresh(draft: &mut TranscriptDraft) -> Result<()> {
                 })
                 || vad_provenance.is_some_and(|first| {
                     first.model_sha256 != evidence.model_sha256
-                        || first.runtime_sha256 != evidence.runtime_sha256
                         || first.source_start_sample != evidence.source_start_sample
                         || first.source_end_sample != evidence.source_end_sample
                 })

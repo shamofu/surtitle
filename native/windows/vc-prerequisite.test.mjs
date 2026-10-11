@@ -1,25 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-test('VC prerequisite manifest pins the actual hook and helper bytes', () => {
-  const manifest = JSON.parse(readFileSync(new URL('../../native/runtime-windows-x64.json', import.meta.url), 'utf8'));
-  const prerequisites = manifest.prerequisites.filter(item => item.id === 'microsoft-vc-runtime-x64');
-  assert.equal(prerequisites.length, 1);
-  const prerequisite = prerequisites[0];
-  for (const [field, path] of [['hook', 'native/windows-prerequisite.nsh'], ['helper', 'native/vc-prerequisite.ps1']]) {
-    assert.equal(prerequisite[`${field}Path`], path);
-    assert.match(prerequisite[`${field}Sha256`], /^[a-f0-9]{64}$/);
-    const actual = createHash('sha256').update(readFileSync(new URL('../../' + path, import.meta.url))).digest('hex');
-    assert.equal(prerequisite[`${field}Sha256`], actual, `VC prerequisite ${field} hash must match the committed input bytes`);
-  }
-});
 
 test.skipIf(process.platform !== 'win32')('VC prerequisite resolves its adjacent manifest under Windows PowerShell -File and honors explicit paths', t => {
   const directory = realpathSync.native(mkdtempSync(join(tmpdir(), 'surtitle VC manifest 日本語 & ')));
