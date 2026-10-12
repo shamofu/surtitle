@@ -3,6 +3,7 @@ import type { AiPurpose, AiModelPreference } from './ai';
 
 export type ToolId = 'ffmpeg' | 'yt-dlp' | 'deno' | 'vad';
 export type MotionPreference = 'system' | 'reduce';
+export type CaptionGapMode = 'review' | 'preview';
 
 export interface ToolStatus {
   id: ToolId;
@@ -29,6 +30,7 @@ export interface ExternalToolCandidate {
 export interface AppSettings {
   theme: 'dark' | 'light' | 'system';
   motionPreference?: MotionPreference;
+  captionGapMode?: CaptionGapMode;
   locale: 'ja' | 'en';
   learningLanguage: string;
   explanationLanguage: string;

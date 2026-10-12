@@ -10,6 +10,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import { settingsApi } from '../features/settings/api';
+import { settingsEditor } from '../features/settings/editing';
 import { aiApi } from '../features/ai/api';
 import type { AppSettings } from '../shared/contracts/settings';
 import type { AppSnapshot } from '../shared/contracts/snapshot';
@@ -50,6 +51,32 @@ beforeEach(() => {
   vi.mocked(aiApi.vertexModels).mockResolvedValue([]);
 });
 afterEach(async () => { cleanup(); await act(async () => {}); clients.splice(0).forEach(client => client.clear()); vi.clearAllMocks(); });
+
+it('persists the caption gap mode through a partial patch while retaining unfinished settings input', async () => {
+  const client = new QueryClient(); clients.push(client);
+  const session = settingsEditor(client);
+  await session.load();
+  expect(session.getSnapshot().fields.captionGapMode).toBe('review');
+  session.change({ replayContextMs: '', captionGapMode: 'preview' });
+  expect(session.getSnapshot().fields.captionGapMode).toBe('preview');
+  expect(await session.flush()).toBe(true);
+  expect(settingsApi.patch).toHaveBeenCalledExactlyOnceWith('0', { captionGapMode: 'preview' });
+  expect(session.getSnapshot().fields.replayContextMs).toBe('');
+  expect(context.data!.settings.captionGapMode).toBe('preview');
+  const reopened = settingsEditor(client);
+  await reopened.load();
+  expect(reopened.getSnapshot().fields.captionGapMode).toBe('preview');
+});
+
+it('retains an invalid caption gap mode without sending it to settings', async () => {
+  const client = new QueryClient(); clients.push(client);
+  const session = settingsEditor(client);
+  await session.load();
+  session.change({ captionGapMode: 'current' });
+  await session.flush();
+  expect(settingsApi.patch).not.toHaveBeenCalled();
+  expect(session.getSnapshot().fields.captionGapMode).toBe('current');
+});
 
 it('autosaves a valid field without a save button and leaves typing enabled', async () => {
   await mount();

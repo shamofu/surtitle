@@ -26,6 +26,7 @@ import { VolumeControl } from './VolumeControl';
 import { nativeAvailable } from '../../../shared/native/transport';
 
 import type { Media } from '../../../shared/contracts/media';
+import type { CaptionGapMode } from '../../../shared/contracts/settings';
 import type { PlayerControlRequest, PlayerState, PlayerSurfaceRect } from '../../../shared/contracts/player';
 import type { SubtitleSegment } from '../../../shared/contracts/media';
 
@@ -52,6 +53,29 @@ function intersection(a: PlayerSurfaceRect, b: PlayerSurfaceRect): PlayerSurface
   const x = Math.max(a.x, b.x), y = Math.max(a.y, b.y);
   return { x, y, width: Math.max(0, Math.min(a.x + a.width, b.x + b.width) - x),
     height: Math.max(0, Math.min(a.y + a.height, b.y + b.height) - y) };
+}
+
+// Match Win32 placement and region rounding, so subpixel CSS changes that paint
+// the same physical pixels do not enqueue another native window operation.
+function placementSignature(request: SurfacePlacement['request']) {
+  if (request.action === 'hide' || !request.bounds) return 'hide';
+  const bounds = request.bounds;
+  const scale = bounds.scaleFactor;
+  const round = (value: number) => value < 0 ? -Math.round(-value) : Math.round(value);
+  const x = round(bounds.x * scale), y = round(bounds.y * scale);
+  const width = Math.round(bounds.width * scale), height = Math.round(bounds.height * scale);
+  const rectangle = (rect: PlayerSurfaceRect, exclude: boolean) => {
+    const low = exclude ? Math.floor : Math.ceil;
+    const high = exclude ? Math.ceil : Math.floor;
+    const left = Math.max(0, Math.min(width, low(rect.x * scale - x)));
+    const top = Math.max(0, Math.min(height, low(rect.y * scale - y)));
+    return [left, top, Math.max(left, Math.min(width, high((rect.x + rect.width) * scale - x))),
+      Math.max(top, Math.min(height, high((rect.y + rect.height) * scale - y)))];
+  };
+  return JSON.stringify([x, y, width, height,
+    bounds.clip ? rectangle(bounds.clip, false) : [0, 0, width, height],
+    bounds.occlusions?.filter(rect => rect.width > 0 && rect.height > 0).map(rect => rectangle(rect, true)) ?? [],
+    !!bounds.inputBlocked]);
 }
 
 // One native HWND is shared across player mounts. Serialize its placements so an
@@ -93,7 +117,7 @@ const surfacePlacement = (() => {
     }).finally(() => { active = false; flush(); });
   };
   return (owner: object, request: SurfacePlacement['request'], complete?: SurfacePlacement['complete']) => {
-    const next = { owner, request, complete, signature: JSON.stringify(request) };
+    const next = { owner, request, complete, signature: placementSignature(request) };
     wanted = next;
     // A hide is a barrier: reopening may replace desired bounds, but must never
     // cancel the hide already requested by a modal or a departing player.
@@ -114,6 +138,13 @@ export function NativePlayer({
   onSettingsOpen,
   onSettingsClose = () => {},
   onUseStudySubtitles,
+  gapMode = 'review',
+  onGapModeChange,
+  gapModeReady = true,
+  gapModeSaving = false,
+  gapModeError,
+  onGapModeRetry,
+  onPreferencesChanged,
   interactionsDisabled = false,
 }: {
   media: Media;
@@ -123,6 +154,13 @@ export function NativePlayer({
   onSettingsOpen?: () => void;
   onSettingsClose?: () => void;
   onUseStudySubtitles?: (streamIndex: number) => void;
+  gapMode?: CaptionGapMode;
+  onGapModeChange?: (mode: CaptionGapMode) => void;
+  gapModeReady?: boolean;
+  gapModeSaving?: boolean;
+  gapModeError?: string;
+  onGapModeRetry?: () => void;
+  onPreferencesChanged?: () => void | Promise<void>;
   interactionsDisabled?: boolean;
   selected?: SubtitleSegment;
   selectionRevision: number;
@@ -140,6 +178,7 @@ export function NativePlayer({
   const surfaceOwner = useRef({});
   const surfaceButton = useRef<HTMLButtonElement>(null);
   const [state, setState] = useState<PlayerState>();
+  const [sentencePauseSaving, setSentencePauseSaving] = useState(false);
   const playerRevision = useRef(-1);
   const acceptState = useCallback((current: PlayerState) => {
     if (current.revision !== undefined) {
@@ -355,6 +394,7 @@ export function NativePlayer({
     };
     setSurfaceError('');
     const measure = () => {
+        if (frame) window.cancelAnimationFrame(frame);
         frame = 0;
         if (disposed) return;
         const rect = viewport.current?.getBoundingClientRect();
@@ -429,6 +469,10 @@ export function NativePlayer({
       // The last animation frame is measured even when an older IPC is pending.
       if (!frame) frame = window.requestAnimationFrame(measure);
     };
+    const layout = (event: Event) => {
+      if (event instanceof CustomEvent && event.detail?.immediate) measure();
+      else update();
+    };
     const visibility = () => {
       if (document.hidden) {
         window.cancelAnimationFrame(frame);
@@ -442,9 +486,9 @@ export function NativePlayer({
     if (scrollContainer) observer.observe(scrollContainer);
     for (const element of occludingElements) observer.observe(element);
     window.addEventListener('resize', update);
-    // A companion's reserved layout changes once, before its own visual slide.
-    // Explicit measurement lets the slide wait for the matching HWND acknowledgement.
-    window.addEventListener('surtitle-player-layout', measure);
+    // Animation ticks and ResizeObserver share one frame measurement. Endpoints
+    // measure synchronously so the companion can wait for that exact native ack.
+    window.addEventListener('surtitle-player-layout', layout);
     window.addEventListener('scroll', update, true);
     document.addEventListener('visibilitychange', visibility);
     // New opaque cards are withheld until their region has been acknowledged;
@@ -456,7 +500,7 @@ export function NativePlayer({
       window.cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener('resize', update);
-      window.removeEventListener('surtitle-player-layout', measure);
+      window.removeEventListener('surtitle-player-layout', layout);
       window.removeEventListener('scroll', update, true);
       document.removeEventListener('visibilitychange', visibility);
     };
@@ -506,6 +550,8 @@ export function NativePlayer({
     };
   }, [draftMode, loaded, control]);
   async function setSentencePause(enabled: boolean) {
+    if (sentencePauseSaving || gapModeSaving) return;
+    setSentencePauseSaving(true);
     try {
       await playerApi.player({
         action: 'sentence-pause',
@@ -513,9 +559,10 @@ export function NativePlayer({
       });
       acceptState(await playerApi.playerState());
       await refresh();
+      await onPreferencesChanged?.();
     } catch (error) {
       notify(String(error), 'error');
-    }
+    } finally { setSentencePauseSaving(false); }
   }
   const position = seekDraft ?? state?.positionMs ?? media.lastPositionMs;
   const controlsDisabled = !loaded || interactionsDisabled;
@@ -677,6 +724,21 @@ export function NativePlayer({
       {repeatTarget && createPortal(repeatButton, repeatTarget)}
       {settingsOpen && (
         <Modal {...settingsExit.modalProps} title={t('再生設定', 'Playback settings')} onClose={() => void settingsExit.close(onSettingsClose)}>
+          <label className="field">
+            <span>{t('字幕のない間', 'Between captions')}</span>
+            <select
+              value={gapMode}
+              disabled={!gapModeReady || !onGapModeChange || sentencePauseSaving}
+              onChange={event => onGapModeChange?.(event.target.value as CaptionGapMode)}
+            >
+              <option value="review">{t('直前の字幕を復習', 'Review the previous caption')}</option>
+              <option value="preview">{t('次の字幕を予習', 'Preview the next caption')}</option>
+            </select>
+          </label>
+          {gapModeError && <div className="notice warning" role="alert">
+            <span>{gapModeError}</span>
+            {onGapModeRetry && <Button onClick={onGapModeRetry}>{t('再試行', 'Retry')}</Button>}
+          </div>}
           <div className="track-controls">
             {(['audio', 'sub'] as const).map((kind) => {
               const tracks = state?.tracks.filter((track) => track.kind === kind) || [];
@@ -714,7 +776,7 @@ export function NativePlayer({
             })}
           </div>
           <label className="check-field">
-            <input type="checkbox" checked={!draftMode && (state?.sentencePause ?? false)} disabled={controlsDisabled || draftMode} onChange={(event) => void setSentencePause(event.target.checked)} />
+            <input type="checkbox" checked={!draftMode && (state?.sentencePause ?? false)} disabled={controlsDisabled || draftMode || sentencePauseSaving || gapModeSaving} onChange={(event) => void setSentencePause(event.target.checked)} />
             <span>{t('字幕グループの終わりで一時停止', 'Pause at the end of a caption group')}</span>
           </label>
           <p className="helper-text">

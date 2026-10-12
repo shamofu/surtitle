@@ -33,4 +33,11 @@
 .track-controls { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
 .track-controls label { display: flex; flex-direction: column; gap: 8px; min-width: 180px; flex: 1; font-size: 14px; color: var(--muted); }
 .track-controls select { width: 100%; font-size: 15px; }
+/* Dock resizing changes width only: controls keep the same row allocation. */
+@media (min-width: 1000px) and (max-width: 1399px) {
+  .study-left .player-control-row { display: grid; grid-template-columns: minmax(0, 1fr); }
+}
+@media (min-width: 1400px) {
+  .study-left .player-control-row { flex-wrap: nowrap; }
+}
 @media (max-width: 1150px) { .player-time { margin-inline: 2px; } .volume-slider { width: 44px; } .volume-control { gap: 4px; margin-right: 4px; } .player-controls { padding-inline: 8px; } }

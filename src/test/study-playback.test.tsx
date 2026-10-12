@@ -32,9 +32,24 @@ import { cardsApi } from '../features/cards/api';
 import { queryKeys } from '../shared/query/keys';
 import type { PlayerState } from '../shared/contracts/player';
 import type { SubtitleSegment } from '../shared/contracts/media';
+import type { AppSettings } from '../shared/contracts/settings';
+import { uiDraftApi } from '../shared/editing/drafts';
 vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
+vi.mock('../shared/editing/drafts', () => import('./editing-mocks'));
+vi.mock('../shared/editing/session', async importOriginal => {
+  const actual = await importOriginal<typeof import('../shared/editing/session')>();
+  return { ...actual, editingSession: (kind: import('../shared/contracts/editing').DraftKind, id: string, adapter: import('../shared/editing/session').EditAdapter) => {
+    const key = `${kind}:${id}`;
+    let session = fixture.editingSessions.get(key);
+    if (!session) { session = new actual.EditingSession(kind, id, adapter); fixture.editingSessions.set(key, session); }
+    return session;
+  } };
+});
 
 const fixture = vi.hoisted(() => ({
+  settings: {} as AppSettings,
+  settingsRevision: 0,
+  editingSessions: new Map<string, import('../shared/editing/session').EditingSession>(),
   resumeId: undefined as string | undefined,
   aiDialogProps: undefined as undefined | { continuation?: AiContinuation; sourceInvalid?: boolean; sourceContext?: { sourceCueIds: string[]; sourceRevision: string }; onReselectSource?: (item: AiContinuation) => void },
   hasMedia: true,
@@ -82,7 +97,7 @@ vi.mock('../features/study/playback/api', () => ({
 vi.mock('../features/cards/api', () => ({ cardsApi: { saveCard: vi.fn() } }));
 vi.mock('../features/ai/api', () => ({ aiApi: { createQuote: vi.fn() } }));
 vi.mock('../features/settings/api', () => ({
-  settingsApi: { updateSettings: vi.fn() },
+  settingsApi: { updateSettings: vi.fn(), state: vi.fn(), patch: vi.fn() },
 }));
 
 vi.mock('../features/ai/continuations', () => ({ continuationApi: { list: vi.fn().mockResolvedValue([]), save: vi.fn(), discard: vi.fn() } }));
@@ -141,7 +156,7 @@ vi.mock('../app/runtime', () => {
   };
   const useFixture = () => ({
     mutate: (action: () => Promise<unknown>) => action(),
-    data: fixture.snapshotAvailable ? { media: fixture.hasMedia ? [fixture.media] : [], cards: [], jobs: [] } : undefined,
+    data: fixture.snapshotAvailable ? { settings: fixture.settings, media: fixture.hasMedia ? [fixture.media] : [], cards: [], jobs: [] } : undefined,
     loading: fixture.snapshotLoading,
     error: fixture.snapshotError,
     locale: 'en',
@@ -231,6 +246,20 @@ beforeAll(() => {
   );
 });
 beforeEach(() => {
+  fixture.editingSessions.clear();
+  fixture.settingsRevision = 0;
+  fixture.settings = { theme: 'dark', locale: 'en', learningLanguage: 'en', explanationLanguage: 'ja', dailyBudgetUsd: 0,
+    vertexProject: '', vertexLocation: 'global', credentialConfigured: false, retention: .9, captionGapMode: 'review' };
+  vi.mocked(settingsApi.state).mockImplementation(async () => ({ settings: structuredClone(fixture.settings), revision: String(fixture.settingsRevision) }));
+  vi.mocked(settingsApi.patch).mockImplementation(async (revision, patch) => {
+    if (revision !== String(fixture.settingsRevision)) throw Error('Settings changed; reload before saving');
+    const { budgets, ...normal } = patch;
+    Object.assign(fixture.settings, normal, budgets ?? {});
+    return { settings: structuredClone(fixture.settings), revision: String(++fixture.settingsRevision) };
+  });
+  vi.mocked(uiDraftApi.get).mockResolvedValue(null);
+  vi.mocked(uiDraftApi.remove).mockResolvedValue(undefined);
+  vi.mocked(uiDraftApi.save).mockImplementation(async (kind, entityId, revision, fields) => ({ kind, entityId, revision: revision + 1, fields, updatedAt: '', stale: false }));
   fixture.snapshotAvailable = true;
   fixture.snapshotLoading = false;
   fixture.snapshotError = null;
@@ -273,14 +302,18 @@ beforeEach(() => {
   vi.mocked(playerApi.player).mockImplementation(async (request) => {
     if (request.action === 'pause') state = { ...state, paused: true };
     if (request.action === 'play') state = { ...state, paused: false };
-    if (request.action === 'sentence-pause')
+    if (request.action === 'sentence-pause') {
       state = { ...state, sentencePause: request.value === 1 };
+      fixture.settings.sentencePause = state.sentencePause;
+      fixture.settingsRevision++;
+    }
   });
   vi.mocked(playerApi.playSourceRange).mockResolvedValue();
 });
 afterEach(async () => {
   window.getSelection()?.removeAllRanges();
   cleanup();
+  await Promise.all([...fixture.editingSessions.values()].map(session => session.flush()));
   await flushEditorDrafts().catch(() => {});
   clearEditorDraftSessions();
   clients.splice(0).forEach((client) => client.clear());
@@ -734,12 +767,13 @@ describe('study navigation and unfinished phrases', () => {
     expect(aiApi.createQuote).not.toHaveBeenCalled();
   });
 
-  it('finds adjacent captions in a gap and disables direct replay without an active caption', async () => {
+  it('finds adjacent captions in a gap and replays the previous caption displayed for review', async () => {
     mount();
     await ready();
     await emit({ positionMs: 2100 });
     const actions = within(screen.getByRole('group', { name: 'Subtitle playback' }));
-    expect(actions.getByRole('button', { name: 'Replay this subtitle' })).toBeDisabled();
+    expect(actions.getByRole('button', { name: 'Replay this subtitle' })).toBeEnabled();
+    expect(document.querySelector('.current-caption-text')).toHaveTextContent('to go home.');
     fireEvent.click(actions.getByRole('button', { name: 'Previous subtitle' }));
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'seek', value: 1000 }));
     await waitFor(() => expect(actions.getByRole('button', { name: 'Next subtitle' })).toBeEnabled());
@@ -747,6 +781,113 @@ describe('study navigation and unfinished phrases', () => {
     await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'seek', value: 2500 }));
     await emit({ positionMs: 3000 });
     expect(actions.getByRole('button', { name: 'Next subtitle' })).toBeDisabled();
+    await emit({ positionMs: 2100 });
+    fireEvent.click(actions.getByRole('button', { name: 'Replay this subtitle' }));
+    await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'source-seek', startMs: 1000, endMs: 2000 }));
+  });
+
+  it('switches the displayed gap caption and replay target through the saved playback preference', async () => {
+    mount();
+    await ready();
+    await emit({ positionMs: 2100 });
+    expect(document.querySelector('.current-caption-text')).toHaveTextContent('to go home.');
+    openPlaybackSettings();
+    const mode = screen.getByRole('combobox', { name: 'Between captions' });
+    await waitFor(() => expect(mode).toBeEnabled());
+    fireEvent.change(mode, { target: { value: 'preview' } });
+    expect(document.querySelector('.current-caption-text')).toHaveTextContent('Next sentence.');
+    await waitFor(() => expect(settingsApi.patch).toHaveBeenCalledExactlyOnceWith('0', { captionGapMode: 'preview' }));
+    expect(fixture.settings.captionGapMode).toBe('preview');
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Playback settings' })).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Playback settings' })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Play this subtitle' }));
+    await waitFor(() => expect(playerApi.player).toHaveBeenCalledWith({ action: 'source-seek', startMs: 2500, endMs: 3200 }));
+    expect(settingsApi.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it('keeps a changed gap caption usable after save failure and retries its partial preference patch', async () => {
+    mount();
+    await ready();
+    await emit({ positionMs: 2100 });
+    vi.mocked(settingsApi.patch).mockRejectedValueOnce(Error('Disk full'));
+    openPlaybackSettings();
+    const mode = screen.getByRole('combobox', { name: 'Between captions' });
+    await waitFor(() => expect(mode).toBeEnabled());
+    fireEvent.change(mode, { target: { value: 'preview' } });
+    const dialog = within(screen.getByRole('dialog', { name: 'Playback settings' }));
+    await waitFor(() => expect(dialog.getByRole('alert')).toHaveTextContent('Disk full'));
+    expect(mode).toHaveValue('preview');
+    expect(mode).toBeEnabled();
+    expect(document.querySelector('.current-caption-text')).toHaveTextContent('Next sentence.');
+    expect(fixture.settings.captionGapMode).toBe('review');
+    fireEvent.click(dialog.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(fixture.settings.captionGapMode).toBe('preview'));
+    expect(settingsApi.patch).toHaveBeenNthCalledWith(1, '0', { captionGapMode: 'preview' });
+    expect(settingsApi.patch).toHaveBeenNthCalledWith(2, '0', { captionGapMode: 'preview' });
+    expect(dialog.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('refreshes the settings revision after sentence pause before saving a gap preference', async () => {
+    mount();
+    await ready();
+    openPlaybackSettings();
+    const mode = screen.getByRole('combobox', { name: 'Between captions' });
+    await waitFor(() => expect(mode).toBeEnabled());
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Pause at the end of a caption group' }));
+    expect(mode).toBeDisabled();
+    await waitFor(() => expect(mode).toBeEnabled());
+    expect(fixture.settings.sentencePause).toBe(true);
+    fireEvent.change(mode, { target: { value: 'preview' } });
+    await waitFor(() => expect(settingsApi.patch).toHaveBeenCalledExactlyOnceWith('1', { captionGapMode: 'preview' }));
+    expect(fixture.settings.sentencePause).toBe(true);
+    expect(fixture.settings.captionGapMode).toBe('preview');
+    expect(within(screen.getByRole('dialog', { name: 'Playback settings' })).queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('retries only the requested gap mode after a settings conflict without restoring unrelated recovered input', async () => {
+    mount();
+    await ready();
+    await emit({ positionMs: 2100 });
+    openPlaybackSettings();
+    const mode = screen.getByRole('combobox', { name: 'Between captions' });
+    await waitFor(() => expect(mode).toBeEnabled());
+    const session = fixture.editingSessions.get('settings:default')!;
+    act(() => session.change({ learningLanguage: 'fr' }));
+    fixture.settings.theme = 'light';
+    fixture.settingsRevision++;
+    fireEvent.change(mode, { target: { value: 'preview' } });
+    const dialog = within(screen.getByRole('dialog', { name: 'Playback settings' }));
+    await waitFor(() => expect(dialog.getByRole('alert')).toHaveTextContent('Settings changed'));
+    expect(session.getSnapshot().recovery).toMatchObject({ learningLanguage: 'fr', captionGapMode: 'preview' });
+    expect(mode).toHaveValue('review');
+    fireEvent.click(dialog.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(fixture.settings.captionGapMode).toBe('preview'));
+    expect(settingsApi.patch).toHaveBeenNthCalledWith(2, '1', { captionGapMode: 'preview' });
+    expect(fixture.settings.theme).toBe('light');
+    expect(fixture.settings.learningLanguage).toBe('en');
+    expect(session.getSnapshot().recovery?.learningLanguage).toBe('fr');
+    expect(document.querySelector('.current-caption-text')).toHaveTextContent('Next sentence.');
+  });
+
+  it('keeps the last gap mode when changed again while its first save is in flight', async () => {
+    mount();
+    await ready();
+    await emit({ positionMs: 2100 });
+    openPlaybackSettings();
+    const mode = screen.getByRole('combobox', { name: 'Between captions' });
+    await waitFor(() => expect(mode).toBeEnabled());
+    const patch = vi.mocked(settingsApi.patch).getMockImplementation()!;
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    vi.mocked(settingsApi.patch).mockImplementationOnce(async (revision, fields) => { await pending; return patch(revision, fields); });
+    fireEvent.change(mode, { target: { value: 'preview' } });
+    await waitFor(() => expect(settingsApi.patch).toHaveBeenCalledTimes(1));
+    fireEvent.change(mode, { target: { value: 'review' } });
+    expect(document.querySelector('.current-caption-text')).toHaveTextContent('to go home.');
+    await act(async () => { release(); await pending; });
+    await waitFor(() => expect(settingsApi.patch).toHaveBeenNthCalledWith(2, '1', { captionGapMode: 'review' }));
+    expect(fixture.settings.captionGapMode).toBe('review');
+    expect(mode).toHaveValue('review');
   });
 
   it('direct caption replay retains the inspected source and unsaved form', async () => {
@@ -1005,7 +1146,7 @@ describe('study sentence and source playback', () => {
           [{ ...cues[0], startMs: 100, endMs: 900 }, ...cues.slice(1)],
         ));
         await within(screen.getByRole('region', { name: 'Current subtitle' }))
-          .findByText('Subtitles appear here as you watch.');
+          .findByText('The first subtitle starts at 0:00');
       } else {
         fixture.media.audioStreamIndex = 2;
         await emit({ positionMs: 100 });

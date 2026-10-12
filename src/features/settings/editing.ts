@@ -10,10 +10,10 @@ import type { AppSnapshot } from '../../shared/contracts/snapshot';
 
 const numbers = ['retention', 'replayContextMs', 'dailyBudgetUsd', 'monthlyBudgetUsd', 'perJobBudgetUsd'] as const;
 const budgetKeys = ['dailyBudgetUsd', 'monthlyBudgetUsd', 'perJobBudgetUsd'] as const;
-const keys = ['locale', 'theme', 'motionPreference', 'learningLanguage', 'explanationLanguage', 'retention', 'sentencePause', 'replayContextMs', 'proficiency', 'ytDlpChannel', 'vertexLocation', 'dailyBudgetUsd', 'monthlyBudgetUsd', 'perJobBudgetUsd', 'aiModels'] as const;
+const keys = ['locale', 'theme', 'motionPreference', 'captionGapMode', 'learningLanguage', 'explanationLanguage', 'retention', 'sentencePause', 'replayContextMs', 'proficiency', 'ytDlpChannel', 'vertexLocation', 'dailyBudgetUsd', 'monthlyBudgetUsd', 'perJobBudgetUsd', 'aiModels'] as const;
 
 export function settingsFields(settings: AppSettings): EditFields {
-  const complete = { ...settings, motionPreference: settings.motionPreference ?? 'system', replayContextMs: settings.replayContextMs ?? 150,
+  const complete = { ...settings, motionPreference: settings.motionPreference ?? 'system', captionGapMode: settings.captionGapMode ?? 'review', replayContextMs: settings.replayContextMs ?? 150,
     sentencePause: settings.sentencePause ?? false, proficiency: settings.proficiency ?? 'B1', ytDlpChannel: settings.ytDlpChannel ?? 'stable',
     monthlyBudgetUsd: settings.monthlyBudgetUsd ?? settings.dailyBudgetUsd, perJobBudgetUsd: settings.perJobBudgetUsd ?? settings.dailyBudgetUsd };
   return { ...Object.fromEntries(keys.map(key => [key, key === 'aiModels' ? JSON.stringify(settings.aiModels ?? {}) : String(complete[key] ?? '')])),
@@ -32,6 +32,7 @@ export function settingsFromFields(fields: EditFields, base: AppSettings): AppSe
   return next;
 }
 function valid(key: string, value: unknown) {
+  if (key === 'captionGapMode') return value === 'review' || value === 'preview';
   if (numbers.includes(key as typeof numbers[number])) {
     if (typeof value !== 'number' || !Number.isFinite(value)) return false;
     if (key === 'retention') return value >= .7 && value <= .97;

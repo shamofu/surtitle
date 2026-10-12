@@ -299,6 +299,8 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
         }
         if (command === 'player_control') {
           const request = args.request;
+          // Native surface placement does not broadcast playback state.
+          if (request.action === 'bounds' || request.action === 'hide') return;
           if (request.action === 'pause') state.paused = true;
           if (request.action === 'play') state.paused = false;
           if (request.action === 'toggle-pause') state.paused = !state.paused;

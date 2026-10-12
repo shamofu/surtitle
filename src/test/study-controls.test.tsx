@@ -192,14 +192,14 @@ describe('player loading and recovery', () => {
 describe('current subtitle controls', () => {
   it('keeps neighboring subtitle controls available in a gap and disables replay', () => {
     const previous = vi.fn(); const next = vi.fn();
-    const view = render(<CurrentCaption language="en" loading={false} hasSubtitles draftMode={false} enabled
+    const view = render(<CurrentCaption language="en" loading={false} hasSubtitles hasTimedSubtitles gapMode="review" onOpenTranscript={vi.fn()} draftMode={false} enabled
       inspectButton={createRef()} onInspect={vi.fn()} onImport={vi.fn()} onPrevious={previous} onNext={next}
       onReplay={vi.fn()} hasPrevious hasNext />);
     fireEvent.click(screen.getByRole('button', { name: 'Previous subtitle' }));
     fireEvent.click(screen.getByRole('button', { name: 'Next subtitle' }));
     expect(previous).toHaveBeenCalledOnce(); expect(next).toHaveBeenCalledOnce();
     expect(screen.getByRole('button', { name: 'Replay this subtitle' })).toBeDisabled();
-    view.rerender(<CurrentCaption language="en" active={cues[0]} loading={false} hasSubtitles draftMode enabled
+    view.rerender(<CurrentCaption language="en" active={cues[0]} loading={false} hasSubtitles hasTimedSubtitles gapMode="review" onOpenTranscript={vi.fn()} draftMode enabled
       inspectButton={createRef()} onInspect={vi.fn()} onImport={vi.fn()} onPrevious={previous} onNext={next}
       onReplay={vi.fn()} hasPrevious hasNext />);
     expect(screen.queryByRole('button', { name: 'Next subtitle' })).not.toBeInTheDocument();

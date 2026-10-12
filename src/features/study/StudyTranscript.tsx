@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useCallback, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import type { VirtualItem } from '@tanstack/react-virtual';
 import {
@@ -68,8 +68,6 @@ export function StudyTranscript({
   onReview,
   onDraftPlay,
   transcriptionWorkspace,
-  transcriptionStatus,
-  aiRuntime,
   active = true,
   onTranscribeRange,
 }: {
@@ -99,8 +97,6 @@ export function StudyTranscript({
   onReview: (jobId: string) => void;
   onDraftPlay: PlayRange;
   transcriptionWorkspace?: ReactNode;
-  transcriptionStatus?: ReactNode;
-  aiRuntime?: ReactNode;
   active?: boolean;
   onTranscribeRange?: (range: { startMs: number; endMs: number }) => void;
 }) {
@@ -131,7 +127,11 @@ export function StudyTranscript({
   }, [onViewStateChange]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const followedSubtitle = useRef<string | undefined>(undefined);
-  const filtered = segments.filter(item => (!markedOnly || isMarked(item)) && `${item.text} ${item.translation || ''}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+  const filtered = useMemo(() => {
+    const query = search.toLocaleLowerCase();
+    return segments.filter(item => (!markedOnly || isMarked(item)) &&
+      (!query || `${item.text} ${item.translation || ''}`.toLocaleLowerCase().includes(query)));
+  }, [segments, markedOnly, search]);
   const cached = viewState.measurementCache;
   const initialMeasurements = cached?.search === search && cached.showTranslations === showTranslations && (cached.markedOnly ?? false) === markedOnly ? cached : undefined;
   const previousLayout = useRef({ search, showTranslations, markedOnly, width: initialMeasurements?.width });
@@ -238,7 +238,6 @@ export function StudyTranscript({
           </button>
         ))}
       </div>
-      {(tab === 'transcript' || tab === 'vocabulary') && aiRuntime}
       <div className="transcript-tab-content" data-motion-direction={direction}>
       {transcriptionWorkspace && <StudyRegion open={tab === 'transcription'} keepMounted freezeOnExit={false}><div
         className="transcription-view"
@@ -323,7 +322,6 @@ export function StudyTranscript({
       </StudyRegion>
       <StudyRegion open={tab === 'transcript'}>
             <div className="transcript-view" role="tabpanel" id={`${tabsId}-transcript-panel`} aria-labelledby={`${tabsId}-transcript-tab`}>
-              {transcriptionStatus}
               <div className="transcript-tools">
                 <div className="search-box">
                   <Search size={16} />

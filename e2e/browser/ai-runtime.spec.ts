@@ -2,7 +2,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installLearningFixture } from './learning-fixture';
 
-async function installRuntimeFixture(page: Page, locale: 'ja' | 'en', kind: 'transcribe' | 'vocabulary' | 'translate') {
+async function installRuntimeFixture(page: Page, locale: 'ja' | 'en', kind: 'transcribe' | 'vocabulary' | 'translate', completed = false) {
   await installLearningFixture(page, locale, locale === 'ja' ? 'light' : 'dark');
   const sentence = 'The sound of the sea follows us along the coast. ';
   const preview = kind === 'vocabulary' ? JSON.stringify({ items: [{ term: 'along the coast', meaning: '海岸沿いに', explanation: sentence.repeat(90), example: 'We walked along the coast.' }] })
@@ -10,7 +10,7 @@ async function installRuntimeFixture(page: Page, locale: 'ja' | 'en', kind: 'tra
       : JSON.stringify({ transcript: sentence.repeat(100), words: [{ text: 'Must not duplicate word text' }] });
   const runtime = { jobId: 'live-job', approvalId: 'scope-one', revision: 20,
     events: Array.from({ length: 16 }, (_, index) => ({ id: `event-${index}`, timestamp: `2026-10-11T01:00:${String(index).padStart(2, '0')}Z`, phase: ['sending', 'receiving', 'validating', 'settled'][index % 4], ordinal: Math.floor(index / 4) })),
-    preview: { attemptId: 'attempt-four', ordinal: 3, text: preview, state: 'streaming' } };
+    preview: { attemptId: 'attempt-four', ordinal: 3, text: preview, state: completed ? 'validated' : 'streaming' } };
   await page.route(/\/src\/shared\/native\/transport\.ts(?:\?|$)/, route => route.fulfill({ contentType: 'application/javascript', body: `
     const ready = ${JSON.stringify(runtime)};
     const runtime = { ...ready, revision: 0, events: [], preview: undefined };
@@ -21,9 +21,9 @@ async function installRuntimeFixture(page: Page, locale: 'ja' | 'en', kind: 'tra
       if (command === 'get_ai_runtime') return args.jobId === runtime.jobId ? structuredClone(runtime) : null;
       if (command === 'get_app_snapshot') {
         const snapshot = await fixture.call(command, args);
-        snapshot.jobs = [{ id: 'live-job', mediaId: 'visual-fixture', kind: ${JSON.stringify(kind)}, status: 'running',
-          createdAt: new Date().toISOString(), progress: .75, executionOutcome: 'running',
-          requestCounts: { total: 4, succeeded: 3, rejected: 0, pending: 0, inFlight: 1 },
+        snapshot.jobs = [{ id: 'live-job', mediaId: 'visual-fixture', kind: ${JSON.stringify(kind)}, status: ${JSON.stringify(completed ? 'completed' : 'running')},
+          createdAt: new Date().toISOString(), progress: ${completed ? 1 : .75}, executionOutcome: ${JSON.stringify(completed ? 'complete' : 'running')},
+          requestCounts: { total: 4, succeeded: ${completed ? 4 : 3}, rejected: 0, pending: 0, inFlight: ${completed ? 0 : 1} },
           automaticTranscript: ${kind === 'transcribe'}, transcriptReview: false }];
         return snapshot;
       }
@@ -38,8 +38,38 @@ async function installRuntimeFixture(page: Page, locale: 'ja' | 'en', kind: 'tra
 
 for (const locale of ['ja', 'en'] as const) {
   for (const kind of ['transcribe', 'vocabulary', 'translate'] as const) {
+    test(`completed ${kind} outcome stays in processing history ${locale}`, async ({ page }) => {
+      const text = (ja: string, en: string) => locale === 'ja' ? ja : en;
+      await page.setViewportSize({ width: 1024, height: 700 });
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await installRuntimeFixture(page, locale, kind, true);
+      await page.goto('/study/visual-fixture');
+      await page.waitForLoadState('networkidle');
+      await page.getByRole('button', { name: text('字幕一覧', 'Transcript'), exact: true }).click();
+      await page.evaluate(() => (window as any).__runtimeFixture.begin());
+      await expect(page.locator('.study-transcript .ai-runtime:visible')).toHaveCount(0);
+      await expect(page.locator('.transcription-status')).toHaveCount(0);
+      await expect(page.locator('.transcript-row').first()).toBeVisible();
+      if (kind === 'transcribe') {
+        await page.getByRole('tab', { name: text('文字起こし', 'Transcription'), exact: true }).click();
+        await page.getByText(text('文字起こしの履歴 (1)', 'Transcription history (1)'), { exact: true }).click();
+      } else {
+        await page.getByRole('button', { name: text('処理・管理', 'Activity & tools'), exact: true }).click();
+        await page.locator('.study-auxiliary .study-jobs > summary').click();
+      }
+      const runtime = page.locator(kind === 'transcribe'
+        ? '.transcription-workspace .ai-runtime[data-job-id="live-job"]'
+        : '.study-auxiliary .ai-runtime[data-job-id="live-job"]');
+      await expect(runtime.locator('.ai-runtime-outcome')).toBeVisible();
+      await expect(runtime.locator('.ai-runtime-outcome')).toHaveAttribute('data-outcome', 'complete');
+      await expect(runtime).toContainText(text('成功 4件・失敗 0件', '4 succeeded · 0 failed'));
+      await runtime.getByText(text('生成内容・処理履歴', 'Generated content and history'), { exact: true }).click();
+      await expect(runtime.getByRole('region', { name: text('生成中のプレビュー', 'Generation preview') })).toContainText(text('受信した内容', 'Received content'));
+      const sends = await page.evaluate(() => (window as any).__learningFixture.calls.filter((call: any) => ['approve_quote', 'reapprove_quote'].includes(call.command)));
+      expect(sends).toHaveLength(0);
+    });
     for (const width of [1024, 760]) {
-    test(`readable ${kind} stream across Study, drafts, and activity ${locale} ${width}`, async ({ page }, testInfo) => {
+    test(`readable ${kind} stream in processing views, drafts, and activity ${locale} ${width}`, async ({ page }, testInfo) => {
       const text = (ja: string, en: string) => locale === 'ja' ? ja : en;
       await page.setViewportSize({ width, height: 700 });
       await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -55,12 +85,22 @@ for (const locale of ['ja', 'en'] as const) {
       }));
       const before = await playerBounds();
       await page.evaluate(() => (window as any).__runtimeFixture.begin());
-      const runtime = page.locator('.study-runtime-dock .ai-runtime').first();
-      await expect(runtime).toBeVisible();
-      await expect(runtime.locator('.ai-runtime-recent li')).toHaveCount(3);
+      await expect(page.locator('.study-transcript .ai-runtime:visible')).toHaveCount(0);
+      await expect(page.locator('.transcription-status')).toHaveCount(0);
       await expect.poll(playerBounds).toEqual(before);
-      await expect(runtime.locator('.ai-runtime-preview')).not.toBeVisible();
       expect(await page.locator('.transcript-scroll').evaluate(element => element.clientHeight)).toBeGreaterThan(100);
+      if (kind === 'transcribe') {
+        await page.getByRole('tab', { name: text('文字起こし', 'Transcription'), exact: true }).click();
+      } else {
+        await page.getByRole('button', { name: text('処理・管理', 'Activity & tools'), exact: true }).click();
+      }
+      const runtime = page.locator(kind === 'transcribe'
+        ? '.transcription-workspace .ai-runtime[data-job-id="live-job"]'
+        : '.study-auxiliary .ai-runtime[data-job-id="live-job"]');
+      await expect(runtime).toBeVisible();
+      const processingBounds = await playerBounds();
+      await expect(runtime.locator('.ai-runtime-recent li')).toHaveCount(3);
+      await expect(runtime.locator('.ai-runtime-preview')).not.toBeVisible();
       await page.screenshot({ path: testInfo.outputPath(`runtime-${kind}-${locale}.png`), fullPage: true, animations: 'disabled' });
       await runtime.getByText(text('生成内容・処理履歴', 'Generated content and history'), { exact: true }).click();
       const preview = runtime.getByRole('region', { name: text('生成中のプレビュー', 'Generation preview') });
@@ -70,7 +110,7 @@ for (const locale of ['ja', 'en'] as const) {
       if (kind === 'vocabulary') await expect(preview).toContainText('along the coast');
       if (kind === 'translate') await expect(preview).toContainText('海岸に沿った小道');
       if (kind === 'transcribe') await expect(preview).toContainText('The sound of the sea');
-      await expect.poll(playerBounds).toEqual(before);
+      await expect.poll(playerBounds).toEqual(processingBounds);
       expect(await preview.evaluate(element => element.clientHeight)).toBeLessThanOrEqual(140);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await page.screenshot({ path: testInfo.outputPath(`runtime-expanded-${kind}-${locale}.png`), fullPage: true, animations: 'disabled' });
@@ -84,7 +124,8 @@ for (const locale of ['ja', 'en'] as const) {
       });
       await expect(runtime.locator('.ai-runtime-history li')).toHaveCount(17);
       expect(await runtime.locator('.ai-runtime-history').evaluate(element => element.scrollTop)).toBe(0);
-      await expect.poll(playerBounds).toEqual(before);
+      await expect.poll(playerBounds).toEqual(processingBounds);
+      if (kind !== 'transcribe') await page.getByRole('button', { name: text('字幕一覧', 'Transcript'), exact: true }).click();
       await page.getByRole('tab', { name: text('文字起こし', 'Transcription'), exact: true }).click();
       await page.getByText(text('文字起こしの履歴', 'Transcription history'), { exact: true }).click();
       await page.getByRole('button', { name: text('以前の下書きを開く', 'Open earlier drafts'), exact: true }).click();
@@ -124,4 +165,55 @@ test('a new stream does not open a Study panel or move playback', async ({ page 
   await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-open', 'false');
   await expect(page.locator('.ai-runtime-preview:visible')).toHaveCount(0);
   expect(await player.boundingBox()).toEqual(before);
+});
+
+test('completed AI history loads runtime details only when its history is opened', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 700 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await installLearningFixture(page, 'en', 'dark');
+  const jobIds = Array.from({ length: 24 }, (_, index) => `archived-job-${index}`);
+  await page.route(/\/src\/shared\/native\/transport\.ts(?:\?|$)/, route => route.fulfill({ contentType: 'application/javascript', body: `
+    const fixture = window.__learningFixture;
+    window.__runtimeHistoryReads = [];
+    fixture.snapshot.jobs = ${JSON.stringify(jobIds)}.map((id, index) => ({
+      id, mediaId: 'visual-fixture', kind: index % 2 ? 'translate' : 'vocabulary', status: 'completed',
+      createdAt: '2026-10-11T01:00:00Z', progress: 1, executionOutcome: 'complete',
+      requestCounts: { total: 1, succeeded: 1, rejected: 0, pending: 0, inFlight: 0 },
+    }));
+    export const nativeAvailable = () => true;
+    export const call = async (command, args = {}) => {
+      if (command === 'get_ai_runtime') {
+        window.__runtimeHistoryReads.push(args.jobId);
+        return { jobId: args.jobId, approvalId: args.jobId, revision: 1,
+          events: [{ id: args.jobId + '-complete', timestamp: '2026-10-11T01:00:00Z', phase: 'completed', ordinal: 0 }],
+          preview: { attemptId: args.jobId, ordinal: 0, state: 'validated', text: JSON.stringify({ text: 'Saved response for ' + args.jobId }) } };
+      }
+      return fixture.call(command, args);
+    };` }));
+  const reads = () => page.evaluate(() => (window as any).__runtimeHistoryReads as string[]);
+  await page.goto('/study/visual-fixture');
+  await page.waitForLoadState('networkidle');
+  expect(await reads()).toEqual([]);
+  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await expect(page.locator('.transcript-row').first()).toBeVisible();
+  expect(await reads()).toEqual([]);
+  await page.getByRole('button', { name: 'Activity & tools', exact: true }).click();
+  const history = page.locator('.study-auxiliary .study-jobs');
+  await expect(history.locator(':scope > summary')).toHaveText('Job history (24)');
+  await expect(history).not.toHaveAttribute('open', '');
+  await expect(history.locator('.ai-runtime')).toHaveCount(0);
+  expect(await reads()).toEqual([]);
+  await history.locator(':scope > summary').click();
+  await expect(history.locator('.ai-runtime')).toHaveCount(jobIds.length);
+  await expect.poll(async () => (await reads()).sort()).toEqual([...jobIds].sort());
+  await expect(history).toContainText('vocabulary');
+  await expect(history).toContainText('translate');
+  const runtime = history.locator('.ai-runtime[data-job-id="archived-job-0"]');
+  await expect(runtime.locator('.ai-runtime-outcome')).toContainText('1 succeeded · 0 failed');
+  await runtime.getByText('Generated content and history', { exact: true }).click();
+  await expect(runtime.getByRole('region', { name: 'Generation preview' })).toContainText('Saved response for archived-job-0');
+  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await expect(page.locator('.transcript-row').first()).toBeVisible();
+  await expect(history.locator('.ai-runtime')).toHaveCount(0);
+  expect((await reads()).sort()).toEqual([...jobIds].sort());
 });

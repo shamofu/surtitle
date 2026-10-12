@@ -19,6 +19,11 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StudyPage } from '../features/study/StudyPage';
 vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
+vi.mock('../shared/editing/drafts', () => import('./editing-mocks'));
+vi.mock('../shared/editing/session', async importOriginal => {
+  const actual = await importOriginal<typeof import('../shared/editing/session')>();
+  return { ...actual, editingSession: (kind: 'settings', id: string, adapter: import('../shared/editing/session').EditAdapter) => new actual.EditingSession(kind, id, adapter) };
+});
 import { studyApi } from '../features/study/api';
 import { playerApi } from '../features/study/playback/api';
 import { settingsApi } from '../features/settings/api';
@@ -35,6 +40,7 @@ import type { DraftSelection } from '../features/study/drafts/api';
 
 const fixture = vi.hoisted(() => ({
   data: undefined as AppSnapshot | undefined,
+  settingsRevision: 0,
   notify: vi.fn(),
   refresh: vi.fn(),
   register: () => () => {},
@@ -65,7 +71,7 @@ vi.mock('../features/ai/api', () => ({
   aiApi: { createQuote: vi.fn(), approveQuote: vi.fn() },
 }));
 vi.mock('../features/settings/api', () => ({
-  settingsApi: { updateSettings: vi.fn() },
+  settingsApi: { updateSettings: vi.fn(), state: vi.fn(), patch: vi.fn() },
 }));
 
 vi.mock('../features/ai/continuations', () => ({ continuationApi: { list: vi.fn().mockResolvedValue([]), save: vi.fn(), discard: vi.fn() } }));
@@ -268,6 +274,14 @@ beforeAll(() => {
   );
 });
 beforeEach(() => {
+  fixture.settingsRevision = 0;
+  vi.mocked(settingsApi.state).mockImplementation(async () => ({ settings: structuredClone(fixture.data!.settings), revision: String(fixture.settingsRevision) }));
+  vi.mocked(settingsApi.patch).mockImplementation(async (revision, patch) => {
+    if (revision !== String(fixture.settingsRevision)) throw Error('Settings changed; reload before saving');
+    const { budgets, ...normal } = patch;
+    Object.assign(fixture.data!.settings, normal, budgets ?? {});
+    return { settings: structuredClone(fixture.data!.settings), revision: String(++fixture.settingsRevision) };
+  });
   vi.mocked(continuationApi.list).mockResolvedValue([]);
   vi.mocked(editorDraftApi.list).mockResolvedValue([]);
   vi.mocked(editorDraftApi.save).mockImplementation(async request => ({ ...request, version: request.expectedVersion + 1, stale: false, bindingVerified: true, sourceMediaSignature: '', createdAt: '', updatedAt: '' }));

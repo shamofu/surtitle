@@ -61,6 +61,7 @@ fn validate_fields(kind: &str, fields: &BTreeMap<String, String>) -> Result<()> 
             "locale",
             "theme",
             "motionPreference",
+            "captionGapMode",
             "learningLanguage",
             "explanationLanguage",
             "retention",
@@ -385,6 +386,21 @@ mod tests {
             expected_revision: 0,
             fields: [(key.into(), value.into())].into(),
         }
+    }
+    #[test]
+    fn caption_gap_mode_draft_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.sqlite");
+        let mut store = WorkspaceStore::open(&path).unwrap();
+        let saved = store
+            .save(&request("settings", "captionGapMode", "preview"), "a")
+            .unwrap();
+        drop(store);
+        let reopened = WorkspaceStore::open(path).unwrap();
+        assert_eq!(
+            reopened.get("settings", "default", "b").unwrap(),
+            Some(saved)
+        );
     }
     #[test]
     fn raw_invalid_input_survives_restart_and_cas_protects_newer_writes() {

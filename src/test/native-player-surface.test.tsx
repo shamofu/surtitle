@@ -390,6 +390,68 @@ it('coalesces animated bounds while one placement is pending and sends the final
   await waitFor(() => expect(placementRequests().filter(request => request.action === 'bounds').map(request => request.bounds?.width)).toEqual([320, 240]));
 });
 
+it('deduplicates CSS widths that produce the same physical bounds and clipping', async () => {
+  render(player());
+  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+  vi.mocked(playerApi.player).mockClear();
+  await resizeSurface(320.1);
+  await resizeSurface(320.2);
+  expect(placementRequests()).toEqual([]);
+  expect(document.querySelector('.native-player-viewport')).toHaveAttribute('data-native-placement', 'ready');
+});
+
+it('retains inward clip changes even when the rounded HWND width stays the same', async () => {
+  fixture.viewportWidth = 319.6;
+  render(player());
+  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+  vi.mocked(playerApi.player).mockClear();
+  await resizeSurface(320.1);
+  expect(placementRequests()).toEqual([expect.objectContaining({ action: 'bounds', bounds: expect.objectContaining({ width: 320.1 }) })]);
+});
+
+it('retains outward occlusion changes while deduplicating the same physical region', async () => {
+  let left = 10.1;
+  const card = document.createElement('section');
+  document.body.append(card);
+  fixture.occludingElements = [card];
+  vi.spyOn(card, 'getBoundingClientRect').mockImplementation(() => new DOMRect(left, 10, 10, 10));
+  render(player());
+  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+  vi.mocked(playerApi.player).mockClear();
+  left = 10.2;
+  await resizeSurface(320);
+  expect(placementRequests()).toEqual([]);
+  expect(card).not.toHaveAttribute('data-native-occlusion');
+  left = 10;
+  await resizeSurface(320);
+  expect(placementRequests()).toHaveLength(1);
+});
+
+it('matches native rounding away from zero for negative half-pixel positions', async () => {
+  fixture.viewportTop = -.4;
+  render(player());
+  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+  vi.mocked(playerApi.player).mockClear();
+  fixture.viewportTop = -.5;
+  await resizeSurface(320);
+  expect(placementRequests()).toEqual([expect.objectContaining({ action: 'bounds', bounds: expect.objectContaining({ y: -.5 }) })]);
+});
+
+it('batches layout ticks and cancels the queued sample when the endpoint is measured', async () => {
+  render(player());
+  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+  vi.mocked(playerApi.player).mockClear();
+  fixture.viewportWidth = 280;
+  await act(async () => {
+    window.dispatchEvent(new Event('surtitle-player-layout'));
+    window.dispatchEvent(new Event('surtitle-player-layout'));
+    fixture.viewportWidth = 240;
+    window.dispatchEvent(new CustomEvent('surtitle-player-layout', { detail: { immediate: true } }));
+    await new Promise(requestAnimationFrame);
+  });
+  expect(placementRequests()).toEqual([expect.objectContaining({ action: 'bounds', bounds: expect.objectContaining({ width: 240 }) })]);
+});
+
 it('coalesces modal input blocking with the final geometry without hiding the video', async () => {
   const pending = deferred<void>();
   vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
@@ -468,6 +530,24 @@ it('offers embedded tracks as study sources and explains that captions appear be
   fireEvent.click(await screen.findByRole('button', { name: 'Use these captions for study' }));
   expect(close).toHaveBeenCalledOnce();
   expect(choose).toHaveBeenCalledExactlyOnceWith(4);
+});
+
+it('changes the caption gap preference independently of playback readiness and offers save retry', async () => {
+  const change = vi.fn();
+  const retry = vi.fn();
+  const view = render(player({ settingsOpen: true, onGapModeChange: change, gapModeReady: false }));
+  const select = screen.getByRole('combobox', { name: 'Between captions' });
+  expect(select).toBeDisabled();
+  expect(select).toHaveValue('review');
+  view.rerender(player({ settingsOpen: true, onGapModeChange: change, gapMode: 'preview', interactionsDisabled: true }));
+  expect(select).toBeEnabled();
+  expect(select).toHaveValue('preview');
+  fireEvent.change(select, { target: { value: 'review' } });
+  expect(change).toHaveBeenCalledExactlyOnceWith('review');
+  view.rerender(player({ settingsOpen: true, onGapModeChange: change, gapModeError: 'Disk full', onGapModeRetry: retry }));
+  expect(screen.getByRole('alert')).toHaveTextContent('Disk full');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(retry).toHaveBeenCalledOnce();
 });
 
 it('keeps browser and IME shortcuts local and does not repeat a held play toggle', async () => {

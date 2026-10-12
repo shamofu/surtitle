@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createContext, useContext, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { animate as motionAnimate, motionValue } from 'motion';
-import { MotionRegion, motionDurations, motionEase, useAppMotion } from '../../shared/motion';
+import { MotionRegion, motionDurations, motionEase, motionRevealEase, useAppMotion } from '../../shared/motion';
 
 const StudyRegionActivity = createContext(true);
 export const useStudyRegionActive = () => useContext(StudyRegionActivity);
 
-/** Reserve geometry once; only the opaque companion moves inside its clipped dock. */
+/** Resize the desktop player before revealing UI beside its native window. */
 export function useStudyPresence(open: boolean) {
   const { reducedMotion } = useAppMotion();
   const panelRef = useRef<HTMLElement>(null);
@@ -15,17 +15,132 @@ export function useStudyPresence(open: boolean) {
   const [ready, setReady] = useState(open);
   const [animating, setAnimating] = useState(false);
   const [position] = useState(() => motionValue(open ? 0 : 1));
+  const [extent] = useState(() => motionValue(open ? 1 : 0));
+  const [layoutRevision, setLayoutRevision] = useState(0);
+  const previousLayout = useRef(layoutRevision);
   const visible = open || retained;
   const moving = !reducedMotion && (animating || open !== settled);
   useLayoutEffect(() => {
     const panel = panelRef.current;
     if (!panel) return;
+    const dock = panel.parentElement;
+    const rail = dock?.querySelector<HTMLElement>('.study-transcript-rail');
+    const resized = previousLayout.current !== layoutRevision;
+    previousLayout.current = layoutRevision;
+    const resize = () => setLayoutRevision(value => value + 1);
+    if (window.innerWidth >= 1000 && dock) {
+      let disposed = false;
+      let stop: (() => void) | undefined;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let observer: MutationObserver | undefined;
+      let generation = 0;
+      const width = parseFloat(getComputedStyle(dock).getPropertyValue('--study-panel-width')) || (window.innerWidth >= 1400 ? 360 : 320);
+      const viewport = dock.closest('.study-grid')?.querySelector<HTMLElement>('.native-player-viewport');
+      const render = () => {
+        dock.style.width = `${44 + width * extent.get()}px`;
+        panel.style.transform = `translateX(${position.get() * 100}%)`;
+        // During resize the rail remains at the old, rightmost screen position.
+        // It enters the released space only after the native endpoint is ready.
+        if (rail) rail.style.transform = `translateX(${width * (extent.get() < 1 ? extent.get() : position.get())}px)`;
+      };
+      const unsubscribeExtent = extent.on('change', () => {
+        render();
+        window.dispatchEvent(new Event('surtitle-player-layout'));
+      });
+      const unsubscribePosition = position.on('change', render);
+      const cancel = () => { generation += 1; stop?.(); stop = undefined; clearTimeout(timer); observer?.disconnect(); };
+      const finish = () => {
+        if (disposed) return;
+        cancel();
+        extent.jump(open ? 1 : 0);
+        position.jump(open ? 0 : 1);
+        render();
+        // Keep the closing endpoint hidden until React commits retained=false;
+        // restoring visibility here can expose a frame before that commit.
+        panel.style.visibility = open ? '' : 'hidden';
+        setRetained(open); setSettled(open); setReady(open); setAnimating(false);
+      };
+      const acknowledge = (complete: () => void) => {
+        observer?.disconnect();
+        if (!viewport) { complete(); return; }
+        const version = ++generation;
+        const accept = () => {
+          if (disposed || version !== generation || viewport.dataset.nativePlacement === 'pending') return;
+          observer?.disconnect();
+          complete();
+        };
+        observer = new MutationObserver(accept);
+        observer.observe(viewport, { attributes: true, attributeFilter: ['data-native-placement'] });
+        // The final measurement is synchronous, including when an earlier IPC
+        // is pending; its acknowledgement always belongs to this exact endpoint.
+        window.dispatchEvent(new CustomEvent('surtitle-player-layout', { detail: { immediate: true } }));
+        accept();
+      };
+      const animate = (value: typeof extent, endpoint: number, seconds: number, complete: () => void) => {
+        cancel();
+        const distance = Math.abs(value.get() - endpoint);
+        if (reducedMotion || document.hidden || resized || distance < .001) { value.jump(endpoint); complete(); return; }
+        const version = generation;
+        setAnimating(true);
+        const done = () => {
+          if (disposed || version !== generation) return;
+          stop?.(); stop = undefined; clearTimeout(timer);
+          value.jump(endpoint);
+          complete();
+        };
+        const controls = motionAnimate(value, endpoint, { duration: seconds * distance, ease: motionRevealEase, onComplete: done });
+        stop = () => controls.stop();
+        timer = setTimeout(done, seconds * distance * 1000 + 100);
+      };
+      const reveal = () => {
+        panel.style.visibility = '';
+        setReady(true);
+        animate(position, 0, motionDurations.studySlide, finish);
+      };
+      const collapse = () => {
+        panel.style.visibility = 'hidden';
+        animate(extent, 0, motionDurations.studyResize, () => acknowledge(finish));
+      };
+      render();
+      if (open) {
+        setRetained(true);
+        if (extent.get() < 1 || resized || viewport?.dataset.nativePlacement === 'pending') {
+          setReady(false);
+          panel.style.visibility = 'hidden';
+          position.jump(1);
+          animate(extent, 1, motionDurations.studyResize, () => acknowledge(reveal));
+        } else reveal();
+      } else {
+        setReady(false);
+        if (extent.get() < 1 || position.get() >= 1) collapse();
+        else animate(position, 1, motionDurations.studySlide, collapse);
+      }
+      const visibility = () => {
+        if (!document.hidden) return;
+        cancel();
+        panel.style.visibility = 'hidden';
+        position.jump(1);
+        extent.jump(open ? 1 : 0);
+        acknowledge(finish);
+      };
+      window.addEventListener('resize', resize);
+      document.addEventListener('visibilitychange', visibility);
+      return () => {
+        disposed = true; cancel(); unsubscribeExtent(); unsubscribePosition();
+        window.removeEventListener('resize', resize);
+        document.removeEventListener('visibilitychange', visibility);
+      };
+    }
+    // Stacked layouts retain their existing stationary player and sliding panel.
+    if (dock) dock.style.width = '';
+    if (rail) rail.style.transform = '';
+    extent.jump(open ? 1 : 0);
     let disposed = false;
     let stop: (() => void) | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let placementObserver: MutationObserver | undefined;
     let started = false;
-    let settleRequested = false;
+    let settleRequested = resized;
     const axis = window.innerWidth < 1000 ? 'Y' : 'X';
     const render = (value: number) => { panel.style.transform = `translate${axis}(${value * 100}%)`; };
     const unsubscribe = position.on('change', render);
@@ -67,7 +182,7 @@ export function useStudyPresence(open: boolean) {
     };
     if (open) {
       const viewport = panel.closest('.study-grid')?.querySelector<HTMLElement>('.native-player-viewport');
-      if (viewport && (!retained || viewport.dataset.nativePlacement === 'pending')) {
+      if (viewport && (resized || !retained || viewport.dataset.nativePlacement === 'pending')) {
         setReady(false);
         panel.style.visibility = 'hidden';
         // Scroll the stationary dock before acknowledging the final page clip.
@@ -76,7 +191,7 @@ export function useStudyPresence(open: boolean) {
           if (viewport.dataset.nativePlacement === 'ready') start();
         });
         placementObserver.observe(viewport, { attributes: true, attributeFilter: ['data-native-placement'] });
-        window.dispatchEvent(new Event('surtitle-player-layout'));
+        window.dispatchEvent(new CustomEvent('surtitle-player-layout', { detail: { immediate: true } }));
         if (viewport.dataset.nativePlacement !== 'pending') start();
       } else {
         if (!retained && window.innerWidth < 1000) panel.closest('.study-companion-dock')?.scrollIntoView({ block: 'start', behavior: 'auto' });
@@ -84,7 +199,7 @@ export function useStudyPresence(open: boolean) {
       }
     } else start();
     const visibility = () => { if (document.hidden) finish(); };
-    window.addEventListener('resize', finish);
+    window.addEventListener('resize', resize);
     document.addEventListener('visibilitychange', visibility);
     return () => {
       disposed = true;
@@ -93,10 +208,10 @@ export function useStudyPresence(open: boolean) {
       placementObserver?.disconnect();
       unsubscribe();
       panel.style.visibility = '';
-      window.removeEventListener('resize', finish);
+      window.removeEventListener('resize', resize);
       document.removeEventListener('visibilitychange', visibility);
     };
-  }, [open, reducedMotion, position]);
+  }, [open, reducedMotion, position, extent, layoutRevision]);
   return { visible, moving, ready, panelRef, dockProps: { 'data-open': visible, 'data-moving': moving } };
 }
 /** Retain real outgoing views, inert, while the next view takes over the same space. */

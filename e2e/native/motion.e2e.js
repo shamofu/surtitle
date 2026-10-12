@@ -49,7 +49,7 @@ const nativeVideo = windows => windows.find(window => window.visible && window.p
         await assertNativeVideoBounds();
       });
 
-      it('changes panel layout once without animating video geometry or hiding the native surface', async () => {
+      it('resizes the real video beside the panel without hiding it or changing its height', async () => {
         const before = await assertNativeVideoBounds();
         const trace = await sampleNativeVideoBounds(async () => {
           await $('button=Transcript').click();
@@ -58,6 +58,13 @@ const nativeVideo = windows => windows.find(window => window.visible && window.p
         }, `motion-${preference}-native-panel-open.json`);
         const during = trace.result;
         for (const sample of trace.samples) assert(nativeVideo(sample.windows), 'Panel layout hid the native video');
+        if (preference === 'system') {
+          const widths = trace.samples.map(sample => {
+            const screen = nativeVideo(sample.windows)?.screen;
+            return screen && screen.Right - screen.Left;
+          });
+          assert(new Set(widths).size > 2, 'The native video must pass through intermediate widths');
+        }
         assert.equal(during.dom.viewport.height, before.dom.viewport.height, 'Panel opening reduced video height');
         const layout = await browser.execute(() => {
           const viewport = document.querySelector('[data-testid="native-player-viewport"]');

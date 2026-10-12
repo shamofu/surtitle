@@ -101,7 +101,8 @@ for (const locale of ['ja', 'en'] as const) {
     await page.screenshot({ path: testInfo.outputPath('transcription-estimate.png'), fullPage: true, animations: 'disabled' });
     await start.click();
     await expect(page.getByRole('tab', { name: locale === 'ja' ? '字幕' : 'Transcript', exact: true })).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('.transcription-status').getByRole('progressbar')).toBeVisible();
+    await expect(page.locator('.transcription-status')).toHaveCount(0);
+    await expect(page.locator('.study-transcript .ai-runtime:visible')).toHaveCount(0);
     await expect(page.getByText(locale === 'ja' ? '本文は取得済み・字幕の時刻は未確定' : 'Text received · subtitle timing unavailable', { exact: false })).toBeVisible();
     await expect(page.locator('.transcript-row')).toHaveCount(1);
     await expect.poll(() => page.evaluate(() => (window as any).__learningFixture.calls.filter((call: any) => call.command === 'get_snapshot_patch' && call.args.domains.includes('jobs')).length)).toBeGreaterThan(0);
@@ -115,8 +116,9 @@ for (const locale of ['ja', 'en'] as const) {
       return bounds.bottom <= panel.bottom && bounds.top >= panel.top;
     })).toBe(true);
     await page.screenshot({ path: testInfo.outputPath('transcription-progress.png'), fullPage: true, animations: 'disabled' });
-    await page.locator('.transcription-status').click();
+    await page.getByRole('tab', { name: locale === 'ja' ? '文字起こし' : 'Transcription', exact: true }).click();
     await expect(page.getByRole('tab', { name: locale === 'ja' ? '文字起こし' : 'Transcription', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('.transcription-job[data-job-id="quote"]').getByRole('progressbar')).toBeVisible();
     expect((await commands()).filter(command => command === 'prepare_transcription')).toHaveLength(1);
   });
 }
@@ -180,16 +182,15 @@ for (const locale of ['ja', 'en'] as const) {
         pacing: { ordinal: 1, nextSendAt: new Date(Date.now() + 10000).toISOString(), intervalMs: 10000, slowed: false },
       });
     });
-    const compact = page.locator('.transcription-status');
-    await expect(compact).toContainText(locale === 'ja' ? '送信間隔を調整中です。' : 'Spacing out requests.');
-    await expect(compact).toContainText(locale === 'ja' ? '秒後に次の区間を送信' : 'Next request in');
-    await expect(compact).not.toContainText('HTTP 429');
+    await expect(page.locator('.transcription-status')).toHaveCount(0);
     await expect(page.locator('.transcript-row')).toHaveCount(1);
     await expect(page.locator('.transcript-row')).toContainText('We took the path that follows the coast.');
-    await compact.click();
+    await page.getByRole('tab', { name: locale === 'ja' ? '文字起こし' : 'Transcription', exact: true }).click();
     const job = page.locator('.transcription-job[data-job-id="quote"]');
-    await expect(job).toBeFocused();
-    await expect(job.locator('details')).toHaveAttribute('open', '');
+    await expect(job).toContainText(locale === 'ja' ? '送信間隔を調整中です。' : 'Spacing out requests.');
+    await expect(job).toContainText(locale === 'ja' ? '秒後に次の区間を送信' : 'Next request in');
+    await expect(job).not.toContainText('HTTP 429');
+    await job.getByText(locale === 'ja' ? '処理の詳細' : 'Processing details', { exact: true }).click();
     await expect(job).toContainText(locale === 'ja' ? '区間 2 · 3:06–14:00' : 'Range 2 · 3:06–14:00');
     await expect(job).toContainText(locale === 'ja' ? '10秒以上' : 'At least 10s');
     await expect(job.getByRole('button', { name: locale === 'ja' ? '次の送信前に一時停止' : 'Pause before next request', exact: true })).toBeEnabled();
@@ -205,7 +206,8 @@ for (const locale of ['ja', 'en'] as const) {
     await expect(job).not.toContainText('HTTP 429');
     await page.screenshot({ path: testInfo.outputPath('transcription-pacing.png'), fullPage: true, animations: 'disabled' });
     await page.getByRole('tab', { name: locale === 'ja' ? '字幕' : 'Transcript', exact: true }).click();
-    await expect(compact).toContainText(locale === 'ja' ? '混雑を避けるため送信間隔を調整中' : 'Spacing out requests to reduce congestion');
+    await expect(page.locator('.transcription-status')).toHaveCount(0);
+    await expect(job).not.toBeVisible();
     await expect(page.locator('.transcript-row')).toHaveCount(1);
     await expect(page.locator('.transcript-row')).toContainText('We took the path that follows the coast.');
     const approvals = await page.evaluate(() => (window as unknown as { __learningFixture: { calls: { command: string }[] } }).__learningFixture.calls.filter(call => ['approve_quote', 'reapprove_quote'].includes(call.command)));
@@ -229,14 +231,12 @@ for (const locale of ['ja', 'en'] as const) {
         issue: { code: 'provider', phase: 'execute', httpStatus: 429, ordinal: 1, occurredAt: '2026-10-10T00:00:00Z', nextAction: 'resume' },
       });
     });
-    const compact = page.locator('.transcription-status');
-    await expect(compact).toContainText('HTTP 429');
-    await expect(compact).toContainText(locale === 'ja' ? '秒後に再試行' : 'Retrying in');
+    await expect(page.locator('.transcription-status')).toHaveCount(0);
     await expect(page.locator('.transcript-row')).toHaveCount(1);
-    await compact.click();
+    await page.getByRole('tab', { name: locale === 'ja' ? '文字起こし' : 'Transcription', exact: true }).click();
     const job = page.locator('.transcription-job[data-job-id="quote"]');
-    await expect(job).toBeFocused();
-    await expect(job.locator('details')).toHaveAttribute('open', '');
+    await expect(job).toContainText(locale === 'ja' ? '秒後に再試行' : 'Retrying in');
+    await job.getByText(locale === 'ja' ? '処理の詳細' : 'Processing details', { exact: true }).click();
     await expect(job.getByText('HTTP 429', { exact: true })).toBeVisible();
     await expect(job).toContainText(locale === 'ja' ? '区間 2 · 3:06–14:00' : 'Range 2 · 3:06–14:00');
     await expect(job.getByRole('button', { name: locale === 'ja' ? '自動再試行を一時停止' : 'Pause automatic retry', exact: true })).toBeEnabled();

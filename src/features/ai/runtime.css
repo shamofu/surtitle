@@ -12,8 +12,6 @@
 .ai-runtime-preview dd { margin: 3px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ai-runtime-preview[data-state='rejected'] { opacity: .8; }
 .ai-runtime-outcome { line-height: 1.6; }
-.study-runtime-dock { flex: 0 0 auto; max-height: 152px; overflow: auto; overscroll-behavior: contain; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-.study-runtime-dock:empty { display: none; }
 .ai-runtime-compact { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; font-size: 12px; }
 .ai-runtime-compact > .ai-runtime-recent { grid-column: 1; }
 .ai-runtime-compact > .ai-runtime-disclosure { grid-column: 2; align-self: start; }
@@ -26,9 +24,6 @@
 .ai-runtime-compact .ai-runtime-preview { padding: 8px; max-height: 140px; }
 .ai-runtime-compact .ai-runtime-history { max-height: 140px; }
 .ai-runtime-compact .ai-runtime-history li { flex-direction: column; gap: 0; }
-.study-transcript:has(.study-runtime-dock) .transcript-tools { padding-block: 6px; }
-.study-transcript:has(.study-runtime-dock) .transcript-actions { padding-bottom: 4px; }
-.study-transcript:has(.study-runtime-dock) .transcript-footer { padding-block: 4px; }
 .study-auxiliary .study-jobs > summary { padding-block: 3px; }
 .study-auxiliary .study-jobs > div { padding-bottom: 4px; }
 .study-jobs .job-status { padding: 4px 12px; gap: 6px; }

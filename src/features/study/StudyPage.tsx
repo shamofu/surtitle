@@ -2,7 +2,7 @@
 import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   BookmarkPlus,
@@ -43,6 +43,9 @@ import { continuationApi, type AiContinuation } from '../ai/continuations';
 import { editorDraftApi, flushEditorDrafts } from './editor-drafts/useEditorDraft';
 import { JobActions } from '../ai/JobActions';
 import { AiRuntime, JobOutcome } from '../ai/AiRuntime';
+import type { CaptionGapMode } from '../../shared/contracts/settings';
+import { useEditingSession } from '../../shared/editing/useEditingSession';
+import { settingsEditor } from '../settings/editing';
 import { TransferDialog } from '../transfer/TransferDialog';
 import { studyApi } from './api';
 import { playerApi } from './playback/api';
@@ -54,7 +57,7 @@ import { StudyTranscript } from './StudyTranscript';
 import { CurrentCaption } from './CurrentCaption';
 import type { TranscriptTab, TranscriptViewState } from './StudyTranscript';
 import { TranscriptReviewDialog } from './transcript/TranscriptReview';
-import { TranscriptionStatus, TranscriptionWorkspace, type TranscriptionRequest } from './transcript/TranscriptionWorkspace';
+import { TranscriptionWorkspace, type TranscriptionRequest } from './transcript/TranscriptionWorkspace';
 import { resolveSourceSelection } from './source-selection';
 import type { SelectedContext } from './source-selection';
 import { useStudyExitGuard } from './useStudyExitGuard';
@@ -145,6 +148,25 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const { t, locale } = useAppearance();
   const { report } = useNotifications();
   const { surfaceHidden } = useSurface();
+  const client = useQueryClient();
+  const [preferences] = useState(() => settingsEditor(client));
+  const preferenceEditing = useEditingSession(preferences);
+  const requestedGapMode = useRef<CaptionGapMode | undefined>(undefined);
+  const gapMode: CaptionGapMode = (preferenceEditing.ready
+    ? preferenceEditing.fields.captionGapMode
+    : data?.settings?.captionGapMode) === 'preview' ? 'preview' : 'review';
+  function changeGapMode(mode: CaptionGapMode) {
+    requestedGapMode.current = mode;
+    preferences.change({ captionGapMode: mode });
+    void preferences.flush();
+  }
+  function retryGapMode() {
+    const requested = requestedGapMode.current;
+    if (requested && preferences.getSnapshot().recovery?.captionGapMode === requested) {
+      preferences.change({ captionGapMode: requested });
+    }
+    void preferences.flush();
+  }
   const media = data?.media.find(item => item.id === mediaId);
   const mediaSignature = JSON.stringify([media?.path, media?.audioStreamIndex]);
   const aiMediaSignature = JSON.stringify([media?.path, media?.audioStreamIndex, media?.learningLanguage, media?.explanationLanguage]);
@@ -202,12 +224,12 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const [repeatTarget, setRepeatTarget] = useState<HTMLDivElement | null>(null);
 
   const [playbackSettings, setPlaybackSettings] = useState(false);
+  const [jobHistoryOpen, setJobHistoryOpen] = useState(false);
   const [draftReview, setDraftReview] = useState<string>();
   const [draftPlayback, setDraftPlayback] = useState<SubtitleSegment>();
   const [edit, setEdit] = useState<SubtitleSegment>();
   const [aiKind, setAiKind] = useState<AiQuote['kind']>();
   const [transcriptionRequest, setTranscriptionRequest] = useState<TranscriptionRequest>();
-  const [focusedTranscriptionJob, setFocusedTranscriptionJob] = useState<string>();
   const [aiContinuation, setAiContinuation] = useState<AiContinuation>();
   const [aiRebind, setAiRebind] = useState<AiContinuation>();
   const [transfer, setTransfer] = useState(false);
@@ -657,7 +679,6 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const needsAttention = jobs.some(job => ['failed', 'unknown', 'paused'].includes(job.status) || (job.pendingResults || 0) > 0 ||
     !!job.needsAttention);
   const completedJobs = data?.jobs.filter(job => job.mediaId === mediaId && job.kind !== 'transcribe' && !job.automaticTranscript && job.status === 'completed' && !job.needsAttention && !(job.pendingResults || 0)) || [];
-  const runtimeJobs = data?.jobs.filter(job => job.mediaId === mediaId && (job.status === 'running' || !!job.executionOutcome)).slice(0, 3) ?? [];
   function openTranscription(range?: { startMs: number; endMs: number }) {
     rememberTrigger();
     setPanel('transcript'); setTab('transcription'); setAiKind(undefined);
@@ -719,12 +740,23 @@ function StudySession({ mediaId }: { mediaId: string }) {
             onSettingsClose={() => setPlaybackSettings(false)}
             onUseStudySubtitles={streamIndex => { setSubtitleStreamIndex(streamIndex); setSubtitleSource('embedded'); }}
             interactionsDisabled={busy || saveBusy}
+            gapMode={gapMode}
+            onGapModeChange={changeGapMode}
+            gapModeReady={preferenceEditing.ready}
+            gapModeSaving={preferenceEditing.saving}
+            gapModeError={preferenceEditing.error}
+            onGapModeRetry={retryGapMode}
+            onPreferencesChanged={() => preferences.refresh()}
           />
           <CurrentCaption
             active={active}
             language={media.learningLanguage}
             loading={segmentsQuery.isLoading}
             hasSubtitles={segments.length > 0}
+            hasTimedSubtitles={timedSegments.length > 0}
+            previous={previousCaption}
+            next={nextCaption}
+            gapMode={gapMode}
             draftMode={draftMode}
             enabled={playerReady && !busy && !saveBusy && !surfaceHidden}
             error={segmentsQuery.error}
@@ -732,11 +764,12 @@ function StudySession({ mediaId }: { mediaId: string }) {
             onInspect={(source, term) => void inspect(source, term)}
             onSave={source => void inspect(source, '', undefined, true)}
             onImport={() => openTranscription()}
+            onOpenTranscript={() => { rememberTrigger(); setPanel('transcript'); setTab('transcript'); }}
             hasPrevious={!!previousCaption}
             hasNext={!!nextCaption}
             onPrevious={() => void moveCaption(previousCaption)}
             onNext={() => void moveCaption(nextCaption)}
-            onReplay={() => void moveCaption(active, true)}
+            onReplay={source => void moveCaption(source, true)}
           />
         </div>
         <div className="study-companion-dock" {...companion.dockProps}>
@@ -842,7 +875,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             key={job.id}
           >
             <ProgressStatus label={job.kind} phase={job.message} status={job.status === 'queued' ? 'waiting' : job.status} completed={job.progress} total={1} />
-            <JobOutcome job={job} />
+            {panel === 'activity' ? <AiRuntime job={job} compact /> : <JobOutcome job={job} />}
             {job.resultState === 'applied_with_warnings' && <span>{t('完了・注意箇所あり', 'Complete · marked passages')}</span>}
             <JobActions
               job={job}
@@ -850,7 +883,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             />
           </div>)}</div>
         </AnimatedDetails>}
-      {completedJobs.length > 0 && <AnimatedDetails className="study-jobs"><summary>{t('処理履歴', 'Job history')} (<AnimatedValue value={completedJobs.length} />)</summary><div>{completedJobs.map(job => <div className="job-status" key={job.id}><span>{job.resultState === 'applied_with_warnings' ? t('完了・注意箇所あり', 'Complete · marked passages') : job.message || job.kind}</span><JobOutcome job={job} /><JobActions job={job} onReviewTranscript={setDraftReview} /></div>)}</div></AnimatedDetails>}
+      {completedJobs.length > 0 && <AnimatedDetails className="study-jobs" onToggle={event => setJobHistoryOpen(event.currentTarget.open)}><summary>{t('処理履歴', 'Job history')} (<AnimatedValue value={completedJobs.length} />)</summary><div>{completedJobs.map(job => <div className="job-status" key={job.id}><span>{job.resultState === 'applied_with_warnings' ? t('完了・注意箇所あり', 'Complete · marked passages') : job.message || job.kind}</span>{panel === 'activity' && jobHistoryOpen ? <AiRuntime job={job} compact /> : <JobOutcome job={job} />}<JobActions job={job} onReviewTranscript={setDraftReview} /></div>)}</div></AnimatedDetails>}
       <MotionRegion mode="status" open={media.status === 'missing' || media.status === 'error'}>
         <div
           className="job-status warning"
@@ -873,9 +906,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             <StudyRegion className="study-transcript" open={panel === 'transcript'} retain={!panel && companion.visible && presentedPanel === 'transcript'} animate={!companion.moving} keepMounted freezeOnExit={false}>
               <StudyTranscript
                 active={panel === 'transcript'}
-                transcriptionWorkspace={<TranscriptionWorkspace media={media} request={transcriptionRequest} onRequest={openTranscription} continuations={continuationsQuery.data} onResume={resumeAi} focusJobId={focusedTranscriptionJob} active={panel === 'transcript' && tab === 'transcription'} onOpenEarlierDrafts={() => setTab('draft')} onDone={() => { setTranscriptionRequest(undefined); void continuationsQuery.refetch(); }} onStarted={() => { setTranscriptionRequest(undefined); setTab('transcript'); void continuationsQuery.refetch(); }} />}
-                transcriptionStatus={<TranscriptionStatus mediaId={mediaId} hasRequest={!!transcriptionRequest} onOpen={jobId => { setFocusedTranscriptionJob(jobId); setTab('transcription'); }} />}
-                aiRuntime={runtimeJobs.length > 0 && <div className="study-runtime-dock">{runtimeJobs.map(job => <AiRuntime key={job.id} job={job} compact />)}</div>}
+                transcriptionWorkspace={<TranscriptionWorkspace media={media} request={transcriptionRequest} onRequest={openTranscription} continuations={continuationsQuery.data} onResume={resumeAi} active={panel === 'transcript' && tab === 'transcription'} onOpenEarlierDrafts={() => setTab('draft')} onDone={() => { setTranscriptionRequest(undefined); void continuationsQuery.refetch(); }} onStarted={() => { setTranscriptionRequest(undefined); setTab('transcript'); void continuationsQuery.refetch(); }} />}
                 onTranscribeRange={openTranscription}
                 media={media}
                 segments={segments}

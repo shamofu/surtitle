@@ -171,6 +171,8 @@ pub struct AppSettings {
     pub theme: String,
     #[serde(default = "default_motion_preference")]
     pub motion_preference: String,
+    #[serde(default = "default_caption_gap_mode")]
+    pub caption_gap_mode: String,
     pub locale: String,
     pub learning_language: String,
     pub explanation_language: String,
@@ -229,11 +231,15 @@ fn default_channel() -> String {
 fn default_motion_preference() -> String {
     "system".into()
 }
+fn default_caption_gap_mode() -> String {
+    "review".into()
+}
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme: "dark".into(),
             motion_preference: default_motion_preference(),
+            caption_gap_mode: default_caption_gap_mode(),
             locale: "ja".into(),
             learning_language: "en".into(),
             explanation_language: "ja".into(),
@@ -373,6 +379,23 @@ pub struct DraftStudyCardFields {
 #[cfg(test)]
 mod settings_tests {
     use super::AppSettings;
+
+    #[test]
+    fn missing_caption_gap_mode_defaults_to_review_and_preview_roundtrips() {
+        let defaults = AppSettings::default();
+        assert_eq!(defaults.caption_gap_mode, "review");
+        let mut wire = serde_json::to_value(defaults).unwrap();
+        wire.as_object_mut().unwrap().remove("captionGapMode");
+        let legacy: AppSettings = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(legacy.caption_gap_mode, "review");
+        wire["captionGapMode"] = serde_json::json!("preview");
+        let preview: AppSettings = serde_json::from_value(wire).unwrap();
+        assert_eq!(preview.caption_gap_mode, "preview");
+        assert_eq!(
+            serde_json::to_value(preview).unwrap()["captionGapMode"],
+            "preview"
+        );
+    }
 
     #[test]
     fn missing_motion_preference_defaults_to_system_and_explicit_reduce_roundtrips() {

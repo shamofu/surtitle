@@ -98,6 +98,10 @@ pub(crate) fn validate_settings(settings: &AppSettings) -> Result<()> {
         "Invalid animation preference"
     );
     ensure!(
+        ["review", "preview"].contains(&settings.caption_gap_mode.as_str()),
+        "Invalid caption gap mode"
+    );
+    ensure!(
         !settings.vertex_location.is_empty()
             && settings.vertex_location.len() <= 63
             && settings
@@ -392,6 +396,7 @@ pub struct BudgetPatch {
 pub struct SettingsPatch {
     theme: Option<String>,
     motion_preference: Option<String>,
+    caption_gap_mode: Option<String>,
     locale: Option<String>,
     learning_language: Option<String>,
     explanation_language: Option<String>,
@@ -409,6 +414,7 @@ impl SettingsPatch {
     fn has_preferences(&self) -> bool {
         self.theme.is_some()
             || self.motion_preference.is_some()
+            || self.caption_gap_mode.is_some()
             || self.locale.is_some()
             || self.learning_language.is_some()
             || self.explanation_language.is_some()
@@ -431,6 +437,7 @@ impl SettingsPatch {
         assign!(
             theme,
             motion_preference,
+            caption_gap_mode,
             locale,
             learning_language,
             explanation_language,
@@ -794,6 +801,58 @@ mod settings_tests {
     }
     fn patch(json: serde_json::Value) -> SettingsPatch {
         serde_json::from_value(json).unwrap()
+    }
+
+    #[test]
+    fn caption_gap_mode_patch_persists_without_replacing_other_preferences() {
+        let root = tempfile::tempdir().unwrap();
+        let state = Services::open(root.path().to_path_buf()).unwrap();
+        let initial = get_settings_state(state.clone()).unwrap();
+        assert_eq!(initial.settings.caption_gap_mode, "review");
+        let saved = update_settings_patch(
+            state.clone(),
+            initial.revision.clone(),
+            patch(serde_json::json!({"captionGapMode":"preview"})),
+        )
+        .unwrap();
+        assert_eq!(saved.settings.caption_gap_mode, "preview");
+        assert_eq!(saved.settings.theme, initial.settings.theme);
+        assert_eq!(
+            saved.settings.replay_context_ms,
+            initial.settings.replay_context_ms
+        );
+        assert!(
+            update_settings_patch(
+                state.clone(),
+                initial.revision,
+                patch(serde_json::json!({"captionGapMode":"review"}))
+            )
+            .is_err()
+        );
+        for invalid in ["", "current", "Preview"] {
+            assert!(
+                update_settings_patch(
+                    state.clone(),
+                    saved.revision.clone(),
+                    patch(serde_json::json!({"captionGapMode":invalid}))
+                )
+                .is_err()
+            );
+            let unchanged = get_settings_state(state.clone()).unwrap();
+            assert_eq!(unchanged.revision, saved.revision);
+            assert_eq!(unchanged.settings.caption_gap_mode, "preview");
+        }
+        drop(state);
+        let reopened = Services::open(root.path().to_path_buf()).unwrap();
+        assert_eq!(reopened.settings().unwrap().caption_gap_mode, "preview");
+        let current = get_settings_state(reopened.clone()).unwrap();
+        let reviewed = update_settings_patch(
+            reopened,
+            current.revision,
+            patch(serde_json::json!({"captionGapMode":"review"})),
+        )
+        .unwrap();
+        assert_eq!(reviewed.settings.caption_gap_mode, "review");
     }
 
     #[test]
