@@ -32,6 +32,15 @@ async function openSubtitles() {
   await $('[role="dialog"] select').waitForDisplayed();
 }
 async function dialogClosed() { await $('[role="dialog"]').waitForExist({ reverse: true, timeout: 60000 }); }
+async function openDownloads() {
+  const opener = $('button=Downloads');
+  await opener.waitForClickable();
+  await opener.click();
+  const dialog = $('[role="dialog"]');
+  await dialog.waitForDisplayed();
+  await expect(dialog.$('h2')).toHaveText('Downloads');
+  return dialog;
+}
 async function chooseSubtitle(value) {
   await $(`[role="dialog"] option[value="${value}"]`).waitForExist({ timeout: 60000 });
   await $('[role="dialog"] select').waitForEnabled({ timeout: 60000 });
@@ -173,14 +182,28 @@ async function cardArticle() { await navigate('/cards'); const search = $('[aria
     await $(`a.media-card[href="/study/${completed.mediaId}"]`).waitForDisplayed();
     const request = { kind: 'url', learningLanguage: 'en', explanationLanguage: 'ja', pathOrUrl: `${serverUrl}/slow.mp4` };
     const slow = await invoke('start_url_import', { request }); await browser.waitUntil(async () => (await invoke('list_download_jobs')).find(job => job.id === slow).storedBytes > 0);
-    await $(`[data-download-id="${slow}"]`).$('button=Cancel download').click(); await browser.waitUntil(async () => (await invoke('list_download_jobs')).find(job => job.id === slow).status === 'cancelled');
+    const downloads = await openDownloads();
+    const slowArticle = downloads.$(`[data-download-id="${slow}"]`);
+    await slowArticle.waitForDisplayed();
+    const cancel = slowArticle.$('button=Cancel download');
+    await cancel.waitForClickable();
+    await cancel.click(); await browser.waitUntil(async () => (await invoke('list_download_jobs')).find(job => job.id === slow).status === 'cancelled');
     const failed = await invoke('start_url_import', { request: { ...request, pathOrUrl: `${serverUrl}/retry.mp4` } });
     await browser.waitUntil(async () => (await invoke('list_download_jobs')).find(job => job.id === failed).status === 'failed');
-    const article = await $(`[data-download-id="${failed}"]`); await article.$('button=Retry from start').click();
+    const article = downloads.$(`[data-download-id="${failed}"]`);
+    await article.waitForDisplayed();
+    const retry = article.$('button=Retry from start');
+    await retry.waitForClickable();
+    await retry.click();
     await browser.waitUntil(async () => (await invoke('list_download_jobs')).some(job => job.id !== failed && job.request.pathOrUrl === `${serverUrl}/retry.mp4` && job.status === 'completed'));
     const final = await snapshot(); assert.equal(final.budget.spentUsd, 0); assert.equal(final.budget.reservedUsd, 0); assert.equal(final.settings.credentialConfigured, false);
     assert(!readdirSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'media')).some(name => name.startsWith('.download-')), 'Cancelled or failed downloads retained partial files');
     await browser.saveScreenshot(resolve('test-results/native/background-downloads.png'));
+    assert(await browser.execute(() => document.querySelector('[role="dialog"]')?.contains(document.activeElement)),
+      'Download actions must retain keyboard focus in the dialog after pending buttons are disabled');
+    await browser.keys(Key.Escape);
+    await dialogClosed();
+    await expect($('button=Downloads')).toBeFocused();
   });
   (process.env.SURTITLE_E2E_AV1_FIXTURE ? it : it.skip)('decodes, plays and seeks the optional CPU AV1 candidate fixture', async () => {
     const path = process.env.SURTITLE_E2E_AV1_FIXTURE;

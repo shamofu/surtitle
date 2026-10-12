@@ -152,8 +152,13 @@ describe('real native learning workflow (no cloud requests)', () => {
     await browser.refresh();
     await openTranscript();
     await $('[aria-label="Subtitle list"]').waitForDisplayed();
-    await $('.transcript-row').moveTo();
-    await $('[aria-label="Edit subtitle"]').click();
+    const editedRow = $('.transcript-row[data-index="0"]');
+    await editedRow.waitForDisplayed();
+    await expect(editedRow.$('.segment-text')).toHaveText('Milliseconds matter.');
+    await clickInView('.transcript-row[data-index="0"] .segment-options summary');
+    const editSubtitle = editedRow.$('[aria-label="Edit subtitle"]');
+    await editSubtitle.waitForClickable();
+    await editSubtitle.click();
     await $('[role="dialog"]').waitForDisplayed();
     const times = await $$('[role="dialog"] .field-row input');
     await expect(times[0]).toHaveValue('0:00.125');

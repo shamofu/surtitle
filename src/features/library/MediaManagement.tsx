@@ -30,7 +30,10 @@ export function DownloadJobs() {
     enabled: nativeAvailable(),
   });
   const [busyId, setBusyId] = useState<string>();
-  async function perform(id: string, action: () => Promise<unknown>) {
+  async function perform(id: string, action: () => Promise<unknown>, trigger: HTMLButtonElement) {
+    // Disabling a focused button sends focus to body. Keep its stable row focused
+    // so Escape and Tab continue to work while the job action settles.
+    if (document.activeElement === trigger) trigger.closest<HTMLElement>('[data-download-id]')?.focus({ preventScroll: true });
     setBusyId(id);
     await report(action);
     setBusyId(undefined);
@@ -67,6 +70,8 @@ export function DownloadJobs() {
           key={job.id}
           className="download-job"
           data-download-id={job.id}
+          tabIndex={-1}
+          aria-label={job.request.title || job.request.pathOrUrl}
         >
           <div>
             <strong>{job.request.title || job.request.pathOrUrl}</strong>
@@ -111,11 +116,12 @@ export function DownloadJobs() {
             <>
               <Button
                 busy={busyId === job.id}
-                onClick={() =>
+                onClick={event =>
                   void perform(job.id, () =>
                     mutate(() => libraryApi.cancelDownload(job.id), {
                       kind: 'downloads',
                     }),
+                    event.currentTarget,
                   )
                 }
               >
@@ -133,11 +139,12 @@ export function DownloadJobs() {
           ) : (
             <Button
               busy={busyId === job.id}
-              onClick={() =>
+              onClick={event =>
                 void perform(job.id, () =>
                   mutate(() => libraryApi.startUrlImport(job.request), {
                     kind: 'downloads',
                   }),
+                  event.currentTarget,
                 )
               }
             >

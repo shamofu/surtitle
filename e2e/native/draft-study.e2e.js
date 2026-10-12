@@ -76,16 +76,29 @@ async function dismissSuccessToasts() {
   }
   assert.fail('Unexpected continuous success notifications');
 }
+export function draftSurfaceSettled(node) {
+  const region = node.closest('[role="dialog"], .study-companion') ?? node;
+  if (region.closest('.study-companion-dock')?.dataset.moving === 'true') return false;
+  // Motion values update disclosure height and study-tab transforms without
+  // creating native Web Animations. WebKit can retain the zero translation
+  // after the tab reaches its endpoint; only nonzero transforms block a click.
+  const movingRegions = region.querySelectorAll('details[data-motion-state], .motion-region, .study-motion-region');
+  for (const surface of movingRegions) {
+    const transform = surface.style.transform;
+    if (surface.style.height || surface.style.overflow === 'hidden' ||
+        (surface.classList.contains('study-motion-region') && transform && !['none', 'translateX(0px)'].includes(transform))) return false;
+  }
+  return region.getAnimations({ subtree: true }).every(animation =>
+    (!animation.pending && animation.playState !== 'running') || animation.effect?.getTiming().iterations === Infinity);
+}
 async function scrollVisible(element) {
   await element.waitForExist();
   // A history disclosure moves its following buttons while height is animated.
   // WebDriver clickability alone does not wait for that geometry to settle; a
   // coordinate click can otherwise land on a different history action in WebKit.
-  await browser.waitUntil(async () => browser.execute(node => {
-    const region = node.closest('[role="dialog"], .study-companion') ?? node;
-    return region.getAnimations({ subtree: true }).every(animation =>
-      (!animation.pending && animation.playState !== 'running') || animation.effect?.getTiming().iterations === Infinity);
-  }, await element), { timeoutMsg: 'The target surface did not finish its finite animations before scrolling' });
+  await browser.waitUntil(async () => browser.execute(draftSurfaceSettled, await element), {
+    timeoutMsg: 'The target surface did not finish its finite animations and layout before scrolling',
+  });
   // WDIO 9 uses a wheel event at viewport (0,0), which cannot scroll this nested
   // panel in WebKit. Use the DOM scroll API; clicks still go through WebDriver.
   await browser.execute(node => node.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }), await element);
@@ -112,11 +125,14 @@ async function openDraft(id = mediaId) {
   const transcript = $('.study-transcript-toggle');
   await transcript.waitForClickable();
   if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
-  await clickVisible($('.transcript-tabs').$('button=Transcription'));
+  const transcriptionTab = $('.transcript-tabs').$('button=Transcription');
+  await clickVisible(transcriptionTab);
+  await expect(transcriptionTab).toHaveAttribute('aria-selected', 'true');
   const history = $('.transcription-workspace > details');
   await history.waitForDisplayed();
   if ((await history.getAttribute('open')) === null) await clickVisible(history.$('summary'));
-  await clickVisible($('button=Open earlier drafts'));
+  await clickVisible(history.$('button=Open earlier drafts'));
+  await $('.transcript-draft-view').waitForDisplayed();
   await panel().waitForDisplayed();
   await panel().$('select').waitForDisplayed();
   await scrollVisible(panel().$('select'));

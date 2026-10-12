@@ -20,7 +20,22 @@ async function installDownloads(page: Page) {
     fixture.call = async (command: string, args?: Record<string, unknown>) => {
       if (command === 'list_download_jobs') return structuredClone(downloads);
       if (command === 'cancel_download') { fixture.downloadCancelled = args?.jobId; fixture.setDownloads('failed'); return; }
-      if (command === 'start_url_import') { fixture.downloadRetried = args?.request; fixture.setDownloads('running'); return 'lesson'; }
+      if (command === 'start_url_import') {
+        fixture.downloadRetried = args?.request;
+        if (fixture.keepFailedDownload) {
+          downloads.unshift({ id: 'retried-lesson', request: args?.request, status: 'running', phase: 'downloading', storedBytes: 0, updatedAt: new Date().toISOString() });
+          changed();
+          await new Promise<void>(resolve => {
+            fixture.finishDownloadRetry = () => {
+              Object.assign(downloads[0], { status: 'completed', phase: 'completed', mediaId: 'visual-fixture' });
+              changed();
+              resolve();
+            };
+          });
+          return 'retried-lesson';
+        }
+        fixture.setDownloads('running'); return 'lesson';
+      }
       return original(command, args);
     };
   });
@@ -109,4 +124,36 @@ test('download details retain cancel, retry, completed material links, and keybo
   await open.click();
   await expect(page).toHaveURL(/\/study\/visual-fixture$/);
   await expect(dialog).toHaveCount(0);
+});
+
+for (const duringPending of [false, true]) test(`retrying as a new download retains Escape ${duringPending ? 'while the action is pending' : 'after the action completes'}`, async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await installLearningFixture(page, 'en', 'dark');
+  await page.goto('/');
+  await expect(page.locator('.continue-row').first()).toBeVisible();
+  await installDownloads(page);
+  await page.evaluate(() => {
+    const fixture = (window as any).__learningFixture;
+    fixture.keepFailedDownload = true;
+    fixture.setDownloads('failed');
+  });
+  const entrance = page.getByRole('button', { name: 'Downloads', exact: true });
+  await entrance.click();
+  const dialog = page.getByRole('dialog', { name: 'Downloads', exact: true });
+  const row = dialog.locator('[data-download-id="lesson"]');
+  const retry = row.getByRole('button', { name: 'Retry from start', exact: true });
+  await retry.click();
+  await expect(retry).toBeDisabled();
+  await expect(row).toBeFocused();
+  await expect.poll(() => page.evaluate(() => typeof (window as any).__learningFixture.finishDownloadRetry)).toBe('function');
+  if (!duringPending) {
+    await page.evaluate(() => (window as any).__learningFixture.finishDownloadRetry());
+    await expect(dialog.locator('[data-download-id="retried-lesson"]').getByRole('link', { name: 'Open media', exact: true })).toBeVisible();
+    await expect(retry).toBeEnabled();
+    await expect(row).toBeFocused();
+  }
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(entrance).toBeFocused();
+  if (duringPending) await page.evaluate(() => (window as any).__learningFixture.finishDownloadRetry());
 });

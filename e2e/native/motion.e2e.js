@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
 import { assertNativeVideoBounds, inspectNativeWindow, resizeNativeWindow, sampleNativeVideoBounds, saveNativeScreenshot } from '../support/native-window.mjs';
+import { setWebViewReducedMotion } from '../support/webview-media.mjs';
 
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
 const invoke = (command, args = {}) => browser.execute(async (name, parameters) => window.__TAURI_INTERNALS__.invoke(name, parameters), command, args);
@@ -94,6 +95,7 @@ async function releaseNativeAcknowledgements() {
 
 (process.platform === 'win32' ? describe : describe.skip)('stable layout with the real Windows video surface', () => {
   let originalSettings;
+  let mediaEmulated = false;
   before(async () => {
     await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__));
     const expectedFrontend = process.env.SURTITLE_E2E_FRONTEND_SCRIPT;
@@ -107,10 +109,17 @@ async function releaseNativeAcknowledgements() {
     assert.equal(snapshot.budget.spentUsd, 0);
     assert(snapshot.media.some(media => media.id === fixture.mediaId && media.path === fixture.mediaPath));
     originalSettings = snapshot.settings;
+    // "system" follows the OS. Hosted Windows can disable animation effects,
+    // so choose the tested WebView's media input without changing the host OS.
+    await setWebViewReducedMotion(browser, 'no-preference');
+    mediaEmulated = true;
   });
   after(async () => {
     try { await control({ action: 'pause' }); }
-    finally { if (originalSettings) await invoke('update_settings', { settings: originalSettings }); }
+    finally {
+      try { if (originalSettings) await invoke('update_settings', { settings: originalSettings }); }
+      finally { if (mediaEmulated) await setWebViewReducedMotion(browser, null); }
+    }
   });
   afterEach(async () => { await releaseNativeAcknowledgements(); });
 
@@ -123,6 +132,8 @@ async function releaseNativeAcknowledgements() {
       beforeEach(async () => {
         await invoke('update_settings', { settings: { ...originalSettings, locale, theme, sentencePause: false, motionPreference: preference } });
         await browser.refresh();
+        assert.equal(await browser.execute(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches), false,
+          'The tested WebView must retain no-preference media emulation after reload');
         await browser.waitUntil(async () => browser.execute((language, appearance, motion) => document.documentElement.lang === language
           && document.documentElement.dataset.theme === appearance && document.documentElement.dataset.motion === motion,
         locale, theme, preference === 'reduce' ? 'reduce' : 'full'));
