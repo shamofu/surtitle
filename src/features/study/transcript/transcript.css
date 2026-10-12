@@ -46,6 +46,7 @@
 .transcript-row.selected { border-left-width: 3px; }
 .segment-time > span:first-child { display: grid; place-items: center; width: 18px; height: 18px; }
 .segment-actions { align-items: center; }
+.segment-actions .segment-save { width: 36px; height: 36px; min-height: 36px; padding: 6px; }
 .segment-review-slot { display: flex; align-items: center; flex: 1; min-width: 20px; height: 36px; }
 .segment-review-mark { display: inline-flex; color: var(--warning); }
 .segment-translation, .suggestion-card p { color: var(--text); }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installLearningFixture } from './learning-fixture';
 
 test.use({ video: { mode: 'on', size: { width: 1440, height: 1000 } } });
@@ -9,6 +9,91 @@ async function openSurfaces(page: Page) {
     contentType: 'application/javascript', body: 'import "/e2e/browser/surface-fixture.tsx";',
   }));
   await page.goto('/');
+}
+
+async function recordControlFrames(control: Locator) {
+  await control.evaluate(element => {
+    const frames: { scale: number; y: number; opacity: number }[] = [];
+    const read = () => {
+      const style = getComputedStyle(element);
+      const matrix = new DOMMatrix(style.transform === 'none' ? undefined : style.transform);
+      const individualScale = style.scale === 'none' ? 1 : Number.parseFloat(style.scale);
+      const individualY = style.translate === 'none' ? 0 : Number.parseFloat(style.translate.split(/\s+/)[1] || '0');
+      return { scale: Math.hypot(matrix.m11, matrix.m12) * individualScale, y: matrix.m42 + individualY, opacity: Number(style.opacity) };
+    };
+    let frame = 0;
+    const sample = () => { frames.push(read()); frame = requestAnimationFrame(sample); };
+    sample();
+    (window as any).__motionControlProbe = { read, finish: () => { cancelAnimationFrame(frame); return frames; } };
+    // Observe press/release on the same live control; navigation/action behavior
+    // is exercised separately, and must not unmount the release endpoint here.
+    element.addEventListener('click', event => { event.preventDefault(); event.stopImmediatePropagation(); }, { once: true, capture: true });
+  });
+}
+
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(`compact controls show hover, press and release frames while reduction stays immediate (${reducedMotion})`, async ({ page }) => {
+    await page.setViewportSize({ width: 440, height: 820 });
+    await page.emulateMedia({ reducedMotion });
+    await installLearningFixture(page, 'en', 'light');
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('html')).toHaveAttribute('data-motion', reducedMotion === 'reduce' ? 'reduce' : 'full');
+    await page.evaluate(() => {
+      const fixture = (window as any).__learningFixture;
+      const original = fixture.call.bind(fixture);
+      fixture.call = (command: string, args?: Record<string, unknown>) => command === 'list_operation_progress'
+        ? Promise.resolve([{ id: 'motion-lesson', kind: 'export', label: 'Saved lesson', mediaId: 'visual-fixture', status: 'completed', phase: 'completed', updatedAt: new Date().toISOString() }])
+        : original(command, args);
+      fixture.publish('data-changed', { version: 1, epoch: 'fixture', revision: 1, domain: 'operations' });
+    });
+    const observe = async (control: Locator) => {
+      await page.mouse.move(0, 0);
+      await recordControlFrames(control);
+      const pose = () => page.evaluate(() => (window as any).__motionControlProbe.read() as { scale: number; y: number; opacity: number });
+      const stable = () => expect.poll(async () => {
+        const current = await pose();
+        return Math.abs(current.scale - 1) < .001 && Math.abs(current.y) < .1;
+      }).toBe(true);
+      await stable();
+      await control.hover();
+      if (reducedMotion === 'no-preference') await expect.poll(async () => {
+        const current = await pose();
+        return current.scale > 1.015 && current.y < -1;
+      }).toBe(true);
+      else await stable();
+      await page.mouse.down();
+      if (reducedMotion === 'no-preference') await expect.poll(async () => (await pose()).scale).toBeLessThan(.955);
+      else await stable();
+      await page.mouse.up();
+      if (reducedMotion === 'no-preference') await expect.poll(async () => {
+        const current = await pose();
+        return current.scale > 1.015 && current.y < -1;
+      }).toBe(true);
+      else await stable();
+      await page.mouse.move(0, 0);
+      await stable();
+      const frames = await page.evaluate(() => (window as any).__motionControlProbe.finish() as { scale: number; y: number; opacity: number }[]);
+      expect(frames.every(frame => frame.opacity === 1)).toBe(true);
+      if (reducedMotion === 'no-preference') {
+        expect(frames.some(frame => frame.scale > 1.015 && frame.y < -1), 'visible hover lift').toBe(true);
+        expect(frames.some(frame => frame.scale < .955), 'visible press compression').toBe(true);
+        expect(frames.filter(frame => frame.scale > .96 && frame.scale < 1.01).length, 'intermediate press/release poses').toBeGreaterThan(1);
+      } else expect(frames.every(frame => Math.abs(frame.scale - 1) < .001 && Math.abs(frame.y) < .1), 'reduced motion stays at the base pose in every frame').toBe(true);
+    };
+    await observe(page.locator('.locale-button'));
+    await observe(page.locator('.activity-trigger'));
+    await observe(page.locator('.main-nav a[href="/cards"]'));
+    await page.getByRole('button', { name: 'Open activity', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Activity', exact: true });
+    const actionLink = dialog.getByRole('link', { name: 'Open media', exact: true });
+    await expect(actionLink).toBeVisible();
+    await observe(actionLink);
+    await expect(page).toHaveURL(/\/$/);
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Open activity', exact: true })).toBeFocused();
+  });
 }
 
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {

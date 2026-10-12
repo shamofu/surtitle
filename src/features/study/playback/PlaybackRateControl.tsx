@@ -1,0 +1,242 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { animate, motionValue } from 'motion';
+import { Button, Dialog, DialogTrigger, Heading, Popover } from 'react-aria-components';
+import { Gauge, Minus, Plus, X } from 'lucide-react';
+import { useSurface } from '../../../app/runtime';
+import { motionDistances, motionDurations, motionEase, motionExitEase, useAppMotion } from '../../../shared/motion';
+import { canAnimate } from '../../../shared/motion/surfaces';
+import { MotionButton } from '../../../shared/ui';
+
+const presets = [{ value: .5, text: '0.5' }, { value: .75, text: '0.75' }, { value: 1, text: '1.0' }, { value: 1.25, text: '1.25' }, { value: 1.5, text: '1.5' }, { value: 2, text: '2.0' }, { value: 3, text: '3.0' }];
+const ticks = (value: number) => Math.max(5, Math.min(60, Math.round(value * 20)));
+
+function RatePopupContent({ open, triggerRef, onExited, children }: {
+  open: boolean;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  onExited: () => void;
+  children: ReactNode;
+}) {
+  const content = useRef<HTMLDivElement>(null);
+  const visibleProgress = useRef(0);
+  const { registerOcclusion, activeModal } = useSurface();
+  const { reducedMotion } = useAppMotion();
+  useLayoutEffect(() => {
+    const shell = content.current?.closest<HTMLElement>('.playback-rate-popover');
+    if (shell) return registerOcclusion?.(shell);
+  }, [registerOcclusion]);
+  useLayoutEffect(() => {
+    const node = content.current, shell = node?.closest<HTMLElement>('.playback-rate-popover');
+    if (!open || activeModal || !node || !shell) return;
+    const recoverFocus = () => {
+      if (shell.dataset.nativeOcclusion === 'pending' || !document.hasFocus()) return;
+      // React Aria may restore hidden-control focus to its trigger while the
+      // native clipping request is pending. Resume adjustment when that
+      // popup becomes readable without taking focus from another control.
+      if (document.activeElement !== document.body && document.activeElement !== triggerRef.current
+        && document.activeElement !== node.querySelector('[role="dialog"]')) return;
+      const target = node.querySelector<HTMLInputElement>('.playback-rate-slider');
+      target?.focus({ preventScroll: true });
+    };
+    const observer = new MutationObserver(recoverFocus);
+    observer.observe(shell, { attributes: true, attributeFilter: ['data-native-occlusion'] });
+    window.addEventListener('focus', recoverFocus);
+    node.addEventListener('focusin', recoverFocus);
+    const frame = requestAnimationFrame(recoverFocus);
+    return () => {
+      cancelAnimationFrame(frame); observer.disconnect();
+      window.removeEventListener('focus', recoverFocus); node.removeEventListener('focusin', recoverFocus);
+    };
+  }, [open, activeModal, triggerRef]);
+  useLayoutEffect(() => {
+    const node = content.current;
+    const shell = node?.closest<HTMLElement>('.playback-rate-popover');
+    if (!node || !shell) return;
+    if (!open && shell.contains(document.activeElement)) triggerRef.current?.focus({ preventScroll: true });
+    let disposed = false, started = false, finished = false;
+    let stop: (() => void) | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const render = (visible: number) => {
+      visibleProgress.current = visible;
+      node.style.opacity = String(.25 + .75 * visible);
+      node.style.transform = `translateY(${motionDistances.menu * (1 - visible)}px) scale(${.96 + .04 * visible})`;
+    };
+    render(reducedMotion ? (open ? 1 : 0) : visibleProgress.current);
+    const finish = () => {
+      if (disposed || finished) return;
+      finished = true;
+      stop?.(); stop = undefined;
+      clearTimeout(timer);
+      render(open ? 1 : 0);
+      if (!open) onExited();
+    };
+    if (reducedMotion) { finish(); return; }
+    const start = () => {
+      if (started || shell.dataset.nativeOcclusion === 'pending') return;
+      started = true;
+      if (!canAnimate(node, reducedMotion)) { finish(); return; }
+      const progress = motionValue(visibleProgress.current);
+      const unsubscribe = progress.on('change', render);
+      const destination = open ? 1 : 0;
+      const duration = (open ? motionDurations.menuOpen : motionDurations.menuClose) * Math.abs(destination - progress.get());
+      const controls = animate(progress, destination, { duration, ease: open ? motionEase : motionExitEase });
+      stop = () => { unsubscribe(); controls.stop(); progress.destroy(); };
+      timer = setTimeout(finish, duration * 1000 + 100);
+      void controls.finished.then(finish, () => {});
+    };
+    const observer = new MutationObserver(start);
+    observer.observe(shell, { attributes: true, attributeFilter: ['data-native-occlusion'] });
+    // Let native registration/positioning mark the shell before revealing its
+    // contents; only the list animates, so the opaque exclusion stays fixed.
+    const frame = requestAnimationFrame(start);
+    const settle = () => { if (document.hidden || !open) finish(); };
+    document.addEventListener('visibilitychange', settle);
+    window.addEventListener('resize', finish);
+    return () => {
+      disposed = true; cancelAnimationFrame(frame); observer.disconnect(); stop?.(); clearTimeout(timer);
+      document.removeEventListener('visibilitychange', settle); window.removeEventListener('resize', finish);
+    };
+  }, [open, onExited, reducedMotion, triggerRef]);
+  return <div ref={content} className="playback-rate-content" inert={!open} aria-hidden={!open || undefined}>{children}</div>;
+}
+
+export function PlaybackRateControl({ label, decreaseLabel, increaseLabel, closeLabel, value, disabled, isOpen, onOpenChange, onChange, triggerRef }: {
+  label: string;
+  decreaseLabel: string;
+  increaseLabel: string;
+  closeLabel: string;
+  value: number;
+  disabled: boolean;
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  onChange: (rate: number) => Promise<void>;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+}) {
+  const [retained, setRetained] = useState(isOpen);
+  const rateValueId = useId();
+  const videoPointer = useRef(false);
+  const [preview, setPreview] = useState<number | null>(null);
+  const current = useRef(ticks(value));
+  const pending = useRef<number | null>(null);
+  const sending = useRef(false);
+  const mounted = useRef(false);
+  const change = useRef(onChange);
+  change.current = onChange;
+  if (preview === null) current.current = ticks(value);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; pending.current = null; };
+  }, []);
+  useEffect(() => { if (disabled) { pending.current = null; setPreview(null); } }, [disabled]);
+  async function drain() {
+    if (sending.current) return;
+    sending.current = true;
+    try {
+      // Keep one native rate command in flight and retain only the latest drag
+      // or repeated-step target. The owner reads fresh native state before ack.
+      while (mounted.current && pending.current !== null) {
+        const next = pending.current;
+        pending.current = null;
+        await change.current(next / 20);
+      }
+    } finally {
+      sending.current = false;
+      if (mounted.current) setPreview(null);
+    }
+  }
+  function update(next: number) {
+    if (disabled) return;
+    const target = ticks(next);
+    if (target === current.current) return;
+    current.current = target;
+    setPreview(target);
+    pending.current = target;
+    void drain();
+  }
+  const displayedTicks = preview ?? ticks(value);
+  const displayed = displayedTicks / 20;
+  const finishExit = useCallback(() => setRetained(false), []);
+  const { activeModal } = useSurface();
+  const changeOpen = useCallback((next: boolean) => {
+    // The video's click handler owns dismissal. Its preceding focus transition
+    // must not close first and turn that same click into a playback toggle.
+    if (!next && videoPointer.current) return;
+    // Hiding the web popup until its native exclusion is ready can temporarily
+    // drop focus to BODY. That readiness transition is not an outside dismissal.
+    if (!next && document.activeElement === document.body
+      && document.querySelector('[data-native-popup="playback-rate"][data-native-occlusion="pending"]')) return;
+    onOpenChange(next);
+  }, [onOpenChange]);
+  useLayoutEffect(() => { if (isOpen) setRetained(true); }, [isOpen]);
+  useLayoutEffect(() => {
+    if (!isOpen || activeModal) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229 || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+      if (document.activeElement === triggerRef.current
+        && document.querySelector('[data-native-popup="playback-rate"][data-native-occlusion="pending"]')
+        && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', 'Enter', ' '].includes(event.key)) {
+        event.preventDefault(); event.stopPropagation(); return;
+      }
+      if (event.key !== 'Escape') return;
+      event.preventDefault(); event.stopPropagation();
+      triggerRef.current?.focus({ preventScroll: true });
+      onOpenChange(false);
+    };
+    document.addEventListener('keydown', escape, true);
+    const dismissOutside = (event: PointerEvent) => {
+      if (event.button !== 0 || !(event.target instanceof Node)) return;
+      videoPointer.current = event.target instanceof Element && !!event.target.closest('.player-surface-toggle');
+      if (videoPointer.current) return;
+      if (triggerRef.current?.contains(event.target)
+        || (event.target instanceof Element && event.target.closest('[data-native-popup="playback-rate"]'))) return;
+      onOpenChange(false);
+    };
+    const endPointer = () => { videoPointer.current = false; };
+    document.addEventListener('pointerdown', dismissOutside, true);
+    document.addEventListener('pointerup', endPointer, true);
+    document.addEventListener('pointercancel', endPointer, true);
+    return () => {
+      document.removeEventListener('keydown', escape, true);
+      document.removeEventListener('pointerdown', dismissOutside, true);
+      document.removeEventListener('pointerup', endPointer, true);
+      document.removeEventListener('pointercancel', endPointer, true);
+      videoPointer.current = false;
+    };
+  }, [isOpen, activeModal, onOpenChange, triggerRef]);
+  function close() { triggerRef.current?.focus({ preventScroll: true }); onOpenChange(false); }
+  return <div className="speed-select" title={`${label}: ${displayed}×`}><DialogTrigger isOpen={isOpen} onOpenChange={changeOpen}>
+    <Button className="playback-rate-trigger" aria-label={label} aria-haspopup="dialog" aria-describedby={rateValueId} isDisabled={disabled} ref={triggerRef}>
+      <Gauge size={18} aria-hidden="true" /><span id={rateValueId}>{displayed}×</span>
+    </Button>
+    <Popover className="playback-rate-popover" placement="top end" offset={6} isNonModal
+      isExiting={!isOpen && retained} data-native-popup="playback-rate" data-state={isOpen ? 'open' : 'closing'}>
+      <RatePopupContent open={isOpen} triggerRef={triggerRef} onExited={finishExit}>
+        <Dialog className="playback-rate-dialog" aria-label={label}>
+          <div className="playback-rate-header">
+            <MotionButton className="playback-rate-close" aria-label={closeLabel} onClick={close}><X size={17} aria-hidden="true" /></MotionButton>
+            <Heading slot="title" className="playback-rate-heading">{label}</Heading>
+          </div>
+          <div className="playback-rate-body">
+            <output className="playback-rate-value" aria-hidden="true">{displayed.toFixed(2)}×</output>
+            <div className="playback-rate-adjustment">
+              <MotionButton className="playback-rate-step" aria-label={decreaseLabel} disabled={disabled} aria-disabled={displayedTicks <= 5}
+                onClick={() => update((current.current - 1) / 20)}><Minus size={18} aria-hidden="true" /></MotionButton>
+              <input className="playback-rate-slider" type="range" min="0.25" max="3" step="0.05" value={displayed}
+                aria-label={label} aria-valuetext={`${displayed.toFixed(2)}×`} disabled={disabled} autoFocus
+                style={{ '--rate-progress': `${(displayedTicks - 5) / 55 * 100}%` } as CSSProperties}
+                onChange={event => update(event.currentTarget.valueAsNumber)} />
+              <MotionButton className="playback-rate-step" aria-label={increaseLabel} disabled={disabled} aria-disabled={displayedTicks >= 60}
+                onClick={() => update((current.current + 1) / 20)}><Plus size={18} aria-hidden="true" /></MotionButton>
+            </div>
+            <div className="playback-rate-presets" role="group" aria-label={label}>
+              {[presets.slice(0, 3), presets.slice(3)].map((row, index) => <div className={`playback-rate-preset-row ${index ? 'fast' : ''}`} key={index}>
+                {row.map(preset => <MotionButton className="playback-rate-preset" key={preset.text} aria-pressed={displayedTicks === ticks(preset.value)}
+                  disabled={disabled} onClick={() => update(preset.value)}>{preset.text}</MotionButton>)}
+              </div>)}
+            </div>
+          </div>
+        </Dialog>
+      </RatePopupContent>
+    </Popover>
+  </DialogTrigger></div>;
+}

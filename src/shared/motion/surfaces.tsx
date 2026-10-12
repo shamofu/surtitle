@@ -37,7 +37,9 @@ export function animateEntrance(element: HTMLElement, preset: MotionPreset) {
   for (const [active, cancel] of entrances) {
     if (element.contains(active)) cancel();
   }
-  const { duration, x, y } = motionPresets[preset];
+  const { duration, x: distance, y } = motionPresets[preset];
+  const direction = preset === 'page' ? element.closest('[data-page-direction]')?.getAttribute('data-page-direction') : undefined;
+  const x = direction === 'backward' ? -distance : direction === 'none' ? 0 : distance;
   const original = { opacity: element.style.opacity, transform: element.style.transform };
   // Own the value rather than a cached DOM visual element. Unsubscribing before
   // stop prevents Motion's queued frame from restoring an interrupted pose.

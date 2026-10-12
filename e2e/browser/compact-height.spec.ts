@@ -3,7 +3,9 @@ import { expect, test, type Page } from '@playwright/test';
 import { installLearningFixture } from './learning-fixture';
 
 async function expectPrimaryControlsInside(page: Page) {
-  const controls = await page.locator('.player-controls button, .player-controls select, .player-controls input, .caption-controls button').evaluateAll(elements => elements.map(element => {
+  // React Aria keeps an aria-hidden native select for form/autofill support.
+  // Measure the visible rate trigger and all other user-facing controls.
+  const controls = await page.locator('.player-controls button, .player-controls select, .player-controls input, .caption-controls button').evaluateAll(elements => elements.filter(element => !element.closest('[aria-hidden="true"]')).map(element => {
     const bounds = element.getBoundingClientRect();
     return { name: element.getAttribute('aria-label') || element.textContent, top: bounds.top, bottom: bounds.bottom,
       left: bounds.left, right: bounds.right, width: bounds.width, height: bounds.height, viewportWidth: innerWidth, viewportHeight: innerHeight };

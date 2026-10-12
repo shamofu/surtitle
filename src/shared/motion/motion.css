@@ -25,6 +25,23 @@
 .notification-portal { display: contents; }
 .toast-slot { min-width: 0; }
 .toast-slot > .toast { width: 100%; }
+/* Native controls and navigation links share the press response of MotionButton. */
+:where(button, a, summary):not([data-motion-control]):not(.segment-text):not(:disabled):not([aria-disabled='true']) {
+  transition: background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease),
+    scale var(--motion-release) var(--motion-ease), translate var(--motion-release) var(--motion-ease);
+}
+@media (hover: hover) {
+  :root[data-motion='full'] :where(button, a, summary):not([data-motion-control]):not(.segment-text):not(:disabled):not([aria-disabled='true']):hover {
+    scale: 1.025;
+    translate: 0 -2px;
+  }
+}
+:root[data-motion='full'] :where(button, a, summary):not([data-motion-control]):not(.segment-text):not(:disabled):not([aria-disabled='true']):active {
+  scale: .94;
+  translate: 0 0;
+  transition-duration: var(--motion-press);
+}
 details[data-motion-state='exiting'] > :not(summary) { pointer-events: none; }
 :root[data-motion='reduce'] *,
 :root[data-motion='reduce'] *::before,

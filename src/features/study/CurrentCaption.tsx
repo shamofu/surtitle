@@ -51,6 +51,7 @@ export function CurrentCaption({
   const sourceScroll = useRef<HTMLDivElement>(null);
   const translationScroll = useRef<HTMLDivElement>(null);
   const handled = useRef(false);
+  const previousTimeId = useId();
   const nextTimeId = useId();
   const gapSource = gapMode === 'review' ? previous : next;
   const displayed: CaptionSource | undefined = gestureSource || (active ? { cue: active, context: 'active' }
@@ -58,6 +59,8 @@ export function CurrentCaption({
   const source = displayed?.cue;
   const previewing = displayed?.context === 'preview';
   const replayLabel = previewing ? t('この字幕を再生', 'Play this subtitle') : t('この字幕をもう一度', 'Replay this subtitle');
+  const previousTimeLabel = previous ? t(`前の字幕 ${timestamp(previous.startMs)}`, `Previous subtitle ${timestamp(previous.startMs)}`)
+    : t('前の字幕はありません', 'No previous subtitle');
   const nextTimeLabel = next ? t(`次の字幕 ${timestamp(next.startMs)}`, `Next subtitle ${timestamp(next.startMs)}`)
     : t('この先の字幕はまだありません', 'No further subtitles yet');
   const translationOpen = !!source && !draftMode && showTranslation;
@@ -194,16 +197,17 @@ export function CurrentCaption({
         </div>
         <div className="caption-navigation-slot">
           <MotionRegion mode="status" open={hasTimedSubtitles && !draftMode} className="caption-navigation" role="group" aria-label={t('字幕の再生操作', 'Subtitle playback')}>
-            <div className="caption-playback-action">
-            <span className="caption-navigation-note" aria-hidden="true" />
-            <Button variant="ghost" aria-label={t('前の字幕', 'Previous subtitle')} disabled={!enabled || !hasPrevious} onClick={onPrevious}>
+            <div className="caption-playback-action caption-previous-action">
+            <span className="caption-navigation-note caption-context-time" aria-label={previousTimeLabel}>
+              <span id={previousTimeId} className="sr-only">{previousTimeLabel}</span>
+              <span aria-hidden="true">{previous ? timestamp(previous.startMs) : '—'}</span>
+            </span>
+            <Button variant="ghost" aria-label={t('前の字幕', 'Previous subtitle')} aria-describedby={previousTimeId} disabled={!enabled || !hasPrevious} onClick={onPrevious}>
               <ChevronLeft size={16} /><span className="caption-full-label">{t('前の字幕', 'Previous subtitle')}</span><span className="caption-short-label" aria-hidden="true">{t('前の字幕', 'Previous')}</span>
             </Button>
             </div>
             <div className="caption-playback-action caption-replay-action">
-            <span className="caption-navigation-note caption-context-label" title={displayed?.context === 'review' ? t('前の字幕を復習', 'Review the previous subtitle') : displayed?.context === 'preview' ? t('次の字幕を予習', 'Preview the next subtitle') : undefined}>
-              {displayed?.context === 'review' ? t('復習中', 'Reviewing') : displayed?.context === 'preview' ? t('予習中', 'Previewing') : ''}
-            </span>
+            <span className="caption-navigation-note" aria-hidden="true" />
             <Button variant="secondary" aria-label={replayLabel} disabled={!enabled || !source} onClick={() => source && onReplay(source)}>
               {previewing ? <Play size={16} /> : <RotateCcw size={16} />}
               <span className="caption-full-label" aria-hidden="true"><span className="caption-replay-copy">

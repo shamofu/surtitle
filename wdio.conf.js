@@ -66,6 +66,24 @@ export const config = {
           pageContent: content ? { scrollTop: content.scrollTop, rect: rectangle(content) } : null,
           nativePlayerViewport: rectangle(document.querySelector('[data-testid="native-player-viewport"]')),
           dialogPresent: !!document.querySelector('[role="dialog"], dialog[open], [aria-modal="true"]'),
+          documentHasFocus: document.hasFocus(),
+          activeElement: document.activeElement ? {
+            tag: document.activeElement.tagName,
+            role: document.activeElement.getAttribute('role'),
+            label: document.activeElement.getAttribute('aria-label'),
+            key: document.activeElement.getAttribute('data-key'),
+          } : null,
+          playbackRatePopup: (() => {
+            const popup = document.querySelector('.playback-rate-popover');
+            return popup ? {
+              rect: rectangle(popup), state: popup.getAttribute('data-state'),
+              nativeOcclusion: popup.getAttribute('data-native-occlusion'),
+              sliderValue: popup.querySelector('.playback-rate-slider')?.value,
+              selectedPreset: popup.querySelector('.playback-rate-preset[aria-pressed="true"]')?.textContent,
+              sliderHasFocus: popup.querySelector('.playback-rate-slider') === document.activeElement,
+              widgetHasFocus: popup.contains(document.activeElement),
+            } : null;
+          })(),
         };
       });
     } catch (error) { diagnostics.pageError = reportError('page capture failed', error); }

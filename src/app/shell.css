@@ -34,6 +34,9 @@
 .locale-button:hover { color: var(--text); background: var(--surface-hover); }
 .running-label { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); white-space: nowrap; margin-right: 12px; }
 .page-content { flex: 1; overflow: auto; padding: 24px 32px 32px; scroll-behavior: auto; min-height: 0; }
+/* Page slides may cross the stage edge without opening a horizontal scroll lane.
+   Keep this more specific than feature overflow rules; vertical scrolling stays local. */
+main.page-content[data-page-direction] { overflow-x: hidden; }
 .page-content > div { max-width: 1440px; margin: 0 auto; }
 .app-notifications { position: fixed; right: 20px; bottom: 16px; z-index: 50; width: min(420px, calc(100vw - 40px)); pointer-events: none; }
 .app-notifications .toast-stack {

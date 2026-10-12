@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { StudyRegion, useStudyPresence, useStudyRegionActive } from '../features/study/StudyPresence';
+import { motionDurations } from '../shared/motion';
 
 type PendingMotion = { duration: number; frames?: Record<string, string[]>; stopped: boolean; set(value: number): void; complete(): void; obsoleteComplete(): void };
 const fixture = vi.hoisted(() => ({ reducedMotion: false, animations: [] as PendingMotion[] }));
@@ -66,10 +67,10 @@ it('deactivates a closing drawer immediately but retains its draft until the sli
   expect(field).toHaveValue('edited phrase');
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   expect(screen.getByTestId('dock')).toHaveAttribute('data-moving', 'true');
-  expect(latest().duration).toBe(.1);
+  expect(latest().duration).toBe(.24);
   act(() => latest().complete());
   expect(screen.getByTestId('dock')).toHaveStyle({ width: '364px' });
-  expect(latest().duration).toBe(.1);
+  expect(latest().duration).toBe(.24);
   act(() => latest().complete());
   expect(region).toHaveAttribute('hidden');
   expect(field).not.toBeInTheDocument();
@@ -87,7 +88,7 @@ it('reverses from the visible position and ignores the obsolete completion', () 
   view.rerender(<Panel open><input aria-label="Draft" defaultValue="日本語" /></Panel>);
   expect(panel.style.transform).toBe(before);
   expect(closing.stopped).toBe(true);
-  expect(latest().duration).toBeCloseTo(.12 * .4);
+  expect(latest().duration).toBeCloseTo(.24 * .4);
   act(() => closing.obsoleteComplete());
   expect(screen.getByTestId('dock')).toHaveAttribute('data-open', 'true');
   act(() => latest().complete());
@@ -120,7 +121,7 @@ it('resizes the desktop dock with the rail anchored before revealing the panel',
   view.rerender(<Panel open><input aria-label="Draft" /></Panel>);
   expect(dock).toHaveStyle({ width: '44px' });
   expect(panel).toHaveStyle({ visibility: 'hidden' });
-  expect(latest().duration).toBe(.16);
+  expect(latest().duration).toBe(.30);
   act(() => latest().set(.5));
   expect(dock).toHaveStyle({ width: '204px' });
   expect(rail).toHaveStyle({ transform: 'translateX(160px)' });
@@ -128,7 +129,7 @@ it('resizes the desktop dock with the rail anchored before revealing the panel',
   act(() => latest().complete());
   expect(dock).toHaveStyle({ width: '364px' });
   expect(panel).toHaveStyle({ visibility: 'visible' });
-  expect(latest().duration).toBe(.12);
+  expect(latest().duration).toBe(.24);
   act(() => latest().set(.5));
   expect(dock).toHaveStyle({ width: '364px' });
   expect(rail).toHaveStyle({ transform: 'translateX(160px)' });
@@ -145,7 +146,7 @@ it('reverses a partially resized dock without exposing its hidden panel', () => 
   view.rerender(<Panel open={false}><input aria-label="Draft" /></Panel>);
   expect(opening.stopped).toBe(true);
   expect(screen.getByTestId('dock')).toHaveStyle({ width: '172px' });
-  expect(latest().duration).toBeCloseTo(.1 * .4);
+  expect(latest().duration).toBeCloseTo(.24 * .4);
   expect(document.querySelector('aside')).toHaveStyle({ visibility: 'hidden' });
   act(() => opening.obsoleteComplete());
   act(() => latest().complete());
@@ -191,11 +192,11 @@ it('reopens during the closing resize from the current width before revealing', 
   view.rerender(<Panel open><input aria-label="Draft" /></Panel>);
   expect(shrinking.stopped).toBe(true);
   expect(screen.getByTestId('dock')).toHaveStyle({ width: '236px' });
-  expect(latest().duration).toBeCloseTo(.16 * .4);
+  expect(latest().duration).toBeCloseTo(.30 * .4);
   expect(document.querySelector('aside')).toHaveStyle({ visibility: 'hidden' });
   act(() => shrinking.obsoleteComplete());
   act(() => latest().complete());
-  expect(latest().duration).toBe(.12);
+  expect(latest().duration).toBe(.24);
   act(() => latest().complete());
   expect(screen.getByTestId('dock')).toHaveStyle({ width: '364px' });
   expect(document.querySelector('aside')).not.toHaveAttribute('hidden');
@@ -207,7 +208,7 @@ it('preserves the stacked slide without changing player layout width', () => {
   screen.getByTestId('dock').scrollIntoView = vi.fn();
   view.rerender(<Panel open><input aria-label="Draft" /></Panel>);
   expect(screen.getByTestId('dock').style.width).toBe('');
-  expect(latest().duration).toBe(.28);
+  expect(latest().duration).toBe(.40);
   act(() => latest().set(.5));
   expect(document.querySelector('aside')).toHaveStyle({ transform: 'translateY(50%)' });
   act(() => latest().complete());
@@ -245,9 +246,9 @@ it('retains the outgoing tab inert for the overlap, then releases its content', 
   expect(screen.queryByRole('button')).not.toBeInTheDocument();
   expect(region).toHaveAttribute('data-motion-state', 'exiting');
   expect(region).toHaveAttribute('inert');
-  expect(latest().duration).toBe(.22);
+  expect(latest().duration).toBe(.36);
   expect(latest().frames?.opacity).toEqual([1, 1]);
-  expect(latest().frames?.transform.at(-1)).toBe('translateX(-16px)');
+  expect(latest().frames?.transform.at(-1)).toBe('translateX(-32px)');
   act(() => latest().complete());
   expect(screen.queryByText('Old tab')).not.toBeInTheDocument();
   expect(region).toHaveAttribute('hidden');
@@ -264,7 +265,7 @@ it.each(['reduce', 'hidden', 'resize', 'timeout'])('settles a closing drawer on 
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     fireEvent(document, new Event('visibilitychange'));
   } else if (reason === 'resize') fireEvent(window, new Event('resize'));
-  else act(() => vi.advanceTimersByTime(600));
+  else act(() => vi.advanceTimersByTime((motionDurations.studySlideOut + motionDurations.studyCollapse) * 1000 + 201));
   expect(document.querySelector('.study-motion-region')).toHaveAttribute('hidden');
   expect(screen.getByTestId('dock')).toHaveAttribute('data-moving', 'false');
 });

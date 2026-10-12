@@ -69,11 +69,11 @@ it('reverses disclosure height from the current frame and preserves its live for
   expect(host).toHaveAttribute('inert');
   expect(host).not.toHaveAttribute('hidden');
   expect(animate.mock.calls.at(-1)![0].get()).toBe(240);
-  expect(animate).toHaveBeenLastCalledWith(expect.anything(), 0, expect.objectContaining({ duration: .18 }));
+  expect(animate).toHaveBeenLastCalledWith(expect.anything(), 0, expect.objectContaining({ duration: .26 }));
   bounds.mockReturnValueOnce(new DOMRect(0, 0, 300, 80));
   view.rerender(region(true));
   expect(animate.mock.calls.at(-1)![0].get()).toBe(80);
-  expect(animate).toHaveBeenLastCalledWith(expect.anything(), 240, expect.objectContaining({ duration: .24 }));
+  expect(animate).toHaveBeenLastCalledWith(expect.anything(), 240, expect.objectContaining({ duration: .34 }));
   act(() => vi.advanceTimersByTime(1000));
   expect(screen.getByLabelText('Draft')).toBe(input);
   expect(host).not.toHaveAttribute('hidden');
@@ -120,7 +120,7 @@ it('reveals measured native details and allows synchronous validation during an 
   vi.spyOn(details, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 300, details.open ? 240 : 40));
   fireEvent.click(summary);
   expect(animate.mock.calls.at(-1)![0].get()).toBe(40);
-  expect(animate).toHaveBeenLastCalledWith(expect.anything(), 240, expect.objectContaining({ duration: .24 }));
+  expect(animate).toHaveBeenLastCalledWith(expect.anything(), 240, expect.objectContaining({ duration: .34 }));
   const input = screen.getByLabelText('Required field');
   input.focus();
   fireEvent.click(summary);
@@ -206,12 +206,12 @@ it('settles a page entrance on reduction and never replays it when motion return
   act(() => vi.advanceTimersToNextFrame());
   expect(animate).toHaveBeenCalledWith(
     expect.anything(), 1,
-    expect.objectContaining({ duration: .22 }),
+    expect.objectContaining({ duration: .38 }),
   );
   const progress = animate.mock.calls.at(-1)![0];
   act(() => progress.set(.5));
   expect(screen.getByText('Page').style.opacity).toBe('0.5');
-  expect(screen.getByText('Page').style.transform).toBe('translate(0px, 4px)');
+  expect(screen.getByText('Page').style.transform).toBe('translate(24px, 0px)');
   reduce(true);
   expect(animate.mock.results[1].value.stop).toHaveBeenCalledOnce();
   act(() => progress.set(.8));

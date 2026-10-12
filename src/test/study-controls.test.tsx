@@ -106,7 +106,7 @@ describe('player loading and recovery', () => {
     expect(openSettings).toHaveBeenCalledOnce();
     expect(screen.getByRole('button', { name: 'Back 5 seconds' })).toHaveTextContent('5s');
     expect(screen.getByRole('button', { name: 'Forward 5 seconds' })).toHaveTextContent('5s');
-    expect(screen.getByText('Speed')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Playback speed' })).toBeVisible();
   });
 
   it('shows a load failure inline and retries only once while pending', async () => {

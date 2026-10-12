@@ -777,6 +777,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
               ref={transcriptToggle}
               type="button"
               className="study-transcript-toggle"
+              hoverMotion={false}
               aria-expanded={panel === 'transcript'}
               aria-controls="study-companion"
               title={panel === 'transcript' ? t('字幕パネルを閉じる', 'Close transcript panel') : t('字幕パネルを開く', 'Open transcript panel')}

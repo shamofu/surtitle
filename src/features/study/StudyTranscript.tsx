@@ -531,15 +531,14 @@ export function StudyTranscript({
                                       className="segment-review-mark" title={t('要確認', 'Needs review')} aria-label={t('要確認', 'Needs review')} role="note"
                                     ><TriangleAlert size={16} /></span>}
                                   </span>
-                                  <Button
-                                    variant="ghost"
-                                    aria-label={t('フレーズを確認・保存', 'Review and save phrase')}
+                                  <IconButton
+                                    className="segment-save"
+                                    label={t('フレーズを確認・保存', 'Review and save phrase')}
                                     disabled={!ready || !subtitleUsable(segment)}
                                     onClick={() => onInspect(segment, '', undefined, true)}
                                   >
-                                    <BookmarkPlus size={16} />
-                                    {t('確認・保存', 'Review and save')}
-                                  </Button>
+                                    <BookmarkPlus size={16} aria-hidden="true" />
+                                  </IconButton>
                                   <AnimatedDetails className="segment-options" data-motion-geometry="stable" open={openMenu === segment.id}
                                     onToggle={event => placeMenu(event.currentTarget)}
                                     onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpenMenu(undefined); }}

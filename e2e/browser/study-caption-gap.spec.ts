@@ -17,9 +17,9 @@ async function installGaps(page: Page, locale: 'ja' | 'en' = 'en', longText = fa
   await expect(page.getByRole('slider', { name: locale === 'ja' ? '再生位置' : 'Playback position' })).toBeEnabled();
 }
 
-async function seek(page: Page, position: number) {
+async function seek(page: Page, position: number, locale: 'ja' | 'en' = 'en') {
   await page.evaluate(value => (window as any).__learningFixture.call('player_control', { request: { action: 'seek', value } }), position);
-  await expect(page.getByRole('slider', { name: 'Playback position' })).toHaveValue(String(position));
+  await expect(page.getByRole('slider', { name: locale === 'ja' ? '再生位置' : 'Playback position' })).toHaveValue(String(position));
 }
 
 async function setGapMode(page: Page, mode: 'review' | 'preview', locale: 'ja' | 'en' = 'en') {
@@ -36,7 +36,10 @@ test('gap mode persists and meaning, translation and replay use the displayed pa
   await installGaps(page);
   const caption = page.locator('.current-caption');
   await expect(caption.locator('.current-caption-text')).toHaveText(reviewText);
-  await expect(caption).toContainText('Reviewing');
+  await expect(caption.locator('.caption-replay-action .caption-navigation-note')).toBeEmpty();
+  await expect(caption.locator('.caption-replay-action .caption-navigation-note')).toHaveAttribute('aria-hidden', 'true');
+  await expect(caption.locator('.caption-previous-action')).toContainText('1:10');
+  await expect(caption.getByRole('button', { name: 'Previous subtitle', exact: true })).toHaveAccessibleDescription('Previous subtitle 1:10');
   await expect(caption.locator('.caption-next-action')).toContainText('1:20');
   await expect(caption.getByRole('button', { name: 'Next subtitle', exact: true })).toHaveAccessibleDescription('Next subtitle 1:20');
   await caption.getByRole('button', { name: 'Show translation', exact: true }).click();
@@ -59,14 +62,15 @@ test('gap mode persists and meaning, translation and replay use the displayed pa
     .toEqual({ action: 'source-seek', startMs: 80000, endMs: 81000 });
   await page.reload();
   await expect(caption.locator('.current-caption-text')).toHaveText(previewText);
-  await expect(caption).toContainText('Previewing');
+  await expect(caption.locator('.caption-replay-action .caption-navigation-note')).toBeEmpty();
   await page.getByRole('button', { name: 'Playback settings', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Playback settings', exact: true }).getByLabel('Between captions')).toHaveValue('preview');
 });
 
 for (const locale of ['en', 'ja'] as const) {
-  test(`hour-long skip timestamps never resize navigation buttons ${locale}`, async ({ page }) => {
-    await page.setViewportSize({ width: 1024, height: 700 });
+  for (const viewport of [{ width: 1024, height: 700 }, { width: 440, height: 620 }]) {
+  test(`hour-long skip timestamps never resize navigation buttons ${locale} ${viewport.width}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await installLearningFixture(page, locale, 'light', { segmentCount: 12, segmentOverrides: {
       10: { endMs: 71000 }, 11: { startMs: 68461000, endMs: 68462000 },
@@ -77,12 +81,14 @@ for (const locale of ['en', 'ja'] as const) {
       fixture.snapshot.media[0].durationMs = 68463000;
     });
     await page.goto('/study/visual-fixture');
-    await page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true }).click();
-    await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
+    if (viewport.width >= 1000) {
+      await page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true }).click();
+      await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
+    }
     await setGapMode(page, 'preview', locale);
     const next = page.getByRole('button', { name: locale === 'ja' ? '次の字幕' : 'Next subtitle', exact: true });
     await expect(next).toHaveAccessibleDescription(locale === 'ja' ? '次の字幕 19:01:01' : 'Next subtitle 19:01:01');
-    const note = page.locator('.caption-context-time');
+    const note = page.locator('.caption-next-action .caption-context-time');
     expect(await note.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     const read = () => page.locator('.caption-navigation button').evaluateAll(elements => elements.map(element => {
       const { x, y, width, height } = element.getBoundingClientRect();
@@ -96,7 +102,19 @@ for (const locale of ['en', 'ja'] as const) {
     after.forEach((bounds, index) => bounds.forEach((value, axis) => expect(Math.abs(value - before[index][axis])).toBeLessThan(1)));
     expect(await page.evaluate(() => (window as any).__learningFixture.calls
       .filter((call: any) => call.command === 'player_control' && call.args.request.action === 'seek').at(-1).args.request.value)).toBe(68461000);
+    await seek(page, 68462500, locale);
+    const previous = page.getByRole('button', { name: locale === 'ja' ? '前の字幕' : 'Previous subtitle', exact: true });
+    await expect(previous).toHaveAccessibleDescription(locale === 'ja' ? '前の字幕 19:01:01' : 'Previous subtitle 19:01:01');
+    const previousNote = page.locator('.caption-previous-action .caption-context-time');
+    await expect(previousNote).toContainText('19:01:01');
+    expect(await previousNote.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    const lastGap = await read();
+    lastGap.forEach((bounds, index) => bounds.forEach((value, axis) => expect(Math.abs(value - before[index][axis])).toBeLessThan(1)));
+    await previous.click();
+    expect(await page.evaluate(() => (window as any).__learningFixture.calls
+      .filter((call: any) => call.command === 'player_control' && call.args.request.action === 'seek').at(-1).args.request.value)).toBe(68461000);
   });
+  }
   for (const viewport of [{ width: 1440, height: 900 }, { width: 920, height: 620 }]) {
     test(`caption controls keep their bounds across preview, active and review with long text ${locale} ${viewport.width}x${viewport.height}`, async ({ page }) => {
       await page.setViewportSize(viewport);
@@ -132,36 +150,46 @@ for (const locale of ['en', 'ja'] as const) {
       await expect(caption.getByRole('button', { name: replay, exact: true })).toBeEnabled();
       await setGapMode(page, 'review', locale);
       await assertBounds(82000);
-      await expect(caption).toContainText(locale === 'ja' ? '復習中' : 'Reviewing');
+      await expect(caption.locator('.caption-replay-action .caption-navigation-note')).toBeEmpty();
       await expect(caption.getByRole('button', { name: replay, exact: true })).toBeEnabled();
     });
   }
 }
 
-test('first and last gaps retain their chosen mode and navigation follows the playback position', async ({ page }) => {
-  await installGaps(page);
+for (const locale of ['en', 'ja'] as const) test(`first and last gaps retain their chosen mode and navigation follows the playback position ${locale}`, async ({ page }) => {
+  const text = (ja: string, en: string) => locale === 'ja' ? ja : en;
+  await installGaps(page, locale);
   const caption = page.locator('.current-caption');
-  await seek(page, 0);
-  await expect(caption).toContainText('The first subtitle starts at 0:01');
+  const previous = caption.getByRole('button', { name: text('前の字幕', 'Previous subtitle'), exact: true });
+  const next = caption.getByRole('button', { name: text('次の字幕', 'Next subtitle'), exact: true });
+  await seek(page, 0, locale);
+  await expect(caption).toContainText(text('最初の字幕は 0:01 から', 'The first subtitle starts at 0:01'));
   await expect(caption.locator('.current-caption-text')).toHaveCount(0);
-  await expect(caption.getByRole('button', { name: 'Previous subtitle', exact: true })).toBeDisabled();
-  await caption.getByRole('button', { name: 'Go to first subtitle', exact: true }).click();
-  await expect(page.getByRole('slider', { name: 'Playback position' })).toHaveValue('1000');
+  await expect(previous).toBeDisabled();
+  await expect(previous).toHaveAccessibleDescription(text('前の字幕はありません', 'No previous subtitle'));
+  await expect(caption.locator('.caption-previous-action .caption-context-time')).toContainText('—');
+  await caption.getByRole('button', { name: text('最初の字幕へ', 'Go to first subtitle'), exact: true }).click();
+  await expect(page.getByRole('slider', { name: text('再生位置', 'Playback position') })).toHaveValue('1000');
   await expect(caption.locator('.current-caption-text')).toHaveText('The first timed passage.');
-  await seek(page, 76000);
-  await setGapMode(page, 'preview');
-  await caption.getByRole('button', { name: 'Previous subtitle', exact: true }).click();
-  await expect(page.getByRole('slider', { name: 'Playback position' })).toHaveValue('70000');
+  await expect(previous).toHaveAccessibleDescription(text('前の字幕はありません', 'No previous subtitle'));
+  await seek(page, 76000, locale);
+  await setGapMode(page, 'preview', locale);
+  await expect(previous).toHaveAccessibleDescription(text('前の字幕 1:10', 'Previous subtitle 1:10'));
+  await previous.click();
+  await expect(page.getByRole('slider', { name: text('再生位置', 'Playback position') })).toHaveValue('70000');
   await expect(caption.locator('.current-caption-text')).toHaveText(reviewText);
-  await seek(page, 76000);
-  await caption.getByRole('button', { name: 'Next subtitle', exact: true }).click();
-  await expect(page.getByRole('slider', { name: 'Playback position' })).toHaveValue('80000');
-  await seek(page, 82000);
-  await expect(caption).toContainText('No further subtitles yet');
+  await seek(page, 76000, locale);
+  await next.click();
+  await expect(page.getByRole('slider', { name: text('再生位置', 'Playback position') })).toHaveValue('80000');
+  await seek(page, 82000, locale);
+  await expect(caption).toContainText(text('この先の字幕はまだありません', 'No further subtitles yet'));
   await expect(caption.locator('.current-caption-text')).toHaveCount(0);
-  await expect(caption.getByRole('button', { name: 'Next subtitle', exact: true })).toBeDisabled();
-  await caption.getByRole('button', { name: 'Go to previous subtitle', exact: true }).click();
-  await expect(page.getByRole('slider', { name: 'Playback position' })).toHaveValue('80000');
+  await expect(next).toBeDisabled();
+  await expect(next).toHaveAccessibleDescription(text('この先の字幕はまだありません', 'No further subtitles yet'));
+  await expect(caption.locator('.caption-next-action .caption-context-time')).toContainText('—');
+  await expect(previous).toHaveAccessibleDescription(text('前の字幕 1:20', 'Previous subtitle 1:20'));
+  await caption.getByRole('button', { name: text('前の字幕へ', 'Go to previous subtitle'), exact: true }).click();
+  await expect(page.getByRole('slider', { name: text('再生位置', 'Playback position') })).toHaveValue('80000');
 });
 
 for (const locale of ['en', 'ja'] as const) {
@@ -190,11 +218,17 @@ for (const locale of ['en', 'ja'] as const) {
           }, textSelector);
           expect(line.height + 1).toBeGreaterThanOrEqual(line.required);
         }
-        const nextButton = caption.getByRole('button', { name: locale === 'ja' ? '次の字幕' : 'Next subtitle', exact: true });
-        const note = await caption.locator('.caption-context-time').boundingBox();
-        const button = await nextButton.boundingBox();
-        expect(note!.y + note!.height).toBeLessThanOrEqual(button!.y + 1);
-        expect(Math.abs(note!.x + note!.width / 2 - button!.x - button!.width / 2)).toBeLessThan(1);
+        for (const [side, label, description] of [
+          ['previous', locale === 'ja' ? '前の字幕' : 'Previous subtitle', locale === 'ja' ? '前の字幕 1:10' : 'Previous subtitle 1:10'],
+          ['next', locale === 'ja' ? '次の字幕' : 'Next subtitle', locale === 'ja' ? '次の字幕 1:20' : 'Next subtitle 1:20'],
+        ] as const) {
+          const control = caption.getByRole('button', { name: label, exact: true });
+          await expect(control).toHaveAccessibleDescription(description);
+          const note = await caption.locator(`.caption-${side}-action .caption-context-time`).boundingBox();
+          const button = await control.boundingBox();
+          expect(note!.y + note!.height).toBeLessThanOrEqual(button!.y + 1);
+          expect(Math.abs(note!.x + note!.width / 2 - button!.x - button!.width / 2)).toBeLessThan(1);
+        }
         const panes = await Promise.all([source.boundingBox(), translation.boundingBox()]);
         const navigation = await caption.locator('.caption-navigation').boundingBox();
         expect(Math.max(...panes.map(bounds => bounds!.y + bounds!.height))).toBeLessThanOrEqual(navigation!.y + 1);
@@ -217,7 +251,9 @@ for (const locale of ['en', 'ja'] as const) {
               range.setEnd(paragraph.firstChild!, 1);
               const glyph = range.getBoundingClientRect();
               bounds.push([glyph.x, glyph.y, glyph.width, glyph.height]);
-              return { bounds, scroll: selectors.slice(0, 2).map(selector => document.querySelector(selector)!.scrollTop) };
+              const replayNote = document.querySelector('.caption-replay-action .caption-navigation-note')!;
+              return { bounds, scroll: selectors.slice(0, 2).map(selector => document.querySelector(selector)!.scrollTop),
+                replayNote: replayNote.textContent, replayNoteHidden: replayNote.getAttribute('aria-hidden') };
             };
             const before = read();
             await (window as any).__learningFixture.call('player_control', { request: { action: 'seek', value: position } });
@@ -231,6 +267,8 @@ for (const locale of ['en', 'ja'] as const) {
           expect(observed.before.scroll).toEqual([80, 60]);
           for (const frame of observed.frames) {
             expect(frame.scroll).toEqual(observed.before.scroll);
+            expect(frame.replayNote).toBe('');
+            expect(frame.replayNoteHidden).toBe('true');
             expect(frame.bounds).toHaveLength(observed.before.bounds.length);
             frame.bounds.forEach((bounds, index) => bounds.forEach((value, axis) => {
               expect(Math.abs(value - observed.before.bounds[index][axis]), 'reading origin and controls stay fixed').toBeLessThan(1);

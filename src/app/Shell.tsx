@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { Link, Outlet } from '@tanstack/react-router';
+import { useState } from 'react';
+import { Link, Outlet, useRouterState } from '@tanstack/react-router';
 import { BookOpen, CircleHelp, Layers3, LibraryBig, Moon, Settings2, Sun } from 'lucide-react';
 import { useSnapshot, useAppearance } from './runtime';
 import { nativeAvailable } from '../shared/native/transport';
@@ -10,7 +11,23 @@ import { ActivityButton } from './ActivityModal';
 import { AnimatedValue, MotionSwap } from '../shared/motion';
 import { SelectionIndicator } from '../shared/motion/SelectionIndicator';
 
+const mainPageOrder = ['/', '/cards', '/review', '/settings'];
+type PageDirection = 'none' | 'forward' | 'backward';
+function usePageDirection(pathname: string) {
+  const [navigation, setNavigation] = useState({ pathname, direction: 'none' as PageDirection });
+  if (navigation.pathname !== pathname) {
+    const previous = mainPageOrder.indexOf(navigation.pathname);
+    const next = mainPageOrder.indexOf(pathname);
+    const direction = previous < 0 || next < 0 || previous === next ? 'none' : next > previous ? 'forward' : 'backward';
+    setNavigation({ pathname, direction });
+    return direction;
+  }
+  return navigation.direction;
+}
+
 export function AppShell() {
+  const pathname = useRouterState({ select: state => state.location.pathname });
+  const direction = usePageDirection(pathname);
   const { data } = useSnapshot();
   const { t, theme, toggleTheme, locale, setLocale } = useAppearance();
   const due = data ? dueCards(data.cards).length : null;
@@ -60,7 +77,7 @@ export function AppShell() {
           </div>
         )}
         <NotificationRegion />
-        <main className="page-content"><Outlet /></main>
+        <main className="page-content" data-page-direction={direction}><Outlet /></main>
       </div>
     </div>
   );

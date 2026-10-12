@@ -25,7 +25,7 @@ import {
 import { shouldIgnoreShortcut } from '../../shared/keyboard';
 import { dueCards, languageName } from '../../shared/format';
 import { Badge, Button, EmptyState, MotionButton } from '../../shared/ui/index';
-import { AnimatedValue, MotionRegion, MotionSpinner, motionDurations, motionEase, useAppMotion, useMotionActive, useMotionEntrance } from '../../shared/motion';
+import { AnimatedValue, MotionRegion, MotionSpinner, motionDistances, motionDurations, motionEase, useAppMotion, useMotionActive, useMotionEntrance } from '../../shared/motion';
 
 export type Rating = 'again' | 'hard' | 'good' | 'easy';
 
@@ -187,7 +187,7 @@ export function ReviewCard({
               )}</span>
         </p>
         <m.div className="rating-buttons" initial={false}
-          animate={{ y: revealed || !motionActive ? 0 : 4 }}
+          animate={{ y: revealed || !motionActive ? 0 : motionDistances.modal }}
           transition={{ duration: motionActive ? motionDurations.content : 0, ease: motionEase }}>
           {choices.map((choice, index) => (
             <MotionButton

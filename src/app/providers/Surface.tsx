@@ -14,11 +14,17 @@ interface Surface {
   activeModal: HTMLElement | null;
   notificationHost: HTMLElement | null;
   registerModal: (dialog: HTMLElement, notificationHost: HTMLElement) => () => void;
+  registerOcclusion: (element: HTMLElement) => () => void;
 }
 interface ModalSurface { dialog: HTMLElement; notificationHost: HTMLElement }
 const Context = createContext<Surface | null>(null);
 export function SurfaceProvider({ children }: { children: ReactNode }) {
   const [modals, setModals] = useState<ModalSurface[]>([]);
+  const [popups, setPopups] = useState<HTMLElement[]>([]);
+  const registerOcclusion = useCallback((element: HTMLElement) => {
+    setPopups(current => [...current, element]);
+    return () => setPopups(current => current.filter(item => item !== element));
+  }, []);
   const registerModal = useCallback((dialog: HTMLElement, notificationHost: HTMLElement) => {
     const entry = { dialog, notificationHost };
     setModals(current => [...current, entry]);
@@ -29,12 +35,13 @@ export function SurfaceProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       surfaceHidden: modals.length > 0,
-      occludingElements: modals.map(modal => modal.dialog),
+      occludingElements: [...popups, ...modals.map(modal => modal.dialog)],
       activeModal: modals.at(-1)?.dialog ?? null,
       notificationHost: modals.at(-1)?.notificationHost ?? null,
       registerModal,
+      registerOcclusion,
     }),
-    [modals, registerModal],
+    [modals, popups, registerModal, registerOcclusion],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

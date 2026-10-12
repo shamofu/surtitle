@@ -7,8 +7,9 @@ import { motionDurations, motionEase, motionScales, useMotionActive } from '../m
 const PressAnchor = forwardRef<HTMLAnchorElement, ComponentPropsWithoutRef<'a'>>(function PressAnchor(props, ref) {
   const active = useMotionActive();
   const enabled = active && props['aria-disabled'] !== true && props['aria-disabled'] !== 'true';
-  return <m.a {...props as HTMLMotionProps<'a'>} ref={ref} initial={false} animate={{ scale: 1 }}
-    whileTap={enabled ? { scale: motionScales.press, transition: { duration: motionDurations.press, ease: motionEase } } : undefined}
+  return <m.a {...props as HTMLMotionProps<'a'>} ref={ref} data-motion-control initial={false} animate={{ scale: 1, y: 0 }}
+    whileHover={enabled ? { scale: motionScales.hover, y: -2 } : undefined}
+    whileTap={enabled ? { scale: motionScales.press, y: 0, transition: { duration: motionDurations.press, ease: motionEase } } : undefined}
     transition={{ duration: active ? motionDurations.release : 0, ease: motionEase }} />;
 });
 

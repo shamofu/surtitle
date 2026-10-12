@@ -70,14 +70,14 @@ describe('current caption transitions', () => {
     const paragraph = screen.getByText(first.text);
     fireEvent.click(screen.getByRole('button', { name: 'Show translation' }));
     const opening = fixture.translation.at(-1)!;
-    expect(opening.duration).toBe(.24);
+    expect(opening.duration).toBe(.34);
     act(() => opening.set(.4));
     expect(body.style.gap).toBe('3.2px');
     fireEvent.click(screen.getByRole('button', { name: 'Hide translation' }));
     expect(opening.stop).toHaveBeenCalledOnce();
     expect(body.style.gridTemplateRows).toBe('minmax(0, 1fr) minmax(0, 0.4fr)');
     const closing = fixture.translation.at(-1)!;
-    expect(closing.duration).toBeCloseTo(.18 * .4);
+    expect(closing.duration).toBeCloseTo(.26 * .4);
     view.rerender(caption(second, { reduced: true }));
     expect(closing.stop).toHaveBeenCalledOnce();
     expect(body.style.gridTemplateRows).toBe('minmax(0, 1fr) minmax(0, 0fr)');
@@ -248,7 +248,9 @@ describe('caption gap learning', () => {
     const target = gapMode === 'review' ? first : second;
     render(caption(undefined, { previous: first, next: second, gapMode }));
     expect(screen.getByText(target.text)).toBeVisible();
-    expect(screen.getByText(gapMode === 'review' ? 'Reviewing' : 'Previewing')).toBeVisible();
+    expect(screen.queryByText(/^(Reviewing|Previewing)$/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Previous subtitle 0:00')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Previous subtitle' })).toHaveAccessibleDescription('Previous subtitle 0:00');
     expect(screen.getByLabelText('Next subtitle 0:02')).toBeVisible();
     expect(screen.getByText(target.text).closest('.caption-source-scroll')).not.toContainElement(screen.getByLabelText('Next subtitle 0:02'));
     fireEvent.click(screen.getByRole('button', { name: 'Show translation' }));
@@ -278,6 +280,8 @@ describe('caption gap learning', () => {
     expect(screen.getByText('The first subtitle starts at 0:02')).toBeVisible();
     expect(screen.queryByText(second.text)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Replay this subtitle' })).toBeDisabled();
+    expect(screen.getByLabelText('No previous subtitle')).toHaveTextContent('—');
+    expect(screen.getByRole('button', { name: 'Previous subtitle' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Go to first subtitle' }));
     expect(next).toHaveBeenCalledOnce();
     view.rerender(caption(undefined, { next: second, hasPrevious: false, gapMode: 'preview' }));

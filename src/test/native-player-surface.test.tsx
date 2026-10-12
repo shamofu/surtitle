@@ -95,12 +95,43 @@ beforeEach(() => {
   vi.mocked(playerApi.player).mockResolvedValue();
   vi.mocked(playerApi.playerState).mockResolvedValue(playerState);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ x: 0, y: fixture.viewportTop, top: fixture.viewportTop, left: 0, width: fixture.viewportWidth, height: 200, bottom: fixture.viewportTop + 200, right: fixture.viewportWidth, toJSON: () => ({}) }));
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('PointerEvent', MouseEvent);
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   HTMLDialogElement.prototype.close = function () { this.open = false; };
 });
 afterEach(() => { cleanup(); fixture.occludingElements.forEach(element => element.remove()); vi.restoreAllMocks(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
+
+it('reads fresh native rate after a widget adjustment and keeps the widget open', async () => {
+  render(player());
+  await waitFor(() => expect(screen.getByRole('slider', { name: 'Playback position' })).toBeEnabled());
+  vi.mocked(playerApi.playerState).mockClear();
+  vi.mocked(playerApi.playerState).mockResolvedValue({ ...playerState, rate: .75, revision: 11 });
+  fireEvent.click(screen.getByRole('button', { name: 'Playback speed' }));
+  fireEvent.click(screen.getByRole('button', { name: '0.75' }));
+  await waitFor(() => expect(screen.getByRole('slider', { name: 'Playback speed' })).toHaveValue('0.75'));
+  expect(playerApi.player).toHaveBeenCalledWith({ action: 'rate', value: .75 });
+  expect(playerApi.playerState).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: '0.75' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('dialog', { name: 'Playback speed' })).toBeInTheDocument();
+});
+
+it('ignores a previous media rate acknowledgement after loading another media', async () => {
+  const delayedState = deferred<PlayerState>();
+  const view = render(player());
+  await waitFor(() => expect(screen.getByRole('slider', { name: 'Playback position' })).toBeEnabled());
+  vi.mocked(playerApi.playerState).mockClear();
+  vi.mocked(playerApi.playerState).mockReturnValueOnce(delayedState.promise);
+  fireEvent.click(screen.getByRole('button', { name: 'Playback speed' }));
+  fireEvent.click(screen.getByRole('button', { name: '3.0' }));
+  await waitFor(() => expect(playerApi.playerState).toHaveBeenCalledTimes(1));
+  vi.mocked(playerApi.playerState).mockResolvedValue({ ...playerState, rate: 1.25, revision: 1 });
+  view.rerender(player({ media: { ...media, id: 'other-video', path: 'C:/other.mkv' } }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Playback speed' })).toHaveTextContent('1.25×'));
+  await act(async () => delayedState.resolve({ ...playerState, rate: 3, revision: 99 }));
+  expect(screen.getByRole('button', { name: 'Playback speed' })).toHaveTextContent('1.25×');
+  expect(screen.queryByRole('dialog', { name: 'Playback speed' })).not.toBeInTheDocument();
+});
 
 it.each(['native', 'DOM'] as const)('toggles playback exactly once for a %s video click and focuses the video control', async source => {
   render(player());

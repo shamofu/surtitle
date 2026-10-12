@@ -55,9 +55,9 @@ it('keeps the 6500 ms lifetime, disables a closing toast and ignores its obsolet
   fireEvent.click(screen.getByText('Notify first'));
   const toast = screen.getByRole('button', { name: 'Saved first' });
   const entrance = latest();
-  expect(toast.style.transform).toBe('translateY(12px)');
+  expect(toast.style.transform).toBe('translateY(24px)');
   act(() => entrance.set(.5));
-  expect(toast.style.transform).toBe('translateY(6px)');
+  expect(toast.style.transform).toBe('translateY(12px)');
   act(() => { vi.advanceTimersByTime(6499); });
   expect(toast).toBeEnabled();
   act(() => { vi.advanceTimersByTime(1); });

@@ -73,7 +73,7 @@ it('places the initial decorative indicator immediately and stretches only after
   expect(marker.style.left).toBe('0px');
   const [progress, target, options] = animate.mock.calls[0];
   expect(target).toBe(1);
-  expect(options).toEqual({ duration: .28, ease: 'linear' });
+  expect(options).toEqual({ duration: .38, ease: 'linear' });
   const frames = Array.from({ length: 21 }, (_, index) => {
     act(() => progress.set(index / 20));
     return { left: marker.style.left, top: marker.style.top, width: marker.style.width, height: marker.style.height, offset: index / 20 };

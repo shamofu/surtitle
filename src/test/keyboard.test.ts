@@ -12,7 +12,13 @@ it('ignores already handled events and accepts ordinary keys', () => {
   event.preventDefault();
   expect(shouldIgnoreShortcut(event)).toBe(true);
 });
-it.each(['button', 'a href="#"', 'summary', 'div contenteditable="true"', 'div role="tab"', 'div role="combobox"'])('keeps events from control descendants local: %s', tag => {
+it('blocks application shortcuts while an opaque popup is open even if focus falls to the body', () => {
+  document.body.innerHTML = '<div data-native-popup="playback-rate" data-state="open"></div>';
+  for (const code of ['Space', 'ArrowLeft', 'ArrowRight']) expect(shouldIgnoreShortcut(new KeyboardEvent('keydown', { code }))).toBe(true);
+  document.querySelector<HTMLElement>('[data-native-popup]')!.dataset.state = 'closing';
+  expect(shouldIgnoreShortcut(new KeyboardEvent('keydown', { code: 'Space' }))).toBe(false);
+});
+it.each(['button', 'a href="#"', 'summary', 'div contenteditable="true"', 'div role="tab"', 'div role="combobox"', 'div role="listbox"', 'div role="option"', 'div role="menu"', 'div role="menuitemradio"'])('keeps events from control descendants local: %s', tag => {
   document.body.innerHTML = `<${tag}><span>Control</span></${tag.split(' ')[0]}>`;
   const child = document.querySelector('span')!;
   let ignored = false;

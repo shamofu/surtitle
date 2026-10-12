@@ -11,7 +11,6 @@ import { m } from 'motion/react';
 
 import { subscribeNative } from '../../../shared/native/events';
 import {
-  ChevronDown,
   Headphones,
   Maximize,
   Pause,
@@ -23,6 +22,7 @@ import {
 } from 'lucide-react';
 import { playerApi } from './api';
 import { VolumeControl } from './VolumeControl';
+import { PlaybackRateControl } from './PlaybackRateControl';
 
 import { nativeAvailable } from '../../../shared/native/transport';
 
@@ -179,6 +179,8 @@ export function NativePlayer({
   const viewport = useRef<HTMLDivElement>(null);
   const surfaceOwner = useRef({});
   const surfaceButton = useRef<HTMLButtonElement>(null);
+  const rateButton = useRef<HTMLButtonElement>(null);
+  const [rateOpen, setRateOpen] = useState(false);
   const [state, setState] = useState<PlayerState>();
   const [sentencePauseSaving, setSentencePauseSaving] = useState(false);
   const playerRevision = useRef(-1);
@@ -202,6 +204,7 @@ export function NativePlayer({
   const seekInput = useRef<number | null>(null);
   const seekOperation = useRef(0);
   const volumeOperation = useRef(0);
+  const rateOperation = useRef(0);
   const [loop, setLoop] = useState(false);
   const loopActive = useRef(false);
   const loopOperation = useRef(0);
@@ -227,6 +230,11 @@ export function NativePlayer({
   );
   const toggleSurface = () => {
     if (!loaded || surfaceHidden || interactionsDisabled || settingsOpen) return;
+    if (rateOpen) {
+      setRateOpen(false);
+      rateButton.current?.focus({ preventScroll: true });
+      return;
+    }
     surfaceButton.current?.focus({ preventScroll: true });
     // Let the native player choose from its current state, even when clicks
     // arrive faster than the periodic player-state snapshots.
@@ -253,6 +261,17 @@ export function NativePlayer({
       if (operation === volumeOperation.current) acceptState(current);
     } catch (error) {
       if (operation === volumeOperation.current) notify(String(error), 'error');
+    }
+  }, [control, acceptState, notify]);
+  const changeRate = useCallback(async (value: number) => {
+    const operation = rateOperation.current;
+    if (!await control({ action: 'rate', value })) return;
+    try {
+      if (operation !== rateOperation.current) return;
+      const current = await playerApi.playerState();
+      if (operation === rateOperation.current) acceptState(current);
+    } catch (error) {
+      if (operation === rateOperation.current) notify(String(error), 'error');
     }
   }, [control, acceptState, notify]);
   const previousSelection = useRef({
@@ -355,6 +374,7 @@ export function NativePlayer({
       disposed = true;
       seekOperation.current += 1;
       volumeOperation.current += 1;
+      rateOperation.current += 1;
       stop();
       surfacePlacement(surfaceOwner.current, { action: 'hide' });
     };
@@ -380,12 +400,13 @@ export function NativePlayer({
     const focusBeforeHide = new Map<HTMLElement, HTMLElement>();
     const measuredCards = new Map<HTMLElement, string>();
     const revealCards = () => {
-      const top = activeModalRef.current;
-      const target = top && marked.has(top) ? focusBeforeHide.get(top) ?? top : undefined;
+      const top = activeModalRef.current ?? occludingElements.at(-1);
+      const target = top && marked.has(top) ? focusBeforeHide.get(top)
+        ?? top.querySelector<HTMLElement>('.playback-rate-slider') ?? top : undefined;
       for (const element of marked) delete element.dataset.nativeOcclusion;
       // visibility:hidden can move focus to BODY while the native exclusion is
-      // pending. Restore only that lost focus in the current top modal; newer
-      // child/other-modal focus and input selection must remain untouched.
+      // pending. Restore only lost focus in the top modal or popup; newer
+      // control focus and input selection must remain untouched.
       if (target && top?.isConnected && document.hasFocus() && document.activeElement === document.body) {
         const connectedTarget = target.isConnected && top.contains(target) ? target : top;
         connectedTarget.focus({ preventScroll: true });
@@ -568,6 +589,7 @@ export function NativePlayer({
   }
   const position = seekDraft ?? state?.positionMs ?? media.lastPositionMs;
   const controlsDisabled = !loaded || interactionsDisabled;
+  useEffect(() => { setRateOpen(false); }, [controlsDisabled, media.id, surfaceHidden]);
   function previewSeek(value: number) {
     seekOperation.current += 1;
     seekInput.current = value;
@@ -695,13 +717,11 @@ export function NativePlayer({
               <span className="player-time"><AnimatedValue value={timestamp(position)} immediate={seekDraft !== null} /> <span className="player-duration">/ <AnimatedValue value={timestamp(duration)} /></span></span>
             </div>
             <div className="control-cluster player-options">
-              <label className="speed-select">
-                <span aria-hidden="true">{t('速度', 'Speed')}</span>
-                <select aria-label={t('再生速度', 'Playback speed')} value={state?.rate || 1} disabled={!loaded} onChange={(event) => void control({ action: 'rate', value: Number(event.target.value) })}>
-                  {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((rate) => <option key={rate} value={rate}>{rate}×</option>)}
-                </select>
-                <ChevronDown size={12} />
-              </label>
+              <PlaybackRateControl key={`rate-${media.id}`} label={t('再生速度', 'Playback speed')}
+                decreaseLabel={t('再生速度を下げる', 'Decrease playback speed')} increaseLabel={t('再生速度を上げる', 'Increase playback speed')}
+                closeLabel={t('再生速度設定を閉じる', 'Close playback speed settings')}
+                value={state?.rate || 1} disabled={controlsDisabled} isOpen={rateOpen} onOpenChange={setRateOpen}
+                triggerRef={rateButton} onChange={changeRate} />
               <VolumeControl key={media.id} value={state?.volume ?? 80} disabled={controlsDisabled}
                 label={t('音量', 'Volume')} onChange={changeVolume} />
               {onSettingsOpen && <Button className="player-settings" variant="ghost" aria-haspopup="dialog"
