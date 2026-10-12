@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render as baseRender, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ReactNode } from 'react';
+import type { AnchorHTMLAttributes, ComponentType, ReactNode } from 'react';
 import { CardsPage } from '../features/cards/CardsPage';
 import { EditCardDialog } from '../features/cards/CardManagement';
 import { cardsApi } from '../features/cards/api';
@@ -19,6 +19,9 @@ const fixture = vi.hoisted(() => ({
 }));
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, to, className }: { children: ReactNode; to: string; className?: string }) => <a href={to} className={className}>{children}</a>,
+  createLink: (Component: ComponentType<AnchorHTMLAttributes<HTMLAnchorElement>>) =>
+    ({ to, params, ...props }: AnchorHTMLAttributes<HTMLAnchorElement> & { to: string; params?: { mediaId: string } }) =>
+      <Component {...props} href={to.replace('$mediaId', params?.mediaId ?? '')} />,
 }));
 vi.mock('../features/cards/api', () => ({ cardsApi: { editCard: vi.fn(), editState: vi.fn(), saveEdit: vi.fn(), suspendCard: vi.fn() } }));
 vi.mock('../app/runtime', () => {

@@ -7,7 +7,7 @@ import {
   render,
   screen,
 } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import type { AnchorHTMLAttributes, ComponentType, ReactNode } from 'react';
 import { ReviewPage } from '../features/cards/ReviewPage';
 import { cardsApi } from '../features/cards/api';
 import type { StudyCard } from '../shared/contracts/cards';
@@ -30,6 +30,9 @@ vi.mock('../features/cards/api', () => ({ cardsApi: { rateCard: vi.fn() } }));
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
+  createLink: (Component: ComponentType<AnchorHTMLAttributes<HTMLAnchorElement>>) =>
+    ({ to, params, ...props }: AnchorHTMLAttributes<HTMLAnchorElement> & { to: string; params?: { mediaId: string } }) =>
+      <Component {...props} href={to.replace('$mediaId', params?.mediaId ?? '')} />,
 }));
 vi.mock('../app/runtime', () => {
   const useFixture = () => ({

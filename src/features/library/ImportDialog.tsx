@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { MotionLink } from '../../shared/ui/MotionLink';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Link } from '@tanstack/react-router';
 import { FolderOpen, Link2, RefreshCw, Upload, X } from 'lucide-react';
 import { libraryApi } from './api';
 import { importWorkspace as workspace } from './import-workspace';
@@ -78,7 +78,7 @@ export function ImportDialog({ onClose, onReturnToLibrary = onClose, droppedFile
           <div className="import-selection-heading"><strong>{t(`${view.rows.length} 件のファイル`, `${view.rows.length} files`)}</strong><Button variant="ghost" disabled={busy} onClick={() => workspace.clear()}>{t('一覧をクリア', 'Clear list')}</Button></div>
           <ul className="import-file-list">{view.rows.map(row => <li key={row.id} className={`import-file-row ${row.status}`}>
             <div className="import-file-copy"><strong title={row.inputPath}>{fileName(row.inputPath)}</strong><p>{row.status === 'imported' ? t('追加しました', 'Added') : row.status === 'existing' ? t('追加済み', 'Already in library') : row.status === 'invalid' ? t('読み込めないファイルです', 'This file cannot be imported') : row.status === 'failed' ? row.error : t('追加中…', 'Adding…')}</p></div>
-            <div className="import-file-actions">{row.mediaId && <Link to="/study/$mediaId" params={{ mediaId: row.mediaId }} className="button secondary" aria-label={t(`${fileName(row.inputPath)} を開く`, `Open ${fileName(row.inputPath)}`)} onClick={onClose}>{t('開く', 'Open')}</Link>}<IconButton label={t(`${fileName(row.inputPath)} を一覧から外す`, `Remove ${fileName(row.inputPath)} from this list`)} disabled={busy} onClick={() => workspace.remove(row.id)}><X size={17} /></IconButton></div>
+            <div className="import-file-actions">{row.mediaId && <MotionLink to="/study/$mediaId" params={{ mediaId: row.mediaId }} className="button secondary" aria-label={t(`${fileName(row.inputPath)} を開く`, `Open ${fileName(row.inputPath)}`)} onClick={onClose}>{t('開く', 'Open')}</MotionLink>}<IconButton label={t(`${fileName(row.inputPath)} を一覧から外す`, `Remove ${fileName(row.inputPath)} from this list`)} disabled={busy} onClick={() => workspace.remove(row.id)}><X size={17} /></IconButton></div>
           </li>)}</ul>
         </section>}
       </> : <Field label={t('動画・音声の URL', 'Video or audio URL')} hint={t('公開 YouTube 動画、またはメディアファイルへの直接リンク。', 'A public YouTube video or direct media link.')}><input value={view.url} onChange={event => workspace.change({ url: event.target.value })} type="url" placeholder="https://…" disabled={startingUrl} /></Field>}

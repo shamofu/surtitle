@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { MotionLink } from '../../shared/ui/MotionLink';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { Link } from '@tanstack/react-router';
+import { m } from 'motion/react';
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -33,7 +35,8 @@ import {
 import { TransferDialog } from '../transfer/TransferDialog';
 import { EditCardDialog, DeleteCardDialog } from './CardManagement';
 import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
-import { AnimatedValue, MotionRegion, MotionSwap, useMotionEntrance } from '../../shared/motion';
+import { AnimatedValue, MotionRegion, MotionSwap, motionLayoutTransition, motionReferences, useMotionEntrance } from '../../shared/motion';
+import { useListMotion } from '../../shared/motion/useListMotion';
 
 function closePhraseMenu(element: HTMLElement, restoreFocus = true) {
   const menu = element.closest('details');
@@ -96,11 +99,18 @@ export function CardsPage() {
   const dueIds = new Set(due.map(card => card.id));
   const mediaById = useMemo(() => new Map(data?.media.map(media => [media.id, media])), [data?.media]);
   const virtualized = filtered.length > 40;
+  const reflow = useListMotion(!virtualized);
+  const listDependency = `${language}:${search}`;
+  const scroller = list.current?.closest<HTMLElement>('.page-content');
   const virtual = useVirtualizer({
     useFlushSync: false,
     enabled: virtualized,
     count: filtered.length,
     getScrollElement: () => list.current?.closest<HTMLElement>('.page-content') ?? null,
+    // Disabling virtual mode clears its observed viewport. Seed the current
+    // viewport when reenabling so retained, focused rows never disappear for a frame.
+    initialRect: scroller ? { width: scroller.clientWidth, height: scroller.clientHeight } : undefined,
+    initialOffset: () => list.current?.closest<HTMLElement>('.page-content')?.scrollTop ?? 0,
     getItemKey: index => filtered[index].id,
     estimateSize: () => 240,
     overscan: 4,
@@ -132,11 +142,11 @@ export function CardsPage() {
           <ArrowDownToLine size={16} />
           {t('書き出す', 'Export')}
         </Button>
-        <Link to="/review" className="button primary">
+        <MotionLink to="/review" className="button primary">
           <BookOpen size={17} />
           {t('復習する', 'Start review')}
           <MotionRegion mode="status" open={due.length > 0} as="span"><span className="button-count"><AnimatedValue value={due.length} /></span></MotionRegion>
-        </Link>
+        </MotionLink>
       </PageTitle>
       <div className="library-toolbar">
         <div className="section-heading">
@@ -199,10 +209,10 @@ export function CardsPage() {
           >
             {cards.length ? <Button variant="primary" onClick={() => {
               setSearch(''); setLanguage('all'); searchInput.current?.focus();
-            }}>{t('絞り込みをリセット', 'Reset filters')}</Button> : <Link to="/" className="button primary">
+            }}>{t('絞り込みをリセット', 'Reset filters')}</Button> : <MotionLink to="/" className="button primary">
               {t('作品を選ぶ', 'Choose something to watch')}
               <ArrowRight size={16} />
-            </Link>}
+            </MotionLink>}
           </EmptyState>
         </div>
       ) : (
@@ -211,9 +221,12 @@ export function CardsPage() {
             const media = mediaById.get(card.mediaId);
             const isDue = dueIds.has(card.id);
             return (
-              <article className="phrase-card" key={card.id} data-index={item?.index}
+              <div key={card.id} data-index={item?.index}
                 ref={item ? virtual.measureElement : undefined}
-                style={item ? { position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${item.start - scrollMargin}px)` } : undefined}
+                style={item ? { position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${item.start - scrollMargin}px)` } : undefined}>
+              <m.article className="phrase-card"
+                layout={reflow ? 'position' : false} layoutDependency={listDependency}
+                transition={{ layout: motionLayoutTransition }} data-motion-reference={motionReferences.list}
                 onFocusCapture={() => setFocusedCard(card.id)}
                 onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocusedCard(undefined); }}>
                 <header>
@@ -298,7 +311,8 @@ export function CardsPage() {
                         : languageName(card.language, locale)}
                   </Badge></MotionSwap>
                 </footer>
-              </article>
+              </m.article>
+              </div>
             );
           })}
         </div>
@@ -306,12 +320,17 @@ export function CardsPage() {
       </MotionSwap>
       {transfer && <TransferDialog onClose={() => setTransfer(false)} />}
       {edit && (
-        <EditCardDialog card={edit} onClose={() => setEdit(undefined)} />
+        <EditCardDialog card={edit} onClose={() => {
+          // Keep the opener mounted until React Aria restores focus, including
+          // when filtering just moved the card outside the virtual viewport.
+          setFocusedCard(edit.id);
+          setEdit(undefined);
+        }} />
       )}
       {deleting && (
         <DeleteCardDialog
           card={deleting}
-          onClose={() => setDeleting(undefined)}
+          onClose={() => { setFocusedCard(deleting.id); setDeleting(undefined); }}
         />
       )}
     </div>

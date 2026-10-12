@@ -4,7 +4,7 @@ import { BookOpen, CircleHelp, Layers3, LibraryBig, Moon, RefreshCw, Settings2, 
 import { useSnapshot, useAppearance, useDataActions } from './runtime';
 import { nativeAvailable } from '../shared/native/transport';
 import { dueCards } from '../shared/format';
-import { IconButton } from '../shared/ui/index';
+import { IconButton, MotionButton } from '../shared/ui/index';
 import { NotificationRegion } from './providers/Notifications';
 import { ActivityButton } from './ActivityModal';
 import { AnimatedValue, MotionRegion, MotionSwap } from '../shared/motion';
@@ -45,9 +45,9 @@ export function AppShell() {
           </nav>
           <div className="topbar-actions">
             <ActivityButton />
-            <button className="locale-button" onClick={() => setLocale(locale === 'ja' ? 'en' : 'ja')} aria-label={t('Switch to English', '日本語に切り替える')}>
+            <MotionButton className="locale-button" onClick={() => setLocale(locale === 'ja' ? 'en' : 'ja')} aria-label={t('Switch to English', '日本語に切り替える')}>
               <AnimatedValue value={locale === 'ja' ? 'EN' : '日本語'} />
-            </button>
+            </MotionButton>
             <IconButton label={t('テーマを切り替える', 'Toggle theme')} onClick={toggleTheme}>
               <MotionSwap as="span" stateKey={theme}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</MotionSwap>
             </IconButton>

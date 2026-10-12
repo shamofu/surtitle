@@ -26,6 +26,10 @@ function Surfaces() {
       {!long && <Field label="Phrase"><input defaultValue="Take a little detour" /></Field>}
       <button onClick={() => setInner(true)}>Open confirmation</button>
       <button onClick={() => void report(async () => { throw new Error('Could not save'); })}>Fail save</button>
+      <button onClick={() => void outerExit.close(async () => {
+        await report(async () => { throw new Error('Could not close'); });
+        throw new Error('Could not close');
+      }).catch(() => {})}>Fail close</button>
       <label><input type="checkbox" checked={locked} onChange={event => setLocked(event.target.checked)} />Saving</label>
       {long && <>
         {Array.from({ length: 20 }, (_, index) => <Field key={index} label={`Phrase ${index + 1}`}><input defaultValue="An editable phrase" /></Field>)}

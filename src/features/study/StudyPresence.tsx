@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createContext, useContext, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { animate as motionAnimate, motionValue } from 'motion';
-import { MotionRegion, motionDurations, motionEase, motionRevealEase, useAppMotion } from '../../shared/motion';
+import { MotionRegion, motionDistances, motionDurations, motionEase, motionRevealEase, useAppMotion } from '../../shared/motion';
 
 const StudyRegionActivity = createContext(true);
 export const useStudyRegionActive = () => useContext(StudyRegionActivity);
@@ -99,7 +99,7 @@ export function useStudyPresence(open: boolean) {
       };
       const collapse = () => {
         panel.style.visibility = 'hidden';
-        animate(extent, 0, motionDurations.studyResize, () => acknowledge(finish));
+        animate(extent, 0, motionDurations.studyCollapse, () => acknowledge(finish));
       };
       render();
       if (open) {
@@ -113,7 +113,7 @@ export function useStudyPresence(open: boolean) {
       } else {
         setReady(false);
         if (extent.get() < 1 || position.get() >= 1) collapse();
-        else animate(position, 1, motionDurations.studySlide, collapse);
+        else animate(position, 1, motionDurations.studySlideOut, collapse);
       }
       const visibility = () => {
         if (!document.hidden) return;
@@ -255,19 +255,21 @@ export function StudyRegion({ open, children, keepMounted = false, freezeOnExit 
     if (first || !changed || !animate || reducedMotion || document.hidden) { settle(); return; }
     const direction = Number(node.closest('[data-motion-direction]')?.getAttribute('data-motion-direction') || 1);
     const from = getComputedStyle(node);
-    const opacity = open && !fromOpen && !exiting ? 0 : Number(from.opacity);
-    const transform = open && !fromOpen && !exiting ? `translateX(${direction * 12}px)` : from.transform || 'translateX(0px)';
+    const transform = open && !fromOpen && !exiting ? `translateX(${direction * motionDistances.tab}px)` : from.transform || 'translateX(0px)';
     let disposed = false;
     animated.current = true;
+    // Install the first pose before paint; both retained pages remain opaque.
+    node.style.opacity = '1';
+    node.style.transform = transform;
     const controls = motionAnimate(node, {
-      opacity: [opacity, open ? 1 : 0],
-      transform: [transform, `translateX(${open ? 0 : -direction * 12}px)`],
+      opacity: [1, 1],
+      transform: [transform, `translateX(${open ? 0 : -direction * motionDistances.tab}px)`],
     }, {
-      duration: motionDurations.content, ease: motionEase,
+      duration: motionDurations.tab, ease: motionEase,
       onComplete: () => { if (!disposed) settle(); },
     });
     const finish = () => { controls.complete(); settle(); };
-    const timer = setTimeout(finish, motionDurations.content * 1000 + 100);
+    const timer = setTimeout(finish, motionDurations.tab * 1000 + 100);
     const visibility = () => { if (document.hidden) finish(); };
     window.addEventListener('resize', finish);
     document.addEventListener('visibilitychange', visibility);

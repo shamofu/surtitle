@@ -75,6 +75,9 @@ for (const locale of ['ja', 'en'] as const) for (const height of [600, 636]) {
     expect(bounds.height).toBeGreaterThanOrEqual(240);
     await page.locator('.caption-actions button[aria-pressed]').click();
     await expect(page.locator('.caption-translation-scroll')).toBeVisible();
+    // Visibility begins during the reveal. Check the readable height at its
+    // endpoint, rather than treating one arbitrary compositor frame as final.
+    await expect(page.locator('.caption-body')).toHaveCSS('row-gap', '8px');
     await expectPrimaryControlsInside(page);
     expect((await video.boundingBox())!.height).toBe(bounds.height);
     for (const area of ['.caption-source-scroll', '.caption-translation-scroll']) {

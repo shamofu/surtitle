@@ -7,7 +7,8 @@ import { animateEntrance } from '../shared/motion/surfaces';
 import { AnimatedDetails, openAnimatedDetails } from '../shared/ui/AnimatedDetails';
 
 let reduce: (next: boolean) => void;
-const animate = vi.fn(() => ({ cancel: vi.fn(), finished: new Promise<void>(() => {}) }));
+const { animate } = vi.hoisted(() => ({ animate: vi.fn((_value: { get(): number; set(value: number): void }, _to: number, _options: unknown) => ({ stop: vi.fn(), finished: new Promise<void>(() => {}) })) }));
+vi.mock('motion', async importActual => ({ ...await importActual<typeof import('motion')>(), animate }));
 beforeEach(() => {
   vi.useFakeTimers();
   let reduced = false;
@@ -67,10 +68,12 @@ it('reverses disclosure height from the current frame and preserves its live for
   view.rerender(region(false));
   expect(host).toHaveAttribute('inert');
   expect(host).not.toHaveAttribute('hidden');
-  expect(animate).toHaveBeenLastCalledWith([{ height: '240px' }, { height: '0px' }], expect.objectContaining({ duration: 180 }));
+  expect(animate.mock.calls.at(-1)![0].get()).toBe(240);
+  expect(animate).toHaveBeenLastCalledWith(expect.anything(), 0, expect.objectContaining({ duration: .18 }));
   bounds.mockReturnValueOnce(new DOMRect(0, 0, 300, 80));
   view.rerender(region(true));
-  expect(animate).toHaveBeenLastCalledWith([{ height: '80px' }, { height: '240px' }], expect.objectContaining({ duration: 180 }));
+  expect(animate.mock.calls.at(-1)![0].get()).toBe(80);
+  expect(animate).toHaveBeenLastCalledWith(expect.anything(), 240, expect.objectContaining({ duration: .24 }));
   act(() => vi.advanceTimersByTime(1000));
   expect(screen.getByLabelText('Draft')).toBe(input);
   expect(host).not.toHaveAttribute('hidden');
@@ -116,7 +119,8 @@ it('reveals measured native details and allows synchronous validation during an 
   const details = summary.parentElement as HTMLDetailsElement;
   vi.spyOn(details, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 300, details.open ? 240 : 40));
   fireEvent.click(summary);
-  expect(animate).toHaveBeenLastCalledWith([{ height: '40px' }, { height: '240px' }], expect.objectContaining({ duration: 180 }));
+  expect(animate.mock.calls.at(-1)![0].get()).toBe(40);
+  expect(animate).toHaveBeenLastCalledWith(expect.anything(), 240, expect.objectContaining({ duration: .24 }));
   const input = screen.getByLabelText('Required field');
   input.focus();
   fireEvent.click(summary);
@@ -141,7 +145,7 @@ it('commits closed disclosure state before releasing its final animated height',
   fireEvent.click(summary);
   const closing = animate.mock.results.at(-1)!.value;
   const openAtRelease: boolean[] = [];
-  closing.cancel.mockImplementation(() => { openAtRelease.push(details.open); });
+  closing.stop.mockImplementation(() => { openAtRelease.push(details.open); });
   act(() => vi.advanceTimersByTime(1000));
   expect(openAtRelease.length).toBeGreaterThan(0);
   expect(openAtRelease.every(open => !open)).toBe(true);
@@ -176,8 +180,8 @@ it('lets one entrance own nested content without replacing focused inputs', () =
   fireEvent.compositionStart(input);
   view.rerender(content(1, 1));
   expect(animate).toHaveBeenCalledTimes(2);
-  expect(animate.mock.results[0].value.cancel).toHaveBeenCalledOnce();
-  expect(animate.mock.results[1].value.cancel).not.toHaveBeenCalled();
+  expect(animate.mock.results[0].value.stop).toHaveBeenCalledOnce();
+  expect(animate.mock.results[1].value.stop).not.toHaveBeenCalled();
   view.rerender(content(1, 2));
   expect(animate).toHaveBeenCalledTimes(2);
   expect(screen.getByLabelText('Nested draft')).toBe(input);
@@ -197,15 +201,22 @@ it('settles a page entrance on reduction and never replays it when motion return
   render(<StrictMode><MotionProvider><Page /></MotionProvider></StrictMode>);
   // StrictMode replaces its first setup before paint; the replacement must enter.
   expect(animate).toHaveBeenCalledTimes(2);
-  expect(animate.mock.results[0].value.cancel).toHaveBeenCalledOnce();
-  expect(animate.mock.results[1].value.cancel).not.toHaveBeenCalled();
+  expect(animate.mock.results[0].value.stop).toHaveBeenCalledOnce();
+  expect(animate.mock.results[1].value.stop).not.toHaveBeenCalled();
   act(() => vi.advanceTimersToNextFrame());
   expect(animate).toHaveBeenCalledWith(
-    [{ opacity: 0, transform: 'translate(0px, 6px)' }, { opacity: 1, transform: 'none' }],
-    expect.objectContaining({ duration: 180 }),
+    expect.anything(), 1,
+    expect.objectContaining({ duration: .22 }),
   );
+  const progress = animate.mock.calls.at(-1)![0];
+  act(() => progress.set(.5));
+  expect(screen.getByText('Page').style.opacity).toBe('0.5');
+  expect(screen.getByText('Page').style.transform).toBe('translate(0px, 4px)');
   reduce(true);
-  expect(animate.mock.results[1].value.cancel).toHaveBeenCalledOnce();
+  expect(animate.mock.results[1].value.stop).toHaveBeenCalledOnce();
+  act(() => progress.set(.8));
+  expect(screen.getByText('Page').style.opacity).toBe('');
+  expect(screen.getByText('Page').style.transform).toBe('');
   reduce(false);
   expect(animate).toHaveBeenCalledTimes(2);
 });

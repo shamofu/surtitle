@@ -439,14 +439,6 @@ body:has(.settings-page) .toast-stack { bottom: 112px; }
 .toast.error {
   border-left-color: var(--danger);
 }
-.spin {
-  animation: spin var(--motion-spin) linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 /* A small nested viewport can show an input without its label or help. Let the
    whole page scroll in short windows so each field stays together. */
 @media (max-height: 600px) {

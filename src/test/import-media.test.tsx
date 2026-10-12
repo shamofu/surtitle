@@ -2,7 +2,7 @@
 vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import type { AnchorHTMLAttributes, ComponentType, ReactNode } from 'react';
 import userEvent from '@testing-library/user-event';
 import { listen } from '@tauri-apps/api/event';
 import { importWorkspace } from '../features/library/import-workspace';
@@ -19,7 +19,14 @@ vi.mock('../features/library/api', () => ({ libraryApi: {
 } }));
 vi.mock('../features/library/MediaManagement', () => ({ DownloadJobs: () => null }));
 vi.mock('../features/transfer/TransferDialog', () => ({ TransferDialog: ({ onClose }: { onClose: () => void }) => <div role="dialog" data-app-modal aria-label="Your data"><button onClick={onClose}>Close data</button></div> }));
-vi.mock('@tanstack/react-router', () => ({ useNavigate: () => async () => {}, Link: ({ children, to, params, ...props }: { children: ReactNode; to: string; params?: { mediaId: string }; className?: string }) => <a href={params ? `/study/${params.mediaId}` : to} {...props}>{children}</a> }));
+vi.mock('@tanstack/react-router', async importOriginal => ({
+  ...await importOriginal<typeof import('@tanstack/react-router')>(),
+  useNavigate: () => async () => {},
+  Link: ({ children, to, params, ...props }: { children: ReactNode; to: string; params?: { mediaId: string }; className?: string }) => <a href={params ? `/study/${params.mediaId}` : to} {...props}>{children}</a>,
+  createLink: (Component: ComponentType<AnchorHTMLAttributes<HTMLAnchorElement>>) =>
+    ({ to, params, ...props }: AnchorHTMLAttributes<HTMLAnchorElement> & { to: string; params?: { mediaId: string } }) =>
+      <Component {...props} href={to.replace('$mediaId', params?.mediaId ?? '')} />,
+}));
 const registerModal = () => () => {};
 vi.mock('../app/runtime', () => ({
   useAppearance: () => ({ t: (_ja: string, en: string) => en, locale: 'en' }),

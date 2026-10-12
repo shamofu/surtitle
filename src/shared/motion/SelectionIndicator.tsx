@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useLayoutEffect, useRef } from 'react';
-import { cubicBezier } from 'motion';
-import { motionCssEase, motionDurations, useAppMotion } from './index';
+import { animate, cubicBezier, motionValue } from 'motion';
+import { motionEase, motionDurations, useAppMotion } from './index';
 import './selection-indicator.css';
 
 type Geometry = { left: number; top: number; width: number; height: number };
-const frame = (box: Geometry): Keyframe => ({
+const frame = (box: Geometry) => ({
   left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px`,
 });
 const sameGeometry = (a: Geometry | null, b: Geometry) => !!a &&
@@ -32,7 +32,8 @@ export function SelectionIndicator({
     if (!marker || !host) return;
     let selected: HTMLElement | null = null;
     let destination: Geometry | null = null;
-    let animation: Animation | undefined;
+    let animation: ReturnType<typeof animate> | undefined;
+    let releaseProgress: (() => void) | undefined;
     host.dataset.selectionIndicator = variant;
 
     const boxInHost = (element: HTMLElement): Geometry => {
@@ -46,7 +47,9 @@ export function SelectionIndicator({
       };
     };
     const stop = () => {
-      animation?.cancel();
+      releaseProgress?.();
+      releaseProgress = undefined;
+      animation?.stop();
       animation = undefined;
     };
     const update = (settle = false) => {
@@ -84,18 +87,28 @@ export function SelectionIndicator({
         const progress = leading ? elapsed / .7 : (elapsed - .25) / .75;
         return from + (to - from) * ease(Math.max(0, Math.min(1, progress)));
       };
-      const frames = sameRow
-        ? Array.from({ length: 21 }, (_, index) => {
-          const elapsed = index / 20;
+      const progress = motionValue(0);
+      const render = (elapsed: number) => {
+        if (sameRow) {
           const left = edge(previous.left, target.left, elapsed, !rightward);
           const right = edge(previous.left + previous.width, target.left + target.width, elapsed, rightward);
-          return { ...frame({ ...target, left, width: Math.max(0, right - left) }), offset: elapsed };
-        })
-        : [frame(previous), frame(target)];
-      const current = marker.animate(frames, { duration: motionDurations.selection * 1000, easing: sameRow ? 'linear' : motionCssEase });
+          Object.assign(marker.style, frame({ ...target, left, width: Math.max(0, right - left) }));
+        } else {
+          Object.assign(marker.style, frame({
+            left: previous.left + (target.left - previous.left) * elapsed,
+            top: previous.top + (target.top - previous.top) * elapsed,
+            width: previous.width + (target.width - previous.width) * elapsed,
+            height: previous.height + (target.height - previous.height) * elapsed,
+          }));
+        }
+      };
+      const unsubscribe = progress.on('change', render);
+      releaseProgress = () => { unsubscribe(); progress.destroy(); };
+      render(0);
+      const current = animate(progress, 1, { duration: motionDurations.selection, ease: sameRow ? 'linear' : motionEase });
       animation = current;
       void current.finished.then(() => {
-        if (animation === current) stop();
+        if (animation === current) { stop(); Object.assign(marker.style, frame(target)); }
       }, () => {});
     };
     update(true);

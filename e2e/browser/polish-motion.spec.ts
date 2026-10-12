@@ -5,6 +5,28 @@ import { installLearningFixture } from './learning-fixture';
 
 test.use({ video: { mode: 'on', size: { width: 1440, height: 1000 } } });
 
+declare global { interface Window { __drawerFrameRequested?: boolean } }
+
+/** Advance Motion's RAF clock only when the observation requests another frame.
+ * Async React/IPC commits run at a fixed pose, even on a saturated CI worker. */
+async function runDrawerFrames<T>(page: Page, action: () => Promise<T>): Promise<T> {
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  let settled = false;
+  const result = action().finally(() => { settled = true; });
+  // Attach a rejection handler while driving frames; the original promise below
+  // still reports the action's error without an unhandled rejection race.
+  void result.catch(() => {});
+  while (!settled) {
+    const requested = await page.evaluate(() => {
+      const requested = window.__drawerFrameRequested;
+      window.__drawerFrameRequested = false;
+      return requested;
+    });
+    if (requested) await page.clock.runFor(16);
+  }
+  return result;
+}
+
 async function installReviewFixture(page: Page) {
   await installLearningFixture(page, 'en', 'light', { cardCount: 2 });
   await page.route(/\/src\/shared\/native\/transport\.ts(?:\?|$)/, route => route.fulfill({
@@ -47,18 +69,27 @@ async function record<T>(page: Page, info: TestInfo, name: string, action: () =>
 
 for (const viewport of [{ width: 1440, height: 1000 }, { width: 920, height: 900 }]) {
   test(`opaque drawer reverses safely through player resize and panel slide (${viewport.width}px)`, async ({ page }, info) => {
+    await page.clock.install();
     await page.setViewportSize(viewport);
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await installLearningFixture(page, 'en', 'light');
     await page.goto('/study/visual-fixture');
     await expect(page.locator('.native-player-viewport')).toHaveAttribute('data-native-placement', 'ready');
-    const observed = await record(page, info, 'drawer', () => page.evaluate(async () => {
+    const observed = await runDrawerFrames(page, () => record(page, info, 'drawer', () => page.evaluate(async () => {
       const toggle = document.querySelector<HTMLButtonElement>('.study-transcript-toggle')!;
       const panel = document.querySelector<HTMLElement>('.study-companion')!;
       const dock = document.querySelector<HTMLElement>('.study-companion-dock')!;
       const video = document.querySelector<HTMLElement>('.native-player-viewport')!;
       const rail = document.querySelector<HTMLElement>('.study-transcript-rail')!;
-      const frame = () => new Promise(requestAnimationFrame);
+      const frame = () => { window.__drawerFrameRequested = true; return new Promise(requestAnimationFrame); };
+      const committed = async (open: boolean) => {
+        const matches = () => toggle.getAttribute('aria-expanded') === String(open) && panel.inert === !open;
+        if (matches()) return;
+        await new Promise<void>(resolve => {
+          const observer = new MutationObserver(() => { if (matches()) { observer.disconnect(); resolve(); } });
+          observer.observe(dock, { subtree: true, attributes: true, attributeFilter: ['aria-expanded', 'inert'] });
+        });
+      };
       const read = () => {
         const style = getComputedStyle(panel);
         const matrix = new DOMMatrix(style.transform);
@@ -86,8 +117,10 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 920, height: 900
       };
       const initial = read();
       toggle.click();
+      await committed(true);
       const opening = await settle();
       toggle.click();
+      await committed(false);
       const reversal = [];
       for (let index = 0; index < 120; index++) {
         await frame(); const current = read(); reversal.push(current);
@@ -97,14 +130,15 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 920, height: 900
       toggle.click();
       // React may commit this asynchronous action after another compositor frame.
       // Measure the reversal from its committed state, not the click timestamp.
-      for (let index = 0; index < 120 && panel.inert; index++) await frame();
+      await committed(true);
       const after = read();
       const reopening = await settle();
       reversal.push(...reopening);
       toggle.click();
+      await committed(false);
       const closing = await settle();
       return { initial, opening, reversal, reopening, before, after, closing };
-    }));
+    })));
     const distance = (frame: typeof observed.before) => Math.abs(viewport.width < 1000 ? frame.y : frame.x);
     const moving = observed.opening.filter(frame => frame.moving && frame.visibility === 'visible');
     expect(moving.filter(frame => distance(frame) > 1).length, 'visible intermediate slide frames').toBeGreaterThan(2);
@@ -149,26 +183,36 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 920, height: 900
 }
 
 test('closing during desktop resize reverses the player width without revealing the panel', async ({ page }) => {
+  await page.clock.install();
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await installLearningFixture(page, 'en', 'light');
   await page.goto('/study/visual-fixture');
   await expect(page.locator('.native-player-viewport')).toHaveAttribute('data-native-placement', 'ready');
-  const observed = await page.evaluate(async () => {
+  const observed = await runDrawerFrames(page, () => page.evaluate(async () => {
     const toggle = document.querySelector<HTMLButtonElement>('.study-transcript-toggle')!;
     const panel = document.querySelector<HTMLElement>('.study-companion')!;
     const dock = document.querySelector<HTMLElement>('.study-companion-dock')!;
     const video = document.querySelector<HTMLElement>('.native-player-viewport')!;
-    const frame = () => new Promise(requestAnimationFrame);
+    const frame = () => { window.__drawerFrameRequested = true; return new Promise(requestAnimationFrame); };
+    const committed = async (open: boolean) => {
+      const matches = () => toggle.getAttribute('aria-expanded') === String(open) && panel.inert === !open;
+      if (matches()) return;
+      await new Promise<void>(resolve => {
+        const observer = new MutationObserver(() => { if (matches()) { observer.disconnect(); resolve(); } });
+        observer.observe(dock, { subtree: true, attributes: true, attributeFilter: ['aria-expanded', 'inert'] });
+      });
+    };
     const read = () => ({ width: video.getBoundingClientRect().width, moving: dock.dataset.moving === 'true',
       visibility: getComputedStyle(panel).visibility, hidden: panel.hidden, inert: panel.inert });
     const initial = read();
     toggle.click();
+    await committed(true);
     for (let index = 0; index < 120; index++) {
       await frame();
       const before = read();
       if (initial.width - before.width <= 8 || before.visibility !== 'hidden') continue;
       toggle.click();
-      for (let commitFrame = 0; commitFrame < 120 && !panel.inert; commitFrame++) await frame();
+      await committed(false);
       const after = read();
       const closing = [after];
       for (let closingFrame = 0; closingFrame < 120; closingFrame++) {
@@ -178,7 +222,7 @@ test('closing during desktop resize reverses the player width without revealing 
       throw new Error('Interrupted resize did not finish closing');
     }
     throw new Error('Desktop resize did not produce an intermediate width');
-  });
+  }));
   expect(observed.before.width).toBeLessThan(observed.initial.width - 8);
   expect(observed.after.width).toBeLessThanOrEqual(observed.initial.width + 1);
   let previousWidth = observed.after.width;
@@ -213,6 +257,7 @@ test('tab overlap keeps outgoing controls inert and preserves a composing input 
       samples.push([...document.querySelectorAll<HTMLElement>('.transcript-tab-content > .study-motion-region:not([hidden])')].map(region => ({
         state: region.dataset.motionState, inert: region.inert, hiddenFromAT: region.getAttribute('aria-hidden'),
         opacity: Number(getComputedStyle(region).opacity), transform: getComputedStyle(region).transform,
+        background: getComputedStyle(region).backgroundColor,
       })));
     }
     transcript.click();
@@ -229,7 +274,8 @@ test('tab overlap keeps outgoing controls inert and preserves a composing input 
   for (const sample of observed.samples) {
     expect(sample.filter(region => !region.inert)).toHaveLength(1);
     expect(sample.filter(region => region.state === 'exiting').every(region => region.inert && region.hiddenFromAT === 'true')).toBe(true);
-    expect(sample.reduce((sum, region) => sum + region.opacity, 0), 'no empty overlap frame').toBeGreaterThan(.9);
+    expect(sample.every(region => region.opacity === 1), 'retained tab faces stay opaque through reversal').toBe(true);
+    expect(sample.every(region => region.background !== 'rgba(0, 0, 0, 0)' && region.background !== 'transparent')).toBe(true);
   }
   await expect(page.getByRole('tabpanel')).toHaveCount(1);
 });
@@ -327,20 +373,22 @@ test('live reduced motion fully reveals a partially clipped review and preserves
 });
 
 test('live reduced motion settles a genuinely moving drawer at its latest endpoint', async ({ page }, info) => {
+  await page.clock.install();
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await installLearningFixture(page, 'en', 'light');
   await page.goto('/study/visual-fixture');
   await expect(page.locator('.native-player-viewport')).toHaveAttribute('data-native-placement', 'ready');
-  const before = await page.evaluate(async () => {
+  const before = await runDrawerFrames(page, () => page.evaluate(async () => {
     document.querySelector<HTMLButtonElement>('.study-transcript-toggle')!.click();
     const panel = document.querySelector<HTMLElement>('.study-companion')!;
     for (let index = 0; index < 120; index++) {
+      window.__drawerFrameRequested = true;
       await new Promise(requestAnimationFrame);
       const x = new DOMMatrix(getComputedStyle(panel).transform).m41;
       if (getComputedStyle(panel).visibility === 'visible' && x > 8 && x < panel.getBoundingClientRect().width - 8) return x;
     }
     throw new Error('The drawer did not produce an intermediate frame');
-  });
+  }));
   await info.attach('reduction-intermediate.json', { body: JSON.stringify({ before }), contentType: 'application/json' });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
@@ -397,25 +445,23 @@ test('notification reflow moves retained slots and reduced motion cancels the cu
       frames.push({ y: slot.getBoundingClientRect().y, offset: new DOMMatrix(getComputedStyle(slot).transform).m42,
         connected: original.isConnected, count: document.querySelectorAll('.toast').length });
     }
-    // Hold a real running reflow so OS reduction can be inspected independently of IPC timing.
-    const originalAnimate = Element.prototype.animate;
-    Element.prototype.animate = function (...args) {
-      const animation = originalAnimate.apply(this, args);
-      if (this.matches('.toast-slot')) { animation.pause(); animation.currentTime = 60; }
-      return animation;
-    };
-    (window as any).__restoreToastAnimation = () => { Element.prototype.animate = originalAnimate; };
     fail.click();
-    return frames;
+    for (let index = 0; index < 60; index++) {
+      await new Promise(requestAnimationFrame);
+      const offset = new DOMMatrix(getComputedStyle(original.closest('.toast-slot')!).transform).m42;
+      if (Math.abs(offset) > .5) return { frames, reductionStart: offset };
+    }
+    throw new Error('The next notification did not produce an intermediate reflow frame');
   }));
-  expect(observed.every(frame => frame.connected)).toBe(true);
-  expect(observed.some(frame => Math.abs(frame.offset) > .5)).toBe(true);
-  expect(new Set(observed.map(frame => frame.y)).size).toBeGreaterThan(2);
+  expect(observed.frames.every(frame => frame.connected)).toBe(true);
+  expect(observed.frames.some(frame => Math.abs(frame.offset) > .5)).toBe(true);
+  expect(new Set(observed.frames.map(frame => frame.y)).size).toBeGreaterThan(2);
+  expect(Math.abs(observed.reductionStart)).toBeGreaterThan(.5);
   await expect(page.locator('.toast')).toHaveCount(3);
-  await expect.poll(() => page.locator('.toast-slot').evaluateAll(elements => elements.flatMap(element => element.getAnimations().map(animation => animation.playState)))).toContain('paused');
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await expect.poll(() => page.locator('.toast-slot').evaluateAll(elements => elements.flatMap(element => element.getAnimations()).length)).toBe(0);
-  await page.evaluate(() => (window as any).__restoreToastAnimation());
+  await expect.poll(() => page.locator('.toast-slot').evaluateAll(elements => elements.every(element => getComputedStyle(element).transform === 'none'))).toBe(true);
+  await page.evaluate(async () => { await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); });
+  expect(await page.locator('.toast').evaluateAll(elements => elements.every(element => getComputedStyle(element).transform === 'none' && getComputedStyle(element).opacity === '1'))).toBe(true);
   await page.locator('.toast').last().click();
   await expect(page.locator('.toast')).toHaveCount(2);
 });

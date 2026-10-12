@@ -11,9 +11,9 @@ import {
 } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { animate, motionValue, type AnimationPlaybackControls } from 'motion';
 import { useSurface } from './Surface';
-import { motionDurations, motionCssEase, motionCssExitEase, useAppMotion } from '../../shared/motion';
-import { animateEntrance, canAnimate } from '../../shared/motion/surfaces';
+import { motionDistances, motionDurations, motionEase, motionToastTransition, useAppMotion } from '../../shared/motion';
 
 interface Toast {
   id: number;
@@ -41,7 +41,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const nextId = useRef(0);
   const stack = useRef<HTMLDivElement>(null);
   const positions = useRef(new Map<string, number>());
-  const reflows = useRef(new Map<HTMLElement, Animation>());
+  const reflows = useRef(new Map<HTMLElement, () => void>());
   const previousHost = useRef<HTMLElement | null>(null);
   // Moving one portal container preserves toast identity and its live region
   // when a nested dialog becomes the frontmost surface.
@@ -60,7 +60,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   useLayoutEffect(() => () => { portalRoot.remove(); }, [portalRoot]);
   useLayoutEffect(() => {
     const cancel = () => {
-      reflows.current.forEach(animation => animation.cancel());
+      reflows.current.forEach(cancel => cancel());
       reflows.current.clear();
       positions.current.clear();
     };
@@ -83,18 +83,29 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       const offset = transform && transform !== 'none' && typeof DOMMatrix !== 'undefined' ? new DOMMatrix(transform).m42 : 0;
       const top = slot.getBoundingClientRect().top - offset;
       const from = positions.current.get(id);
-      reflows.current.get(slot)?.cancel();
+      reflows.current.get(slot)?.();
       reflows.current.delete(slot);
+      slot.style.transform = '';
       next.set(id, top);
       const delta = from === undefined ? 0 : from + offset - top;
-      if (!sameHost || reducedMotion || document.hidden || Math.abs(delta) < .5 || !slot.animate) continue;
-      const animation = slot.animate([{ transform: `translateY(${delta}px)` }, { transform: 'none' }], { duration: motionDurations.content * 1000, easing: motionCssEase });
-      reflows.current.set(slot, animation);
-      void animation.finished.then(() => {
-        if (reflows.current.get(slot) === animation) { animation.cancel(); reflows.current.delete(slot); }
-      }, () => {});
+      if (!sameHost || reducedMotion || document.hidden || Math.abs(delta) < .5) continue;
+      const offsetValue = motionValue(delta);
+      const render = (offset: number) => { slot.style.transform = offset ? `translateY(${offset}px)` : ''; };
+      render(delta);
+      const unsubscribe = offsetValue.on('change', render);
+      let animation: AnimationPlaybackControls | undefined;
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        // Numeric values never enqueue a cached DOM render after cancellation.
+        unsubscribe(); animation?.stop(); offsetValue.destroy(); slot.style.transform = '';
+        if (reflows.current.get(slot) === finish) reflows.current.delete(slot);
+      };
+      reflows.current.set(slot, finish);
+      animation = animate(offsetValue, 0, { duration: motionDurations.toastReflow, ease: motionEase, onComplete: finish });
     }
-    for (const [node, animation] of reflows.current) if (!node.isConnected) { animation.cancel(); reflows.current.delete(node); }
+    for (const [node, cancel] of reflows.current) if (!node.isConnected) cancel();
     positions.current = next;
   }, [toasts, host, reducedMotion]);
   const dismiss = useCallback((id: number) => {
@@ -139,7 +150,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const notifications = (
     <div ref={stack} className="toast-stack" aria-live="polite" aria-atomic="false">
       {toasts.map(toast => (
-        <div key={toast.id} className="toast-slot" data-toast-id={toast.id}><ToastMessage toast={toast} dismiss={dismiss} remove={remove} /></div>
+        <div key={toast.id} className="toast-slot" data-toast-id={toast.id}><ToastMessage toast={toast} host={host} dismiss={dismiss} remove={remove} /></div>
       ))}
     </div>
   );
@@ -150,33 +161,46 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     </Context.Provider>
   );
 }
-function ToastMessage({ toast, dismiss, remove }: { toast: Toast; dismiss: (id: number) => void; remove: (id: number) => void }) {
+function ToastMessage({ toast, host, dismiss, remove }: { toast: Toast; host: HTMLElement | null; dismiss: (id: number) => void; remove: (id: number) => void }) {
   const { reducedMotion } = useAppMotion();
   const element = useRef<HTMLButtonElement>(null);
   const entered = useRef(false);
+  const previousHost = useRef(host);
   useLayoutEffect(() => {
     const node = element.current;
-    if (!node || !canAnimate(node, reducedMotion)) {
+    const moved = previousHost.current !== host;
+    previousHost.current = host;
+    if (!node) return;
+    const reveal = () => { node.style.opacity = ''; node.style.transform = ''; };
+    if (moved || reducedMotion || document.hidden) {
       entered.current = true;
+      reveal();
       if (toast.closing) remove(toast.id);
       return;
     }
-    if (!toast.closing) {
-      if (entered.current) return;
-      const cancel = animateEntrance(node, 'toast');
-      const frame = requestAnimationFrame(() => {
-        entered.current = true;
-      });
-      return () => { cancelAnimationFrame(frame); cancel?.(); };
-    }
-    const duration = motionDurations.exit * 1000;
-    const animation = node.animate(
-      [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-8px)' }],
-      { duration, easing: motionCssExitEase, fill: 'both' });
+    if (!toast.closing && entered.current) { reveal(); return; }
+    entered.current = true;
+    let animation: AnimationPlaybackControls | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     let settled = false;
+    const current = getComputedStyle(node);
+    const fromOpacity = toast.closing ? Number(current.opacity) : 0;
+    const fromOffset = toast.closing
+      ? typeof DOMMatrix !== 'undefined' ? new DOMMatrix(current.transform === 'none' ? '' : current.transform).m42
+        : Number(current.transform.match(/translateY\(([-\d.]+)px\)/)?.[1] ?? 0)
+      : motionDistances.toast;
+    const toOpacity = toast.closing ? 0 : 1;
+    const toOffset = toast.closing ? motionDistances.toast : 0;
+    const progress = motionValue(0);
+    const render = (value: number) => {
+      node.style.opacity = String(fromOpacity + (toOpacity - fromOpacity) * value);
+      node.style.transform = `translateY(${fromOffset + (toOffset - fromOffset) * value}px)`;
+    };
+    render(0);
+    const unsubscribe = progress.on('change', render);
     const cleanup = () => {
-      animation.cancel(); clearTimeout(timer);
-      document.removeEventListener('visibilitychange', finish);
+      unsubscribe(); animation?.stop(); progress.destroy(); clearTimeout(timer);
+      document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('resize', finish);
     };
     const finish = () => {
@@ -184,13 +208,19 @@ function ToastMessage({ toast, dismiss, remove }: { toast: Toast; dismiss: (id: 
       settled = true;
       cleanup();
       if (toast.closing) remove(toast.id);
+      else reveal();
     };
-    const timer = window.setTimeout(finish, duration + 100);
-    document.addEventListener('visibilitychange', finish);
+    const visibility = () => { if (document.hidden) finish(); };
+    animation = animate(progress, 1, toast.closing
+      ? { duration: motionDurations.toastExit, ease: 'easeIn', onComplete: finish }
+      : { ...motionToastTransition, onComplete: finish });
+    // A spring's visual duration precedes its quiet settling tail. The fallback
+    // only releases a stalled animation; lifecycle events settle synchronously.
+    timer = setTimeout(finish, (toast.closing ? motionDurations.toastExit + .1 : motionDurations.toastEnter + 1) * 1000);
+    document.addEventListener('visibilitychange', visibility);
     window.addEventListener('resize', finish);
-    void animation.finished.then(finish, () => {});
     return () => { settled = true; cleanup(); };
-  }, [toast.closing, toast.id, reducedMotion, remove]);
+  }, [toast.closing, toast.id, host, reducedMotion, remove]);
   return <button ref={element} className={`toast ${toast.kind}`} disabled={toast.closing}
     onClick={() => dismiss(toast.id)}>{toast.text}</button>;
 }

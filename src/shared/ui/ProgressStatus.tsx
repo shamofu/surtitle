@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useAppearance } from '../../app/runtime';
 import type { ActivityStatus, ProgressUnit } from '../contracts/activity';
-import { AnimatedValue, MotionRegion, MotionSwap } from '../motion';
+import { m } from 'motion/react';
+import { AnimatedValue, MotionRegion, MotionSwap, motionDurations, motionEase, useMotionActive } from '../motion';
 import './progress.css';
 
 const phases: Record<string, [string, string]> = {
@@ -47,6 +48,7 @@ export interface ProgressStatusProps {
 
 export function ProgressStatus({ label, phase, completed, total, unit, status = 'running', error, compact = false }: ProgressStatusProps) {
   const { t } = useAppearance();
+  const motionActive = useMotionActive();
   const exact = typeof total === 'number' && Number.isFinite(total) && total > 0;
   const value = Math.max(0, Number.isFinite(completed) ? completed ?? 0 : 0);
   const bounded = exact ? Math.min(value, total) : value;
@@ -59,7 +61,13 @@ export function ProgressStatus({ label, phase, completed, total, unit, status = 
   const count = ratioOnly ? `${Math.floor(bounded * 100)}%` : exact ? `${format(bounded)} / ${format(total)}` : completed !== undefined ? format(value) : undefined;
   return <div className={`progress-status${compact ? ' compact' : ''}`} data-status={status} aria-busy={active}>
     <div className="progress-status-copy"><strong>{label}</strong><span role="status"><MotionSwap disabled as="span" stateKey={progressPhaseLabel(state, t)}>{progressPhaseLabel(state, t)}</MotionSwap></span></div>
-    <MotionRegion mode="status" open={active}><progress aria-label={label} {...(exact ? { value: bounded, max: total } : {})} /></MotionRegion>
+    <MotionRegion mode="status" open={active}><div className="progress-track">
+      <progress aria-label={label} {...(exact ? { value: bounded, max: total } : {})} />
+      <m.span aria-hidden="true" className="progress-fill" initial={false}
+        animate={exact ? { scaleX: bounded / total, x: '0%' } : { scaleX: .3, x: motionActive ? ['-30%', '100%'] : '35%' }}
+        transition={exact ? { duration: motionActive ? motionDurations.progressFollow : 0, ease: motionEase }
+          : { duration: motionActive ? motionDurations.progress : 0, repeat: motionActive ? Infinity : 0, ease: 'linear' }} />
+    </div></MotionRegion>
     <MotionRegion mode="status" open={!!count}><p className="progress-status-count">{unit === 'bytes' && !exact ? `${t('保存中の容量', 'Stored size')}: ` : ''}<AnimatedValue value={`${count ?? ''}${exact && active && !ratioOnly ? ` · ${Math.floor(bounded / total * 100)}%` : ''}`} /></p></MotionRegion>
     <MotionRegion mode="status" open={!!error}><p className="progress-status-error"><MotionSwap disabled as="span" stateKey={error ?? ''}>{error}</MotionSwap></p></MotionRegion>
   </div>;

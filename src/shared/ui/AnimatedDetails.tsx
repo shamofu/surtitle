@@ -77,7 +77,7 @@ export const AnimatedDetails = forwardRef<HTMLDetailsElement, ComponentPropsWith
       details.open = true;
       const from = interruptedHeight.current ?? (requestedOpen ? collapsedHeight : expandedHeight);
       interruptedHeight.current = undefined;
-      const stop = animateHeight(details, from, requestedOpen ? expandedHeight : collapsedHeight, complete);
+      const stop = animateHeight(details, from, requestedOpen ? expandedHeight : collapsedHeight, complete, requestedOpen);
       const cancel = () => {
         ++revision.current;
         interruptedHeight.current = stop();

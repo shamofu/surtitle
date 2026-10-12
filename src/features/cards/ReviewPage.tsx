@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { MotionLink } from '../../shared/ui/MotionLink';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { animate } from 'motion';
+import { m } from 'motion/react';
 import { Link } from '@tanstack/react-router';
 import {
   ArrowLeft,
@@ -8,7 +10,6 @@ import {
   BookOpen,
   Check,
   Eye,
-  LoaderCircle,
   RefreshCw,
 } from 'lucide-react';
 import { cardsApi } from './api';
@@ -23,8 +24,8 @@ import {
 } from '../../app/runtime';
 import { shouldIgnoreShortcut } from '../../shared/keyboard';
 import { dueCards, languageName } from '../../shared/format';
-import { Badge, Button, EmptyState } from '../../shared/ui/index';
-import { AnimatedValue, MotionRegion, motionDurations, motionEase, useAppMotion, useMotionEntrance } from '../../shared/motion';
+import { Badge, Button, EmptyState, MotionButton } from '../../shared/ui/index';
+import { AnimatedValue, MotionRegion, MotionSpinner, motionDurations, motionEase, useAppMotion, useMotionActive, useMotionEntrance } from '../../shared/motion';
 
 export type Rating = 'again' | 'hard' | 'good' | 'easy';
 
@@ -40,6 +41,7 @@ export function ReviewCard({
   const { t, locale } = useAppearance();
   const { report } = useNotifications();
   const { surfaceHidden } = useSurface();
+  const motionActive = useMotionActive();
   const [revealed, setRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
@@ -184,9 +186,11 @@ export function ReviewCard({
                 'Take a moment to recall the meaning in your own words.',
               )}</span>
         </p>
-        <div className="rating-buttons">
+        <m.div className="rating-buttons" initial={false}
+          animate={{ y: revealed || !motionActive ? 0 : 4 }}
+          transition={{ duration: motionActive ? motionDurations.content : 0, ease: motionEase }}>
           {choices.map((choice, index) => (
-            <button
+            <MotionButton
               key={choice.id}
               className={`rating-button ${choice.id}`}
               disabled={!revealed || busy}
@@ -195,9 +199,9 @@ export function ReviewCard({
               <span className="rating-key">{index + 1}</span>
               <strong>{choice.title}</strong>
               <small>{choice.detail}</small>
-            </button>
+            </MotionButton>
           ))}
-        </div>
+        </m.div>
         <small>
           {t(
             '思い出しやすさに合わせて、次の復習時刻が調整されます。',
@@ -270,6 +274,7 @@ function ReviewTransition({ card, stateKey, children }: { card?: StudyCard; stat
 
 export function ReviewPage() {
   const page = useRef<HTMLDivElement>(null);
+  const motionActive = useMotionActive();
   useMotionEntrance(page);
   const { data, loading, error } = useSnapshot();
   const { refresh } = useDataActions();
@@ -315,7 +320,7 @@ export function ReviewPage() {
         setRetrying(true);
         void report(refresh).finally(() => setRetrying(false));
       }}>{t('再試行', 'Try again')}</Button>
-    </EmptyState> : <div className="page-loading" role="status"><LoaderCircle size={22} className="spin" aria-hidden="true" />{t('復習を読み込んでいます…', 'Loading your review…')}</div>}
+    </EmptyState> : <div className="page-loading" role="status"><MotionSpinner size={22} />{t('復習を読み込んでいます…', 'Loading your review…')}</div>}
   </div>;
   return (
     <div className="review-page" ref={page}>
@@ -338,8 +343,9 @@ export function ReviewPage() {
         </p>
       </header>
       <div className="session-progress">
-        <span
-          style={{ width: `${total ? (reviewed.length / total) * 100 : 0}%` }}
+        <m.span initial={false} style={{ width: '100%', transformOrigin: 'left' }}
+          animate={{ scaleX: total ? reviewed.length / total : 0 }}
+          transition={{ duration: motionActive ? motionDurations.progressFollow : 0, ease: motionEase }}
         />
       </div>
       <div className="review-session">
@@ -375,12 +381,12 @@ export function ReviewPage() {
                 )}
           </p>
           <div className="review-complete-actions">
-            <Link to="/" className="button primary">
+            <MotionLink to="/" className="button primary">
               {t('作品に戻る', 'Back to watching')}
-            </Link>
-            <Link to="/cards" className="button secondary">
+            </MotionLink>
+            <MotionLink to="/cards" className="button secondary">
               {t('フレーズ帳を開く', 'Open phrases')}
-            </Link>
+            </MotionLink>
           </div>
         </div>
           )}

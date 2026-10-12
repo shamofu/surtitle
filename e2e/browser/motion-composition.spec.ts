@@ -1,68 +1,62 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from '@playwright/test';
 import { installLearningFixture } from './learning-fixture';
+import { motionDurations } from '../../src/shared/motion';
 
 test('rapid keyboard tab changes and drawer reversal retain the search and focus owner', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.clock.install();
   await installLearningFixture(page, 'en', 'light');
   await page.goto('/study/visual-fixture');
   await page.getByRole('button', { name: 'Transcript', exact: true }).click();
   await page.getByLabel('Search transcript').fill('coast');
-
-  const result = await page.evaluate(async () => {
-    const committed = (predicate: () => boolean) => new Promise<void>((resolve, reject) => {
-      if (predicate()) { resolve(); return; }
-      const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('Study state did not commit')); }, 5000);
-      const observer = new MutationObserver(() => {
-        if (predicate()) { observer.disconnect(); clearTimeout(timeout); resolve(); }
-      });
-      observer.observe(document.body, { childList: true, attributes: true, subtree: true });
-    });
-    const originalAnimate = Element.prototype.animate;
-    let indicatorStarts = 0;
-    Element.prototype.animate = function (...args) {
-      const animation = originalAnimate.apply(this, args);
-      if (this.matches('.transcript-tabs > .selection-indicator')) {
-        indicatorStarts++;
-        animation.pause();
-        animation.currentTime = 80;
-      }
-      return animation;
-    };
-    try {
-      const transcript = document.querySelector<HTMLButtonElement>('.transcript-tabs [role="tab"]')!;
-      const suggestions = [...document.querySelectorAll<HTMLButtonElement>('.transcript-tabs [role="tab"]')].at(-1)!;
-      transcript.focus();
-      transcript.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
-      await committed(() => suggestions.getAttribute('aria-selected') === 'true');
-      const selectedFocus = document.activeElement === suggestions;
-      suggestions.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-      await committed(() => transcript.getAttribute('aria-selected') === 'true' && !!document.querySelector('input[aria-label="Search transcript"]'));
-      const search = document.querySelector<HTMLInputElement>('input[aria-label="Search transcript"]')!;
-      const tabFocus = document.activeElement === transcript;
-      const panel = document.querySelector<HTMLElement>('.study-companion')!;
-      const toggle = document.querySelector<HTMLButtonElement>('.study-transcript-toggle')!;
-      const close = panel.querySelector<HTMLButtonElement>('button[aria-label="Close panel"]')!;
-      close.focus();
-      close.click();
-      await committed(() => panel.hidden);
-      const closeFocus = document.activeElement === toggle;
-      toggle.click();
-      await committed(() => !panel.hidden);
-      const retained = search === document.querySelector('input[aria-label="Search transcript"]');
-      let safeVideo = true;
-      for (let element: Element | null = document.querySelector('.native-player-viewport'); element; element = element.parentElement) {
-        const style = getComputedStyle(element);
-        safeVideo &&= style.opacity === '1' && style.transform === 'none' && style.translate === 'none';
-      }
-      return { indicatorStarts, selectedFocus, tabFocus, closeFocus, retained, value: search.value, safeVideo };
-    } finally {
-      Element.prototype.animate = originalAnimate;
-      document.querySelectorAll('.selection-indicator').forEach(element => element.getAnimations().forEach(animation => animation.finish()));
+  const search = await page.getByLabel('Search transcript').elementHandle();
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  const transcript = page.getByRole('tab', { name: 'Transcript', exact: true });
+  const suggestions = page.getByRole('tab', { name: 'Suggestions', exact: true });
+  const marker = page.locator('.transcript-tabs > .selection-indicator');
+  const read = () => marker.evaluate(element => ({ left: element.getBoundingClientRect().left, width: element.getBoundingClientRect().width }));
+  const initial = await read();
+  const destination = (await suggestions.boundingBox())!.x;
+  await transcript.focus();
+  await transcript.dispatchEvent('keydown', { key: 'End' });
+  await expect(suggestions).toHaveAttribute('aria-selected', 'true');
+  await expect(suggestions).toBeFocused();
+  // The trailing edge starts at 25% of the selection duration, after Motion's
+  // first RAF establishes its clock. Sample inside the stretch, not its onset.
+  await page.clock.runFor(Math.round(motionDurations.selection * 1000 * .4));
+  const outward = await read();
+  expect(outward.left).toBeGreaterThan(initial.left);
+  expect(outward.left).toBeLessThan(destination);
+  expect(outward.width).toBeGreaterThan(initial.width);
+  await suggestions.dispatchEvent('keydown', { key: 'Home' });
+  await expect(transcript).toHaveAttribute('aria-selected', 'true');
+  await expect(transcript).toBeFocused();
+  const reversed = await read();
+  expect(Math.abs(reversed.left - outward.left)).toBeLessThan(1);
+  await page.clock.runFor(80);
+  expect((await read()).left).toBeLessThan(reversed.left);
+  await page.clock.runFor(300);
+  expect(Math.abs((await read()).left - initial.left)).toBeLessThan(.5);
+  const close = page.getByRole('button', { name: 'Close panel', exact: true });
+  await close.focus();
+  await close.evaluate(button => button.click());
+  const toggle = page.locator('.study-transcript-toggle');
+  await expect(toggle).toBeFocused();
+  await page.clock.runFor(40);
+  await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'true');
+  await toggle.evaluate(button => button.click());
+  await page.clock.runFor(500);
+  await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
+  await expect(page.getByLabel('Search transcript')).toHaveValue('coast');
+  expect(await search!.evaluate(input => input === document.querySelector('input[aria-label="Search transcript"]'))).toBe(true);
+  expect(await page.evaluate(() => {
+    for (let element: Element | null = document.querySelector('.native-player-viewport'); element; element = element.parentElement) {
+      const style = getComputedStyle(element);
+      if (style.opacity !== '1' || style.transform !== 'none' || style.translate !== 'none') return false;
     }
-  });
-  expect(result).toMatchObject({ selectedFocus: true, tabFocus: true, closeFocus: true, retained: true, value: 'coast', safeVideo: true });
-  expect(result.indicatorStarts).toBeGreaterThanOrEqual(2);
+    return true;
+  })).toBe(true);
   await expect(page.getByRole('tab', { name: 'Transcript', exact: true })).toHaveAttribute('aria-selected', 'true');
 });
 
@@ -119,79 +113,62 @@ test('a disclosure inside the subtitle modal settles its geometry without moving
 
 test('a page entrance owns its subtree when an answer is revealed before that entrance ends', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.clock.install();
   await installLearningFixture(page, 'en', 'light');
   await page.goto('/');
   await expect(page.locator('.media-card').first()).toBeVisible();
   await expect(page.getByRole('link', { name: /^Review/ })).toBeVisible();
-  const result = await page.evaluate(async () => {
-    const originalAnimate = Element.prototype.animate;
-    let entrance: Animation | undefined;
-    let entranceStarted!: () => void;
-    const entering = new Promise<void>(resolve => { entranceStarted = resolve; });
-    Element.prototype.animate = function (...args) {
-      const animation = originalAnimate.apply(this, args);
-      if (this.matches('.review-page')) { entrance = animation; animation.pause(); animation.currentTime = 60; entranceStarted(); }
-      return animation;
-    };
-    const committed = (predicate: () => boolean) => new Promise<void>((resolve, reject) => {
-      if (predicate()) { resolve(); return; }
-      const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('Review state did not commit')); }, 5000);
-      const observer = new MutationObserver(() => {
-        if (predicate()) { observer.disconnect(); clearTimeout(timeout); resolve(); }
-      });
-      observer.observe(document.body, { childList: true, attributes: true, subtree: true });
-    });
-    try {
-      document.querySelector<HTMLAnchorElement>('.main-nav a[href="/review"]')!.click();
-      await Promise.all([committed(() => !!document.querySelector('.review-answer.concealed button')), entering]);
-      document.querySelector<HTMLButtonElement>('.review-answer.concealed button')!.click();
-      await committed(() => !!document.querySelector('.review-card.revealed'));
-      const page = document.querySelector('.review-page')!;
-      // Enabled-button color/opacity transitions are separate feedback, not an entrance.
-      const fades = page.getAnimations({ subtree: true }).filter(animation => !(animation instanceof CSSTransition)
-        && !(animation instanceof CSSAnimation) && animation.effect instanceof KeyframeEffect
-        && animation.effect.getKeyframes().some(frame => frame.opacity !== undefined));
-      return { paused: entrance?.playState === 'paused', duration: entrance?.effect?.getTiming().duration,
-        targets: fades.map(animation => (animation.effect as KeyframeEffect).target === page ? 'page' : 'child'),
-        answer: document.querySelector('.review-answer')?.textContent,
-        enabled: [...document.querySelectorAll<HTMLButtonElement>('.rating-button')].every(button => !button.disabled) };
-    } finally {
-      Element.prototype.animate = originalAnimate;
-      entrance?.finish();
-    }
-  });
-  expect(result).toMatchObject({ paused: true, duration: 180, targets: ['page'], enabled: true });
-  expect(result.answer).toContain('少し寄り道をする');
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  await page.locator('.main-nav a[href="/review"]').evaluate(link => link.click());
+  const review = page.locator('.review-page');
+  await expect(review.locator('.review-answer.concealed button')).toHaveCount(1);
+  // The controlled RAF clock keeps the page's initial entrance frame pending.
+  // Revealing here must not install a competing fade on the live answer subtree.
+  await expect(review).toHaveCSS('opacity', '0');
+  await review.locator('.review-answer.concealed button').evaluate(button => button.click());
+  await expect(review.locator('.review-card')).toHaveClass(/revealed/);
+  await expect(review.locator('.review-answer')).toContainText('少し寄り道をする');
+  await expect(review.locator('.review-answer')).toHaveCSS('opacity', '1');
+  await expect(review.locator('.review-answer')).toHaveCSS('transform', 'none');
+  await expect(review.locator('[data-motion-snapshot]')).toHaveCount(0);
+  const answer = await review.locator('.review-answer').elementHandle();
+  expect(await review.locator('.rating-button').evaluateAll(buttons => buttons.every(button => !(button as HTMLButtonElement).disabled))).toBe(true);
+  await page.clock.runFor(motionDurations.content * 1000 + 120);
+  await expect(review).toHaveCSS('opacity', '1');
+  await expect(review).toHaveCSS('transform', 'none');
+  expect(await answer!.evaluate(element => element === document.querySelector('.review-answer'))).toBe(true);
 });
 
-test('live reduced motion cancels a paused tab indicator and leaves only the latest panel interactive', async ({ page }) => {
+test('live reduced motion settles an in-flight tab indicator and leaves only the latest panel interactive', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.clock.install();
   await installLearningFixture(page, 'en', 'dark');
   await page.goto('/study/visual-fixture');
   await page.getByRole('button', { name: 'Transcript', exact: true }).click();
   await expect(page.getByLabel('Search transcript')).toBeVisible();
-  await page.evaluate(() => {
-    const marker = document.querySelector<HTMLElement>('.transcript-tabs > .selection-indicator')!;
-    const originalAnimate = marker.animate;
-    marker.animate = function (...args) {
-      const animation = originalAnimate.apply(this, args);
-      animation.pause();
-      animation.currentTime = 60;
-      return animation;
-    };
-  });
-  await page.getByRole('tab', { name: 'Suggestions', exact: true }).click();
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  const suggestions = page.getByRole('tab', { name: 'Suggestions', exact: true });
+  await suggestions.evaluate(button => button.click());
   const marker = page.locator('.transcript-tabs > .selection-indicator');
-  await expect.poll(() => marker.evaluate(element => element.getAnimations().map(animation => animation.playState))).toEqual(['paused']);
+  await page.clock.runFor(80);
+  const before = await marker.evaluate(element => {
+    const selected = element.parentElement!.querySelector('[aria-selected="true"]')!;
+    return Math.abs(element.getBoundingClientRect().left - selected.getBoundingClientRect().left);
+  });
+  expect(before).toBeGreaterThan(1);
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await expect.poll(() => marker.evaluate(element => element.getAnimations().length)).toBe(0);
   await expect(page.getByRole('tabpanel')).toHaveCount(1);
   await expect(page.getByRole('tab', { name: 'Suggestions', exact: true })).toHaveAttribute('aria-selected', 'true');
   expect(await marker.evaluate(element => {
     const selected = element.parentElement!.querySelector('[aria-selected="true"]')!;
     return Math.abs(element.getBoundingClientRect().left - selected.getBoundingClientRect().left);
   })).toBeLessThan(.5);
-  await page.getByRole('tab', { name: 'Transcript', exact: true }).click();
+  // Advancing beyond the superseded transition must not bring its frame back.
+  await page.clock.runFor(400);
+  const selectedLeft = (await suggestions.boundingBox())!.x;
+  expect((await marker.boundingBox())!.x).toBeCloseTo(selectedLeft, 1);
+  await page.getByRole('tab', { name: 'Transcript', exact: true }).evaluate(button => button.click());
   await expect(page.getByLabel('Search transcript')).toBeVisible();
-  expect(await marker.evaluate(element => element.getAnimations().length)).toBe(0);
+  const transcriptLeft = (await page.getByRole('tab', { name: 'Transcript', exact: true }).boundingBox())!.x;
+  expect((await marker.boundingBox())!.x).toBeCloseTo(transcriptLeft, 1);
 });

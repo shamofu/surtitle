@@ -40,6 +40,34 @@ for (const viewport of [{ width: 1024, height: 700 }, { width: 1366, height: 768
   });
 }
 
+test('a failed accepted close restores the same draft after exit and keeps notifications accessible', async ({ page }) => {
+  await page.getByRole('button', { name: 'Open editor', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Editor', exact: true });
+  const input = dialog.getByRole('textbox', { name: 'Phrase', exact: true });
+  await input.fill('日本語の途中入力');
+  const original = await input.elementHandle();
+  await input.evaluate(node => {
+    (node as HTMLInputElement).setSelectionRange(2, 5);
+    node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+  });
+  await dialog.getByRole('button', { name: 'Fail close', exact: true }).click();
+  const toast = dialog.getByRole('button', { name: 'Could not close', exact: true });
+  await expect(toast).toBeVisible();
+  await expect(dialog).toHaveAttribute('data-state', 'open');
+  await expect.poll(() => dialog.locator('.modal-body').evaluate(node => node.getAnimations().length)).toBe(0);
+  await expect(dialog.locator('.modal-body')).toHaveCSS('opacity', '1');
+  await expect(dialog.locator('.modal-header')).toHaveCSS('opacity', '1');
+  await expect(input).toHaveValue('日本語の途中入力');
+  expect(await original!.evaluate(node => node === document.querySelector('input'))).toBe(true);
+  expect(await input.evaluate(node => [(node as HTMLInputElement).selectionStart, (node as HTMLInputElement).selectionEnd])).toEqual([2, 5]);
+  await toast.click();
+  await expect(toast).toHaveCount(0);
+  await input.dispatchEvent('compositionend', { data: '日本語' });
+  await input.focus();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
+
 test('nested dialogs own Escape and restore focus in order', async ({ page }) => {
   const opener = page.getByRole('button', { name: 'Open editor' });
   await opener.click();

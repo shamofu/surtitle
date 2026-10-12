@@ -2,7 +2,8 @@
 import { ImportDialog } from './ImportDialog';
 import type { DroppedMediaFiles } from './ImportDialog';
 import { useRef, useState } from 'react';
-import { Link } from '@tanstack/react-router';
+import { createLink, Link } from '@tanstack/react-router';
+import { m } from 'motion/react';
 import { ArrowDownToLine, FileVideo2, Headphones, Play, Plus, Search, Upload, X } from 'lucide-react';
 import type { Media } from '../../shared/contracts/media';
 import { useAppearance, useDataActions, useNotifications, useSnapshot } from '../../app/runtime';
@@ -12,11 +13,15 @@ import { Badge, Button, EmptyState, PageTitle } from '../../shared/ui/index';
 import { TransferDialog } from '../transfer/TransferDialog';
 import { DownloadJobs } from './MediaManagement';
 import { useLibraryDrop } from './useLibraryDrop';
-import { AnimatedValue, MotionRegion, MotionSwap, useMotionEntrance } from '../../shared/motion';
+import { AnimatedValue, MotionRegion, MotionSwap, motionDurations, motionLayoutTransition, motionReferences, useMotionActive, useMotionEntrance } from '../../shared/motion';
 import { SelectionIndicator } from '../../shared/motion/SelectionIndicator';
+import { useListMotion } from '../../shared/motion/useListMotion';
 
-function MediaRow({ media }: { media: Media }) {
+const MotionLink = createLink(m.a);
+
+function MediaRow({ media, layout, layoutDependency }: { media: Media; layout: boolean; layoutDependency: string }) {
   const { t, locale } = useAppearance();
+  const motionActive = useMotionActive();
   const position = Math.max(0, media.lastPositionMs);
   const duration = media.durationMs > 0 ? media.durationMs : null;
   const status = {
@@ -26,7 +31,9 @@ function MediaRow({ media }: { media: Media }) {
     error: t('読み込みエラー', 'Import error'),
   }[media.status];
   return (
-    <Link to="/study/$mediaId" params={{ mediaId: media.id }} className="media-card media-row">
+    <MotionLink to="/study/$mediaId" params={{ mediaId: media.id }} className="media-card media-row"
+      layout={layout ? 'position' : false} layoutDependency={layoutDependency}
+      transition={{ layout: motionLayoutTransition }} data-motion-reference={motionReferences.list}>
       <div className="media-row-title">
         <span className="media-type-icon" aria-hidden="true">
           {media.kind === 'audio' ? <Headphones size={21} /> : <FileVideo2 size={21} />}
@@ -57,11 +64,12 @@ function MediaRow({ media }: { media: Media }) {
         <span><AnimatedValue value={timestamp(position)} /> <span className="muted">/ <AnimatedValue value={duration ? timestamp(duration) : '—'} /></span></span>
         {duration !== null && (
           <span className="media-progress" aria-hidden="true">
-            <span style={{ width: `${Math.min(100, (position / duration) * 100)}%` }} />
+            <m.span initial={false} animate={{ width: `${Math.min(100, (position / duration) * 100)}%` }}
+              transition={{ duration: motionActive ? motionDurations.progressFollow : 0 }} data-motion-reference={motionReferences.progress} />
           </span>
         )}
       </div>
-    </Link>
+    </MotionLink>
   );
 }
 
@@ -111,6 +119,8 @@ export function LibraryPage() {
       (!item.durationMs || item.lastPositionMs < item.durationMs),
   ).slice(0, 3);
   const filtering = !!search || filter !== 'all';
+  const reflow = useListMotion(filtered.length <= 40);
+  const listDependency = `${filter}:${search}`;
 
   return (
     <div ref={pageRef} className="library-page" onDragOver={event => {
@@ -193,7 +203,7 @@ export function LibraryPage() {
               <span>{t('フレーズ', 'Phrases')}</span>
               <span>{t('再生位置 / 長さ', 'Position / duration')}</span>
             </div>
-            {filtered.map((item) => <MediaRow key={item.id} media={item} />)}
+            {filtered.map((item) => <MediaRow key={item.id} media={item} layout={reflow} layoutDependency={listDependency} />)}
           </div>
         ) : (
           <div className="library-empty">

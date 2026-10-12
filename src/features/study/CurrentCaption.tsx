@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
+import { animate, motionValue } from 'motion';
 import { BookmarkPlus, ChevronLeft, ChevronRight, Languages, Play, RotateCcw } from 'lucide-react';
 import { useAppearance } from '../../app/runtime';
 import type { SubtitleSegment } from '../../shared/contracts/media';
 import { timestamp } from '../../shared/format';
-import { Button } from '../../shared/ui/index';
-import { MotionRegion, motionCssEase, motionDurations, useAppMotion } from '../../shared/motion';
+import { Button, MotionButton } from '../../shared/ui/index';
+import { MotionRegion, motionDurations, motionRevealEase, useAppMotion } from '../../shared/motion';
 
 type CaptionSource = {
   cue: SubtitleSegment;
@@ -47,7 +48,8 @@ export function CurrentCaption({
   const [showTranslation, setShowTranslation] = useState(false);
   const [gestureSource, setGestureSource] = useState<CaptionSource>();
   const caption = useRef<HTMLParagraphElement>(null);
-  const translation = useRef<HTMLParagraphElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const [translationExtent] = useState(() => motionValue(0));
   const sourceScroll = useRef<HTMLDivElement>(null);
   const translationScroll = useRef<HTMLDivElement>(null);
   const handled = useRef(false);
@@ -59,41 +61,43 @@ export function CurrentCaption({
   const replayLabel = previewing ? t('この字幕を再生', 'Play this subtitle') : t('この字幕をもう一度', 'Replay this subtitle');
   const translationOpen = !!source && !draftMode && showTranslation;
   const sourceKey = !draftMode && source ? JSON.stringify([source.mediaId, source.id]) : undefined;
-  const textKey = sourceKey ? JSON.stringify([sourceKey, source?.text]) : undefined;
-  const translationKey = sourceKey ? JSON.stringify([sourceKey, source?.translation]) : undefined;
-  const previousContent = useRef({ textKey, translationKey });
-  const cancelAnimation = useRef<(() => void) | undefined>(undefined);
   useLayoutEffect(() => {
-    const sourceChanged = previousContent.current.textKey !== textKey;
-    const translationChanged = previousContent.current.translationKey !== translationKey;
-    previousContent.current = { textKey, translationKey };
-    cancelAnimation.current?.();
-    if (reducedMotion || document.hidden || gestureSource || draftMode) return;
-    const nodes = [sourceChanged && source ? caption.current : null,
-      translationOpen && (sourceChanged || translationChanged) ? translation.current : null]
-      .filter((node): node is HTMLParagraphElement => !!node && typeof node.animate === 'function');
-    if (!nodes.length) return;
-    // Update the live text at the cue boundary; the short fade never queues old cues.
-    const animations = nodes.map(node => node.animate([{ opacity: .35 }, { opacity: 1 }], {
-      duration: motionDurations.caption * 1000, easing: motionCssEase,
-    }));
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      animations.forEach(animation => animation.cancel());
-      window.clearTimeout(timer);
-      document.removeEventListener('visibilitychange', finish);
-      window.removeEventListener('resize', finish);
-      if (cancelAnimation.current === finish) cancelAnimation.current = undefined;
+    const node = body.current;
+    if (!node) return;
+    const endpoint = translationOpen ? 1 : 0;
+    const render = (extent: number) => {
+      node.style.gridTemplateRows = `minmax(0, 1fr) minmax(0, ${extent}fr)`;
+      node.style.gap = `${8 * extent}px`;
     };
-    const timer = window.setTimeout(finish, motionDurations.caption * 1000 + 100);
-    cancelAnimation.current = finish;
-    document.addEventListener('visibilitychange', finish);
+    const unsubscribe = translationExtent.on('change', render);
+    render(translationExtent.get());
+    // Cue text is always immediate. Only the user-controlled translation space
+    // changes size, inside the existing caption frame and below the native video.
+    if (reducedMotion || document.hidden || translationExtent.get() === endpoint) {
+      translationExtent.jump(endpoint);
+      render(endpoint);
+      return unsubscribe;
+    }
+    let controls: ReturnType<typeof animate> | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      controls?.stop();
+      translationExtent.jump(endpoint);
+      render(endpoint);
+      clearTimeout(timer);
+    };
+    const duration = (translationOpen ? motionDurations.reveal : motionDurations.revealClose) * Math.abs(endpoint - translationExtent.get());
+    controls = animate(translationExtent, endpoint, { duration, ease: motionRevealEase, onComplete: finish });
+    timer = setTimeout(finish, duration * 1000 + 100);
+    const visibility = () => { if (document.hidden) finish(); };
+    document.addEventListener('visibilitychange', visibility);
     window.addEventListener('resize', finish);
-    void Promise.all(animations.map(animation => animation.finished)).then(finish, finish);
-    return finish;
-  }, [textKey, translationKey, translationOpen, reducedMotion, gestureSource, draftMode]);
+    return () => {
+      controls?.stop(); clearTimeout(timer); unsubscribe();
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('resize', finish);
+    };
+  }, [translationOpen, reducedMotion, translationExtent]);
   useLayoutEffect(() => {
     // A new subtitle starts at its beginning, but selection keeps its frozen source.
     if (sourceScroll.current) sourceScroll.current.scrollTop = 0;
@@ -128,7 +132,7 @@ export function CurrentCaption({
 
   return (
     <section className="current-caption" aria-label={t('いまの字幕', 'Current subtitle')}>
-      <div className="caption-body" data-translation-open={translationOpen}>
+      <div ref={body} className="caption-body" data-translation-open={translationOpen}>
         <div ref={sourceScroll} className="caption-source-scroll" role="region" aria-label={t('字幕の原文', 'Subtitle source')} tabIndex={0}>
             {draftMode ? (
               <div className="caption-empty">
@@ -144,7 +148,7 @@ export function CurrentCaption({
                   : t('この先の字幕はまだありません', 'No further subtitles yet')}</span>
               </div>}
               <p ref={caption} className="current-caption-text" lang={language}
-                onPointerDown={() => { cancelAnimation.current?.(); handled.current = false; setGestureSource(displayed); }}
+                onPointerDown={() => { handled.current = false; setGestureSource(displayed); }}
                 onPointerUp={finishSelection}>
                 {source.text}
               </p>
@@ -167,7 +171,7 @@ export function CurrentCaption({
         </div>
         <div className="caption-translation-region" data-open={translationOpen} inert={!translationOpen} aria-hidden={!translationOpen}>
           <div ref={translationScroll} className="caption-translation-scroll" role="region" aria-label={t('字幕の訳', 'Subtitle translation')} tabIndex={0}>
-            <p ref={translation} className="caption-translation">
+            <p className="caption-translation">
               {source?.translation || t('翻訳はまだありません。言葉を確認して翻訳を見積もれます。', 'No translation yet. Inspect this phrase to estimate one.')}
             </p>
           </div>
@@ -184,10 +188,10 @@ export function CurrentCaption({
               </span>
               <span className="caption-short-label" aria-hidden="true">{t('訳', 'Translation')}</span>
             </Button>
-            <button ref={inspectButton} type="button" className="button secondary" aria-label={t('意味を調べる', 'Explore meaning')} disabled={!enabled} onClick={() => onInspect(source)}>
+            <MotionButton ref={inspectButton} type="button" className="button secondary" aria-label={t('意味を調べる', 'Explore meaning')} disabled={!enabled} onClick={() => onInspect(source)}>
               <span className="caption-full-label">{t('意味を調べる', 'Explore meaning')}</span>
               <span className="caption-short-label" aria-hidden="true">{t('意味を調べる', 'Meaning')}</span>
-            </button>
+            </MotionButton>
             {onSave && <Button variant="ghost" aria-label={t('保存', 'Save phrase')} disabled={!enabled} onClick={() => onSave(source)}><BookmarkPlus size={16} /><span className="caption-full-label">{t('保存', 'Save phrase')}</span><span className="caption-short-label" aria-hidden="true">{t('保存', 'Save')}</span></Button>}
           </>}
         </div>

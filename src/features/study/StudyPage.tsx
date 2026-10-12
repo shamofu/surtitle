@@ -6,7 +6,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   BookmarkPlus,
-  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -32,9 +31,9 @@ import {
 } from '../../app/runtime';
 import { shouldIgnoreShortcut } from '../../shared/keyboard';
 import { activeSegment, languageName, timestamp } from '../../shared/format';
-import { AnimatedValue, MotionRegion } from '../../shared/motion';
+import { AnimatedCheck, AnimatedValue, MotionRegion } from '../../shared/motion';
 import { nativeAvailable } from '../../shared/native/transport';
-import { Button, EmptyState, IconButton, Modal, useModalExit } from '../../shared/ui/index';
+import { Button, EmptyState, IconButton, Modal, MotionButton, useModalExit } from '../../shared/ui/index';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
 import { libraryApi } from '../library/api';
 import { RemoveMediaDialog, SubtitleSourceDialog } from '../library/MediaManagement';
@@ -774,7 +773,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
         </div>
         <div className="study-companion-dock" {...companion.dockProps}>
           <div className="study-transcript-rail">
-            <button
+            <MotionButton
               ref={transcriptToggle}
               type="button"
               className="study-transcript-toggle"
@@ -791,7 +790,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
             >
               {panel === 'transcript' ? <ChevronRight size={18} aria-hidden="true" /> : <ChevronLeft size={18} aria-hidden="true" />}
               <span>{t('字幕一覧', 'Transcript')}</span>
-            </button>
+            </MotionButton>
           </div>
           {/* Keep setup and estimates alive while inspecting a phrase or closing the panel. */}
           <aside
@@ -1087,7 +1086,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                     className="phrase-saved"
                     role="status"
                   >
-                    <Check size={16} />
+                    <AnimatedCheck size={16} />
                     {t('フレーズ帳に保存しました', 'Saved to your phrases')}
                   </p>
                 </MotionRegion>

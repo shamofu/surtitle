@@ -6,6 +6,18 @@ import { CurrentCaption } from '../features/study/CurrentCaption';
 import { MotionProvider } from '../shared/motion';
 import type { SubtitleSegment } from '../shared/contracts/media';
 
+type TranslationMotion = { duration: number; set(value: number): void; complete(): void; stop: ReturnType<typeof vi.fn> };
+const fixture = vi.hoisted(() => ({ translation: [] as TranslationMotion[] }));
+vi.mock('motion', async importOriginal => ({
+  ...await importOriginal<typeof import('motion')>(),
+  animate: (target: { set(value: number): void }, endpoint: number, options: { duration: number; onComplete?: () => void }) => {
+    const controls = { duration: options.duration, set: (value: number) => target.set(value),
+      complete: () => { target.set(endpoint); options.onComplete?.(); }, stop: vi.fn() };
+    fixture.translation.push(controls);
+    return controls;
+  },
+}));
+
 vi.mock('../app/runtime', () => ({ useAppearance: () => ({ t: (_ja: string, en: string) => en }) }));
 
 const first: SubtitleSegment = { id: 'first', mediaId: 'media', text: 'First subtitle', translation: '最初の字幕', startMs: 0, endMs: 1000 };
@@ -31,6 +43,7 @@ function caption(active?: SubtitleSegment, options: Partial<ComponentProps<typeo
 }
 
 beforeEach(() => {
+  fixture.translation = [];
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
@@ -51,43 +64,75 @@ afterEach(() => {
 });
 
 describe('current caption transitions', () => {
-  it('commits loaded and restored cues immediately while animating independently of player readiness', () => {
+  it('reverses the translation space from its visible size and settles on reduced motion', () => {
+    const view = render(caption(first));
+    const body = document.querySelector<HTMLElement>('.caption-body')!;
+    const paragraph = screen.getByText(first.text);
+    fireEvent.click(screen.getByRole('button', { name: 'Show translation' }));
+    const opening = fixture.translation.at(-1)!;
+    expect(opening.duration).toBe(.24);
+    act(() => opening.set(.4));
+    expect(body.style.gap).toBe('3.2px');
+    fireEvent.click(screen.getByRole('button', { name: 'Hide translation' }));
+    expect(opening.stop).toHaveBeenCalledOnce();
+    expect(body.style.gridTemplateRows).toBe('minmax(0, 1fr) minmax(0, 0.4fr)');
+    const closing = fixture.translation.at(-1)!;
+    expect(closing.duration).toBeCloseTo(.18 * .4);
+    view.rerender(caption(second, { reduced: true }));
+    expect(closing.stop).toHaveBeenCalledOnce();
+    expect(body.style.gridTemplateRows).toBe('minmax(0, 1fr) minmax(0, 0fr)');
+    expect(body.style.gap).toBe('0px');
+    expect(screen.getByText(second.text)).toBe(paragraph);
+    expect(animations).toHaveLength(0);
+  });
+
+  it.each(['resize', 'hidden'])('settles translation geometry when the document is %s', reason => {
+    render(caption(first));
+    fireEvent.click(screen.getByRole('button', { name: 'Show translation' }));
+    const opening = fixture.translation.at(-1)!;
+    act(() => opening.set(.5));
+    if (reason === 'resize') fireEvent.resize(window);
+    else {
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+      fireEvent(document, new Event('visibilitychange'));
+    }
+    expect(opening.stop).toHaveBeenCalledOnce();
+    expect(document.querySelector<HTMLElement>('.caption-body')!.style.gridTemplateRows).toBe('minmax(0, 1fr) minmax(0, 1fr)');
+    expect(animations).toHaveLength(0);
+  });
+
+  it('commits loaded and restored cues immediately without fading readable text', () => {
     const view = render(caption(undefined, { enabled: false }));
     view.rerender(caption(first, { enabled: false }));
     const paragraph = screen.getByText(first.text);
-    expect(animations).toHaveLength(1);
+    expect(animations).toHaveLength(0);
     view.rerender(caption(first));
-    expect(animations).toHaveLength(1);
+    expect(animations).toHaveLength(0);
     view.rerender(caption(second));
     expect(screen.getByText(second.text)).toBe(paragraph);
     view.rerender(caption(third, { enabled: false }));
     view.rerender(caption(first));
     expect(screen.getByText(first.text)).toBe(paragraph);
-    expect(animations).toHaveLength(4);
-    for (const animation of animations) {
-      expect(animation.duration).toBe(140);
-      expect(animation.frames).toEqual([{ opacity: .35 }, { opacity: 1 }]);
-    }
+    expect(animations).toHaveLength(0);
   });
 
   it.each([false, true])('keeps one live node through rapid cues, edits, media changes and replay (reduced=%s)', reduced => {
     const view = render(caption(first, { reduced }));
     const paragraph = screen.getByText(first.text);
     const updates = [second, third, { ...third, text: 'Edited current subtitle' }, { ...first, mediaId: 'other-media' }];
-    for (const [index, cue] of updates.entries()) {
+    for (const cue of updates) {
       view.rerender(caption(cue, { reduced }));
       expect(screen.getByText(cue.text)).toBe(paragraph);
       expect(paragraph).toBeVisible();
       expect(document.querySelectorAll('.current-caption-text')).toHaveLength(1);
-      expect(animations).toHaveLength(reduced ? 0 : index + 1);
-      if (!reduced && index > 0) expect(animations[index - 1].cancel).toHaveBeenCalledOnce();
+      expect(animations).toHaveLength(0);
     }
     fireEvent.click(screen.getByRole('button', { name: 'Replay this subtitle' }));
     expect(replay).toHaveBeenCalledExactlyOnceWith(updates.at(-1));
-    expect(animations).toHaveLength(reduced ? 0 : updates.length);
+    expect(animations).toHaveLength(0);
   });
 
-  it('animates source and visible translation together without replaying fades on disclosure changes', () => {
+  it('updates source and visible translation immediately without replaying motion on disclosure changes', () => {
     const view = render(caption(first));
     const region = document.querySelector('.caption-translation-region')!;
     expect(region).toHaveAttribute('inert');
@@ -98,30 +143,29 @@ describe('current caption transitions', () => {
     const translation = screen.getByText(first.translation!);
     view.rerender(caption(second));
     expect(screen.getByText(second.translation!)).toBe(translation);
-    expect(animations.map(animation => animation.node.className)).toEqual(['current-caption-text', 'caption-translation']);
+    expect(animations).toHaveLength(0);
     view.rerender(caption({ ...second, translation: 'Updated translation' }));
-    expect(animations).toHaveLength(3);
-    expect(animations[2].node).toBe(translation);
+    expect(animations).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Hide translation' }));
     expect(region).toHaveAttribute('inert');
     expect(region).toHaveAttribute('aria-hidden', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Show translation' }));
     expect(screen.getByText('Updated translation')).toBe(translation);
-    expect(animations).toHaveLength(3);
+    expect(animations).toHaveLength(0);
   });
 
-  it('cancels motion on pointer-down and freezes source and translation until the selection is inspected', () => {
+  it('freezes source and translation until the selection is inspected without fading either text node', () => {
     const view = render(caption(first));
     fireEvent.click(screen.getByRole('button', { name: 'Show translation' }));
     view.rerender(caption(second));
     const paragraph = screen.getByText(second.text);
     const translation = screen.getByText(second.translation!);
     fireEvent.pointerDown(paragraph);
-    expect(animations.every(animation => animation.cancel.mock.calls.length === 1)).toBe(true);
+    expect(animations).toHaveLength(0);
     view.rerender(caption(third));
     expect(screen.getByText(second.text)).toBe(paragraph);
     expect(screen.getByText(second.translation!)).toBe(translation);
-    expect(animations).toHaveLength(2);
+    expect(animations).toHaveLength(0);
     const range = document.createRange();
     range.selectNodeContents(paragraph);
     window.getSelection()?.addRange(range);
@@ -129,7 +173,7 @@ describe('current caption transitions', () => {
     expect(inspect).toHaveBeenCalledExactlyOnceWith(second, second.text);
     expect(screen.getByText(third.text)).toBe(paragraph);
     expect(screen.getByText(third.translation!)).toBe(translation);
-    expect(animations).toHaveLength(4);
+    expect(animations).toHaveLength(0);
   });
 
   it.each(['pointercancel', 'blur', 'pointerup'])('shows the latest cue after window %s releases a selection', event => {
@@ -141,7 +185,7 @@ describe('current caption transitions', () => {
     act(() => window.dispatchEvent(new Event(event)));
     expect(screen.getByText(second.text)).toBe(paragraph);
     expect(inspect).not.toHaveBeenCalled();
-    expect(animations).toHaveLength(1);
+    expect(animations).toHaveLength(0);
   });
 
   it('freezes preview timing and its first-cue label when playback crosses the selected cue', () => {
@@ -165,21 +209,21 @@ describe('current caption transitions', () => {
     const paragraph = screen.getByText(first.text);
     view.rerender(caption(second));
     act(() => window.dispatchEvent(new Event('resize')));
-    expect(animations[0].cancel).toHaveBeenCalledOnce();
+    expect(animations).toHaveLength(0);
     view.rerender(caption(third));
     view.rerender(caption(third, { reduced: true }));
-    expect(animations[1].cancel).toHaveBeenCalledOnce();
+    expect(animations).toHaveLength(0);
     view.rerender(caption(first, { reduced: true }));
     expect(screen.getByText(first.text)).toBe(paragraph);
     view.rerender(caption(second));
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     act(() => document.dispatchEvent(new Event('visibilitychange')));
-    expect(animations[2].cancel).toHaveBeenCalledOnce();
+    expect(animations).toHaveLength(0);
     view.rerender(caption(third));
     expect(screen.getByText(third.text)).toBe(paragraph);
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
     act(() => document.dispatchEvent(new Event('visibilitychange')));
-    expect(animations).toHaveLength(3);
+    expect(animations).toHaveLength(0);
   });
 
   it('resets independent scroll positions only when the displayed cue identity changes', () => {
@@ -260,7 +304,7 @@ describe('caption gap learning', () => {
     expect(animations).toHaveLength(0);
     view.rerender(caption(second, { previous: first, next: third }));
     expect(screen.getByText(second.text)).toBe(paragraph);
-    expect(animations).toHaveLength(1);
+    expect(animations).toHaveLength(0);
   });
 
   it('directs untimed source text to the transcript instead of implying playback has ended', () => {

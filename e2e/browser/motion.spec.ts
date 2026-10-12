@@ -26,6 +26,9 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     const inner = page.getByRole('dialog', { name: 'Confirmation', exact: true });
     await expect(inner.getByRole('button', { name: 'Could not save', exact: true })).toBeVisible();
     expect(await originalToast!.evaluate(element => element === [...document.querySelectorAll('[data-app-modal]')].at(-1)?.querySelector('.toast'))).toBe(true);
+    await expect(toast).toHaveCSS('opacity', '1');
+    await expect(toast).toHaveCSS('transform', 'none');
+    expect(await toast.evaluate(element => element.closest('.toast-stack')?.getAttribute('aria-live'))).toBe('polite');
     await expect(page.getByTestId('occlusion-count')).toHaveText('2');
     await page.keyboard.press('Escape');
     await expect(inner).toHaveCount(0);

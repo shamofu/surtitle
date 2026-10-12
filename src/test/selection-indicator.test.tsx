@@ -4,7 +4,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MotionProvider } from '../shared/motion';
 import { SelectionIndicator } from '../shared/motion/SelectionIndicator';
 
-const animate = vi.fn((_frames: Keyframe[], _options: KeyframeAnimationOptions) => ({ cancel: vi.fn(), finished: new Promise<void>(() => {}) }));
+const { animate } = vi.hoisted(() => ({ animate: vi.fn((_value: { get(): number; set(value: number): void }, _to: number, _options: unknown) => ({ stop: vi.fn(), finished: new Promise<void>(() => {}) })) }));
+vi.mock('motion', async importActual => ({ ...await importActual<typeof import('motion')>(), animate }));
 let positions: Record<string, DOMRect>;
 let visibleFrame: DOMRect | null;
 let onResize: ResizeObserverCallback;
@@ -69,9 +70,14 @@ it('places the initial decorative indicator immediately and stretches only after
   expect(screen.getByRole('textbox')).toBe(input);
   expect(input).toHaveFocus();
   expect(input).toHaveValue('unfinished 日本語');
-  expect(marker.style.left).toBe('120px');
-  const [frames, options] = animate.mock.calls[0];
-  expect(options).toEqual({ duration: 260, easing: 'linear' });
+  expect(marker.style.left).toBe('0px');
+  const [progress, target, options] = animate.mock.calls[0];
+  expect(target).toBe(1);
+  expect(options).toEqual({ duration: .28, ease: 'linear' });
+  const frames = Array.from({ length: 21 }, (_, index) => {
+    act(() => progress.set(index / 20));
+    return { left: marker.style.left, top: marker.style.top, width: marker.style.width, height: marker.style.height, offset: index / 20 };
+  });
   expect(frames).toHaveLength(21);
   expect(frames[0]).toEqual({ left: '0px', top: '38px', width: '100px', height: '2px', offset: 0 });
   expect(frames.at(-1)).toEqual({ left: '120px', top: '38px', width: '100px', height: '2px', offset: 1 });
@@ -96,8 +102,9 @@ it('reverses from the visible in-flight geometry and cancels the replaced animat
   const replaced = animate.mock.results[0].value;
   visibleFrame = new DOMRect(130, 40, 240, 40);
   view.rerender(<Controls selected="second" variant="pill" />);
-  expect(replaced.cancel).toHaveBeenCalledOnce();
-  expect(animate.mock.calls.at(-1)?.[0][0]).toEqual({ left: '30px', top: '0px', width: '240px', height: '40px', offset: 0 });
+  expect(replaced.stop).toHaveBeenCalledOnce();
+  const marker = view.container.querySelector<HTMLElement>('.selection-indicator')!;
+  expect([marker.style.left, marker.style.top, marker.style.width, marker.style.height]).toEqual(['30px', '0px', '240px', '40px']);
 });
 
 it('settles on layout, text, visibility and motion preference changes', async () => {
@@ -107,19 +114,19 @@ it('settles on layout, text, visibility and motion preference changes', async ()
   const resized = animate.mock.results.at(-1)!.value;
   positions.second = new DOMRect(240, 40, 130, 40);
   act(() => onResize([], {} as ResizeObserver));
-  expect(resized.cancel).toHaveBeenCalledOnce();
+  expect(resized.stop).toHaveBeenCalledOnce();
   expect(marker.style.left).toBe('140px');
   expect(marker.style.width).toBe('130px');
   view.rerender(<Controls selected="third" />);
   const localized = animate.mock.results.at(-1)!.value;
   view.rerender(<Controls selected="third" translated />);
   await act(async () => {});
-  expect(localized.cancel).toHaveBeenCalledOnce();
+  expect(localized.stop).toHaveBeenCalledOnce();
   view.rerender(<Controls selected="first" translated />);
   const hidden = animate.mock.results.at(-1)!.value;
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
   fireEvent(document, new Event('visibilitychange'));
-  expect(hidden.cancel).toHaveBeenCalledOnce();
+  expect(hidden.stop).toHaveBeenCalledOnce();
   const count = animate.mock.calls.length;
   view.rerender(<Controls selected="second" translated />);
   expect(marker.style.left).toBe('140px');
@@ -137,6 +144,7 @@ it('observes route-style selection changes without remounting its parent', async
     screen.getByRole('link', { name: 'Next' }).setAttribute('aria-current', 'page');
   });
   expect(animate).toHaveBeenCalledOnce();
+  act(() => animate.mock.calls[0][0].set(1));
   expect(view.container.querySelector<HTMLElement>('.selection-indicator')!.style.left).toBe('120px');
   await act(async () => { screen.getByRole('link', { name: 'Next' }).removeAttribute('aria-current'); });
   expect(view.container.querySelector('.selection-indicator')).toHaveAttribute('hidden');
@@ -146,8 +154,12 @@ it('moves between wrapped rows without stretching across unrelated controls', ()
   positions.third = new DOMRect(100, 84, 140, 40);
   const view = render(<Controls selected="first" />);
   view.rerender(<Controls selected="third" />);
-  expect(animate.mock.calls[0][0]).toHaveLength(2);
-  expect(animate.mock.calls[0][0][1]).toEqual({ left: '0px', top: '82px', width: '140px', height: '2px' });
+  const marker = view.container.querySelector<HTMLElement>('.selection-indicator')!;
+  act(() => animate.mock.calls[0][0].set(.5));
+  expect(marker.style.top).toBe('60px');
+  expect(marker.style.width).toBe('120px');
+  act(() => animate.mock.calls[0][0].set(1));
+  expect([marker.style.left, marker.style.top, marker.style.width, marker.style.height]).toEqual(['0px', '82px', '140px', '2px']);
 });
 
 it('keeps nested groups independent while the focused control and its selection update immediately', async () => {

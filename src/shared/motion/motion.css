@@ -10,18 +10,10 @@
   transition: background-color var(--motion-fast) var(--motion-ease),
     border-color var(--motion-fast) var(--motion-ease),
     color var(--motion-fast) var(--motion-ease),
-    opacity var(--motion-fast) var(--motion-ease),
-    scale var(--motion-release) var(--motion-ease);
+    opacity var(--motion-fast) var(--motion-ease);
 }
-:where(.button, .icon-button, .locale-button, .rating-button):active:not(:disabled):not([aria-disabled='true']) {
-  scale: .98;
-  transition-duration: var(--motion-fast), var(--motion-fast), var(--motion-fast), var(--motion-fast), var(--motion-press);
-}
-.session-progress > span { transition: width var(--motion-swap) var(--motion-ease); }
+.motion-spinner { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; }
 .toast { animation: none; }
-.progress-status progress::-webkit-progress-value {
-  transition: width var(--motion-swap) var(--motion-ease);
-}
 .motion-region[hidden] { display: none !important; }
 .motion-region[inert] { pointer-events: none; }
 .motion-swap { position: relative; min-width: 0; }
@@ -43,10 +35,4 @@ details[data-motion-state='exiting'] > :not(summary) { pointer-events: none; }
   animation: none !important;
   transition: none !important;
   scroll-behavior: auto !important;
-}
-:root[data-motion='reduce'] :where(.button, .icon-button, .locale-button, .rating-button):active {
-  scale: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  :where(.button, .icon-button, .locale-button, .rating-button):active { scale: none; }
 }

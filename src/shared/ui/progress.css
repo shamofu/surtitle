@@ -3,11 +3,12 @@
 .progress-status-copy { display: flex; gap: 8px 16px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
 .progress-status-copy strong { font-size: 14px; font-weight: 550; overflow-wrap: anywhere; }
 .progress-status-copy > span, .progress-status-count { color: var(--muted); font-size: 12px; }
-.progress-status progress { appearance: none; display: block; width: 100%; height: 6px; overflow: hidden; border: 0; border-radius: 3px; background: var(--surface-raised); accent-color: var(--accent); }
+.progress-track { position: relative; height: 6px; overflow: hidden; border-radius: 3px; background: var(--surface-raised); }
+.progress-status progress { appearance: none; display: block; width: 100%; height: 6px; border: 0; opacity: 0; }
+.progress-fill { position: absolute; inset: 0; background: var(--accent); transform-origin: left; }
 .progress-status progress::-webkit-progress-bar { background: var(--surface-raised); }
 .progress-status progress::-webkit-progress-value { background: var(--accent); border-radius: 3px; }
 .progress-status progress::-moz-progress-bar { background: var(--accent); border-radius: 3px; }
-.progress-status progress:not([value]) { background: linear-gradient(90deg, var(--surface-raised) 0 30%, var(--accent) 30% 60%, var(--surface-raised) 60%); background-size: 200% 100%; animation: progress-pulse var(--motion-progress) var(--motion-reveal-ease) infinite; }
 .progress-status progress:not([value])::-webkit-progress-bar { background: transparent; }
 .progress-status-count { font-variant-numeric: tabular-nums; margin: 0; }
 .progress-status-error { color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }
@@ -22,6 +23,4 @@
 .activity-children { padding-left: 16px; border-left: 2px solid var(--border); }
 .activity-empty { padding: 24px 0; color: var(--muted); }
 .activity-note { color: var(--muted); font-size: 12px; }
-@keyframes progress-pulse { from { background-position: 100% 0; } to { background-position: -100% 0; } }
-@media (prefers-reduced-motion: reduce) { .progress-status progress:not([value]) { animation: none; } }
 @media (max-width: 480px) { .activity-trigger-label { display: none; } }

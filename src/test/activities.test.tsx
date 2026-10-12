@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useState } from 'react';
+import type { AnchorHTMLAttributes, ComponentType } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,7 +24,13 @@ vi.mock('../app/runtime', async () => ({
   useNotifications: () => ({ report: (action: () => Promise<unknown>) => action() }),
   useDataActions: () => ({ mutate: (action: () => Promise<unknown>) => action() }),
 }));
-vi.mock('@tanstack/react-router', () => ({ useNavigate: () => async () => {}, Link: ({ children, onClick, to, params }: { children: React.ReactNode; onClick?: () => void; to: string; params?: { mediaId: string } }) => <a href={to.replace('$mediaId', params?.mediaId ?? '')} onClick={onClick}>{children}</a> }));
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => async () => {},
+  Link: ({ children, onClick, to, params }: { children: React.ReactNode; onClick?: () => void; to: string; params?: { mediaId: string } }) => <a href={to.replace('$mediaId', params?.mediaId ?? '')} onClick={onClick}>{children}</a>,
+  createLink: (Component: ComponentType<AnchorHTMLAttributes<HTMLAnchorElement>>) =>
+    ({ to, params, ...props }: AnchorHTMLAttributes<HTMLAnchorElement> & { to: string; params?: { mediaId: string } }) =>
+      <Component {...props} href={to.replace('$mediaId', params?.mediaId ?? '')} />,
+}));
 
 let clients: QueryClient[] = [];
 beforeEach(() => {

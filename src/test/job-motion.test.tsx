@@ -7,6 +7,10 @@ import type { AiQuote, JobSummary } from '../shared/contracts/ai';
 import { motionDurations } from '../shared/motion';
 
 const fixture = vi.hoisted(() => ({ reduced: false, errors: [] as string[] }));
+vi.mock('motion', async importActual => ({
+  ...await importActual<typeof import('motion')>(),
+  animate: vi.fn(() => ({ stop: vi.fn(), finished: new Promise<void>(() => {}) })),
+}));
 vi.mock('../shared/motion', async importOriginal => ({
   ...await importOriginal<typeof import('../shared/motion')>(),
   useAppMotion: () => ({ reducedMotion: fixture.reduced }),
@@ -42,7 +46,7 @@ beforeEach(() => {
   })) });
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); vi.restoreAllMocks(); delete (HTMLElement.prototype as Partial<HTMLElement>).animate; });
-const exitFallbackMs = motionDurations.reveal * 1000 + 100;
+const exitFallbackMs = motionDurations.revealClose * 1000 + 100;
 
 async function openQuote() {
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Resume remaining work' })); });

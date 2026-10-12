@@ -4,66 +4,59 @@ import { installLearningFixture } from './learning-fixture';
 import { motionDurations } from '../../src/shared/motion';
 
 // Outlive the disclosure's bounded completion fallback, including a stale one.
-const obsoleteExitDeadline = motionDurations.reveal * 1000 + 150;
+const obsoleteExitDeadline = motionDurations.revealClose * 1000 + 150;
 
 test('disclosure animates actual height and following content, then reverses with the same draft', async ({ page }, info) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.clock.install();
   await installLearningFixture(page, 'en', 'light');
   await page.goto('/settings');
   await page.waitForLoadState('networkidle');
   const details = page.locator('.budget-details');
   await details.scrollIntoViewIfNeeded();
-  const observe = (reverse = false) => details.evaluate(async (element, { reverse, duration }) => {
-    const summary = element.querySelector('summary')!;
-    const text = element.querySelector('.helper-text')!;
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  const read = (at: number) => details.evaluate((element, at) => {
+    const summary = element.querySelector('summary')!, text = element.querySelector('.helper-text')!;
     const following = element.nextElementSibling!;
-    const read = (at: number) => ({ at, height: element.getBoundingClientRect().height,
+    return { at, height: element.getBoundingClientRect().height,
       following: following.getBoundingClientRect().y, summary: summary.textContent, text: text.textContent,
       font: getComputedStyle(text).fontSize, transform: getComputedStyle(text).transform,
       opacity: getComputedStyle(text).opacity, inert: !!text.closest('[inert]'),
-      open: (element as HTMLDetailsElement).open });
-    const frames = [read(0)];
-    const originalAnimate = element.animate;
-    let started: (animation: Animation) => void;
-    // Pause synchronously at creation so CI frame cadence cannot skip a short transition.
-    element.animate = function (...args) {
-      const animation = originalAnimate.apply(this, args);
-      animation.pause();
-      started(animation);
-      return animation;
-    };
-    const toggle = async () => {
-      const pending = new Promise<Animation>(resolve => { started = resolve; });
-      summary.click();
-      const animation = await pending;
-      if (animation.effect!.getTiming().duration !== duration) throw new Error('Unexpected disclosure duration');
-      return animation;
-    };
-    try {
-      let animation = await toggle();
-      for (const fraction of (reverse ? [0, .2, .4] : [0, .2, .5, .8, 1])) {
-        animation.currentTime = duration * fraction;
-        frames.push(read(duration * fraction));
-      }
-      let reversalJump = 0;
-      if (reverse) {
-        const before = element.getBoundingClientRect().height;
-        animation = await toggle();
-        animation.currentTime = 0;
-        reversalJump = Math.abs(element.getBoundingClientRect().height - before);
-        for (const fraction of [0, .2, .5, .8, 1]) {
-          animation.currentTime = duration * fraction;
-          frames.push(read(duration * (.4 + fraction)));
-        }
-      }
-      animation.finish();
-      await animation.finished;
-      frames.push(read(duration * (reverse ? 1.4 : 1)));
-      return { frames, reversalJump };
-    } finally {
-      element.animate = originalAnimate;
+      open: (element as HTMLDetailsElement).open };
+  }, at);
+  const observe = async (reverse = false) => {
+    const startedOpen = await details.evaluate(element => (element as HTMLDetailsElement).open);
+    const duration = (startedOpen ? motionDurations.revealClose : motionDurations.reveal) * 1000;
+    const frames = [await read(0)];
+    await details.locator('summary').evaluate(summary => summary.click());
+    frames.push(await read(0));
+    let elapsed = 0;
+    for (const fraction of reverse ? [.2, .4] : [.2, .5, .8, 1]) {
+      await page.clock.runFor(duration * fraction - elapsed);
+      elapsed = duration * fraction;
+      frames.push(await read(elapsed));
     }
-  }, { reverse, duration: motionDurations.reveal * 1000 });
+    let reversalJump = 0;
+    if (reverse) {
+      const before = await read(elapsed);
+      await details.locator('summary').evaluate(summary => summary.click());
+      const after = await read(elapsed);
+      reversalJump = Math.abs(after.height - before.height);
+      frames.push(after);
+      const reversalDuration = (startedOpen ? motionDurations.reveal : motionDurations.revealClose) * 1000;
+      let reversalElapsed = 0;
+      for (const fraction of [.2, .5, .8, 1]) {
+        await page.clock.runFor(reversalDuration * fraction - reversalElapsed);
+        reversalElapsed = reversalDuration * fraction;
+        frames.push(await read(elapsed + reversalElapsed));
+      }
+      elapsed += reversalElapsed;
+    }
+    // Flush the completion frame, without relying on a particular browser driver.
+    await page.clock.runFor(32);
+    frames.push(await read(elapsed + 32));
+    return { frames, reversalJump };
+  };
   const { frames: opening } = await observe();
   const daily = page.getByRole('textbox', { name: 'Daily limit (USD)', exact: true });
   await daily.fill('12.5');
@@ -76,7 +69,7 @@ test('disclosure animates actual height and following content, then reverses wit
     const first = frames[0], last = frames.at(-1)!;
     const low = Math.min(first.height, last.height), high = Math.max(first.height, last.height);
     expect(high - low).toBeGreaterThan(100);
-    // These samples are at known animation times, rather than accidental painted frames.
+    // A controlled RAF clock samples the actual layout at known animation times.
     expect(frames.slice(2, 5).every(frame => frame.height > low + 2 && frame.height < high - 2)).toBe(true);
     for (let index = 0; index < frames.length; index++) {
       const frame = frames[index];
@@ -106,33 +99,39 @@ test('disclosure animates actual height and following content, then reverses wit
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {
   test(`validation reopens a closing disclosure before focusing its field (${reducedMotion})`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion });
+    await page.clock.install();
     await installLearningFixture(page, 'en', 'light');
     await page.goto('/settings');
     const details = page.locator('.budget-details');
     await details.locator('summary').click();
     const daily = page.getByRole('textbox', { name: 'Daily limit (USD)', exact: true });
     await daily.fill('-1');
-    const result = await details.evaluate(async element => {
-      element.querySelector('summary')!.click();
-      await new Promise(requestAnimationFrame);
-      const before = (element as HTMLElement).dataset.motionState;
-      const review = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Review errors')!;
-      review.click();
+    const original = await daily.elementHandle();
+    await expect(page.getByRole('button', { name: 'Review errors', exact: true })).toBeVisible();
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+    await details.locator('summary').evaluate(summary => summary.click());
+    // Commit the close while RAF time is frozen. A busy CI frame can otherwise
+    // outlive the whole short exit before the reversal is delivered.
+    await expect(details).toHaveAttribute('data-motion-state', reducedMotion === 'reduce' ? 'closed' : 'exiting');
+    await page.getByRole('button', { name: 'Review errors', exact: true }).evaluate(button => button.click());
+    const result = await details.evaluate(element => {
       const input = element.querySelector('input')!;
-      return { before, open: (element as HTMLDetailsElement).open, inert: !!input.closest('[inert]'), focused: document.activeElement === input };
+      return { open: (element as HTMLDetailsElement).open, inert: !!input.closest('[inert]'), focused: document.activeElement === input };
     });
-    expect(result.before).toBe(reducedMotion === 'reduce' ? 'closed' : 'exiting');
     expect(result).toMatchObject({ open: true, inert: false, focused: true });
     await expect(details).toHaveAttribute('data-motion-state', 'open');
     // Cross the obsolete exit timer's deadline: it must not close the new state.
-    await page.waitForTimeout(obsoleteExitDeadline);
+    await page.clock.runFor(obsoleteExitDeadline);
     await expect(details).toHaveAttribute('open', '');
     await expect(daily).toBeFocused();
+    await expect(daily).toHaveValue('-1');
+    expect(await original!.evaluate(element => element === document.querySelector('.budget-details input'))).toBe(true);
   });
 }
 
 test('choosing custom model output cancels a disclosure exit', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.clock.install();
   await installLearningFixture(page, 'en', 'light');
   await page.goto('/settings');
   const purposes = page.locator('#ai-models > details');
@@ -142,17 +141,13 @@ test('choosing custom model output cancels a disclosure exit', async ({ page }) 
   await output.selectOption('custom');
   await output.selectOption('standard');
   const details = model.locator('.model-editor-details');
-  const before = await details.evaluate(async element => {
-    element.querySelector('summary')!.click();
-    await new Promise(requestAnimationFrame);
-    const state = (element as HTMLElement).dataset.motionState;
-    const select = Array.from(element.closest('.model-editor')!.querySelectorAll('select')).find(item => item.querySelector('option[value="custom"]'))!;
-    select.value = 'custom';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-    return state;
-  });
-  expect(before).toBe('exiting');
+  await expect(details).toHaveAttribute('open', '');
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  await details.locator('summary').evaluate(summary => summary.click());
+  await expect(details).toHaveAttribute('data-motion-state', 'exiting');
+  await output.selectOption('custom');
   await expect(details).toHaveAttribute('data-motion-state', 'open');
-  await page.waitForTimeout(obsoleteExitDeadline);
+  await page.clock.runFor(obsoleteExitDeadline);
+  await expect(details).toHaveAttribute('open', '');
   await expect(model.getByRole('textbox', { name: /^Maximum output tokens/ })).toBeVisible();
 });

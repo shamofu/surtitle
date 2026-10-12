@@ -1,12 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { Children, cloneElement, Fragment, isValidElement, useId, useLayoutEffect, useRef } from 'react';
-import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode, RefObject } from 'react';
+import type { ButtonHTMLAttributes, ComponentPropsWithRef, HTMLAttributes, ReactNode, RefObject } from 'react';
+import { animate, motionValue } from 'motion';
+import { m, type HTMLMotionProps } from 'motion/react';
 import { Button as AriaButton, Dialog, Modal as AriaModal, ModalOverlay } from 'react-aria-components';
-import { ArrowUpRight, LoaderCircle, X } from 'lucide-react';
+import { ArrowUpRight, X } from 'lucide-react';
 import { useSurface, useAppearance } from '../../app/runtime';
-import { MotionRegion, MotionSwap, useAppMotion } from '../motion';
+import { MotionRegion, MotionSwap, MotionSpinner, motionDistances, motionDurations, motionEase, motionExitEase, motionScales, useAppMotion, useMotionActive } from '../motion';
 import { animateEntrance, canAnimate } from '../motion/surfaces';
 export { useModalExit } from './useModalExit';
+
+export function MotionButton(props: ComponentPropsWithRef<'button'>) {
+  const active = useMotionActive();
+  const enabled = active && !props.disabled && props['aria-disabled'] !== true && props['aria-disabled'] !== 'true';
+  return <m.button {...props as HTMLMotionProps<'button'>} initial={false} animate={{ scale: 1 }}
+    whileTap={enabled ? { scale: motionScales.press, transition: { duration: motionDurations.press, ease: motionEase } } : undefined}
+    transition={{ duration: active ? motionDurations.release : 0, ease: motionEase }} />;
+}
+
+const MotionAriaButton = m.create(AriaButton);
 
 export function Button({
   children,
@@ -19,16 +31,16 @@ export function Button({
   busy?: boolean;
 }) {
   return (
-    <button
+    <MotionButton
       type="button"
       className={`button ${variant} ${className}`}
       {...props}
       disabled={props.disabled || busy}
       aria-busy={busy || props['aria-busy'] || undefined}
     >
-      <MotionRegion mode="status" as="span" open={!!busy}><LoaderCircle size={16} className="spin" aria-hidden="true" /></MotionRegion>
+      <MotionRegion mode="status" as="span" open={!!busy}><MotionSpinner /></MotionRegion>
       {children}
-    </button>
+    </MotionButton>
   );
 }
 export function IconButton({
@@ -38,7 +50,7 @@ export function IconButton({
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
   return (
-    <button
+    <MotionButton
       type="button"
       className={`icon-button ${className}`}
       aria-label={label}
@@ -46,7 +58,7 @@ export function IconButton({
       {...props}
     >
       {children}
-    </button>
+    </MotionButton>
   );
 }
 interface ModalProps {
@@ -95,7 +107,10 @@ function ModalContent({
   const { t } = useAppearance();
   const notificationHost = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
+  const heading = useRef<HTMLElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const { reducedMotion } = useAppMotion();
+  const motionActive = useMotionActive();
   const titleId = useId();
   const completed = useRef(false);
   const entranceAttempted = useRef(false);
@@ -114,38 +129,74 @@ function ModalContent({
   }, [dialog, registerModal]);
   useLayoutEffect(() => {
     const shell = dialog.current;
-    const content = inner.current;
+    const contents = [heading.current, body.current].filter((node): node is HTMLElement => !!node);
     if (entranceAttempted.current) return;
-    if (!shell || !content) return;
-    if (!open || !canAnimate(content, reducedMotion)) { entranceAttempted.current = true; return; }
+    if (!shell || !contents.length) return;
+    if (!open || !canAnimate(contents[0], reducedMotion)) { entranceAttempted.current = true; return; }
     let started = false;
-    let cancel: (() => void) | undefined;
+    let cancels: Array<(() => void) | undefined> = [];
     // Surface registration can trigger the player's layout effect. Wait until
     // that commit has marked any native exclusion before starting the contents.
     const start = () => {
       if (started || shell.dataset.nativeOcclusion === 'pending') return;
       started = true;
       entranceAttempted.current = true;
-      if (canAnimate(content, reducedMotion)) cancel = animateEntrance(content, 'modal');
+      if (canAnimate(contents[0], reducedMotion)) cancels = contents.map(content => animateEntrance(content, 'modal'));
     };
     const observer = new MutationObserver(start);
     const frame = requestAnimationFrame(() => {
       observer.observe(shell, { attributes: true, attributeFilter: ['data-native-occlusion'] });
       start();
     });
-    return () => { cancelAnimationFrame(frame); observer.disconnect(); cancel?.(); };
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); cancels.forEach(cancel => cancel?.()); };
   }, [dialog, open, reducedMotion]);
   useLayoutEffect(() => {
-    if (open) { completed.current = false; return; }
+    const contents = [heading.current, body.current].filter((node): node is HTMLElement => !!node);
+    if (open) {
+      completed.current = false;
+      for (const node of contents) { node.style.opacity = ''; node.style.transform = ''; }
+      return;
+    }
     // Move focus out before making the old controls inert. Notifications remain usable.
     const element = dialog.current;
     if (element?.querySelector('.modal-body')?.contains(document.activeElement)) element.focus({ preventScroll: true });
     if (completed.current) return;
-    completed.current = true;
-    // Opaque native-video exclusions cannot follow CSS fades or transforms.
-    // There is no visual exit to wait for; keep this scope while the owner commits.
-    onExited?.();
-  }, [open, onExited, dialog]);
+    let cancelled = false;
+    const finish = () => {
+      if (cancelled || completed.current) return;
+      completed.current = true;
+      for (const node of contents) { node.style.opacity = '0'; node.style.transform = ''; }
+      onExited?.();
+    };
+    // The shell and notification host stay opaque and stationary throughout exit.
+    if (!contents.length || !canAnimate(contents[0], reducedMotion)) { finish(); return; }
+    const progress = motionValue(0);
+    const render = (value: number) => {
+      for (const node of contents) {
+        node.style.opacity = String(1 - value);
+        node.style.transform = `translateY(${motionDistances.modal * value}px)`;
+      }
+    };
+    render(0);
+    const unsubscribe = progress.on('change', render);
+    const controls = animate(progress, 1, { duration: motionDurations.exit, ease: motionExitEase });
+    const stop = () => { unsubscribe(); controls.stop(); progress.destroy(); };
+    const settle = () => { stop(); finish(); };
+    const visibility = () => { if (document.hidden) settle(); };
+    const timer = window.setTimeout(settle, motionDurations.exit * 1000 + 100);
+    window.addEventListener('resize', settle);
+    document.addEventListener('visibilitychange', visibility);
+    void controls.finished.then(settle, () => {});
+    return () => {
+      cancelled = true;
+      stop();
+      window.clearTimeout(timer);
+      window.removeEventListener('resize', settle);
+      document.removeEventListener('visibilitychange', visibility);
+      // A rejected async close can reopen this exact input subtree.
+      entranceAttempted.current = false;
+    };
+  }, [open, onExited, dialog, reducedMotion]);
   return (
     <Dialog
       ref={dialog}
@@ -156,17 +207,19 @@ function ModalContent({
       data-state={open ? 'open' : 'closing'}
     >
       <div className="modal-inner" ref={inner}>
-        <header className="modal-header">
+        <header className="modal-header" ref={heading}>
           <div>
             {eyebrow && <span className="eyebrow">{eyebrow}</span>}
             <h2 id={titleId}>{title}</h2>
           </div>
-          <AriaButton className="icon-button" aria-label={t('閉じる', 'Close')} isDisabled={closeDisabled || !open} onPress={requestClose}>
+          <MotionAriaButton className="icon-button" aria-label={t('閉じる', 'Close')} isDisabled={closeDisabled || !open} onPress={requestClose}
+            initial={false} animate={{ scale: 1 }} whileTap={motionActive && open && !closeDisabled ? { scale: motionScales.press, transition: { duration: motionDurations.press } } : undefined}
+            transition={{ duration: motionActive ? motionDurations.release : 0, ease: motionEase }}>
             <X size={20} />
-          </AriaButton>
+          </MotionAriaButton>
         </header>
         <div className="modal-notifications" ref={notificationHost} />
-        <div className="modal-body" inert={!open} onClickCapture={event => {
+        <div className="modal-body" ref={body} inert={!open} onClickCapture={event => {
           if (!open) { event.preventDefault(); event.stopPropagation(); }
         }} onKeyDownCapture={event => {
           if (!open) { event.preventDefault(); event.stopPropagation(); }

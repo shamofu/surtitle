@@ -46,8 +46,7 @@
 .study-transcript-toggle:focus-visible { outline-offset: -3px; }
 .study-left { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .current-caption { display: flex; flex-direction: column; flex: 0 0 156px; padding: 10px 4px 0; min-height: 156px; min-width: 0; }
-.caption-body { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 0fr); flex: 1; gap: 0; min-height: 0; min-width: 0; overflow: hidden; transition: grid-template-rows var(--motion-reveal) var(--motion-reveal-ease), gap var(--motion-reveal) var(--motion-reveal-ease); }
-.caption-body:has(> .caption-translation-region[data-open='true']) { grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.caption-body { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 0fr); flex: 1; gap: 0; min-height: 0; min-width: 0; overflow: hidden; }
 .caption-source-scroll, .caption-translation-scroll { min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 2px 4px; }
 .caption-body > .caption-translation-region { display: flex; min-height: 0; overflow: hidden; }
 .caption-translation-region .caption-translation-scroll { border-top: 1px solid var(--border); }
@@ -76,9 +75,9 @@
 .study-motion-region { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
 .study-motion-region[hidden] { display: none; }
 .study-motion-region[data-motion-state='exiting'] { position: absolute; inset: 0; pointer-events: none; }
+:is(.study-companion-body, .transcript-tab-content) > .study-motion-region { background: var(--surface); }
+:is(.study-companion-body, .transcript-tab-content) > .study-motion-region[data-motion-state='open'] { position: relative; z-index: 1; }
 .study-companion-body, .transcript-tab-content { overflow: clip; }
-.phrase-saved svg path { stroke-dasharray: 24; animation: saved-check var(--motion-success) var(--motion-ease) both; }
-@keyframes saved-check { from { stroke-dashoffset: 24; } to { stroke-dashoffset: 0; } }
 .study-motion-inline { flex: 0 0 auto; }
 .study-companion[inert] { pointer-events: none; }
 .transcript-draft-view > .button { flex-shrink: 0; align-self: flex-start; margin: 8px; white-space: normal; }
@@ -155,7 +154,7 @@
 /* A high-DPI workarea can be shorter than the preferred 700px window. Keep
    primary controls at their normal hit sizes and recover space from chrome. */
 @media (min-width: 1000px) and (max-height: 680px) {
-  .page-content:has(.study-page) { padding-block: 4px 8px; }
+  .page-content:has(.study-page) { padding-block: 4px; }
   .study-page { gap: 6px; }
   .study-top { height: 40px; min-height: 40px; }
   .current-caption { flex-basis: 144px; min-height: 144px; padding-top: 6px; }

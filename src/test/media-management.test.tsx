@@ -10,7 +10,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import type { AnchorHTMLAttributes, ComponentType, ReactNode } from 'react';
 import {
   DownloadJobs,
   RemoveMediaDialog,
@@ -34,6 +34,9 @@ const context = vi.hoisted(() => ({
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, to, className }: { children: ReactNode; to: string; className?: string }) =>
     <a href={to} className={className}>{children}</a>,
+  createLink: (Component: ComponentType<AnchorHTMLAttributes<HTMLAnchorElement>>) =>
+    ({ to, params, ...props }: AnchorHTMLAttributes<HTMLAnchorElement> & { to: string; params?: { mediaId: string } }) =>
+      <Component {...props} href={to.replace('$mediaId', params?.mediaId ?? '')} />,
 }));
 
 vi.mock('../features/library/api', () => ({

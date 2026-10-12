@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useLayoutEffect, useRef, useState, type HTMLAttributes, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
-import { motionCssEase, motionDurations, useAppMotion } from './index';
-import { motionCssRevealEase, motionPresets, type MotionPreset } from './tokens';
+import { animate, motionValue } from 'motion';
+import { motionDurations, useAppMotion } from './index';
+import { motionEase, motionRevealEase, motionSnapEase, motionPresets, type MotionPreset } from './tokens';
 
 type ElementProps = HTMLAttributes<HTMLElement> & { as?: 'div' | 'span'; children?: ReactNode };
 
@@ -37,16 +38,26 @@ export function animateEntrance(element: HTMLElement, preset: MotionPreset) {
     if (element.contains(active)) cancel();
   }
   const { duration, x, y } = motionPresets[preset];
-  const frames: Keyframe[] = x || y
-    ? [{ opacity: 0, transform: `translate(${x}px, ${y}px)` }, { opacity: 1, transform: 'none' }]
-    : [{ opacity: 0 }, { opacity: 1 }];
-  const animation = element.animate(frames, { duration: duration * 1000, easing: motionCssEase });
+  const original = { opacity: element.style.opacity, transform: element.style.transform };
+  // Own the value rather than a cached DOM visual element. Unsubscribing before
+  // stop prevents Motion's queued frame from restoring an interrupted pose.
+  const progress = motionValue(0);
+  const render = (value: number) => {
+    element.style.opacity = String(value);
+    if (x || y) element.style.transform = `translate(${x * (1 - value)}px, ${y * (1 - value)}px)`;
+  };
+  render(0);
+  const unsubscribe = progress.on('change', render);
+  const animation = animate(progress, 1, { duration, ease: preset === 'page' || preset === 'modal' ? motionSnapEase : motionEase });
   let settled = false;
   const finish = () => {
     if (settled) return;
     settled = true;
     if (entrances.get(element) === finish) entrances.delete(element);
-    animation.cancel();
+    unsubscribe();
+    animation.stop();
+    progress.destroy();
+    Object.assign(element.style, original);
     window.clearTimeout(timer);
     document.removeEventListener('visibilitychange', finish);
     window.removeEventListener('resize', finish);
@@ -83,16 +94,20 @@ export function hasStableGeometry(element: HTMLElement) {
 }
 
 /** Interrupted disclosures reverse from their visible size. */
-export function animateHeight(element: HTMLElement, from: number, to: number, onComplete: () => void) {
+export function animateHeight(element: HTMLElement, from: number, to: number, onComplete: () => void, opening = to > from) {
   const original = { height: element.style.height, overflow: element.style.overflow, minHeight: element.style.minHeight };
   element.style.overflow = 'hidden';
   element.style.minHeight = '0';
-  const animation = element.animate([{ height: from + 'px' }, { height: to + 'px' }], {
-    duration: motionDurations.reveal * 1000, easing: motionCssRevealEase, fill: 'both',
-  });
+  const duration = opening ? motionDurations.reveal : motionDurations.revealClose;
+  element.style.height = from + 'px';
+  const height = motionValue(from);
+  const unsubscribe = height.on('change', value => { element.style.height = value + 'px'; });
+  const animation = animate(height, to, { duration, ease: motionRevealEase });
   let finished = false;
   const restore = () => {
-    animation.cancel();
+    unsubscribe();
+    animation.stop();
+    height.destroy();
     Object.assign(element.style, original);
     window.clearTimeout(timer);
     document.removeEventListener('visibilitychange', visibility);
@@ -107,7 +122,7 @@ export function animateHeight(element: HTMLElement, from: number, to: number, on
     restore();
   };
   const visibility = () => { if (document.hidden) complete(); };
-  const timer = window.setTimeout(complete, motionDurations.reveal * 1000 + 100);
+  const timer = window.setTimeout(complete, duration * 1000 + 100);
   document.addEventListener('visibilitychange', visibility);
   window.addEventListener('resize', complete);
   void animation.finished.then(complete, () => {});
@@ -159,7 +174,7 @@ export function MotionRegion({ open, keepMounted = false, mode = 'disclosure', a
     const from = interruptedHeight.current ?? (open ? 0 : node.getBoundingClientRect().height);
     interruptedHeight.current = undefined;
     const to = open ? node.getBoundingClientRect().height : 0;
-    const cancel = animateHeight(node, from, to, finish);
+    const cancel = animateHeight(node, from, to, finish, open);
     return () => { interruptedHeight.current = cancel(); };
   }, [open, reducedMotion, mode]);
   return <Tag {...props} ref={element as RefObject<HTMLDivElement & HTMLSpanElement>}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createContext, useContext, useLayoutEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
-import { domAnimation, LazyMotion, MotionConfig } from 'motion/react';
+import { domMax, LazyMotion, MotionConfig } from 'motion/react';
 import type { MotionPreference } from '../contracts/settings';
 import { motionDurations, motionEase, motionVariables } from './tokens';
 export * from './tokens';
@@ -41,7 +41,7 @@ export function MotionProvider({ children, preference = 'system' }: { children: 
 
   return (
     <MotionContext.Provider value={value}>
-      <LazyMotion features={domAnimation} strict>
+      <LazyMotion features={domMax} strict>
         <MotionConfig reducedMotion={reducedMotion ? 'always' : 'never'} transition={{ duration: reducedMotion ? 0 : motionDurations.enter, ease: motionEase }}>
           {children}
         </MotionConfig>
@@ -55,3 +55,4 @@ export function useAppMotion() {
 }
 
 export { MotionRegion, MotionSwap, AnimatedValue, useMotionChange, useMotionEntrance } from './surfaces';
+export { AnimatedCheck, MotionSpinner, useMotionActive } from './feedback';

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { MotionLink } from '../shared/ui/MotionLink';
 import { Children, isValidElement, useState, type MouseEvent, type ReactNode } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
 import { Activity as ActivityIcon, RefreshCw } from 'lucide-react';
 import { useActivities } from './providers/Activities';
 import { useAppearance, useNotifications, useDataActions } from './runtime';
@@ -10,14 +11,14 @@ import { rootActivities, type Activity } from '../shared/contracts/activity';
 import { libraryApi } from '../features/library/api';
 import { aiApi } from '../features/ai/api';
 import { AiRuntime } from '../features/ai/AiRuntime';
-import { AnimatedValue, MotionRegion, MotionSwap } from '../shared/motion';
+import { AnimatedValue, MotionRegion, MotionSwap, MotionSpinner } from '../shared/motion';
 
 export function ActivityButton() {
   const { runningCount, open, isOpen, close } = useActivities();
   const { t } = useAppearance();
   return <>
     <button className="activity-trigger" onClick={open} aria-label={t('処理状況を開く', 'Open activity')} aria-haspopup="dialog">
-      <MotionSwap as="span" stateKey={runningCount > 0 ? 'running' : 'idle'}>{runningCount ? <RefreshCw size={15} className="spin" aria-hidden="true" /> : <ActivityIcon size={17} aria-hidden="true" />}</MotionSwap>
+      <MotionSwap as="span" stateKey={runningCount > 0 ? 'running' : 'idle'}>{runningCount ? <MotionSpinner><RefreshCw size={15} /></MotionSpinner> : <ActivityIcon size={17} aria-hidden="true" />}</MotionSwap>
       <span className="activity-trigger-label">{t('処理状況', 'Activity')}</span>
       <MotionRegion mode="status" as="span" open={runningCount > 0}><span className="nav-count"><AnimatedValue value={runningCount} /></span></MotionRegion>
     </button>
@@ -66,9 +67,9 @@ function ActivityRow({ activity, children, onNavigate, exiting }: { activity: Ac
     <MotionRegion mode="status" open={Children.count(children) > 0}><MotionSwap disabled stateKey={childKey}><div className="activity-children">{children}</div></MotionSwap></MotionRegion>
     <MotionSwap disabled stateKey={`${cancellable}:${activity.mediaId ?? activity.kind}`}><div className="inline-actions">
       {cancellable && <Button busy={busy} onClick={() => void cancel()}>{t('中止', 'Cancel')}</Button>}
-      {activity.mediaId ? <Link to="/study/$mediaId" params={{ mediaId: activity.mediaId }} className="button" onClick={event => follow(event, () => navigate({ to: '/study/$mediaId', params: { mediaId: activity.mediaId! } }))}>{t('教材を開く', 'Open media')}</Link>
-        : ['tool', 'tool_check', 'models', 'tool_scan', 'tool_updates'].includes(activity.kind) ? <Link to="/settings" className="button" onClick={event => follow(event, () => navigate({ to: '/settings' }))}>{t('設定を開く', 'Open settings')}</Link>
-          : activity.source === 'download' || ['import_check', 'import', 'restore', 'restore_preview', 'export'].includes(activity.kind) ? <Link to="/" className="button" onClick={event => follow(event, () => navigate({ to: '/' }))}>{t('ライブラリを開く', 'Open library')}</Link> : null}
+      {activity.mediaId ? <MotionLink to="/study/$mediaId" params={{ mediaId: activity.mediaId }} className="button" onClick={event => follow(event, () => navigate({ to: '/study/$mediaId', params: { mediaId: activity.mediaId! } }))}>{t('教材を開く', 'Open media')}</MotionLink>
+        : ['tool', 'tool_check', 'models', 'tool_scan', 'tool_updates'].includes(activity.kind) ? <MotionLink to="/settings" className="button" onClick={event => follow(event, () => navigate({ to: '/settings' }))}>{t('設定を開く', 'Open settings')}</MotionLink>
+          : activity.source === 'download' || ['import_check', 'import', 'restore', 'restore_preview', 'export'].includes(activity.kind) ? <MotionLink to="/" className="button" onClick={event => follow(event, () => navigate({ to: '/' }))}>{t('ライブラリを開く', 'Open library')}</MotionLink> : null}
     </div></MotionSwap>
   </article>;
 }

@@ -15,8 +15,6 @@
 .review-outgoing .review-prompt, .review-outgoing .review-answer { background: transparent; }
 .review-outgoing .review-answer { border-color: transparent; }
 .review-answer-reveal { min-height: 0; }
-.rating-area:not(.waiting) .rating-buttons { animation: rating-ready var(--motion-reveal) var(--motion-ease) both; }
-@keyframes rating-ready { from { transform: translateY(3px); } to { transform: translateY(0); } }
 .review-page-header {
   display: flex;
   align-items: center;
@@ -53,7 +51,6 @@
   display: block;
   height: 100%;
   background: var(--accent);
-  transition: width var(--motion-fast) var(--motion-ease);
 }
 .review-card {
   display: flex;
@@ -172,7 +169,6 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 16px;
-  transition: opacity var(--motion-fast) var(--motion-ease);
 }
 .rating-button {
   position: relative;

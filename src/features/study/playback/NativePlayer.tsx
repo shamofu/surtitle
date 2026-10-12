@@ -7,6 +7,7 @@ import {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { m } from 'motion/react';
 
 import { subscribeNative } from '../../../shared/native/events';
 import {
@@ -37,7 +38,7 @@ import {
   useDataActions,
 } from '../../../app/runtime';
 import { timestamp } from '../../../shared/format';
-import { AnimatedValue, MotionRegion, MotionSwap } from '../../../shared/motion';
+import { AnimatedValue, MotionRegion, MotionSwap, motionDurations, motionEase, useMotionActive } from '../../../shared/motion';
 import { shouldIgnoreShortcut } from '../../../shared/keyboard';
 import { Button, IconButton, Modal, useModalExit } from '../../../shared/ui/index';
 
@@ -168,6 +169,7 @@ export function NativePlayer({
   onReady: (ready: boolean) => void;
 }) {
   const { t } = useAppearance();
+  const motionActive = useMotionActive();
   const { notify } = useNotifications();
   const { surfaceHidden, activeModal, occludingElements = noOccludingElements } = useSurface();
   const activeModalRef = useRef(activeModal);
@@ -660,7 +662,7 @@ export function NativePlayer({
         </div>
         <fieldset className="player-controls" disabled={interactionsDisabled}>
           <div className="seek-control">
-            <input
+            <m.input
               type="range" min="0" max={Math.max(duration, 1)} step="100"
               value={Math.min(position, duration || 1)}
               data-motion-immediate={seekDraft !== null ? '' : undefined}
@@ -674,7 +676,8 @@ export function NativePlayer({
               onPointerUp={commitSeek} onKeyUp={commitSeek} onBlur={commitSeek}
               onPointerCancel={cancelSeek}
               aria-label={t('再生位置', 'Playback position')}
-              style={{ '--playback-progress': `${duration ? (position / duration) * 100 : 0}%` } as React.CSSProperties}
+              initial={false} animate={{ '--playback-progress': `${duration ? (position / duration) * 100 : 0}%` }}
+              transition={{ duration: motionActive && seekDraft === null ? motionDurations.progressFollow : 0, ease: motionEase }}
             />
           </div>
           <div className="player-control-row">
