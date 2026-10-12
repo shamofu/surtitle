@@ -921,6 +921,8 @@ function StudySession({ mediaId }: { mediaId: string }) {
                 }}
                 error={segmentsQuery.error}
                 candidatesError={candidatesQuery.error}
+                onRetryTranscript={() => void segmentsQuery.refetch()}
+                onRetryCandidates={() => void candidatesQuery.refetch()}
                 onInspect={(...args) => void inspect(...args)}
                 onPlayFrom={source => void playSource(source, 'continue')}
                 onReplay={source => void playSource(source, 'range')}
@@ -969,7 +971,6 @@ function StudySession({ mediaId }: { mediaId: string }) {
                   </p>
                   : selected &&
                   <>
-                    <p className="context-time">{timestamp(selected.startMs)}–{timestamp(selected.endMs)}</p>
                     <p className="context-sentence">{selected.text}</p>
                     {inspection?.term && <p className="inspected-term">{inspection.term}</p>}
                     {hasMeaning && <Button
@@ -1001,6 +1002,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                     <Play size={16} />
                     {t('この区間を再生', 'Play this passage')}
                   </Button>
+                  {selected && <span className="context-time">{timestamp(selected.startMs)}–{timestamp(selected.endMs)}</span>}
                   <div
                     className="repeat-slot"
                     ref={setRepeatTarget}
@@ -1081,15 +1083,16 @@ function StudySession({ mediaId }: { mediaId: string }) {
                     }}
                   />}
                 </MotionRegion>
-                <MotionRegion open={saved} mode="status">
+                <div className="phrase-saved-slot">
+                {saved &&
                   <p
                     className="phrase-saved"
                     role="status"
                   >
                     <AnimatedCheck size={16} />
                     {t('フレーズ帳に保存しました', 'Saved to your phrases')}
-                  </p>
-                </MotionRegion>
+                  </p>}
+                </div>
                 <Button
                   className="return-to-watching"
                   disabled={!playerReady || busy || saveBusy}

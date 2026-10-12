@@ -50,15 +50,19 @@ export function DownloadJobs() {
     interrupted: t('中断', 'Interrupted'),
   };
   return (
-    <MotionRegion mode="status" open={!!query.data?.length || !!query.error}>
     <section
       className="download-jobs"
       aria-label={t('ダウンロード', 'Downloads')}
+      aria-busy={query.isLoading || undefined}
     >
-      <h2>{t('ダウンロード', 'Downloads')}</h2>
-      <MotionRegion mode="status" open={!!query.error}><p role="alert">{query.error?.message}</p></MotionRegion>
-      <MotionSwap disabled stateKey={query.data?.slice(0, 10).map(job => job.id).join('|') || ''}>
-      {query.data?.slice(0, 10).map((job) => (
+      {query.isLoading && <p role="status">{t('ダウンロードを読み込み中', 'Loading downloads')}</p>}
+      {query.error && <div className="notice warning" role="alert">
+        <span>{t('ダウンロード状況を読み込めませんでした。', 'Could not load downloads.')} {query.error.message}</span>
+        <Button busy={query.isFetching} onClick={() => void query.refetch()}>{t('再試行', 'Retry')}</Button>
+      </div>}
+      {!query.isLoading && !query.error && !query.data?.length && <p className="download-empty">{t('ダウンロードはありません。URL から追加した教材の処理状況をここで確認できます。', 'No downloads yet. Materials added from a URL appear here.')}</p>}
+      <MotionSwap disabled stateKey={query.data?.map(job => job.id).join('|') || ''}>
+      {query.data?.map((job) => (
         <article
           key={job.id}
           className="download-job"
@@ -145,7 +149,16 @@ export function DownloadJobs() {
       ))}
       </MotionSwap>
     </section>
-    </MotionRegion>
+  );
+}
+
+export function DownloadJobsDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useAppearance();
+  const exit = useModalExit();
+  return (
+    <Modal {...exit.modalProps} title={t('ダウンロード', 'Downloads')} onClose={() => void exit.close(onClose)} closeDisabled={exit.exiting}>
+      <DownloadJobs />
+    </Modal>
   );
 }
 

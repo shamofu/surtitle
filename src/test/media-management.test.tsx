@@ -25,6 +25,7 @@ import { libraryApi } from '../features/library/api';
 import { cardsApi } from '../features/cards/api';
 import type { Media } from '../shared/contracts/media';
 import type { StudyCard } from '../shared/contracts/cards';
+import { queryKeys } from '../shared/query/keys';
 
 const context = vi.hoisted(() => ({
   data: undefined as { media: Media[]; cards: StudyCard[] } | undefined,
@@ -354,6 +355,26 @@ describe('media and card management', () => {
         request,
       ),
     );
+  });
+  it('shows an empty download explanation and keeps known jobs usable after a refresh error', async () => {
+    vi.mocked(libraryApi.downloadJobs).mockResolvedValueOnce([]);
+    mount(<DownloadJobs />);
+    await screen.findByText('No downloads yet. Materials added from a URL appear here.');
+    vi.mocked(libraryApi.downloadJobs).mockResolvedValueOnce([{
+      id: 'retained', request: { kind: 'url', pathOrUrl: 'https://example.com/lesson.mp4', title: 'Retained lesson', learningLanguage: 'en', explanationLanguage: 'ja' },
+      status: 'running', phase: 'downloading', storedBytes: 1024, updatedAt: '2026-01-01T00:00:00Z',
+    }]);
+    await act(async () => { await clients.at(-1)!.invalidateQueries({ queryKey: queryKeys.downloads }); });
+    await screen.findByRole('button', { name: 'Cancel download' });
+    vi.mocked(libraryApi.downloadJobs).mockRejectedValueOnce(Error('Connection interrupted'));
+    await act(async () => { await clients.at(-1)!.invalidateQueries({ queryKey: queryKeys.downloads }); });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load downloads. Connection interrupted');
+    expect(screen.getByText('Retained lesson')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel download' })).toBeEnabled();
+    vi.mocked(libraryApi.downloadJobs).mockResolvedValueOnce([]);
+    fireEvent.click(screen.getByRole('button', { name: /^Retry$/ }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(screen.getByText('No downloads yet. Materials added from a URL appear here.')).toBeInTheDocument();
   });
   it('keeps subtitle setup open without a success notification when the picker is cancelled', async () => {
     vi.mocked(libraryApi.importSubtitles).mockResolvedValue(false);

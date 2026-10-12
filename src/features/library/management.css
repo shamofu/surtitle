@@ -1,15 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Library downloads and saved-learning management. */
 .download-jobs {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 18px;
-  margin-bottom: 24px;
-  background: var(--surface);
+  min-width: 0;
 }
-.download-jobs h2 {
-  font-size: 17px;
-  margin: 0 0 12px;
+.download-empty {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.8;
+  margin: 8px 0;
 }
 .download-job {
   display: flex;

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-.page-content:has(.study-page) { padding: 8px 16px 12px; overflow: hidden; scroll-behavior: auto; }
+.page-content:has(.study-page) { padding: 6px 16px 8px; overflow: hidden; scroll-behavior: auto; }
 .page-content > .study-page { max-width: 1600px; }
 .study-page { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
 .study-top { display: flex; gap: 12px; align-items: center; flex-shrink: 0; height: 44px; min-height: 44px; }
@@ -44,19 +44,22 @@
 .study-transcript-toggle:hover { background: var(--surface-hover); color: var(--text); }
 .study-transcript-toggle[aria-expanded='true'] { color: var(--accent); border-right-color: var(--surface); }
 .study-transcript-toggle:focus-visible { outline-offset: -3px; }
-.study-left { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.current-caption { display: flex; flex-direction: column; flex: 0 0 156px; padding: 10px 4px 0; min-height: 156px; min-width: 0; }
+.study-left { display: flex; flex-direction: column; min-width: 0; min-height: 0; container-type: inline-size; container-name: study-content; }
+.current-caption { display: flex; flex-direction: column; flex: 0 0 164px; padding: 10px 4px 0; min-height: 164px; min-width: 0; }
 .caption-body { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 0fr); flex: 1; gap: 0; min-height: 0; min-width: 0; overflow: hidden; }
-.caption-source-scroll, .caption-translation-scroll { min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 2px 4px; }
+.caption-source-scroll, .caption-translation-scroll { min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 1px 4px; }
 .caption-body > .caption-translation-region { display: flex; min-height: 0; overflow: hidden; }
 .caption-translation-region .caption-translation-scroll { border-top: 1px solid var(--border); }
 .caption-translation-scroll { flex: 1; }
 .caption-source-scroll:focus-visible, .caption-translation-scroll:focus-visible { outline-offset: -2px; }
-.caption-controls { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 8px; }
-.current-caption-text { font-size: clamp(24px, 2vw, 28px); line-height: 1.55; max-width: 65ch; white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 450; user-select: text; }
-.caption-context { display: flex; align-items: center; gap: 10px; min-height: 18px; margin-bottom: 2px; font-size: 11px; line-height: 1.4; color: var(--muted); }
+.caption-controls { display: flex; flex: 0 0 auto; align-items: flex-end; justify-content: space-between; gap: 8px; }
+.current-caption-text { font-size: clamp(24px, 2vw, 28px); line-height: 1.4; max-width: 65ch; white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 450; user-select: text; }
+.caption-navigation-note { position: absolute; inset-inline: 0; top: 0; display: block; height: 20px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-size: 11px; line-height: 20px; color: var(--muted); }
+.caption-playback-action { position: relative; display: flex; flex-direction: column; min-width: 0; padding-top: 20px; }
 .caption-context-time { font-variant-numeric: tabular-nums; }
-.caption-translation { font-size: 15px; line-height: 1.7; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.caption-translation { font-size: 15px; line-height: 1.7; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.caption-status-slot { display: inline-flex; width: 32px; flex: 0 0 32px; }
+.caption-status-slot .button { padding-inline: 6px; color: var(--warning); }
 .caption-actions { display: flex; align-items: center; gap: 4px; min-height: 40px; }
 .caption-actions .button { font-size: 13px; }
 .caption-toggle-copy { display: grid; }
@@ -66,7 +69,7 @@
 .caption-short-label { display: none; }
 .caption-navigation { display: flex; align-items: center; justify-content: center; flex-wrap: nowrap; gap: 4px; }
 .caption-navigation .button { font-size: 12px; padding-inline: 10px; }
-.caption-navigation-slot { min-height: 40px; display: flow-root; }
+.caption-navigation-slot { min-height: 60px; display: flow-root; }
 .caption-empty { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 14px; line-height: 1.8; }
 .study-companion { min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--surface); border-radius: 8px; overflow: hidden; }
 .study-transcript, .transcript-view, .transcription-view, .transcript-draft-view { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
@@ -88,7 +91,7 @@
 .context-time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .context-sentence { font-size: 21px; line-height: 1.65; margin: 10px 0 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .inspected-term { color: var(--accent); border-left: 3px solid var(--accent); padding-left: 12px; margin: 12px 0; font-size: 18px; line-height: 1.6; overflow-wrap: anywhere; }
-.context-meaning { padding: 14px 0; color: var(--muted); line-height: 1.8; font-size: 15px; overflow-wrap: anywhere; }
+.context-meaning { padding: 14px 0; color: var(--text); line-height: 1.8; font-size: 15px; overflow-wrap: anywhere; }
 .context-meaning p + p { margin-top: 10px; }
 .context-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 16px 0 8px; }
 .context-actions .button { font-size: 13px; padding-inline: 12px; }
@@ -98,7 +101,8 @@
 .phrase-inspector > .button.primary, .return-to-watching { width: 100%; }
 .phrase-save-toggle { width: 100%; }
 .phrase-inspector .return-to-watching { margin-top: 24px; }
-.phrase-saved { display: flex; gap: 8px; align-items: center; color: var(--accent); font-size: 13px; margin-top: 12px; }
+.phrase-saved-slot { min-height: calc(12px + 1.6em); padding-top: 12px; font-size: 13px; line-height: 1.6; }
+.phrase-saved { display: flex; gap: 8px; align-items: center; color: var(--accent); font-size: 13px; }
 .save-phrase-form { padding-top: 16px; margin-top: 12px; border-top: 1px solid var(--border); }
 .save-phrase-form .field { margin-bottom: 16px; }
 .save-phrase-form textarea, .save-phrase-form input { width: 100%; }
@@ -124,7 +128,7 @@
 .playing .segment-time { color: var(--accent); }
 .segment-content { flex: 1; min-width: 0; }
 .segment-text { text-align: left; display: block; width: 100%; font-size: 16px; line-height: 1.7; padding: 0; user-select: text; white-space: pre-wrap; overflow-wrap: anywhere; }
-.segment-translation { margin-top: 8px; font-size: 14px; line-height: 1.7; color: var(--muted); overflow-wrap: anywhere; }
+.segment-translation { margin-top: 8px; font-size: 14px; line-height: 1.7; color: var(--text); overflow-wrap: anywhere; }
 .segment-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 2px 4px; margin-top: 6px; }
 .segment-actions .button { min-height: 36px; padding: 6px; gap: 4px; font-size: 12px; }
 .transcript-footer { flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; border-top: 1px solid var(--border); padding: 8px 12px; color: var(--muted); font-size: 12px; }
@@ -154,10 +158,10 @@
 /* A high-DPI workarea can be shorter than the preferred 700px window. Keep
    primary controls at their normal hit sizes and recover space from chrome. */
 @media (min-width: 1000px) and (max-height: 680px) {
-  .page-content:has(.study-page) { padding-block: 4px; }
+  .page-content:has(.study-page) { padding-block: 2px; }
   .study-page { gap: 6px; }
   .study-top { height: 40px; min-height: 40px; }
-  .current-caption { flex-basis: 144px; min-height: 144px; padding-top: 6px; }
+  .current-caption { flex-basis: 148px; min-height: 148px; padding-top: 6px; }
   .caption-full-label { display: none; }
   .caption-short-label { display: inline; }
 }
@@ -169,6 +173,17 @@
   .caption-actions { flex: 1; }
   .caption-navigation { justify-content: flex-end; }
   .caption-actions .button, .caption-navigation .button { padding-inline: 6px; font-size: 12px; }
+}
+/* Compact the controls using the space beside the transcript, before wrapping. */
+@container study-content (max-width: 760px) {
+  .caption-full-label { display: none; }
+  .caption-short-label { display: inline; }
+  .caption-controls { flex-wrap: nowrap; }
+  .caption-actions .button, .caption-navigation .button { padding-inline: 6px; font-size: 12px; }
+}
+@container study-content (max-width: 480px) {
+  .caption-controls { flex-wrap: wrap; gap: 0; }
+  .caption-navigation-slot { margin-left: auto; }
 }
 @media (max-width: 999px) {
   .page-content:has(.study-page) { overflow: auto; padding: 16px; }
@@ -201,9 +216,9 @@
   .study-grid { row-gap: 12px; }
   .study-left { height: auto; }
   .study-left .player-card { flex: none; min-height: 0; }
-  .study-left .native-player-viewport { flex: none; min-height: 0; height: clamp(48px, calc(100dvh - 404px), 220px); }
-  .current-caption { flex-basis: 128px; min-height: 128px; padding-top: 6px; }
-  .current-caption-text { font-size: 22px; line-height: 1.45; }
+  .study-left .native-player-viewport { flex: none; min-height: 0; height: clamp(48px, calc(100dvh - 420px), 220px); }
+  .current-caption { flex-basis: 144px; min-height: 144px; padding-top: 6px; }
+  .current-caption-text { font-size: 22px; line-height: 1.4; }
   .caption-full-label { display: none; }
   .caption-short-label { display: inline; }
   .study-companion-dock { --study-panel-height: max(340px, calc(100dvh - 116px)); }
@@ -212,4 +227,11 @@
   .study-left .speed-select > span { display: none; }
   .study-left .play-button { width: 44px; padding-inline: 0; }
   .study-left .play-button > span:last-child { display: none; }
+}
+@media (max-width: 999px) and (max-height: 400px) {
+  .study-page { gap: 0; }
+}
+/* Two control rows need their own space even in a short workarea. */
+@container study-content (max-width: 480px) {
+  .current-caption { flex-basis: 204px; min-height: 204px; }
 }

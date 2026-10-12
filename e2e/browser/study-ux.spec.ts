@@ -323,6 +323,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
     await page.getByRole('button', { name: locale === 'ja' ? 'パネルを閉じる' : 'Close panel', exact: true }).click();
     await page.getByRole('button', { name: locale === 'ja' ? '処理・管理' : 'Activity & tools', exact: true }).click();
     await expect(page.locator('.study-auxiliary')).toBeVisible();
+    await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
     const videoBeforeHistory = await page.getByTestId('native-player-viewport').boundingBox();
     const draft = page.locator('.study-phrase-draft');
     await draft.scrollIntoViewIfNeeded();
@@ -335,7 +336,14 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
     await page.locator('.study-jobs > summary').filter({ hasText: locale === 'ja' ? '処理履歴' : 'Job history' }).click();
     const history = page.locator('.study-jobs').last();
     await expect(history).toHaveAttribute('open', '');
-    await expect.poll(() => history.evaluate(element => element.getAnimations().filter(animation => animation.playState === 'running').length)).toBe(0);
+    // AnimatedDetails drives height through Motion values, so getAnimations()
+    // can report no native animations while the history still clips its rows.
+    await expect.poll(() => history.evaluate(element => {
+      const details = element as HTMLElement;
+      const last = details.querySelector('.job-status:last-child')!;
+      return details.style.height === '' && details.style.overflow === ''
+        && last.getBoundingClientRect().bottom <= details.getBoundingClientRect().bottom + 1;
+    })).toBe(true);
     const activity = page.locator('.study-auxiliary');
     // Activity owns its scroll, so growing history cannot take height from the video.
     expect(await activity.evaluate(element => {

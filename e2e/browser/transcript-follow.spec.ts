@@ -5,10 +5,127 @@ import { installLearningFixture } from './learning-fixture';
 type FixtureWindow = Window & {
   __learningFixture: {
     call: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+    publish: (event: string, payload: unknown) => void;
   };
+  __transcriptRefresh: { marked: boolean; fail: boolean; refresh: () => void };
   __heldPlayerEvents: { hold: () => void; release: () => void; pending: Map<unknown, unknown> };
   __jumpScroll: { start: number; positions: number[]; stop: () => void };
 };
+
+async function installTranscriptRefresh(page: Page) {
+  await page.evaluate(() => {
+    const fixtureWindow = window as FixtureWindow;
+    const fixture = fixtureWindow.__learningFixture;
+    const original = fixture.call.bind(fixture);
+    let revision = 0;
+    const control = fixtureWindow.__transcriptRefresh = {
+      marked: false, fail: false,
+      refresh: () => fixture.publish('data-changed', {
+        version: 1, epoch: 'fixture', revision: ++revision, domain: 'subtitles', entityId: 'visual-fixture',
+      }),
+    };
+    fixture.call = async (command, args) => {
+      if (command === 'list_segments' && control.fail) throw new Error('Offline while refreshing subtitles');
+      const result = await original(command, args);
+      if (command !== 'list_segments') return result;
+      return (result as { id: string; status: string }[]).map(cue => cue.id === 'visual-cue-10'
+        ? { ...cue, status: control.marked ? 'generated_review' : 'confirmed' } : cue);
+    };
+  });
+}
+
+async function observeTranscriptRefresh(page: Page, patch: { marked?: boolean; fail?: boolean }) {
+  return page.evaluate(async patch => {
+    const list = document.querySelector<HTMLElement>('.transcript-scroll')!;
+    const text = list.querySelector<HTMLElement>('.transcript-row[data-index="10"] .segment-text')!;
+    const sample = () => {
+      const bounds = list.getBoundingClientRect(), content = text.getBoundingClientRect();
+      return { top: bounds.top, height: bounds.height, textX: content.x, textY: content.y, textHeight: content.height, scroll: list.scrollTop };
+    };
+    const start = sample(), samples = [];
+    const control = (window as FixtureWindow).__transcriptRefresh;
+    Object.assign(control, patch); control.refresh();
+    for (let frame = 0; frame < 24; frame += 1) {
+      await new Promise(requestAnimationFrame);
+      samples.push(sample());
+    }
+    return { start, samples };
+  }, patch);
+}
+
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(`transcript warnings and refresh errors preserve the reading viewport (${reducedMotion})`, async ({ page }) => {
+    await openTranscript(page, reducedMotion);
+    await installTranscriptRefresh(page);
+    const text = page.locator('.transcript-row[data-index="10"] .segment-text');
+    await text.focus();
+    await expect(page.getByRole('button', { name: 'Show current subtitle', exact: true })).toBeVisible();
+    const filter = page.getByRole('checkbox', { name: 'Show marked passages only' });
+    await expect(filter).toBeDisabled();
+    for (const patch of [{ marked: true }, { marked: false }, { fail: true }]) {
+      const observed = await observeTranscriptRefresh(page, patch);
+      for (const sample of observed.samples) {
+        for (const key of Object.keys(observed.start) as (keyof typeof sample)[]) {
+          expect(Math.abs(sample[key] - observed.start[key]), key).toBeLessThan(1);
+        }
+      }
+      await expect(text).toBeFocused();
+      if ('marked' in patch) await expect(filter)[patch.marked ? 'toBeEnabled' : 'toBeDisabled']();
+    }
+    const disclosure = page.locator('.transcript-filter-bar .transcript-status');
+    const status = disclosure.getByLabel('Subtitles could not be updated', { exact: true });
+    await expect(status).toBeVisible();
+    const before = await page.locator('.transcript-scroll').boundingBox();
+    await status.focus();
+    await status.press('Enter');
+    await expect(disclosure.locator('.transcript-status-panel p')).toHaveText('Offline while refreshing subtitles');
+    await expect(disclosure.locator('.transcript-status-panel p')).toBeVisible();
+    expect(await status.evaluate(element => getComputedStyle(element.closest('details')!).overflow)).toBe('visible');
+    const after = await page.locator('.transcript-scroll').boundingBox();
+    expect(after).toEqual(before);
+    await page.evaluate(() => { (window as FixtureWindow).__transcriptRefresh.fail = false; });
+    await page.keyboard.press('Tab');
+    await expect(disclosure.getByRole('button', { name: 'Retry loading subtitles' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(status).toHaveCount(0);
+    await expect(page.getByRole('textbox', { name: 'Search transcript' })).toBeFocused();
+    await expect(filter).toBeDisabled();
+    expect(await page.locator('.transcript-scroll').boundingBox()).toEqual(before);
+  });
+}
+
+test('secondary subtitle actions overlay rows without moving content and return keyboard focus', async ({ page }) => {
+  await openTranscript(page);
+  const visibleIndexes = await page.locator('.transcript-scroll').evaluate(element => {
+    const viewport = element.getBoundingClientRect();
+    return [...element.querySelectorAll<HTMLElement>('.transcript-row')].filter(row => {
+      const bounds = row.getBoundingClientRect();
+      return bounds.top >= viewport.top && bounds.bottom <= viewport.bottom;
+    }).map(row => Number(row.dataset.index));
+  });
+  expect(visibleIndexes.length).toBeGreaterThan(0);
+  for (const index of [...new Set([visibleIndexes[0], 10, visibleIndexes.at(-1)!])]) {
+    const row = page.locator(`.transcript-row[data-index="${index}"]`);
+    const before = await row.boundingBox();
+    const actions = row.locator('.segment-options summary');
+    await actions.click();
+    expect(await actions.evaluate(element => getComputedStyle(element.closest('details')!).overflow)).toBe('visible');
+    const edit = page.getByRole('button', { name: 'Edit subtitle', exact: true });
+    await expect(edit).toBeVisible();
+    await expect(edit).toBeInViewport();
+    await expect.poll(() => edit.evaluate(element => {
+      const bounds = element.getBoundingClientRect();
+      return document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)?.closest('button') === element;
+    })).toBe(true);
+    expect(await row.boundingBox()).toEqual(before);
+    await page.keyboard.press('Tab');
+    await expect(edit).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(actions).toBeFocused();
+    await expect(edit).toBeHidden();
+    expect(await row.boundingBox()).toEqual(before);
+  }
+});
 
 async function openTranscript(page: Page, reducedMotion: 'no-preference' | 'reduce' = 'no-preference', delayPlayerEvents = false) {
   await page.emulateMedia({ reducedMotion });
@@ -42,6 +159,7 @@ async function openTranscript(page: Page, reducedMotion: 'no-preference' | 'redu
   await expect(page.getByRole('button', { name: 'Explore meaning', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Transcript', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Following playback', exact: true })).toBeVisible();
+  await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
   await expectCentered(page, 10);
 }
 

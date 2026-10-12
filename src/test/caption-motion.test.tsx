@@ -188,19 +188,19 @@ describe('current caption transitions', () => {
     expect(animations).toHaveLength(0);
   });
 
-  it('freezes preview timing and its first-cue label when playback crosses the selected cue', () => {
+  it('freezes the selected preview while the next time keeps describing the skip destination', () => {
     const view = render(caption(undefined, { next: second, gapMode: 'preview', hasPrevious: false }));
     const paragraph = screen.getByText(second.text);
-    expect(screen.getByText('First subtitle 0:02')).toBeVisible();
+    expect(screen.getByLabelText('Next subtitle 0:02')).toHaveTextContent('0:02');
     fireEvent.pointerDown(paragraph);
     view.rerender(caption(second, { previous: first, next: third, gapMode: 'preview' }));
     expect(screen.getByText(second.text)).toBe(paragraph);
-    expect(screen.getByText('First subtitle 0:02')).toBeVisible();
-    expect(screen.queryByText('Next subtitle 0:04')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Next subtitle 0:04')).toHaveTextContent('0:04');
+    expect(screen.getByRole('button', { name: 'Next subtitle' })).toHaveAccessibleDescription('Next subtitle 0:04');
     expect(screen.getByRole('button', { name: 'Play this subtitle' })).toBeEnabled();
     act(() => window.dispatchEvent(new Event('pointercancel')));
     expect(screen.getByText(second.text)).toBe(paragraph);
-    expect(screen.queryByText('First subtitle 0:02')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Next subtitle 0:04')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Replay this subtitle' })).toBeEnabled();
   });
 
@@ -248,8 +248,9 @@ describe('caption gap learning', () => {
     const target = gapMode === 'review' ? first : second;
     render(caption(undefined, { previous: first, next: second, gapMode }));
     expect(screen.getByText(target.text)).toBeVisible();
-    expect(screen.getByText(gapMode === 'review' ? 'Review the previous subtitle' : 'Preview the next subtitle')).toBeVisible();
-    expect(screen.getByText('Next subtitle 0:02')).toBeVisible();
+    expect(screen.getByText(gapMode === 'review' ? 'Reviewing' : 'Previewing')).toBeVisible();
+    expect(screen.getByLabelText('Next subtitle 0:02')).toBeVisible();
+    expect(screen.getByText(target.text).closest('.caption-source-scroll')).not.toContainElement(screen.getByLabelText('Next subtitle 0:02'));
     fireEvent.click(screen.getByRole('button', { name: 'Show translation' }));
     expect(screen.getByText(target.translation!)).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Explore meaning' }));
@@ -281,16 +282,16 @@ describe('caption gap learning', () => {
     expect(next).toHaveBeenCalledOnce();
     view.rerender(caption(undefined, { next: second, hasPrevious: false, gapMode: 'preview' }));
     expect(screen.getByText(second.text)).toBeVisible();
-    expect(screen.getByText('First subtitle 0:02')).toBeVisible();
+    expect(screen.getByLabelText('Next subtitle 0:02')).toBeVisible();
   });
 
   it('keeps the last cue for review but shows a previous action when preview has no next cue', () => {
     const view = render(caption(undefined, { previous: third, hasNext: false }));
     expect(screen.getByText(third.text)).toBeVisible();
-    expect(screen.getByText('No further subtitles yet')).toBeVisible();
+    expect(screen.getByLabelText('No further subtitles yet')).toHaveTextContent('—');
     view.rerender(caption(undefined, { previous: third, hasNext: false, gapMode: 'preview' }));
     expect(screen.queryByText(third.text)).not.toBeInTheDocument();
-    expect(screen.getByText('No further subtitles yet')).toBeVisible();
+    expect(screen.getByText('No further subtitles yet', { selector: '.caption-empty p' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Go to previous subtitle' }));
     expect(previous).toHaveBeenCalledOnce();
     expect(screen.getByRole('button', { name: 'Replay this subtitle' })).toBeDisabled();

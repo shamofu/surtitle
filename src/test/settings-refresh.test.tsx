@@ -14,14 +14,14 @@ import { settingsEditor } from '../features/settings/editing';
 import { aiApi } from '../features/ai/api';
 import type { AppSettings } from '../shared/contracts/settings';
 import type { AppSnapshot } from '../shared/contracts/snapshot';
-const context = vi.hoisted(() => ({ data: undefined as AppSnapshot | undefined, notify: vi.fn(), revision: 0 }));
+const context = vi.hoisted(() => ({ data: undefined as AppSnapshot | undefined, error: null as Error | null, loading: false, native: true, refresh: vi.fn(async () => {}), notify: vi.fn(), revision: 0 }));
 vi.mock('../features/settings/api', () => ({ settingsApi: { state: vi.fn(), patch: vi.fn(), scanExternalTools: vi.fn(), setToolProvider: vi.fn(), importCredential: vi.fn() } }));
 vi.mock('../features/ai/api', () => ({ aiApi: { vertexModels: vi.fn(), vertexPrice: vi.fn() } }));
 vi.mock('../features/ai/continuations', () => ({ continuationApi: { list: vi.fn().mockResolvedValue([]) } }));
-vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
+vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => context.native }));
 vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn() }));
 vi.mock('../app/runtime', () => {
-  const useFixture = () => ({ data: context.data, t: (_ja: string, en: string) => en, locale: 'en',
+  const useFixture = () => ({ data: context.data, error: context.error, loading: context.loading, refresh: context.refresh, t: (_ja: string, en: string) => en, locale: 'en',
     mutate: (action: () => Promise<unknown>) => action(), report: (action: () => Promise<unknown>) => action().catch(() => undefined),
     notify: context.notify, registerModal: () => () => {} });
   return { useSnapshot: useFixture, useDataActions: useFixture, useAppearance: useFixture, useNotifications: useFixture, useSurface: useFixture };
@@ -30,14 +30,18 @@ const settings = (): AppSettings => ({ theme: 'dark', locale: 'en', learningLang
   vertexProject: 'original-project', vertexLocation: 'global', credentialConfigured: false, retention: .9, proficiency: 'B1', ytDlpChannel: 'nightly', aiModels: {} });
 const snapshot = (value: AppSettings): AppSnapshot => ({ settings: value, media: [], cards: [], tools: [], jobs: [], budget: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 } });
 const clients: QueryClient[] = [];
-async function mount() {
+function renderSettings() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); clients.push(client);
-  const view = render(<QueryClientProvider client={client}><SettingsPage /></QueryClientProvider>);
+  return render(<QueryClientProvider client={client}><SettingsPage /></QueryClientProvider>);
+}
+async function mount() {
+  const view = renderSettings();
   await waitFor(() => expect(screen.getByRole('combobox', { name: 'Learning language' })).toBeEnabled());
   return view;
 }
 beforeEach(() => {
-  context.data = snapshot(settings()); context.revision = 0;
+  context.data = snapshot(settings()); context.revision = 0; context.error = null; context.loading = false; context.native = true;
+  context.refresh.mockImplementation(async () => {});
   HTMLElement.prototype.scrollIntoView = vi.fn();
   vi.mocked(settingsApi.state).mockImplementation(async () => ({ settings: context.data!.settings, revision: String(context.revision) }));
   vi.mocked(settingsApi.patch).mockImplementation(async (revision, patch) => {
@@ -51,6 +55,63 @@ beforeEach(() => {
   vi.mocked(aiApi.vertexModels).mockResolvedValue([]);
 });
 afterEach(async () => { cleanup(); await act(async () => {}); clients.splice(0).forEach(client => client.clear()); vi.clearAllMocks(); });
+
+it('keeps disabled settings readable in the browser preview without inventing persisted values', async () => {
+  context.native = false;
+  context.data = undefined;
+  vi.mocked(settingsApi.state).mockRejectedValueOnce(new Error('Open Surtitle desktop to use this feature.'));
+  renderSettings();
+  await screen.findByText(/Open Surtitle desktop to use this feature/);
+  expect(screen.getByRole('combobox', { name: 'Learning language' })).toBeDisabled();
+  expect(screen.getByRole('textbox', { name: /Monthly AI budget/ })).toBeDisabled();
+  expect(screen.getByRole('textbox', { name: /Monthly AI budget/ })).toHaveValue('');
+  expect(screen.queryByText(/Could not load settings/)).not.toBeInTheDocument();
+  expect(settingsApi.patch).not.toHaveBeenCalled();
+});
+
+it('recovers an initial snapshot failure without replacing the loaded editing session', async () => {
+  const available = snapshot(settings());
+  context.data = undefined;
+  context.error = new Error('Snapshot unavailable');
+  vi.mocked(settingsApi.state).mockResolvedValueOnce({ settings: available.settings, revision: '0' });
+  renderSettings();
+  expect(screen.getByRole('alert')).toHaveTextContent('Could not load settings. Snapshot unavailable');
+  expect(screen.queryByRole('combobox', { name: 'Learning language' })).not.toBeInTheDocument();
+  await act(async () => {});
+  context.refresh.mockImplementationOnce(async () => { context.data = available; context.error = null; });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })); });
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Learning language' })).toBeEnabled());
+  expect(settingsApi.state).toHaveBeenCalledOnce();
+  expect(context.refresh).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+it('retries an initial settings-editor read instead of attempting to save unavailable fields', async () => {
+  vi.mocked(settingsApi.state).mockRejectedValueOnce(new Error('Settings store unavailable'));
+  renderSettings();
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Settings store unavailable'));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })); });
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Learning language' })).toBeEnabled());
+  expect(settingsApi.state).toHaveBeenCalledTimes(2);
+  expect(settingsApi.patch).not.toHaveBeenCalled();
+  expect(context.refresh).not.toHaveBeenCalled();
+});
+
+it('keeps the loaded settings subtree and unfinished focused input during a snapshot refresh failure', async () => {
+  const view = await mount();
+  const input = screen.getByRole('textbox', { name: /Playback context on each side/ }) as HTMLInputElement;
+  input.focus();
+  fireEvent.change(input, { target: { value: '-' } });
+  input.setSelectionRange(0, 1);
+  context.error = new Error('Background snapshot failed');
+  view.rerender(<QueryClientProvider client={clients.at(-1)!}><SettingsPage /></QueryClientProvider>);
+  expect(screen.getByRole('textbox', { name: /Playback context on each side/ })).toBe(input);
+  expect(input).toHaveFocus();
+  expect(input).toHaveValue('-');
+  expect([input.selectionStart, input.selectionEnd]).toEqual([0, 1]);
+  expect(screen.queryByText(/Background snapshot failed/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Could not load settings/)).not.toBeInTheDocument();
+});
 
 it('persists the caption gap mode through a partial patch while retaining unfinished settings input', async () => {
   const client = new QueryClient(); clients.push(client);

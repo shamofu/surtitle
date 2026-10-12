@@ -17,7 +17,7 @@ vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => fixture.na
 vi.mock('../features/library/api', () => ({ libraryApi: {
   selectMediaFiles: vi.fn(), validateMediaFiles: vi.fn(), importLocalMedia: vi.fn(), startUrlImport: vi.fn(),
 } }));
-vi.mock('../features/library/MediaManagement', () => ({ DownloadJobs: () => null }));
+vi.mock('../features/library/MediaManagement', () => ({ DownloadJobsDialog: ({ onClose }: { onClose: () => void }) => <div role="dialog" data-app-modal aria-label="Downloads"><button onClick={onClose}>Close downloads</button></div> }));
 vi.mock('../features/transfer/TransferDialog', () => ({ TransferDialog: ({ onClose }: { onClose: () => void }) => <div role="dialog" data-app-modal aria-label="Your data"><button onClick={onClose}>Close data</button></div> }));
 vi.mock('@tanstack/react-router', async importOriginal => ({
   ...await importOriginal<typeof import('@tanstack/react-router')>(),

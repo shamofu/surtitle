@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { Link, Outlet } from '@tanstack/react-router';
-import { BookOpen, CircleHelp, Layers3, LibraryBig, Moon, RefreshCw, Settings2, Sun } from 'lucide-react';
-import { useSnapshot, useAppearance, useDataActions } from './runtime';
+import { BookOpen, CircleHelp, Layers3, LibraryBig, Moon, Settings2, Sun } from 'lucide-react';
+import { useSnapshot, useAppearance } from './runtime';
 import { nativeAvailable } from '../shared/native/transport';
 import { dueCards } from '../shared/format';
 import { IconButton, MotionButton } from '../shared/ui/index';
 import { NotificationRegion } from './providers/Notifications';
 import { ActivityButton } from './ActivityModal';
-import { AnimatedValue, MotionRegion, MotionSwap } from '../shared/motion';
+import { AnimatedValue, MotionSwap } from '../shared/motion';
 import { SelectionIndicator } from '../shared/motion/SelectionIndicator';
 
 export function AppShell() {
-  const { data, error } = useSnapshot();
+  const { data } = useSnapshot();
   const { t, theme, toggleTheme, locale, setLocale } = useAppearance();
-  const { refresh } = useDataActions();
   const due = data ? dueCards(data.cards).length : null;
   return (
     <div className="app-shell">
@@ -36,7 +35,8 @@ export function AppShell() {
             <Link to="/review" activeProps={{ className: 'active', 'aria-current': 'page' }}>
               <BookOpen size={18} aria-hidden="true" />
               <span>{t('復習', 'Review')}</span>
-              <MotionRegion mode="status" as="span" open={due !== null && due > 0}><span className="nav-count"><AnimatedValue value={due ?? 0} /></span></MotionRegion>
+              <span className="nav-count" aria-hidden="true" data-empty={due === null || due === 0}><AnimatedValue value={due && due > 99 ? '99+' : due ?? 0} /></span>
+              {due !== null && due > 0 && <span className="sr-only">{t(`${due} 件`, `${due} due`)}</span>}
             </Link>
             <Link to="/settings" activeProps={{ className: 'active', 'aria-current': 'page' }}>
               <Settings2 size={18} aria-hidden="true" />
@@ -59,12 +59,6 @@ export function AppShell() {
             <span>{t('ブラウザーで UI をプレビュー中です。動画の読み込み・AI・保存はデスクトップアプリで利用できます。', 'Browser UI preview. Import, AI, and persistence are available in the desktop app.')}</span>
           </div>
         )}
-        <MotionRegion mode="status" open={!!error}>
-          <div className="error-banner" role="alert">
-            <MotionSwap disabled as="span" stateKey={error?.message ?? ''}>{error?.message}</MotionSwap>
-            <button onClick={() => void refresh()}>{t('再試行', 'Retry')}<RefreshCw size={14} aria-hidden="true" /></button>
-          </div>
-        </MotionRegion>
         <NotificationRegion />
         <main className="page-content"><Outlet /></main>
       </div>

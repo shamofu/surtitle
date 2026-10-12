@@ -16,6 +16,13 @@
 .progress-status.compact { padding: 6px 0; }
 .activity-trigger { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 8px; font-size: 12px; color: var(--muted); white-space: nowrap; border-radius: 6px; }
 .activity-trigger:hover { background: var(--surface-hover); color: var(--text); }
+.activity-trigger-icon { width: 18px; height: 18px; flex: 0 0 18px; }
+.activity-trigger-icon > .motion-swap-live { justify-content: center; }
+.activity-trigger[data-problem="true"] .activity-trigger-icon { color: var(--warning); }
+.activity-refresh-error { display: grid; gap: 12px; margin-bottom: 24px; }
+.activity-refresh-error h3 { font-size: 15px; }
+.activity-refresh-error > p:not(.notice) { color: var(--muted); font-size: 13px; }
+.activity-refresh-error > .button { justify-self: start; }
 .activity-list { display: grid; gap: 0; }
 .activity-item + .activity-item { border-top: 1px solid var(--border); }
 .activity-item { padding: 6px 0 16px; }

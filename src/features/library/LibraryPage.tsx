@@ -4,14 +4,14 @@ import type { DroppedMediaFiles } from './ImportDialog';
 import { useRef, useState } from 'react';
 import { createLink, Link } from '@tanstack/react-router';
 import { m } from 'motion/react';
-import { ArrowDownToLine, FileVideo2, Headphones, Play, Plus, Search, Upload, X } from 'lucide-react';
+import { ArrowDownToLine, Download, FileVideo2, Headphones, Play, Plus, Search, Upload, X } from 'lucide-react';
 import type { Media } from '../../shared/contracts/media';
 import { useAppearance, useDataActions, useNotifications, useSnapshot } from '../../app/runtime';
 import { nativeAvailable } from '../../shared/native/transport';
 import { languageName, timestamp } from '../../shared/format';
 import { Badge, Button, EmptyState, PageTitle } from '../../shared/ui/index';
 import { TransferDialog } from '../transfer/TransferDialog';
-import { DownloadJobs } from './MediaManagement';
+import { DownloadJobsDialog } from './MediaManagement';
 import { useLibraryDrop } from './useLibraryDrop';
 import { AnimatedValue, MotionRegion, MotionSwap, motionDurations, motionLayoutTransition, motionReferences, useMotionActive, useMotionEntrance } from '../../shared/motion';
 import { SelectionIndicator } from '../../shared/motion/SelectionIndicator';
@@ -86,11 +86,12 @@ export function LibraryPage() {
   const [droppedFiles, setDroppedFiles] = useState<DroppedMediaFiles>();
   const dropRevision = useRef(0);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [downloadsOpen, setDownloadsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const searchInput = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState('all');
   const dragging = useLibraryDrop({
-    blocked: importBusy || transferOpen,
+    blocked: importBusy || transferOpen || downloadsOpen,
     // Inspect open dialogs at delivery time so a just-closed modal cannot
     // reject the next drop while its surface-count cleanup is settling.
     canDrop: () => !document.querySelector('[data-app-modal]:not(:has(.media-import))'),
@@ -131,6 +132,10 @@ export function LibraryPage() {
       if (!nativeAvailable()) notify(t('この操作には Surtitle デスクトップアプリが必要です。', 'Open Surtitle desktop to use this feature.'), 'error');
     }}>
       <PageTitle title={t('ライブラリ', 'Library')} description={t('好きな作品を観ながら、気になる言葉を確かめる。', 'Watch something you enjoy. Take a closer look at the words that catch your attention.')}>
+        <Button variant="ghost" onClick={() => setDownloadsOpen(true)} aria-haspopup="dialog">
+          <Download size={17} />
+          {t('ダウンロード', 'Downloads')}
+        </Button>
         <Button variant="ghost" onClick={() => setTransferOpen(true)}>
           <ArrowDownToLine size={17} />
           {t('データ管理', 'Your data')}
@@ -142,7 +147,6 @@ export function LibraryPage() {
       </PageTitle>
       <p className="library-drop-hint"><Upload size={15} aria-hidden="true" />{t('動画・音声ファイルをここへドロップして追加できます。', 'Drop video or audio files here to add them.')}</p>
       <MotionRegion mode="status" open={dragging && !importOpen}><div className="library-drop-overlay" role="status"><div><Upload size={34} aria-hidden="true" /><strong>{t('ドロップして教材を追加', 'Drop to add your materials')}</strong><p>{t('設定した言語で、すぐに取り込みを開始します。', 'Import immediately with your selected languages.')}</p></div></div></MotionRegion>
-      <DownloadJobs />
       <MotionRegion mode="status" open={continuing.length > 0}>
         <section className="continue-section" aria-labelledby="continue-title">
           <h2 id="continue-title">{t('視聴途中', 'Continue watching')}</h2>
@@ -164,7 +168,7 @@ export function LibraryPage() {
         <div className="library-toolbar">
           <div className="section-heading">
             <h2 id="library-list-title">{t('教材一覧', 'Your materials')}</h2>
-            <MotionRegion mode="status" open={!!data} as="span"><span className="count-pill"><AnimatedValue value={media.length} /></span></MotionRegion>
+            <span className="count-pill library-material-count" aria-label={data ? t(`教材 ${media.length} 件`, `${media.length} materials`) : t('教材件数', 'Material count')}><AnimatedValue value={data ? media.length : '—'} /></span>
           </div>
           <div className="library-tools">
             <div className="filter-tabs" role="group" aria-label={t('コンテンツの種類', 'Content type')}>
@@ -232,6 +236,7 @@ export function LibraryPage() {
         closeImport();
       }} />}
       {transferOpen && <TransferDialog onClose={() => setTransferOpen(false)} />}
+      {downloadsOpen && <DownloadJobsDialog onClose={() => setDownloadsOpen(false)} />}
     </div>
   );
 }

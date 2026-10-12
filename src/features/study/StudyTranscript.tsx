@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import type { VirtualItem } from '@tanstack/react-virtual';
 import {
@@ -8,11 +8,13 @@ import {
   Crosshair,
   Edit3,
   Languages,
+  MoreHorizontal,
   Play,
   RefreshCw,
   Search,
   Sparkles,
   Subtitles,
+  TriangleAlert,
   X
 } from 'lucide-react';
 import type { Media, SubtitleSegment } from '../../shared/contracts/media';
@@ -22,7 +24,8 @@ import type { SelectedContext } from './source-selection';
 import { resolveSourceSelection } from './source-selection';
 import { useAppearance } from '../../app/runtime';
 import { timestamp } from '../../shared/format';
-import { Badge, Button, EmptyState, IconButton } from '../../shared/ui/index';
+import { Button, EmptyState, IconButton } from '../../shared/ui/index';
+import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
 import { AnimatedValue, MotionRegion, MotionSwap, useAppMotion } from '../../shared/motion';
 import { SelectionIndicator } from '../../shared/motion/SelectionIndicator';
 import { DraftStudyPanel } from './drafts/DraftStudyPanel';
@@ -46,6 +49,35 @@ export interface TranscriptViewState {
 const isMarked = (cue: SubtitleSegment) => cue.status === 'generated_review' ||
   cue.timingPrecision === 'source_block' || !!cue.reviewIssues?.length;
 
+function TranscriptStatus({ error, label, retryLabel, onRetry }: {
+  error?: Error | null;
+  label: string;
+  retryLabel: string;
+  onRetry?: () => void;
+}) {
+  return <div className="transcript-status-slot">
+    <span className="sr-only" role="status">{error ? label : ''}</span>
+    {error && <AnimatedDetails className="transcript-status" data-motion-geometry="stable" onBlur={event => {
+      if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+    }} onKeyDown={event => {
+      if (event.key !== 'Escape' || !event.currentTarget.open) return;
+      event.preventDefault(); event.stopPropagation();
+      event.currentTarget.querySelector('summary')?.focus({ preventScroll: true });
+      event.currentTarget.open = false;
+    }}>
+      <summary aria-label={label} title={label}><TriangleAlert size={16} /></summary>
+      <div className="transcript-status-panel">
+        <p>{error.message}</p>
+        {onRetry && <Button onClick={event => {
+          const disclosure = event.currentTarget.closest('details');
+          if (disclosure) disclosure.open = false;
+          onRetry();
+        }}>{retryLabel}</Button>}
+      </div>
+    </AnimatedDetails>}
+  </div>;
+}
+
 export function StudyTranscript({
   media,
   segments,
@@ -59,6 +91,8 @@ export function StudyTranscript({
   onViewStateChange,
   error,
   candidatesError,
+  onRetryTranscript,
+  onRetryCandidates,
   onInspect,
   onPlayFrom,
   onReplay,
@@ -83,6 +117,8 @@ export function StudyTranscript({
   onViewStateChange: (state: TranscriptViewState) => void;
   error?: Error | null;
   candidatesError?: Error | null;
+  onRetryTranscript?: () => void;
+  onRetryCandidates?: () => void;
   onInspect: (
     segment: SelectedContext,
     term?: string,
@@ -117,7 +153,43 @@ export function StudyTranscript({
   const { search, following, showTranslations } = viewState;
   const [markedOnly, setMarkedOnly] = useState(false);
   const [focusedCue, setFocusedCue] = useState<string>();
+  const [openMenu, setOpenMenu] = useState<string>();
+  const activeMenu = useRef<HTMLDetailsElement | null>(null);
+  useEffect(() => {
+    if (!openMenu) return;
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Node && !activeMenu.current?.contains(event.target)) setOpenMenu(undefined);
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [openMenu]);
+  function closeMenu(element: HTMLElement) {
+    setOpenMenu(undefined);
+    element.closest('details')?.querySelector('summary')?.focus({ preventScroll: true });
+  }
+  function placeMenu(menu: HTMLDetailsElement) {
+    const panel = menu.querySelector<HTMLElement>('.segment-options-panel');
+    const summary = menu.querySelector('summary');
+    const viewport = scrollRef.current?.getBoundingClientRect();
+    if (!menu.open || !panel || !summary || !viewport) return;
+    const anchor = summary.getBoundingClientRect();
+    const height = panel.getBoundingClientRect().height;
+    // An edge row can have less room above its actions than the menu needs.
+    // Clamp the overlay inside the reading viewport without resizing the row.
+    const top = Math.max(viewport.top + 4, Math.min(anchor.top - height - 4, viewport.bottom - height - 4));
+    panel.style.bottom = 'auto';
+    panel.style.top = `${top - anchor.top}px`;
+  }
   const searchInput = useRef<HTMLInputElement>(null);
+  const suggestionsActions = useRef<HTMLDivElement>(null);
+  function retryTranscript() {
+    searchInput.current?.focus({ preventScroll: true });
+    onRetryTranscript?.();
+  }
+  function retrySuggestions() {
+    suggestionsActions.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
+    onRetryCandidates?.();
+  }
   const viewStateRef = useRef(viewState);
   viewStateRef.current = viewState;
   const updateView = useCallback((patch: Partial<TranscriptViewState>) => {
@@ -150,8 +222,8 @@ export function StudyTranscript({
     estimateSize: () => showTranslations ? 156 : 126,
     overscan: 6,
     rangeExtractor: range => {
-      const focusedIndex = filtered.findIndex(cue => cue.id === focusedCue);
-      return [...new Set([...defaultRangeExtractor(range), ...(focusedIndex >= 0 ? [focusedIndex] : [])])].sort((a, b) => a - b);
+      const retained = [focusedCue, openMenu].map(id => filtered.findIndex(cue => cue.id === id)).filter(index => index >= 0);
+      return [...new Set([...defaultRangeExtractor(range), ...retained])].sort((a, b) => a - b);
     },
   });
   const viewportWidth = virtualizer.scrollRect?.width ?? 0;
@@ -263,29 +335,25 @@ export function StudyTranscript({
       </StudyRegion>
       <StudyRegion open={tab === 'vocabulary'}>
             <div className="suggestions-panel" role="tabpanel" id={`${tabsId}-vocabulary-panel`} aria-labelledby={`${tabsId}-vocabulary-tab`}>
-              <div className="suggestions-actions">
+              <div className="suggestions-actions" ref={suggestionsActions}>
                 <Button onClick={() => onEstimate('vocabulary')}>
                   <Sparkles size={16} />
                   {t('AIで語彙・表現を調べる', 'Explore words with AI')}
                 </Button>
+                <TranscriptStatus error={candidates.length ? candidatesError : null}
+                  label={t('提案を更新できませんでした', 'Suggestions could not be updated')}
+                  retryLabel={t('提案の読み込みを再試行', 'Retry loading suggestions')} onRetry={onRetryCandidates ? retrySuggestions : undefined} />
               </div>
-              <MotionRegion mode="status" open={!!candidatesError}>{candidatesError &&
-                <p
-                  className="notice warning"
-                  role="alert"
-                >
-                  {candidatesError.message}
-                </p>}</MotionRegion>
               {!candidates.length
                 ? (
                   <EmptyState
                     icon={<Sparkles size={26} />}
-                    title={t('提案はまだありません', 'No suggestions yet')}
-                    description={t(
+                    title={candidatesError ? t('提案を読み込めませんでした', 'Suggestions could not be loaded') : t('提案はまだありません', 'No suggestions yet')}
+                    description={candidatesError?.message ?? t(
                       '区間を選んで、表現の解説や語彙の提案を見積もれます。',
                       'Choose a passage to estimate explanations or vocabulary suggestions.'
                     )}
-                  />
+                  >{candidatesError && onRetryCandidates && <Button onClick={retrySuggestions}>{t('提案の読み込みを再試行', 'Retry loading suggestions')}</Button>}</EmptyState>
                 )
                 : candidates.map(candidate => {
                   const ids = candidate.sourceCueIds?.length ? candidate.sourceCueIds : [candidate.segmentId];
@@ -355,27 +423,27 @@ export function StudyTranscript({
                   {showTranslations ? t('訳を隠す', 'Hide translations') : t('訳を表示', 'Show translations')}
                 </Button>
               </div>
-              {(markedOnly || segments.some(isMarked)) && <label className="transcript-marked-filter"><input type="checkbox" checked={markedOnly} onChange={event => {
+              <div className="transcript-filter-bar">
+              <label className="transcript-marked-filter"><input type="checkbox" checked={markedOnly} disabled={!markedOnly && !segments.some(isMarked)} onChange={event => {
                 setMarkedOnly(event.target.checked);
                 updateView({ scrollOffset: 0, following: false });
-              }} /><span>{t('注意のある箇所だけ表示', 'Show marked passages only')}</span></label>}
-              <MotionRegion mode="status" open={!!error}>{error && <p
-                className="notice warning"
-                role="alert"
-              >
-                {error.message}
-              </p>}</MotionRegion>
+              }} /><span>{t('注意のある箇所だけ表示', 'Show marked passages only')}</span></label>
+              <TranscriptStatus error={segments.length ? error : null}
+                label={t('字幕を更新できませんでした', 'Subtitles could not be updated')}
+                retryLabel={t('字幕の読み込みを再試行', 'Retry loading subtitles')} onRetry={onRetryTranscript ? retryTranscript : undefined} />
+              </div>
               {!segments.length
                 ? (
                   <EmptyState
                     icon={<Subtitles size={26} />}
-                    title={t('字幕を追加できます', 'Add subtitles')}
-                    description={t(
+                    title={error ? t('字幕を読み込めませんでした', 'Subtitles could not be loaded') : t('字幕を追加できます', 'Add subtitles')}
+                    description={error?.message ?? t(
                       '字幕ファイルや埋め込み字幕を使うと、言葉を選んで確認できます。',
                       'Import subtitles to inspect a phrase while you watch.'
                     )}
                   >
-                    <Button onClick={() => onEstimate('transcribe')}>{t('音声から字幕を作成', 'Create subtitles from audio')}</Button>
+                    {error && onRetryTranscript ? <Button onClick={retryTranscript}>{t('字幕の読み込みを再試行', 'Retry loading subtitles')}</Button>
+                      : <Button onClick={() => onEstimate('transcribe')}>{t('音声から字幕を作成', 'Create subtitles from audio')}</Button>}
                   </EmptyState>
                 )
                 : !filtered.length
@@ -457,23 +525,12 @@ export function StudyTranscript({
                                 </button>
                                 {showTranslations && segment.translation &&
                                   <p className="segment-translation">{segment.translation}</p>}
-                                {segment.timingPrecision === 'source_block' && <p className="source-block-note">{t('本文は取得済み・字幕の時刻は未確定', 'Text received · subtitle timing unavailable')}<br />{t('取得元の音声範囲', 'Source audio range')}: {timestamp(segment.startMs)}–{timestamp(segment.endMs)}</p>}
-                                {(isMarked(segment) || !subtitleUsable(segment)) &&
-                                  <Badge tone="warning">{t('要確認', 'Needs review')}</Badge>}
                                 <div className="segment-actions">
-                                  {onTranscribeRange && <Button
-                                    variant="ghost"
-                                    aria-label={t('この区間を再文字起こし', 'Retranscribe this range')}
-                                    onClick={() => onTranscribeRange({ startMs: segment.startMs, endMs: segment.endMs })}
-                                  ><RefreshCw size={15} />{t('再文字起こし', 'Retranscribe')}</Button>}
-                                  <Button
-                                    variant="ghost"
-                                    aria-label={t('字幕を編集', 'Edit subtitle')}
-                                    onClick={() => onEdit(segment)}
-                                  >
-                                    <Edit3 size={16} />
-                                    {t('編集', 'Edit')}
-                                  </Button>
+                                  <span className="segment-review-slot">
+                                    {(isMarked(segment) || !subtitleUsable(segment)) && <span
+                                      className="segment-review-mark" title={t('要確認', 'Needs review')} aria-label={t('要確認', 'Needs review')} role="note"
+                                    ><TriangleAlert size={16} /></span>}
+                                  </span>
                                   <Button
                                     variant="ghost"
                                     aria-label={t('フレーズを確認・保存', 'Review and save phrase')}
@@ -483,7 +540,29 @@ export function StudyTranscript({
                                     <BookmarkPlus size={16} />
                                     {t('確認・保存', 'Review and save')}
                                   </Button>
+                                  <AnimatedDetails className="segment-options" data-motion-geometry="stable" open={openMenu === segment.id}
+                                    onToggle={event => placeMenu(event.currentTarget)}
+                                    onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpenMenu(undefined); }}
+                                    onKeyDown={event => {
+                                      if (event.key !== 'Escape' || !event.currentTarget.open) return;
+                                      event.preventDefault(); event.stopPropagation(); closeMenu(event.currentTarget);
+                                    }}>
+                                    <summary aria-label={t(`${timestamp(segment.startMs)}の字幕の操作`, `Subtitle actions at ${timestamp(segment.startMs)}`)} onClick={event => {
+                                      event.preventDefault();
+                                      activeMenu.current = event.currentTarget.closest('details');
+                                      setOpenMenu(current => current === segment.id ? undefined : segment.id);
+                                    }}><MoreHorizontal size={18} /></summary>
+                                    <div className="segment-options-panel">
+                                      <Button variant="ghost" aria-label={t('字幕を編集', 'Edit subtitle')} onClick={event => {
+                                        closeMenu(event.currentTarget); onEdit(segment);
+                                      }}><Edit3 size={16} />{t('編集', 'Edit')}</Button>
+                                      {onTranscribeRange && <Button variant="ghost" aria-label={t('この区間を再文字起こし', 'Retranscribe this range')} onClick={event => {
+                                        closeMenu(event.currentTarget); onTranscribeRange({ startMs: segment.startMs, endMs: segment.endMs });
+                                      }}><RefreshCw size={15} />{t('再文字起こし', 'Retranscribe')}</Button>}
+                                    </div>
+                                  </AnimatedDetails>
                                 </div>
+                                {segment.timingPrecision === 'source_block' && <p className="source-block-note">{t('本文は取得済み・字幕の時刻は未確定', 'Text received · subtitle timing unavailable')}<br />{t('取得元の音声範囲', 'Source audio range')}: {timestamp(segment.startMs)}–{timestamp(segment.endMs)}</p>}
                               </div>
                             </article>
                           );

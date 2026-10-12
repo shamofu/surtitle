@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { animate, motionValue } from 'motion';
-import { BookmarkPlus, ChevronLeft, ChevronRight, Languages, Play, RotateCcw } from 'lucide-react';
+import { BookmarkPlus, ChevronLeft, ChevronRight, CircleAlert, Languages, Play, RotateCcw } from 'lucide-react';
 import { useAppearance } from '../../app/runtime';
 import type { SubtitleSegment } from '../../shared/contracts/media';
 import { timestamp } from '../../shared/format';
@@ -12,8 +12,6 @@ import { MotionRegion, motionDurations, motionRevealEase, useAppMotion } from '.
 type CaptionSource = {
   cue: SubtitleSegment;
   context: 'active' | 'review' | 'preview';
-  nextStartMs?: number;
-  firstCaption?: boolean;
 };
 
 export function CurrentCaption({
@@ -53,12 +51,15 @@ export function CurrentCaption({
   const sourceScroll = useRef<HTMLDivElement>(null);
   const translationScroll = useRef<HTMLDivElement>(null);
   const handled = useRef(false);
+  const nextTimeId = useId();
   const gapSource = gapMode === 'review' ? previous : next;
   const displayed: CaptionSource | undefined = gestureSource || (active ? { cue: active, context: 'active' }
-    : gapSource ? { cue: gapSource, context: gapMode, nextStartMs: next?.startMs, firstCaption: !previous } : undefined);
+    : gapSource ? { cue: gapSource, context: gapMode } : undefined);
   const source = displayed?.cue;
   const previewing = displayed?.context === 'preview';
   const replayLabel = previewing ? t('この字幕を再生', 'Play this subtitle') : t('この字幕をもう一度', 'Replay this subtitle');
+  const nextTimeLabel = next ? t(`次の字幕 ${timestamp(next.startMs)}`, `Next subtitle ${timestamp(next.startMs)}`)
+    : t('この先の字幕はまだありません', 'No further subtitles yet');
   const translationOpen = !!source && !draftMode && showTranslation;
   const sourceKey = !draftMode && source ? JSON.stringify([source.mediaId, source.id]) : undefined;
   useLayoutEffect(() => {
@@ -139,14 +140,6 @@ export function CurrentCaption({
                 <p>{t('下書きの区間を確認しています。選んだ原文は字幕パネルに表示します。', 'Checking a draft passage. Its source text is shown in the transcript panel.')}</p>
               </div>
             ) : source ? (<>
-              {displayed?.context !== 'active' && <div className="caption-context">
-                <span className="caption-context-label">{displayed?.context === 'review'
-                  ? t('前の字幕を復習', 'Review the previous subtitle')
-                  : t('次の字幕を予習', 'Preview the next subtitle')}</span>
-                <span className="caption-context-time">{displayed?.nextStartMs !== undefined
-                  ? t(`${displayed.firstCaption ? '最初' : '次'}の字幕 ${timestamp(displayed.nextStartMs)}`, `${displayed.firstCaption ? 'First' : 'Next'} subtitle ${timestamp(displayed.nextStartMs)}`)
-                  : t('この先の字幕はまだありません', 'No further subtitles yet')}</span>
-              </div>}
               <p ref={caption} className="current-caption-text" lang={language}
                 onPointerDown={() => { handled.current = false; setGestureSource(displayed); }}
                 onPointerUp={finishSelection}>
@@ -167,7 +160,6 @@ export function CurrentCaption({
                       : previous && <Button variant="ghost" disabled={!enabled} onClick={onPrevious}>{t('前の字幕へ', 'Go to previous subtitle')}</Button>)}
               </div>
             )}
-          <MotionRegion mode="status" open={!!error}>{error && <p className="notice warning" role="alert">{error.message}</p>}</MotionRegion>
         </div>
         <div className="caption-translation-region" data-open={translationOpen} inert={!translationOpen} aria-hidden={!translationOpen}>
           <div ref={translationScroll} className="caption-translation-scroll" role="region" aria-label={t('字幕の訳', 'Subtitle translation')} tabIndex={0}>
@@ -194,12 +186,24 @@ export function CurrentCaption({
             </MotionButton>
             {onSave && <Button variant="ghost" aria-label={t('保存', 'Save phrase')} disabled={!enabled} onClick={() => onSave(source)}><BookmarkPlus size={16} /><span className="caption-full-label">{t('保存', 'Save phrase')}</span><span className="caption-short-label" aria-hidden="true">{t('保存', 'Save')}</span></Button>}
           </>}
+          <span className="caption-status-slot">
+            {error && <Button variant="ghost" aria-label={t('字幕の読み込みエラーを確認', 'Show subtitle loading error')} title={error.message} onClick={onOpenTranscript}>
+              <CircleAlert size={16} /><span className="sr-only" role="alert">{error.message}</span>
+            </Button>}
+          </span>
         </div>
         <div className="caption-navigation-slot">
           <MotionRegion mode="status" open={hasTimedSubtitles && !draftMode} className="caption-navigation" role="group" aria-label={t('字幕の再生操作', 'Subtitle playback')}>
+            <div className="caption-playback-action">
+            <span className="caption-navigation-note" aria-hidden="true" />
             <Button variant="ghost" aria-label={t('前の字幕', 'Previous subtitle')} disabled={!enabled || !hasPrevious} onClick={onPrevious}>
               <ChevronLeft size={16} /><span className="caption-full-label">{t('前の字幕', 'Previous subtitle')}</span><span className="caption-short-label" aria-hidden="true">{t('前の字幕', 'Previous')}</span>
             </Button>
+            </div>
+            <div className="caption-playback-action caption-replay-action">
+            <span className="caption-navigation-note caption-context-label" title={displayed?.context === 'review' ? t('前の字幕を復習', 'Review the previous subtitle') : displayed?.context === 'preview' ? t('次の字幕を予習', 'Preview the next subtitle') : undefined}>
+              {displayed?.context === 'review' ? t('復習中', 'Reviewing') : displayed?.context === 'preview' ? t('予習中', 'Previewing') : ''}
+            </span>
             <Button variant="secondary" aria-label={replayLabel} disabled={!enabled || !source} onClick={() => source && onReplay(source)}>
               {previewing ? <Play size={16} /> : <RotateCcw size={16} />}
               <span className="caption-full-label" aria-hidden="true"><span className="caption-replay-copy">
@@ -211,9 +215,16 @@ export function CurrentCaption({
                 <span style={{ visibility: previewing ? 'hidden' : 'visible' }}>{t('もう一度', 'Replay')}</span>
               </span></span>
             </Button>
-            <Button variant="ghost" aria-label={t('次の字幕', 'Next subtitle')} disabled={!enabled || !hasNext} onClick={onNext}>
+            </div>
+            <div className="caption-playback-action caption-next-action">
+            <span className="caption-navigation-note caption-context-time" aria-label={nextTimeLabel}>
+              <span id={nextTimeId} className="sr-only">{nextTimeLabel}</span>
+              <span aria-hidden="true">{next ? timestamp(next.startMs) : '—'}</span>
+            </span>
+            <Button variant="ghost" aria-label={t('次の字幕', 'Next subtitle')} aria-describedby={nextTimeId} disabled={!enabled || !hasNext} onClick={onNext}>
               <span className="caption-full-label">{t('次の字幕', 'Next subtitle')}</span><span className="caption-short-label" aria-hidden="true">{t('次の字幕', 'Next')}</span><ChevronRight size={16} />
             </Button>
+            </div>
           </MotionRegion>
         </div>
       </div>

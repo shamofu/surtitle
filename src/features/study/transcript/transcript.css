@@ -1,4 +1,55 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+.transcript-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  flex: 0 0 auto;
+  align-items: start;
+  gap: 8px;
+  padding: 0 12px;
+}
+.transcript-filter-bar .transcript-marked-filter { padding-inline: 0; }
+.transcript-marked-filter:has(input:disabled) { opacity: .65; }
+.transcript-status-slot { position: relative; flex: 0 0 36px; width: 36px; height: 36px; margin-left: auto; }
+.transcript-status, .segment-options { position: relative; }
+.transcript-status summary, .segment-options summary {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 6px;
+  color: var(--muted);
+}
+.transcript-status summary { color: var(--warning); }
+.transcript-status summary::-webkit-details-marker, .segment-options summary::-webkit-details-marker { display: none; }
+.transcript-status summary:hover, .segment-options summary:hover, .segment-options[open] summary { background: var(--surface-hover); }
+.transcript-status-panel, .segment-options-panel {
+  position: absolute;
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 4px;
+  width: 220px;
+  max-width: calc(100vw - 40px);
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+}
+.transcript-status-panel { top: calc(100% + 4px); }
+.transcript-status-panel p { margin: 0 0 4px; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; color: var(--text); }
+.transcript-status-panel .button, .segment-options-panel .button { justify-content: flex-start; white-space: normal; text-align: left; }
+.segment-options-panel { bottom: calc(100% + 4px); }
+.transcript-row:has(.segment-options[open]) { z-index: 2; }
+.transcript-row.selected { border-left-width: 3px; }
+.segment-time > span:first-child { display: grid; place-items: center; width: 18px; height: 18px; }
+.segment-actions { align-items: center; }
+.segment-review-slot { display: flex; align-items: center; flex: 1; min-width: 20px; height: 36px; }
+.segment-review-mark { display: inline-flex; color: var(--warning); }
+.segment-translation, .suggestion-card p { color: var(--text); }
+.segment-content > .source-block-note { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
 .draft-cues {
   height: 300px;
   overflow: auto;

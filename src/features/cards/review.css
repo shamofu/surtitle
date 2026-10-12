@@ -94,7 +94,7 @@
 .review-prompt p {
   font-size: 18px;
   line-height: 1.8;
-  color: var(--muted);
+  color: var(--text);
   margin: 12px 0;
   max-width: 66ch;
   overflow-wrap: anywhere;
@@ -127,7 +127,7 @@
 .review-answer .review-translation,
 .review-answer .review-explanation {
   font-size: 15px;
-  color: var(--muted);
+  color: var(--text);
 }
 .review-answer .review-explanation {
   margin-top: 18px;

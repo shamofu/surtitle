@@ -11,18 +11,20 @@ import { ProgressStatus } from '../shared/ui/ProgressStatus';
 import { recentActivities, type Activity, type ActivityUpdate, type OperationProgress } from '../shared/contracts/activity';
 import { queryKeys } from '../shared/query/keys';
 import { aiApi } from '../features/ai/api';
+import { libraryApi } from '../features/library/api';
 
-const fixture = vi.hoisted(() => ({ native: false, downloads: [] as unknown[], operations: [] as unknown[], snapshot: { jobs: [] as unknown[], media: [] as unknown[] } }));
+const fixture = vi.hoisted(() => ({ native: false, downloads: [] as unknown[], operations: [] as unknown[], snapshot: { jobs: [] as unknown[], media: [] as unknown[] }, snapshotError: null as Error | null, snapshotAvailable: true, refresh: vi.fn(async () => {}) }));
 vi.mock('../app/providers/Appearance', () => ({ useAppearance: () => ({ t: (_ja: string, en: string) => en }) }));
-vi.mock('../app/providers/Snapshot', () => ({ useSnapshot: () => ({ data: fixture.snapshot }) }));
+vi.mock('../app/providers/Snapshot', () => ({ useSnapshot: () => ({ data: fixture.snapshotAvailable ? fixture.snapshot : undefined, error: fixture.snapshotError }) }));
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => fixture.native, call: vi.fn(async () => fixture.operations) }));
 vi.mock('../features/library/api', () => ({ libraryApi: { downloadJobs: vi.fn(async () => fixture.downloads), cancelDownload: vi.fn(async () => {}) } }));
 vi.mock('../features/ai/api', () => ({ aiApi: { cancelAiJob: vi.fn(async () => {}), cancelPreparation: vi.fn(async () => {}) } }));
 vi.mock('../app/runtime', async () => ({
   useAppearance: () => ({ t: (_ja: string, en: string) => en }),
+  useSnapshot: (await import('../app/providers/Snapshot')).useSnapshot,
   useSurface: (await import('../app/providers/Surface')).useSurface,
   useNotifications: () => ({ report: (action: () => Promise<unknown>) => action() }),
-  useDataActions: () => ({ mutate: (action: () => Promise<unknown>) => action() }),
+  useDataActions: () => ({ mutate: (action: () => Promise<unknown>) => action(), refresh: fixture.refresh }),
 }));
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => async () => {},
@@ -38,6 +40,8 @@ beforeEach(() => {
   fixture.downloads = [];
   fixture.operations = [];
   fixture.snapshot = { jobs: [], media: [] };
+  fixture.snapshotError = null;
+  fixture.snapshotAvailable = true;
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   HTMLDialogElement.prototype.close = function () { this.open = false; };
 });
@@ -122,6 +126,66 @@ describe('shared operation lifecycle', () => {
 });
 
 describe('progress presentation', () => {
+  it('reserves the same count element through idle, digit changes and visual overflow while exposing exact counts', async () => {
+    fixture.native = true;
+    const { client } = mount(<Overview />);
+    await act(async () => { await client.refetchQueries({ queryKey: queryKeys.operations }); });
+    const trigger = screen.getByRole('button', { name: 'Open activity' });
+    const badge = trigger.querySelector('.nav-count');
+    expect(badge).toHaveAttribute('data-empty', 'true');
+    let revision = Date.now();
+    for (const count of [1, 9, 10, 105, 0]) {
+      // Finish the retained operations when the final batch settles.
+      act(() => client.setQueryData(queryKeys.operations, Array.from({ length: count || 105 }, (_, index) => ({
+        id: `operation-${index}`, kind: 'tool', label: `Tool ${index}`, status: count ? 'running' : 'completed', phase: 'downloading', updatedAt: new Date(++revision).toISOString(),
+      }))));
+      await waitFor(() => expect(screen.getByTestId('count').textContent).toBe(String(count)));
+      expect(trigger.querySelector('.nav-count')).toBe(badge);
+      expect(badge).toHaveTextContent(count > 99 ? '99+' : String(count));
+      expect(badge).toHaveAttribute('aria-hidden', 'true');
+      expect(badge).toHaveAttribute('data-empty', String(count === 0));
+      if (count) expect(trigger).toHaveAccessibleDescription(`${count} operations running.`);
+    }
+  });
+
+  it('opens retained-data refresh details and retry from Activity without showing the error in the page', async () => {
+    fixture.snapshotError = new Error('Snapshot storage unavailable');
+    mount(<Overview />);
+    const trigger = screen.getByRole('button', { name: 'Open activity' });
+    expect(trigger).toHaveAttribute('data-problem', 'true');
+    expect(trigger).toHaveAccessibleDescription('Could not refresh. Open details and retry.');
+    expect(screen.queryByText('Snapshot storage unavailable')).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog', { name: 'Activity' });
+    expect(within(dialog).getByText('Snapshot storage unavailable')).toBeVisible();
+    expect(within(dialog).getByText('You can keep learning with the content already loaded.')).toBeVisible();
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Retry' })); });
+    expect(fixture.refresh).toHaveBeenCalledOnce();
+  });
+
+  it('leaves an initial snapshot load failure to the page recovery UI', () => {
+    fixture.snapshotAvailable = false;
+    fixture.snapshotError = new Error('First read failed');
+    mount(<Overview />);
+    expect(screen.getByRole('button', { name: 'Open activity' })).toHaveAttribute('data-problem', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'Open activity' }));
+    expect(screen.queryByText('You can keep learning with the content already loaded.')).not.toBeInTheDocument();
+  });
+
+  it('opens failed activity reads with a retry for the actual activity queries', async () => {
+    fixture.native = true;
+    vi.mocked(libraryApi.downloadJobs).mockRejectedValueOnce(new Error('Could not read downloads'));
+    mount(<Overview />);
+    const trigger = screen.getByRole('button', { name: 'Open activity' });
+    await waitFor(() => expect(trigger).toHaveAttribute('data-problem', 'true'));
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog', { name: 'Activity' });
+    expect(within(dialog).getByText('Could not read downloads')).toBeVisible();
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Retry' })); });
+    await waitFor(() => expect(within(dialog).queryByText('Could not read downloads')).not.toBeInTheDocument());
+    expect(libraryApi.downloadJobs).toHaveBeenCalledTimes(2);
+  });
+
   it('renders measured, clamped progress and makes an unknown total indeterminate', () => {
     const view = render(<ProgressStatus label="Download" phase="downloading" completed={120} total={100} unit="bytes" />);
     expect(screen.getByRole('progressbar')).toHaveAttribute('value', '100');

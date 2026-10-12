@@ -65,8 +65,9 @@ export function SettingsPage() {
   const navigate = useNavigate();
   const { resume } = useSearch({ from: '/settings' });
   const [continuations, setContinuations] = useState<AiContinuation[]>([]);
-  const { mutate } = useDataActions();
-  const { data } = useSnapshot();
+  const { mutate, refresh } = useDataActions();
+  const { data, loading, error: snapshotError } = useSnapshot();
+  const [retryingLoad, setRetryingLoad] = useState(false);
   const { t } = useAppearance();
   const { reducedMotion } = useAppMotion();
   const { report, notify } = useNotifications();
@@ -242,6 +243,19 @@ export function SettingsPage() {
   const customBudget = !!draft && (draft.dailyBudgetUsd !== monthlyBudget || perJobBudget !== monthlyBudget);
   const retentionPreset = [0.85, 0.9, 0.95].find((value) => Math.abs(value - (draft?.retention ?? 0.9)) < 0.000001);
   const continuation = continuations.find(item => item.id === resume) || continuations[0];
+  if (nativeAvailable() && ((!data && snapshotError) || (!editing.ready && editing.error))) return <div ref={page} className="settings-page">
+    <PageTitle title={t('設定', 'Settings')} description={t('学習・AI・外部ツールの設定を調整できます。', 'Adjust your learning, AI, and external tool settings.')} />
+    <div className="notice warning" role="alert">
+      <span>{t('設定を読み込めませんでした。', 'Could not load settings.')} {!data ? snapshotError?.message || editing.error : editing.error}</span>
+      <Button busy={retryingLoad || loading} onClick={() => {
+        setRetryingLoad(true);
+        void report(async () => {
+          if (!data) await refresh();
+          if (!editing.ready) await session.load();
+        }).finally(() => setRetryingLoad(false));
+      }}>{t('再試行', 'Retry')}</Button>
+    </div>
+  </div>;
   return (
     <div ref={page} className="settings-page" onBlur={() => void save()}>
       <MotionRegion mode="status" open={!!continuation}>{continuation && <div className="notice"><span>{t('途中のAI依頼に戻れます。', 'You can return to your unfinished AI request.')}</span><Button disabled={credentialBusy} busy={busy} onClick={async () => { if (await save()) { void navigate({ to: '/study/$mediaId', params: { mediaId: continuation.mediaId }, search: { resume: continuation.id } }); } }}>{t('元の操作に戻る', 'Return to your request')}</Button></div>}</MotionRegion>
