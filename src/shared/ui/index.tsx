@@ -24,6 +24,7 @@ export function Button({
       className={`button ${variant} ${className}`}
       {...props}
       disabled={props.disabled || busy}
+      aria-busy={busy || props['aria-busy'] || undefined}
     >
       <MotionRegion mode="status" as="span" open={!!busy}><LoaderCircle size={16} className="spin" aria-hidden="true" /></MotionRegion>
       {children}

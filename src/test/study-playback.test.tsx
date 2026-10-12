@@ -38,6 +38,9 @@ const fixture = vi.hoisted(() => ({
   resumeId: undefined as string | undefined,
   aiDialogProps: undefined as undefined | { continuation?: AiContinuation; sourceInvalid?: boolean; sourceContext?: { sourceCueIds: string[]; sourceRevision: string }; onReselectSource?: (item: AiContinuation) => void },
   hasMedia: true,
+  snapshotAvailable: true,
+  snapshotLoading: false,
+  snapshotError: null as Error | null,
   blockerStatus: 'idle',
   resetBlocker: vi.fn(),
   media: {
@@ -113,6 +116,7 @@ vi.mock('@tanstack/react-virtual', () => ({
     scrollToIndex: fixture.scroll,
     scrollToOffset: fixture.scrollOffset,
     measure: () => {},
+    resizeItem: () => {},
     takeSnapshot: () => [],
     getTotalSize: () => count * 118,
     getVirtualItems: () =>
@@ -137,7 +141,9 @@ vi.mock('../app/runtime', () => {
   };
   const useFixture = () => ({
     mutate: (action: () => Promise<unknown>) => action(),
-    data: { media: fixture.hasMedia ? [fixture.media] : [], cards: [], jobs: [] },
+    data: fixture.snapshotAvailable ? { media: fixture.hasMedia ? [fixture.media] : [], cards: [], jobs: [] } : undefined,
+    loading: fixture.snapshotLoading,
+    error: fixture.snapshotError,
     locale: 'en',
     t,
     notify: fixture.notify,
@@ -225,6 +231,9 @@ beforeAll(() => {
   );
 });
 beforeEach(() => {
+  fixture.snapshotAvailable = true;
+  fixture.snapshotLoading = false;
+  fixture.snapshotError = null;
   fixture.resumeId = undefined;
   fixture.aiDialogProps = undefined;
   vi.mocked(continuationApi.list).mockResolvedValue([]);
@@ -305,6 +314,46 @@ async function inspectCurrent() {
   fireEvent.click(inspectButton());
   await screen.findByRole('button', { name: 'Resume from original position' });
 }
+
+it('distinguishes initial study loading, failure, and a genuinely missing material', async () => {
+  fixture.snapshotAvailable = false;
+  fixture.snapshotLoading = true;
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  clients.push(client);
+  const content = () => <QueryClientProvider client={client}><StudyPage /></QueryClientProvider>;
+  const view = render(content());
+  expect(screen.getByRole('status')).toHaveTextContent('Loading your material');
+  expect(screen.queryByText('Choose something to study')).not.toBeInTheDocument();
+  fixture.snapshotLoading = false;
+  fixture.snapshotError = new Error('Store unavailable');
+  view.rerender(content());
+  expect(screen.getByRole('alert')).toHaveTextContent('Store unavailable');
+  expect(screen.queryByText('Choose something to study')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  await waitFor(() => expect(fixture.refresh).toHaveBeenCalled());
+  fixture.snapshotAvailable = true;
+  fixture.snapshotError = null;
+  fixture.hasMedia = false;
+  view.rerender(content());
+  expect(screen.getByText('Choose something to study')).toBeInTheDocument();
+  expect(screen.getByText('Open library')).toBeInTheDocument();
+});
+
+it('preserves an available study session during a background snapshot failure', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  clients.push(client);
+  const content = () => <QueryClientProvider client={client}><StudyPage /></QueryClientProvider>;
+  const view = render(content());
+  await ready();
+  const heading = screen.getByRole('heading', { name: 'Study fixture' });
+  const loads = vi.mocked(playerApi.loadMedia).mock.calls.length;
+  fixture.snapshotError = new Error('Refresh unavailable');
+  view.rerender(content());
+  expect(screen.getByRole('heading', { name: 'Study fixture' })).toBe(heading);
+  expect(inspectButton()).toBeEnabled();
+  expect(playerApi.loadMedia).toHaveBeenCalledTimes(loads);
+  expect(screen.queryByText('Could not load your material.')).not.toBeInTheDocument();
+});
 
 describe('watching and inspecting phrases', () => {
   it('continues from a source block in the list and replays its range only from details', async () => {

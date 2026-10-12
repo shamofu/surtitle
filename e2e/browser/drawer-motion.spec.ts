@@ -5,7 +5,7 @@ import { observeDrawer, expectSafeFrames } from './drawer-motion-fixture';
 
 for (const locale of ['ja','en'] as const) for(const theme of ['light','dark'] as const) {
   for(const size of [{width:1440,height:900},{width:1024,height:700},{width:800,height:900}]) {
-    test(`panel switches immediately and preserves input ${locale} ${theme} ${size.width}`, async ({page},info)=>{
+    test(`panel reserves stable geometry and preserves input ${locale} ${theme} ${size.width}`, async ({page},info)=>{
       await page.setViewportSize(size); await page.emulateMedia({reducedMotion:'no-preference'});
       await installLearningFixture(page,locale,theme); await page.goto('/study/visual-fixture');
       await expect(page.locator('.current-caption-text')).not.toBeEmpty();

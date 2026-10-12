@@ -200,6 +200,7 @@ for (const locale of ['en', 'ja'] as const) {
       .map(call => call.args.request), from);
     const callsBeforePlay = await page.evaluate(() => (window as FixtureWindow).__learningFixture.calls.length);
     await expect(play).toHaveAccessibleName(locale === 'ja' ? new RegExp(`再生.*${time}$`) : `Play from subtitle ${time}`);
+    const playingCueElement = await play.elementHandle();
     await play.click();
     await expect.poll(() => playbackRequestsSince(callsBeforePlay)).toEqual([
       { action: 'seek', value: startMs },
@@ -211,6 +212,8 @@ for (const locale of ['en', 'ja'] as const) {
     await expect(translations).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByRole('button', { name: locale === 'ja' ? '自動追従中' : 'Following playback', exact: true })).toBeVisible();
     await expect(row).toHaveClass(/playing/);
+    expect(await playingCueElement!.evaluate(element => element.isConnected &&
+      element === document.querySelector('.transcript-row.playing .segment-time'))).toBe(true);
     await expect.poll(() => row.evaluate(element => {
       const bounds = element.getBoundingClientRect();
       const viewport = element.closest('.transcript-scroll')!.getBoundingClientRect();

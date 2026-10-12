@@ -3,6 +3,7 @@ vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
+import userEvent from '@testing-library/user-event';
 import { listen } from '@tauri-apps/api/event';
 import { importWorkspace } from '../features/library/import-workspace';
 vi.mock('../shared/editing/drafts', () => import('./editing-mocks'));
@@ -49,6 +50,22 @@ async function emit(event: string, payload: unknown = {}) {
   await act(async () => { handler?.({ event, id: 1, payload }); });
 }
 function files() { return screen.getByRole('region', { name: 'Selected files' }); }
+
+it('returns focus to library search when clearing or resetting its filters', async () => {
+  render(<LibraryPage />);
+  const user = userEvent.setup();
+  const search = screen.getByRole('textbox', { name: 'Search your library' });
+  await user.type(search, 'missing title');
+  await user.tab();
+  expect(screen.getByRole('button', { name: 'Clear search' })).toHaveFocus();
+  await user.keyboard('{Enter}');
+  expect(search).toHaveValue('');
+  expect(search).toHaveFocus();
+  await user.type(search, 'another title');
+  await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+  expect(search).toHaveFocus();
+  expect(search).toHaveValue('');
+});
 
 describe('automatic local import', () => {
   it('starts on drop and shows completed counts while the next file is importing', async () => {

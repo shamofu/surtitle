@@ -6,7 +6,6 @@ import { useAppearance } from '../../app/runtime';
 import type { SubtitleSegment } from '../../shared/contracts/media';
 import { Button } from '../../shared/ui/index';
 import { MotionRegion } from '../../shared/motion';
-import { useCaptionMotion } from './useCaptionMotion';
 
 export function CurrentCaption({
   active, language, loading, hasSubtitles, draftMode, enabled, error,
@@ -34,17 +33,12 @@ export function CurrentCaption({
   const [showTranslation, setShowTranslation] = useState(false);
   const [gestureSource, setGestureSource] = useState<SubtitleSegment>();
   const caption = useRef<HTMLParagraphElement>(null);
-  const translation = useRef<HTMLParagraphElement>(null);
   const sourceScroll = useRef<HTMLDivElement>(null);
   const translationScroll = useRef<HTMLDivElement>(null);
   const handled = useRef(false);
   const source = gestureSource || active;
   const translationOpen = !!source && !draftMode && showTranslation;
   const sourceKey = !draftMode && source ? JSON.stringify([source.mediaId, source.id]) : undefined;
-  const stopCaptionMotion = useCaptionMotion({
-    source: caption, translation, cueKey: sourceKey, selecting: !!gestureSource, translationOpen, enabled,
-    contentKey: JSON.stringify([source?.text, source?.translation]),
-  });
   useLayoutEffect(() => {
     // A new subtitle starts at its beginning, but selection keeps its frozen source.
     if (sourceScroll.current) sourceScroll.current.scrollTop = 0;
@@ -87,7 +81,7 @@ export function CurrentCaption({
               </div>
             ) : source ? (
               <p ref={caption} className="current-caption-text" lang={language}
-                onPointerDown={() => { stopCaptionMotion(); handled.current = false; setGestureSource(source); }}
+                onPointerDown={() => { handled.current = false; setGestureSource(source); }}
                 onPointerUp={finishSelection}>
                 {source.text}
               </p>
@@ -103,7 +97,7 @@ export function CurrentCaption({
         </div>
         <div className="caption-translation-region" data-open={translationOpen} inert={!translationOpen} aria-hidden={!translationOpen}>
           <div ref={translationScroll} className="caption-translation-scroll" role="region" aria-label={t('字幕の訳', 'Subtitle translation')} tabIndex={0}>
-            <p ref={translation} className="caption-translation">
+            <p className="caption-translation">
               {source?.translation || t('翻訳はまだありません。言葉を確認して翻訳を見積もれます。', 'No translation yet. Inspect this phrase to estimate one.')}
             </p>
           </div>

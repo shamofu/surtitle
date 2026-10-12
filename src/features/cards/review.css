@@ -9,6 +9,14 @@
 .page-content:has(.review-page) { padding: 16px 24px; overflow: hidden; }
 .review-session, .review-transition, .review-transition > .motion-swap-live { min-height: 0; height: 100%; }
 .review-transition > .motion-swap-live { display: grid; grid-template-rows: minmax(0, 1fr) auto; }
+.review-transition { position: relative; }
+.review-outgoing { position: absolute; inset: 0; pointer-events: none; }
+.review-outgoing > .review-card { height: 100%; background: transparent; border-color: transparent; }
+.review-outgoing .review-prompt, .review-outgoing .review-answer { background: transparent; }
+.review-outgoing .review-answer { border-color: transparent; }
+.review-answer-reveal { min-height: 0; }
+.rating-area:not(.waiting) .rating-buttons { animation: rating-ready var(--motion-reveal) var(--motion-ease) both; }
+@keyframes rating-ready { from { transform: translateY(3px); } to { transform: translateY(0); } }
 .review-page-header {
   display: flex;
   align-items: center;
@@ -67,8 +75,10 @@
 .review-question,
 .review-answer-label {
   font-size: 12px;
+  font-weight: 400;
   color: var(--muted);
 }
+.review-unavailable { display: flex; flex-direction: column; }
 .review-prompt {
   flex: none;
   max-height: 48%;
@@ -255,4 +265,13 @@
   .review-card footer {
     flex-wrap: wrap;
   }
+}
+/* Small work areas need document scrolling, rather than a clipped card and controls. */
+@media (max-width: 820px) and (max-height: 500px) {
+  .page-content:has(.review-page) { overflow: auto; }
+  .review-page { height: auto; min-height: 100%; grid-template-rows: auto auto 4px auto; }
+  .review-session, .review-transition, .review-transition > .motion-swap-live { height: auto; }
+  .review-transition > .motion-swap-live { grid-template-rows: auto auto; }
+  .review-card { min-height: 280px; }
+  .review-prompt { max-height: none; }
 }

@@ -31,6 +31,8 @@
 .animated-value { font-variant-numeric: tabular-nums; white-space: inherit; max-width: 100%; }
 .button > .motion-region { display: inline-flex; align-items: center; }
 .notification-portal { display: contents; }
+.toast-slot { min-width: 0; }
+.toast-slot > .toast { width: 100%; }
 details[data-motion-state='exiting'] > :not(summary) { pointer-events: none; }
 :root[data-motion='reduce'] *,
 :root[data-motion='reduce'] *::before,

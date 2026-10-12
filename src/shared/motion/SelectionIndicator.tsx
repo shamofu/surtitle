@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useLayoutEffect, useRef } from 'react';
+import { cubicBezier } from 'motion';
 import { motionCssEase, motionDurations, useAppMotion } from './index';
 import './selection-indicator.css';
 
@@ -77,15 +78,21 @@ export function SelectionIndicator({
       // Stretch the leading edge first. Wrapped rows move directly to avoid a
       // wide marker crossing unrelated controls between rows.
       const sameRow = Math.abs(previous.top - target.top) < 1;
-      const stretch = {
-        left: Math.min(previous.left, target.left), top: target.top,
-        width: Math.max(previous.left + previous.width, target.left + target.width) - Math.min(previous.left, target.left),
-        height: target.height,
+      const ease = cubicBezier(.33, 1, .68, 1);
+      const rightward = target.left >= previous.left;
+      const edge = (from: number, to: number, elapsed: number, leading: boolean) => {
+        const progress = leading ? elapsed / .7 : (elapsed - .25) / .75;
+        return from + (to - from) * ease(Math.max(0, Math.min(1, progress)));
       };
       const frames = sameRow
-        ? [frame(previous), { ...frame(stretch), offset: .45 }, frame(target)]
+        ? Array.from({ length: 21 }, (_, index) => {
+          const elapsed = index / 20;
+          const left = edge(previous.left, target.left, elapsed, !rightward);
+          const right = edge(previous.left + previous.width, target.left + target.width, elapsed, rightward);
+          return { ...frame({ ...target, left, width: Math.max(0, right - left) }), offset: elapsed };
+        })
         : [frame(previous), frame(target)];
-      const current = marker.animate(frames, { duration: motionDurations.selection * 1000, easing: motionCssEase });
+      const current = marker.animate(frames, { duration: motionDurations.selection * 1000, easing: sameRow ? 'linear' : motionCssEase });
       animation = current;
       void current.finished.then(() => {
         if (animation === current) stop();

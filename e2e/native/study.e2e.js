@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { Key } from 'webdriverio';
-import { resizeNativeWindow } from '../support/native-window.mjs';
+import { resizeNativeWindow, saveNativeScreenshot } from '../support/native-window.mjs';
 
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
 const mediaId = fixture.mediaId || 'fixture-media';
@@ -239,7 +239,10 @@ describe('real native learning workflow (no cloud requests)', () => {
     await navigate('/review');
     await $('.review-card').waitForDisplayed();
     await expect($('.rating-button.good')).toBeDisabled();
+    await saveNativeScreenshot(resolve('test-results/native/review-question.png'));
     await clickInView('button*=Reveal meaning');
+    await $('.rating-button.good').waitForEnabled();
+    await saveNativeScreenshot(resolve('test-results/native/review-revealed.png'));
     await clickInView('.rating-button.good');
     await browser.waitUntil(async () => (await snapshot()).cards.find(card => card.id === cardId).reviewCount === before.reviewCount + 1);
     await browser.refresh();

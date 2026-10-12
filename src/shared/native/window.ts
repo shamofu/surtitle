@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import type { AppSettings } from '../contracts/settings';
+
+/** Keep system mode native, so Windows can continue following its own theme. */
+export const setWindowTheme = (theme: AppSettings['theme']) =>
+  getCurrentWindow().setTheme(theme === 'system' ? null : theme);
 
 type CloseGuard = { prevent: () => boolean; error: (error: unknown) => void };
 const guards = new Set<CloseGuard>();

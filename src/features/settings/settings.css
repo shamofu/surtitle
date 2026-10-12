@@ -447,3 +447,12 @@ body:has(.settings-page) .toast-stack { bottom: 112px; }
     transform: rotate(360deg);
   }
 }
+/* A small nested viewport can show an input without its label or help. Let the
+   whole page scroll in short windows so each field stays together. */
+@media (max-height: 600px) {
+  .page-content:has(> .settings-page) { display: block; overflow: auto; padding-bottom: 16px; }
+  .settings-page { display: block; }
+  .settings-layout { flex: none; min-height: auto; overflow: visible; padding-bottom: 0; }
+  .settings-nav { position: static; }
+  .settings-save { margin-top: 16px; }
+}

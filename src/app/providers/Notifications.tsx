@@ -12,7 +12,7 @@ import {
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useSurface } from './Surface';
-import { motionDurations, motionCssExitEase, useAppMotion } from '../../shared/motion';
+import { motionDurations, motionCssEase, motionCssExitEase, useAppMotion } from '../../shared/motion';
 import { animateEntrance, canAnimate } from '../../shared/motion/surfaces';
 
 interface Toast {
@@ -39,6 +39,10 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const nextId = useRef(0);
+  const stack = useRef<HTMLDivElement>(null);
+  const positions = useRef(new Map<string, number>());
+  const reflows = useRef(new Map<HTMLElement, Animation>());
+  const previousHost = useRef<HTMLElement | null>(null);
   // Moving one portal container preserves toast identity and its live region
   // when a nested dialog becomes the frontmost surface.
   const [portalRoot] = useState(() => {
@@ -54,6 +58,45 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     (host ?? document.body).appendChild(portalRoot);
   }, [host, portalRoot]);
   useLayoutEffect(() => () => { portalRoot.remove(); }, [portalRoot]);
+  useLayoutEffect(() => {
+    const cancel = () => {
+      reflows.current.forEach(animation => animation.cancel());
+      reflows.current.clear();
+      positions.current.clear();
+    };
+    const visibility = () => { if (document.hidden) cancel(); };
+    window.addEventListener('resize', cancel);
+    document.addEventListener('visibilitychange', visibility);
+    return () => {
+      cancel();
+      window.removeEventListener('resize', cancel);
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, []);
+  useLayoutEffect(() => {
+    const sameHost = previousHost.current === host;
+    previousHost.current = host;
+    const next = new Map<string, number>();
+    for (const slot of stack.current?.querySelectorAll<HTMLElement>('[data-toast-id]') || []) {
+      const id = slot.dataset.toastId!;
+      const transform = getComputedStyle(slot).transform;
+      const offset = transform && transform !== 'none' && typeof DOMMatrix !== 'undefined' ? new DOMMatrix(transform).m42 : 0;
+      const top = slot.getBoundingClientRect().top - offset;
+      const from = positions.current.get(id);
+      reflows.current.get(slot)?.cancel();
+      reflows.current.delete(slot);
+      next.set(id, top);
+      const delta = from === undefined ? 0 : from + offset - top;
+      if (!sameHost || reducedMotion || document.hidden || Math.abs(delta) < .5 || !slot.animate) continue;
+      const animation = slot.animate([{ transform: `translateY(${delta}px)` }, { transform: 'none' }], { duration: motionDurations.content * 1000, easing: motionCssEase });
+      reflows.current.set(slot, animation);
+      void animation.finished.then(() => {
+        if (reflows.current.get(slot) === animation) { animation.cancel(); reflows.current.delete(slot); }
+      }, () => {});
+    }
+    for (const [node, animation] of reflows.current) if (!node.isConnected) { animation.cancel(); reflows.current.delete(node); }
+    positions.current = next;
+  }, [toasts, host, reducedMotion]);
   const dismiss = useCallback((id: number) => {
     setToasts(items => reduced.current ? items.filter(item => item.id !== id)
       : items.map(item => item.id === id ? { ...item, closing: true } : item));
@@ -94,9 +137,9 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   );
   const value = useMemo(() => ({ notify, report, registerRegion: setPageHost }), [notify, report]);
   const notifications = (
-    <div className="toast-stack" aria-live="polite" aria-atomic="false">
+    <div ref={stack} className="toast-stack" aria-live="polite" aria-atomic="false">
       {toasts.map(toast => (
-        <ToastMessage key={toast.id} toast={toast} dismiss={dismiss} remove={remove} />
+        <div key={toast.id} className="toast-slot" data-toast-id={toast.id}><ToastMessage toast={toast} dismiss={dismiss} remove={remove} /></div>
       ))}
     </div>
   );
@@ -120,10 +163,9 @@ function ToastMessage({ toast, dismiss, remove }: { toast: Toast; dismiss: (id: 
     }
     if (!toast.closing) {
       if (entered.current) return;
-      let cancel: (() => void) | undefined;
+      const cancel = animateEntrance(node, 'toast');
       const frame = requestAnimationFrame(() => {
         entered.current = true;
-        if (canAnimate(node, reducedMotion)) cancel = animateEntrance(node, 'toast');
       });
       return () => { cancelAnimationFrame(frame); cancel?.(); };
     }

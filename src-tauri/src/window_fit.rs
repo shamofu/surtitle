@@ -1,5 +1,6 @@
 //! Keep the normal window and its minimum client size within the active work area.
 //! All geometry is physical: mixed-DPI monitor origins are not logical coordinates.
+use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -7,6 +8,7 @@ use std::sync::{
 };
 use std::time::Duration;
 use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow, WindowEvent};
+mod persistence;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Environment {
@@ -76,6 +78,7 @@ fn plan(
 struct State {
     environment: Option<Environment>,
     minimum: Option<PhysicalSize<u32>>,
+    persistence: Option<persistence::Persistence>,
 }
 
 fn apply(window: &WebviewWindow, state: &mut State) -> tauri::Result<()> {
@@ -113,14 +116,63 @@ fn apply(window: &WebviewWindow, state: &mut State) -> tauri::Result<()> {
     Ok(())
 }
 
-pub fn install(window: &WebviewWindow) -> anyhow::Result<()> {
+pub fn install(window: &WebviewWindow, path: PathBuf) -> anyhow::Result<()> {
+    let mut persistence = persistence::Persistence::open(path);
+    let maximized = match persistence.restore(window) {
+        Ok(maximized) => maximized,
+        Err(error) => {
+            eprintln!("Could not restore window placement: {error}");
+            false
+        }
+    };
     let mut initial = State::default();
     apply(window, &mut initial)?;
+    if let Err(error) = persistence.capture(window) {
+        eprintln!("Could not capture initial window placement: {error}");
+    }
+    if maximized {
+        if let Err(error) = window.maximize() {
+            eprintln!("Could not restore maximized window: {error}");
+        } else if let Err(error) = persistence.capture(window) {
+            eprintln!("Could not capture maximized window placement: {error}");
+        }
+    }
+    initial.persistence = Some(persistence);
     let state = Arc::new(Mutex::new(initial));
     let alive = Arc::new(AtomicBool::new(true));
     let (sender, receiver) = mpsc::sync_channel(1);
     let event_alive = alive.clone();
+    let event_state = state.clone();
+    let event_window = window.clone();
     window.on_window_event(move |event| {
+        // Preserve the latest normal bounds even when the user maximizes before
+        // the settle timer fires. Capture is read-only; fitting and disk writes
+        // still wait until the native resize/DPI event burst has finished. A
+        // synchronous event caused by our own fitting is captured after apply.
+        if matches!(event, WindowEvent::Moved(_) | WindowEvent::Resized(_))
+            && let Ok(mut state) = event_state.try_lock()
+            && let Some(persistence) = &mut state.persistence
+            && let Err(error) = persistence.capture(&event_window)
+        {
+            eprintln!("Could not capture window placement: {error}");
+        }
+        if matches!(
+            event,
+            WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed
+        ) && let Ok(mut state) = event_state.lock()
+            && let Some(persistence) = &mut state.persistence
+        {
+            if !matches!(event, WindowEvent::Destroyed)
+                && let Err(error) = persistence.capture(&event_window)
+            {
+                eprintln!("Could not capture window placement: {error}");
+            }
+            // Flush on close as well as after idle. A canceled close can safely
+            // retain placement; it does not commit or discard any learning input.
+            if let Err(error) = persistence.save() {
+                eprintln!("{error:#}");
+            }
+        }
         if matches!(event, WindowEvent::Destroyed) {
             event_alive.store(false, Ordering::Relaxed);
             let _ = sender.try_send(());
@@ -152,18 +204,38 @@ pub fn install(window: &WebviewWindow) -> anyhow::Result<()> {
                 let target = window.clone();
                 let state = state.clone();
                 let alive = alive.clone();
+                let (complete, completed) = mpsc::sync_channel(1);
+                let capture_state = state.clone();
                 if window
                     .run_on_main_thread(move || {
                         if alive.load(Ordering::Relaxed)
-                            && let Ok(mut state) = state.lock()
-                            && let Err(error) = apply(&target, &mut state)
+                            && let Ok(mut state) = capture_state.lock()
                         {
-                            eprintln!("Could not fit window to monitor work area: {error}");
+                            if let Err(error) = apply(&target, &mut state) {
+                                eprintln!("Could not fit window to monitor work area: {error}");
+                            }
+                            if let Some(persistence) = &mut state.persistence
+                                && let Err(error) = persistence.capture(&target)
+                            {
+                                eprintln!("Could not capture window placement: {error}");
+                            }
                         }
+                        let _ = complete.send(());
                     })
                     .is_err()
                 {
                     return;
+                }
+                if completed.recv().is_err() {
+                    return;
+                }
+                // Serialize writes on this existing worker, outside normal UI
+                // interaction. Save the newest capture if close raced this task.
+                if let Ok(mut state) = state.lock()
+                    && let Some(persistence) = &mut state.persistence
+                    && let Err(error) = persistence.save()
+                {
+                    eprintln!("{error:#}");
                 }
             }
         })?;

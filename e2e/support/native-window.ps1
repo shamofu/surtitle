@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('inspect', 'resize', 'capture', 'sample', 'monitor', 'move-monitor')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('inspect', 'resize', 'resize-maximize', 'capture', 'sample', 'monitor', 'move-monitor', 'close', 'maximize', 'restore')][string]$Action,
     [Parameter(Mandatory)][string]$Application,
     [int]$Width,
     [int]$Height,
@@ -19,6 +19,11 @@ $apps = @(Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($expected)) 
 if ($apps.Count -ne 1) { throw "Expected exactly one window for the configured test executable, found $($apps.Count)." }
 $window = $apps[0].MainWindowHandle
 Add-Type -Path (Join-Path $PSScriptRoot 'native-window.cs')
+if ($Action -in @('close', 'maximize', 'restore')) {
+    [SurtitleNativeWindow]::SystemCommand($window, $Action)
+    @{ requested = $Action } | ConvertTo-Json
+    exit 0
+}
 if ($Action -eq 'monitor') {
     [SurtitleNativeWindow]::InspectMonitor($window) | ConvertTo-Json -Depth 6
     exit 0
@@ -41,9 +46,12 @@ if ($Action -eq 'sample') {
     @{ durationMs = $clock.Elapsed.TotalMilliseconds; samples = $samples } | ConvertTo-Json -Depth 8 -Compress
     exit 0
 }
-if ($Action -eq 'resize') {
+if ($Action -in @('resize', 'resize-maximize')) {
     if ($Width -lt 1024 -or $Width -gt 8192 -or $Height -lt 700 -or $Height -gt 8192) { throw 'Client size must be within 1024..8192 by 700..8192 logical pixels.' }
     [SurtitleNativeWindow]::ResizeClient($window, $Width, $Height)
+    if ($Action -eq 'resize-maximize') {
+        [SurtitleNativeWindow]::SystemCommand($window, 'maximize')
+    }
 }
 $geometry = [SurtitleNativeWindow]::Inspect($window)
 if ($Action -eq 'capture') {

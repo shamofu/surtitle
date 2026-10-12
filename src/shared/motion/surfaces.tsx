@@ -10,7 +10,7 @@ export function canAnimate(element: HTMLElement, reduced: boolean) {
   return !reduced && !document.hidden && typeof element.animate === 'function';
 }
 
-/** Only current content enters. Live inputs and their selection never remount. */
+/** Live text/status changes stay opaque; spatial transitions opt into a preset. */
 export function useMotionChange<T extends HTMLElement>(ref: RefObject<T | null>, key: string | number, disabled = false, preset: MotionPreset = 'swap') {
   const { reducedMotion } = useAppMotion();
   const previous = useRef(key);
@@ -18,7 +18,7 @@ export function useMotionChange<T extends HTMLElement>(ref: RefObject<T | null>,
     const changed = previous.current !== key;
     previous.current = key;
     const element = ref.current;
-    if (!element || !changed || !canAnimate(element, reducedMotion || disabled)) return;
+    if (!element || !changed || preset === 'swap' || !canAnimate(element, reducedMotion || disabled)) return;
     return animateEntrance(element, preset);
   }, [ref, key, disabled, reducedMotion, preset]);
 }
@@ -67,12 +67,12 @@ export function useMotionEntrance<T extends HTMLElement>(ref: RefObject<T | null
     const element = ref.current;
     if (entered.current || !element) return;
     if (!canAnimate(element, reducedMotion)) { entered.current = true; return; }
-    let cancel: (() => void) | undefined;
-    // Consume the entrance only when it starts. StrictMode can clean up and
-    // re-run this effect before the first frame without losing the entrance.
+    // Install the initial frame before paint. Deferring animate() itself exposes
+    // the final content for a frame, then hides it again at the start of the fade.
+    const cancel = animateEntrance(element, preset);
+    // Consume after the first frame so StrictMode's setup/cleanup replay remains safe.
     const frame = requestAnimationFrame(() => {
       entered.current = true;
-      if (canAnimate(element, reducedMotion)) cancel = animateEntrance(element, preset);
     });
     return () => { cancelAnimationFrame(frame); cancel?.(); };
   }, [ref, preset, reducedMotion]);
@@ -169,7 +169,7 @@ export function MotionRegion({ open, keepMounted = false, mode = 'disclosure', a
   </Tag>;
 }
 
-/** Incoming content only, without cloning old actions or replacing the live subtree. */
+/** Stable live content; dedicated navigation/disclosure components own choreography. */
 export function MotionSwap({ stateKey, disabled = false, preset = 'swap', as: Tag = 'div', children, className = '', ...props }: ElementProps & {
   stateKey: string | number; disabled?: boolean; preset?: MotionPreset;
 }) {

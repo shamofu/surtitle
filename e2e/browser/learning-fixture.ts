@@ -325,6 +325,7 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
   }));
   await page.route(/\/src\/shared\/native\/window\.ts(?:\?|$)/, route => route.fulfill({
     contentType: 'application/javascript', body: `const tasks = new Set();
+      export const setWindowTheme = async theme => { window.__learningFixture.windowTheme = theme === 'system' ? null : theme; };
       export const registerCloseTask = (task, pending = () => false) => { const entry = {task,pending}; tasks.add(entry); return () => tasks.delete(entry); };
       export const hasPendingCloseTasks = () => [...tasks].some(entry => entry.pending());
       export const flushCloseTasks = () => Promise.all([...tasks].map(entry => entry.task()));

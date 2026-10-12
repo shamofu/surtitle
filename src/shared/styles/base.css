@@ -47,7 +47,7 @@
   color-scheme: light;
 }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 700px; color: var(--text); background: var(--bg); }
+body { margin: 0; min-width: 320px; color: var(--text); background: var(--bg); }
 button, input, select, textarea { font: inherit; }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button, a { touch-action: manipulation; }
@@ -58,6 +58,11 @@ button, input, select, textarea { outline: none; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
+}
+[data-review-focus]:focus-visible, .review-answer-label:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 2px;
 }
 svg { flex-shrink: 0; }
 h1, h2, h3, p { margin: 0; }

@@ -1,10 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, expect, it, vi } from 'vitest';
-import { subscribeWindowClose, registerCloseTask, closeWindow, hasPendingCloseTasks } from '../shared/native/window';
+import { subscribeWindowClose, registerCloseTask, closeWindow, hasPendingCloseTasks, requestWindowClose, setWindowTheme } from '../shared/native/window';
 
-const fixture = vi.hoisted(() => ({ register: vi.fn(), destroy: vi.fn() }));
-vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: fixture.register, destroy: fixture.destroy }) }));
+const fixture = vi.hoisted(() => ({ register: vi.fn(), destroy: vi.fn(), close: vi.fn(), theme: vi.fn() }));
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: fixture.register, destroy: fixture.destroy, close: fixture.close, setTheme: fixture.theme }) }));
 afterEach(() => vi.resetAllMocks());
+
+it('re-enters native close guards and releases the native theme override for system mode', async () => {
+  await requestWindowClose();
+  expect(fixture.close).toHaveBeenCalledOnce();
+  expect(fixture.destroy).not.toHaveBeenCalled();
+  await setWindowTheme('dark');
+  await setWindowTheme('light');
+  await setWindowTheme('system');
+  expect(fixture.theme.mock.calls).toEqual([['dark'], ['light'], [null]]);
+});
 
 it('waits for pending saves before destroying and leaves the app open after a failed write', async () => {
   let finish!: () => void;

@@ -45,7 +45,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
   });
 }
 
-test('rapid cues fade only the incoming live text for 90ms while search rows stay immediate', async ({ page }) => {
+test('rapid cues and translations stay immediately opaque while search rows stay immediate', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await installLearningFixture(page, 'en', 'light', { segmentOverrides: {
     11: { text: 'First rapid caption' }, 12: { text: 'Second rapid caption' }, 13: { text: 'Latest rapid caption' },
@@ -61,26 +61,23 @@ test('rapid cues fade only the incoming live text for 90ms while search rows sta
     for (const [index, expected] of [[11, 'First rapid caption'], [12, 'Second rapid caption'], [13, 'Latest rapid caption']] as const) {
       changes.push(await new Promise<{
         text: string | null; opacity: number[]; snapshots: number; durations: (number | string | undefined)[];
-        stable: boolean; opacityOnly: boolean;
+        stable: boolean;
       }>((resolve, reject) => {
         const caption = document.querySelector('.current-caption')!;
         const cleanup = () => { observer.disconnect(); clearTimeout(timeout); };
-        // React may commit after the next animation frame on a busy runner.
-        // Detect the committed cue and hold its timeline; do not race a 90ms fade.
+        // Inspect the committed text immediately, before an opacity animation
+        // could finish and conceal a transient blank caption.
         const observer = new MutationObserver(() => {
           const source = caption.querySelector('.current-caption-text')!;
           if (source.textContent !== expected) return;
           cleanup();
           const translation = caption.querySelector('.caption-translation')!;
           const animations = [source, translation].flatMap(node => node.getAnimations());
-          animations.forEach(animation => { animation.pause(); animation.currentTime = 45; });
           resolve({ text: source.textContent,
             opacity: [source, translation].map(node => Number(getComputedStyle(node).opacity)),
             snapshots: caption.querySelectorAll('[data-motion-snapshot]').length,
             durations: animations.map(animation => animation.effect?.getTiming().duration),
-            stable: source === original && translation === originalTranslation,
-            opacityOnly: animations.every(animation => animation.effect instanceof KeyframeEffect
-              && animation.effect.getKeyframes().every(frame => frame.opacity !== undefined && frame.transform === undefined)) });
+            stable: source === original && translation === originalTranslation });
         });
         const timeout = setTimeout(() => { cleanup(); reject(new Error(`Caption did not commit: ${expected}`)); }, 5000);
         observer.observe(caption, { childList: true, characterData: true, subtree: true });
@@ -88,15 +85,14 @@ test('rapid cues fade only the incoming live text for 90ms while search rows sta
           .catch((error: unknown) => { cleanup(); reject(error); });
       }));
     }
-    [original, originalTranslation].forEach(node => node.getAnimations().forEach(animation => animation.finish()));
     return changes;
   });
   expect(observations.map(item => item.text)).toEqual(['First rapid caption', 'Second rapid caption', 'Latest rapid caption']);
   for (const item of observations) {
-    expect(item.durations).toEqual([90, 90]);
-    expect(item.opacity.every(opacity => opacity > 0 && opacity < 1)).toBe(true);
+    expect(item.durations).toEqual([]);
+    expect(item.opacity).toEqual([1, 1]);
     expect(item.snapshots).toBe(0);
-    expect(item.stable && item.opacityOnly).toBe(true);
+    expect(item.stable).toBe(true);
   }
   await expect(page.locator('.current-caption-text')).toHaveCSS('opacity', '1');
   await page.getByRole('button', { name: 'Transcript', exact: true }).click();
@@ -197,7 +193,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     expect(await original!.evaluate(node => node === document.querySelector('.current-caption-text'))).toBe(true);
     await page.evaluate(() => (window as any).__learningFixture.call('player_control', { request: { action: 'seek', value: 84010 } }));
     await expect(source).toHaveText('Latest cue after selection');
-    expect(await starts()).toBe(reducedMotion === 'reduce' ? 0 : 1);
+    expect(await starts()).toBe(0);
     await expect(source).toHaveCSS('opacity', '1');
   });
 }

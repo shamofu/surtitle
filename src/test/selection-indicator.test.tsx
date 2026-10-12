@@ -70,11 +70,24 @@ it('places the initial decorative indicator immediately and stretches only after
   expect(input).toHaveFocus();
   expect(input).toHaveValue('unfinished 日本語');
   expect(marker.style.left).toBe('120px');
-  expect(animate).toHaveBeenCalledWith([
-    { left: '0px', top: '38px', width: '100px', height: '2px' },
-    { left: '0px', top: '38px', width: '220px', height: '2px', offset: .45 },
-    { left: '120px', top: '38px', width: '100px', height: '2px' },
-  ], { duration: 200, easing: 'cubic-bezier(0.33, 1, 0.68, 1)' });
+  const [frames, options] = animate.mock.calls[0];
+  expect(options).toEqual({ duration: 260, easing: 'linear' });
+  expect(frames).toHaveLength(21);
+  expect(frames[0]).toEqual({ left: '0px', top: '38px', width: '100px', height: '2px', offset: 0 });
+  expect(frames.at(-1)).toEqual({ left: '120px', top: '38px', width: '100px', height: '2px', offset: 1 });
+  // The leading edge moves first, then the trailing edge catches up; no hold-and-jump.
+  const left = frames.map(frame => parseFloat(String(frame.left)));
+  const right = frames.map((frame, index) => left[index] + parseFloat(String(frame.width)));
+  expect(left[4]).toBe(0);
+  expect(right[4]).toBeGreaterThan(100);
+  expect(left[8]).toBeGreaterThan(0);
+  expect(right[14]).toBeCloseTo(220, 4);
+  expect(left[14]).toBeLessThan(120);
+  for (let index = 1; index < frames.length; index++) {
+    expect(left[index]).toBeGreaterThanOrEqual(left[index - 1]);
+    expect(right[index]).toBeGreaterThanOrEqual(right[index - 1]);
+    expect(parseFloat(String(frames[index].width))).toBeGreaterThanOrEqual(100);
+  }
 });
 
 it('reverses from the visible in-flight geometry and cancels the replaced animation', () => {
@@ -84,7 +97,7 @@ it('reverses from the visible in-flight geometry and cancels the replaced animat
   visibleFrame = new DOMRect(130, 40, 240, 40);
   view.rerender(<Controls selected="second" variant="pill" />);
   expect(replaced.cancel).toHaveBeenCalledOnce();
-  expect(animate.mock.calls.at(-1)?.[0][0]).toEqual({ left: '30px', top: '0px', width: '240px', height: '40px' });
+  expect(animate.mock.calls.at(-1)?.[0][0]).toEqual({ left: '30px', top: '0px', width: '240px', height: '40px', offset: 0 });
 });
 
 it('settles on layout, text, visibility and motion preference changes', async () => {

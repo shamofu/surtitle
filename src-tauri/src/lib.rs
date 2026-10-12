@@ -2,84 +2,102 @@ mod application;
 mod commands;
 mod player;
 mod restore_snapshot;
+mod startup;
+mod window_appearance;
 mod window_fit;
+
+pub use startup::report_startup_failure;
 
 use application::Services;
 use tauri::{Emitter, Manager};
 
-pub fn run() {
+pub fn run() -> tauri::Result<()> {
     tauri::Builder::default()
         .setup(|app| {
-            let root = app.path().app_local_data_dir()?;
-            #[cfg(feature = "e2e-test")]
-            let root = std::env::var_os("SURTITLE_E2E_DATA_DIR")
-                .map(std::path::PathBuf::from)
-                .unwrap_or(root);
-            let services = Services::open(root)?;
-            let changes_handle = app.handle().clone();
-            services.changes.install(move |change| {
-                let _ = changes_handle.emit("data-changed", change);
-            })?;
-            let progress_handle = app.handle().clone();
-            application::ai::runtime::install_publisher(&services, move |snapshot| {
-                let _ = progress_handle.emit("ai-runtime", snapshot);
-            })?;
-            #[cfg(feature = "e2e-test")]
-            application::ai::fixtures::seed_ai_recovery_fixture(&services)?;
-            #[cfg(feature = "e2e-test")]
-            application::transcript::fixtures::seed_transcript_review_fixture(&services)?;
-            let window = app
-                .get_webview_window("main")
-                .ok_or("main window missing")?;
-            window_fit::install(&window)?;
-            #[cfg(windows)]
-            let parent = window.hwnd()?.0 as isize;
-            #[cfg(not(windows))]
-            let parent = 0;
-            let resources = app.path().resource_dir()?;
-            #[cfg(debug_assertions)]
-            let resources = if std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("resources/native/mpv-2.dll")
-                .is_file()
-            {
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources")
-            } else {
-                resources
-            };
-            let click_handle = app.handle().clone();
-            services.initialize_player(&resources, parent, move || {
-                // Native input may arrive during a window operation that already
-                // holds the playback mutex. Let the UI apply its interaction gate.
-                let _ = click_handle.emit_to("main", "player-surface-click", ());
-            })?;
-            app.manage(services.clone());
-            let update_state = services.clone();
-            tauri::async_runtime::spawn(async move {
-                application::tool_updates::run(update_state).await;
-            });
-            let handle = app.handle().clone();
-            let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-            let close_alive = alive.clone();
-            let close_state = services.clone();
-            window.on_window_event(move |event| {
-                if matches!(event, tauri::WindowEvent::Destroyed) {
-                    close_alive.store(false, std::sync::atomic::Ordering::Relaxed);
-                    close_state.shutdown();
-                }
-            });
-            std::thread::Builder::new()
-                .name("surtitle-playback".into())
-                .spawn(move || {
-                    let mut ticks = 0u64;
-                    while alive.load(std::sync::atomic::Ordering::Relaxed) {
-                        if let Ok(state) = services.playback_tick(ticks.is_multiple_of(10)) {
-                            let _ = handle.emit("player-state", &state);
-                        }
-                        ticks += 1;
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                    }
+            // Tauri panics on a returned setup error inside its event loop,
+            // so report initialization failures before handing control back.
+            let startup = (|| -> Result<(), Box<dyn std::error::Error>> {
+                let root = app.path().app_local_data_dir()?;
+                #[cfg(feature = "e2e-test")]
+                let root = std::env::var_os("SURTITLE_E2E_DATA_DIR")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or(root);
+                let services = Services::open(root.clone()).map_err(|error| {
+                    format!(
+                        "Could not open Surtitle data at {}:\n{error:#}",
+                        root.display()
+                    )
                 })?;
-            window.show()?;
+                let changes_handle = app.handle().clone();
+                services.changes.install(move |change| {
+                    let _ = changes_handle.emit("data-changed", change);
+                })?;
+                let progress_handle = app.handle().clone();
+                application::ai::runtime::install_publisher(&services, move |snapshot| {
+                    let _ = progress_handle.emit("ai-runtime", snapshot);
+                })?;
+                #[cfg(feature = "e2e-test")]
+                application::ai::fixtures::seed_ai_recovery_fixture(&services)?;
+                #[cfg(feature = "e2e-test")]
+                application::transcript::fixtures::seed_transcript_review_fixture(&services)?;
+                let window = app
+                    .get_webview_window("main")
+                    .ok_or("main window missing")?;
+                window_appearance::install(&window, &services.settings()?.theme)?;
+                window_fit::install(&window, root.join("window-state.json"))?;
+                #[cfg(windows)]
+                let parent = window.hwnd()?.0 as isize;
+                #[cfg(not(windows))]
+                let parent = 0;
+                let resources = app.path().resource_dir()?;
+                #[cfg(debug_assertions)]
+                let resources = if std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("resources/native/mpv-2.dll")
+                    .is_file()
+                {
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources")
+                } else {
+                    resources
+                };
+                let click_handle = app.handle().clone();
+                services.initialize_player(&resources, parent, move || {
+                    // Native input may arrive during a window operation that already
+                    // holds the playback mutex. Let the UI apply its interaction gate.
+                    let _ = click_handle.emit_to("main", "player-surface-click", ());
+                })?;
+                app.manage(services.clone());
+                let update_state = services.clone();
+                tauri::async_runtime::spawn(async move {
+                    application::tool_updates::run(update_state).await;
+                });
+                let handle = app.handle().clone();
+                let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+                let close_alive = alive.clone();
+                let close_state = services.clone();
+                window.on_window_event(move |event| {
+                    if matches!(event, tauri::WindowEvent::Destroyed) {
+                        close_alive.store(false, std::sync::atomic::Ordering::Relaxed);
+                        close_state.shutdown();
+                    }
+                });
+                std::thread::Builder::new()
+                    .name("surtitle-playback".into())
+                    .spawn(move || {
+                        let mut ticks = 0u64;
+                        while alive.load(std::sync::atomic::Ordering::Relaxed) {
+                            if let Ok(state) = services.playback_tick(ticks.is_multiple_of(10)) {
+                                let _ = handle.emit("player-state", &state);
+                            }
+                            ticks += 1;
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                        }
+                    })?;
+                window.show()?;
+                Ok(())
+            })();
+            if let Err(error) = startup {
+                report_startup_failure(error);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -186,5 +204,4 @@ pub fn run() {
             commands::media_tools::extract_embedded_subtitles
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Surtitle");
 }

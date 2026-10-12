@@ -6,18 +6,16 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react';
 import type { ReactNode } from 'react';
 import { settingsApi } from '../../features/settings/api';
 import { nativeAvailable } from '../../shared/native/transport';
+import { setWindowTheme } from '../../shared/native/window';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSettings } from '../../shared/query/snapshot';
 import { mutateData } from '../../shared/query/mutations';
 import { useNotifications } from './Notifications';
-import { useAppMotion } from '../../shared/motion';
-import { animateEntrance, canAnimate } from '../../shared/motion/surfaces';
 interface Appearance {
   locale: 'ja' | 'en';
   setLocale: (locale: 'ja' | 'en') => void;
@@ -31,21 +29,8 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
   const { data: settings } = useSettings();
   const { report } = useNotifications();
   const [locale, setLocale] = useState<'ja' | 'en'>('ja');
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const { reducedMotion } = useAppMotion();
-  const previousLocale = useRef(locale);
-  useLayoutEffect(() => {
-    const changed = previousLocale.current !== locale;
-    previousLocale.current = locale;
-    if (!changed || reducedMotion || document.hidden) return;
-    // The video is a separate HWND: fade only DOM regions that do not contain it.
-    const regions = document.querySelectorAll<HTMLElement>(
-      '.topbar, .preview-banner, .page-content > :not(.study-page), .study-top, .study-auxiliary, .current-caption, .player-controls, .study-companion, [data-app-modal] .modal-inner',
-    );
-    const cancel = [...regions].filter(node => canAnimate(node, reducedMotion))
-      .map(node => animateEntrance(node, 'swap'));
-    return () => cancel.forEach(finish => finish?.());
-  }, [locale, reducedMotion]);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() =>
+    nativeAvailable() && window.matchMedia && !window.matchMedia('(prefers-color-scheme: dark)').matches ? 'light' : 'dark');
   const changeLocale = useCallback(
     (value: 'ja' | 'en') => {
       if (!nativeAvailable()) {
@@ -79,18 +64,31 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     });
   }, [client, report, theme]);
   useEffect(() => {
-    if (!settings) return;
-    setLocale(settings.locale);
-    const requested = settings.theme;
-    setTheme(
-      requested === 'system'
-        ? window.matchMedia('(prefers-color-scheme: dark)').matches
-          ? 'dark'
-          : 'light'
-        : requested,
-    );
-  }, [settings?.locale, settings?.theme]);
+    if (settings) setLocale(settings.locale);
+  }, [settings?.locale]);
   useEffect(() => {
+    if (!settings) return;
+    const requested = settings.theme;
+    if (requested !== 'system') { setTheme(requested); return; }
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const follow = () => setTheme(query.matches ? 'dark' : 'light');
+    follow();
+    query.addEventListener('change', follow);
+    return () => query.removeEventListener('change', follow);
+  }, [settings?.theme]);
+  useEffect(() => {
+    if (!settings || !nativeAvailable()) return;
+    const requested = settings.theme;
+    void report(async () => {
+      try { await setWindowTheme(requested); }
+      catch (error) {
+        throw new Error(`${settings.locale === 'ja'
+          ? 'テーマ設定は保存されていますが、ウィンドウの配色を変更できませんでした。再起動すると再試行します。'
+          : 'Your theme is saved, but the window appearance could not be updated. Restart to try again.'} ${String(error)}`);
+      }
+    });
+  }, [settings?.theme, report]);
+  useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.lang = locale;
   }, [theme, locale]);

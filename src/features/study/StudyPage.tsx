@@ -32,7 +32,7 @@ import {
 } from '../../app/runtime';
 import { shouldIgnoreShortcut } from '../../shared/keyboard';
 import { activeSegment, languageName, timestamp } from '../../shared/format';
-import { AnimatedValue, MotionRegion, useMotionChange } from '../../shared/motion';
+import { AnimatedValue, MotionRegion } from '../../shared/motion';
 import { nativeAvailable } from '../../shared/native/transport';
 import { Button, EmptyState, IconButton, Modal, useModalExit } from '../../shared/ui/index';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
@@ -140,8 +140,8 @@ function sourceSignature(source?: SelectedContext) {
 function StudySession({ mediaId }: { mediaId: string }) {
   const navigate = useNavigate();
   const { resume: resumeId } = useSearch({ from: '/study/$mediaId' });
-  const { mutate } = useDataActions();
-  const { data } = useSnapshot();
+  const { mutate, refresh } = useDataActions();
+  const { data, loading, error: snapshotError } = useSnapshot();
   const { t, locale } = useAppearance();
   const { report } = useNotifications();
   const { surfaceHidden } = useSurface();
@@ -174,7 +174,6 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const [panel, setPanel] = useState<'transcript' | 'phrase' | 'activity' | null>(null);
   const companion = useStudyPresence(panel !== null);
   const companionContents = useRef<HTMLDivElement>(null);
-  useMotionChange(companionContents, Number(panel !== null), !panel, 'panel');
   const previousPanel = useRef(panel);
   useLayoutEffect(() => { if (panel) previousPanel.current = panel; }, [panel]);
   const presentedPanel = panel || previousPanel.current;
@@ -330,10 +329,13 @@ function StudySession({ mediaId }: { mediaId: string }) {
 
   useLayoutEffect(
     () => {
-      if (panel && !companion.moving) {
+      if (panel && companion.ready) {
         // A disclosure toggle keeps its place and keyboard focus on narrow
         // screens. Inspecting a phrase or starting setup is explicit navigation.
-        if (window.innerWidth < 1000 && panel === 'transcript' && trigger.current === transcriptToggle.current) return;
+        if (window.innerWidth < 1000 && panel === 'transcript' && trigger.current === transcriptToggle.current) {
+          // Presence scrolled the stationary dock before native placement acknowledgement.
+          return;
+        }
         // Opening may finish after the user has already focused an input or
         // another control. Only transfer focus while it still belongs to the
         // opener (or was lost with the previous panel), never interrupt typing.
@@ -341,10 +343,9 @@ function StudySession({ mediaId }: { mediaId: string }) {
         if (focused instanceof HTMLElement && focused !== document.body && focused !== trigger.current &&
           !focused.closest('[inert], [hidden]')) return;
         panelTitle.current?.focus({ preventScroll: true });
-        if (window.innerWidth < 1000) panelTitle.current?.scrollIntoView({ block: 'nearest' });
       }
     },
-    [panel, companion.moving]
+    [panel, companion.ready]
   );
 
   function restorePanelFocus() {
@@ -358,7 +359,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
   useLayoutEffect(() => {
     // The close transaction re-enables the opener in this render. Focusing it
     // before that commit would fail while the playback command still marks it busy.
-    if (!panel && !companion.visible && !busy && !surfaceHidden && restoreFocus.current) {
+    if (!panel && !busy && !surfaceHidden && restoreFocus.current) {
       restoreFocus.current = false;
       restorePanelFocus();
     }
@@ -621,6 +622,13 @@ function StudySession({ mediaId }: { mediaId: string }) {
     [panel, surfaceHidden, busy, saveBusy, inspection, draftMode, draftPlayback, playerReady]
   );
 
+  if (!data && loading) return <div className="empty-state" role="status" aria-busy="true">
+    <p>{t('教材を読み込み中…', 'Loading your material…')}</p>
+  </div>;
+  if (!data && snapshotError) return <div className="notice warning" role="alert">
+    <span>{t('教材を読み込めませんでした。', 'Could not load your material.')} {snapshotError.message}</span>
+    <Button onClick={() => void report(() => refresh())}>{t('再試行', 'Retry')}</Button>
+  </div>;
   if (!media) return <>
     <EmptyState
     icon={<Subtitles size={28} />}
@@ -754,6 +762,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
           </div>
           {/* Keep setup and estimates alive while inspecting a phrase or closing the panel. */}
           <aside
+            ref={companion.panelRef}
             id="study-companion"
             hidden={!companion.visible}
             inert={!panel}

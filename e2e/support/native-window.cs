@@ -19,6 +19,8 @@ public static class SurtitleNativeWindow {
     [DllImport("user32.dll", SetLastError = true)] static extern bool GetClientRect(IntPtr handle, out Rect rect);
     [DllImport("user32.dll", SetLastError = true)] static extern bool ClientToScreen(IntPtr handle, ref Point point);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr handle);
+    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr handle);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool PostMessage(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] static extern IntPtr GetParent(IntPtr handle);
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr handle);
     [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
@@ -52,7 +54,7 @@ public static class SurtitleNativeWindow {
         var origin = new Point();
         if (!ClientToScreen(handle, ref origin)) throw new Win32Exception();
         var name = new StringBuilder(256); GetClassName(handle, name, 256);
-        return new { handle = handle.ToInt64(), parent = GetParent(handle).ToInt64(), className = name.ToString(), visible = IsWindowVisible(handle), dpi = GetDpiForWindow(handle), screen, client, origin,
+        return new { handle = handle.ToInt64(), parent = GetParent(handle).ToInt64(), className = name.ToString(), visible = IsWindowVisible(handle), maximized = IsZoomed(handle), dpi = GetDpiForWindow(handle), screen, client, origin,
             regionRectangles = name.ToString().Equals("STATIC", StringComparison.OrdinalIgnoreCase) ? RegionRectangles(handle) : null };
     }
     public static object[] Inspect(IntPtr root) {
@@ -114,5 +116,11 @@ public static class SurtitleNativeWindow {
             // Preserve position, z-order and activation; let Tauri resize its own WebView.
             if (!SetWindowPos(root, IntPtr.Zero, 0, 0, physicalWidth + borderWidth, physicalHeight + borderHeight, 0x0002 | 0x0004 | 0x0010)) throw new Win32Exception();
         } finally { if (previous != IntPtr.Zero) SetThreadDpiAwarenessContext(previous); }
+    }
+    public static void SystemCommand(IntPtr root, string action) {
+        if (GetParent(root) != IntPtr.Zero) throw new ArgumentException("Command target must be the top-level application window");
+        // Exercise the same native close/maximize/restore path as the title bar.
+        int command = action == "close" ? 0xF060 : action == "maximize" ? 0xF030 : action == "restore" ? 0xF120 : throw new ArgumentException("Invalid system command");
+        if (!PostMessage(root, 0x0112, new IntPtr(command), IntPtr.Zero)) throw new Win32Exception();
     }
 }

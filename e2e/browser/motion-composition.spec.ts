@@ -160,7 +160,7 @@ test('a page entrance owns its subtree when an answer is revealed before that en
       entrance?.finish();
     }
   });
-  expect(result).toMatchObject({ paused: true, duration: 160, targets: ['page'], enabled: true });
+  expect(result).toMatchObject({ paused: true, duration: 180, targets: ['page'], enabled: true });
   expect(result.answer).toContain('少し寄り道をする');
 });
 

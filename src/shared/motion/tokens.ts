@@ -2,7 +2,8 @@
 // Seconds for Motion; CSS and WAAPI derive milliseconds from the same values.
 export const motionDurations = {
   press: .08, release: .14, fast: .12, swap: .12, caption: .09,
-  content: .16, reveal: .18, selection: .2, enter: .2, exit: .12,
+  content: .18, reveal: .18, selection: .26, enter: .24, exit: .18,
+  panelOpen: .24, panelClose: .18, review: .22, success: .16,
   spin: 1.1, progress: 1.6,
 } as const;
 export const motionEase = [.33, 1, .68, 1] as const;

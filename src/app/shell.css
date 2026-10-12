@@ -71,6 +71,7 @@
 .badge.danger { color: var(--danger); background: var(--danger-soft); }
 .back-link { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; min-height: 40px; color: var(--muted); }
 .back-link:hover { color: var(--text); }
+.page-loading { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 180px; color: var(--muted); }
 @media (max-height: 680px) {
   .topbar { height: 48px; min-height: 48px; }
 }

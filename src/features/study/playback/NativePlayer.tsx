@@ -382,6 +382,8 @@ export function NativePlayer({
           }
         }
         const version = ++placementVersion;
+        const placementNode = viewport.current;
+        if (placementNode) placementNode.dataset.nativePlacement = 'pending';
         const hidden =
           !loaded ||
           !rect ||
@@ -406,13 +408,18 @@ export function NativePlayer({
             };
         surfacePlacement(surfaceOwner.current, request, error => {
           if (disposed || version !== placementVersion) return;
+          const acknowledge = () => {
+            if (disposed || version !== placementVersion) return;
+            revealCards();
+            if (placementNode?.isConnected) placementNode.dataset.nativePlacement = 'ready';
+          };
           if (error) {
             setSurfaceError(String(error));
             // An explicit display error must never leave the native HWND over
             // an inaccessible dialog. This is failure recovery, not modal policy.
-            surfacePlacement(surfaceOwner.current, { action: 'hide' }, revealCards);
+            surfacePlacement(surfaceOwner.current, { action: 'hide' }, acknowledge);
           } else {
-            revealCards();
+            acknowledge();
             if (!hidden) setSurfaceError('');
           }
         });
@@ -435,6 +442,9 @@ export function NativePlayer({
     if (scrollContainer) observer.observe(scrollContainer);
     for (const element of occludingElements) observer.observe(element);
     window.addEventListener('resize', update);
+    // A companion's reserved layout changes once, before its own visual slide.
+    // Explicit measurement lets the slide wait for the matching HWND acknowledgement.
+    window.addEventListener('surtitle-player-layout', measure);
     window.addEventListener('scroll', update, true);
     document.addEventListener('visibilitychange', visibility);
     // New opaque cards are withheld until their region has been acknowledged;
@@ -446,6 +456,7 @@ export function NativePlayer({
       window.cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener('resize', update);
+      window.removeEventListener('surtitle-player-layout', measure);
       window.removeEventListener('scroll', update, true);
       document.removeEventListener('visibilitychange', visibility);
     };

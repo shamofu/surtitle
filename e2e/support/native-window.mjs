@@ -74,6 +74,16 @@ export async function inspectNativeMonitor() {
   return nativeWindow('monitor');
 }
 
+export const inspectNativeWindow = () => nativeWindow('inspect');
+export function resizeThenMaximizeNativeWindow(width, height) {
+  validateNativeSize(width, height);
+  return nativeWindow('resize-maximize', ['-Width', String(width), '-Height', String(height)]);
+}
+export function requestNativeWindowCommand(action) {
+  assert(['close', 'maximize', 'restore'].includes(action), 'Invalid native window command');
+  return nativeWindow(action);
+}
+
 export async function moveNativeWindowToMonitor(monitor) {
   assert(Number.isSafeInteger(monitor) && monitor > 0, 'Invalid native monitor identity');
   await nativeWindow('move-monitor', ['-Monitor', String(monitor)]);

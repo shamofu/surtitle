@@ -20,7 +20,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); delete (HTMLElement.prototype as Partial<HTMLElement>).animate; });
 
-it('enters only current content without cloning, remounting inputs or losing composition', () => {
+it('keeps changed content opaque without cloning, remounting inputs or losing composition', () => {
   const action = vi.fn();
   const pane = (key: string) => <MotionProvider><MotionSwap stateKey={key}><label htmlFor="entry">Entry</label><input id="entry" defaultValue="draft" /><button onClick={action}>{key}</button></MotionSwap></MotionProvider>;
   const view = render(pane('first'));
@@ -34,7 +34,7 @@ it('enters only current content without cloning, remounting inputs or losing com
   expect(animate).not.toHaveBeenCalled();
   view.rerender(pane('second'));
   expect(clone).not.toHaveBeenCalled();
-  expect(animate).toHaveBeenCalledWith([{ opacity: 0 }, { opacity: 1 }], expect.objectContaining({ duration: 120 }));
+  expect(animate).not.toHaveBeenCalled();
   expect(screen.getByLabelText('Entry')).toBe(input);
   expect(input).toHaveFocus();
   expect(input).toHaveValue('unfinished 日本語');
@@ -161,14 +161,14 @@ it('does not animate unrelated content renders or opted-out updates', () => {
   expect(animate).not.toHaveBeenCalled();
   view.rerender(content('second'));
   expect(screen.getByText('second')).toBe(paragraph);
-  expect(animate).toHaveBeenCalledOnce();
+  expect(animate).not.toHaveBeenCalled();
   view.rerender(content('third', true));
-  expect(animate).toHaveBeenCalledOnce();
+  expect(animate).not.toHaveBeenCalled();
 });
 
 it('lets one entrance own nested content without replacing focused inputs', () => {
-  const content = (outer: number, inner: number) => <MotionProvider><MotionSwap stateKey={outer}>
-    <MotionSwap stateKey={inner}><input aria-label="Nested draft" defaultValue="日本語" /></MotionSwap>
+  const content = (outer: number, inner: number) => <MotionProvider><MotionSwap stateKey={outer} preset="panel">
+    <MotionSwap stateKey={inner} preset="panel"><input aria-label="Nested draft" defaultValue="日本語" /></MotionSwap>
   </MotionSwap></MotionProvider>;
   const view = render(content(0, 0));
   const input = screen.getByLabelText('Nested draft') as HTMLInputElement;
@@ -195,15 +195,19 @@ it('settles a page entrance on reduction and never replays it when motion return
     return <div ref={ref}>Page</div>;
   }
   render(<StrictMode><MotionProvider><Page /></MotionProvider></StrictMode>);
+  // StrictMode replaces its first setup before paint; the replacement must enter.
+  expect(animate).toHaveBeenCalledTimes(2);
+  expect(animate.mock.results[0].value.cancel).toHaveBeenCalledOnce();
+  expect(animate.mock.results[1].value.cancel).not.toHaveBeenCalled();
   act(() => vi.advanceTimersToNextFrame());
   expect(animate).toHaveBeenCalledWith(
     [{ opacity: 0, transform: 'translate(0px, 6px)' }, { opacity: 1, transform: 'none' }],
-    expect.objectContaining({ duration: 160 }),
+    expect.objectContaining({ duration: 180 }),
   );
   reduce(true);
-  expect(animate.mock.results[0].value.cancel).toHaveBeenCalledOnce();
+  expect(animate.mock.results[1].value.cancel).toHaveBeenCalledOnce();
   reduce(false);
-  expect(animate).toHaveBeenCalledOnce();
+  expect(animate).toHaveBeenCalledTimes(2);
 });
 
 it('never animates opaque modal shells or native video ancestors', () => {

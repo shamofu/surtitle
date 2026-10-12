@@ -43,6 +43,7 @@ vi.mock('@tanstack/react-virtual', () => ({
   useVirtualizer: ({ count, getScrollElement }: { count: number; getScrollElement: () => HTMLElement | null }) => ({
     scrollRect: { width: 400, height: 600 },
     measure: fixture.measure,
+    resizeItem: () => {},
     takeSnapshot: () => [],
     scrollToIndex: fixture.scrollToIndex,
     scrollToOffset: (value: number, options: unknown) => {

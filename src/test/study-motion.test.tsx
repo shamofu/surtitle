@@ -4,22 +4,49 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { StudyRegion, useStudyPresence, useStudyRegionActive } from '../features/study/StudyPresence';
 
-const fixture = vi.hoisted(() => ({ reducedMotion: false }));
+type PendingMotion = { duration: number; stopped: boolean; set(value: number): void; complete(): void; obsoleteComplete(): void };
+const fixture = vi.hoisted(() => ({ reducedMotion: false, animations: [] as PendingMotion[] }));
 vi.mock('../shared/motion', async importOriginal => ({
   ...await importOriginal<typeof import('../shared/motion')>(),
   useAppMotion: () => ({ reducedMotion: fixture.reducedMotion }),
 }));
-beforeEach(() => { fixture.reducedMotion = false; });
+vi.mock('motion', async importOriginal => ({
+  ...await importOriginal<typeof import('motion')>(),
+  animate: (target: HTMLElement | { set(value: number): void }, endpoint: number | Record<string, string[]>, options: { duration: number; onComplete?: () => void }) => {
+    const pending: PendingMotion = {
+      duration: options.duration, stopped: false,
+      set(value) { if ('set' in target) target.set(value); },
+      complete() {
+        if (pending.stopped) return;
+        if (typeof endpoint === 'number') pending.set(endpoint);
+        else if (target instanceof HTMLElement) for (const [key, values] of Object.entries(endpoint)) target.style.setProperty(key, String(values.at(-1)));
+        options.onComplete?.();
+      },
+      obsoleteComplete() { options.onComplete?.(); },
+    };
+    fixture.animations.push(pending);
+    return { complete: pending.complete, stop: () => { pending.stopped = true; } };
+  },
+}));
+beforeEach(() => {
+  fixture.reducedMotion = false;
+  fixture.animations = [];
+  vi.useFakeTimers();
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+});
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
+const latest = () => fixture.animations.filter(animation => animation.duration > 0).at(-1)!;
 
 function Panel({ open, children }: { open: boolean; children: ReactNode }) {
   const presence = useStudyPresence(open);
   return <div data-testid="dock" {...presence.dockProps}>
-    <StudyRegion open={open} retain={presence.visible} animate={!presence.moving}>{children}</StudyRegion>
+    <aside ref={presence.panelRef} hidden={!presence.visible} inert={!open}>
+      <StudyRegion open={open} retain={presence.visible} animate={!presence.moving}>{children}</StudyRegion>
+    </aside>
   </div>;
 }
 
-it('deactivates and removes a closing drawer immediately without a geometry transition', () => {
+it('deactivates a closing drawer immediately but retains its draft until the slide finishes', () => {
   function Session() {
     const [open, setOpen] = useState(true);
     return <><button onClick={() => setOpen(false)}>Close</button><Panel open={open}>
@@ -33,30 +60,40 @@ it('deactivates and removes a closing drawer immediately without a geometry tran
   const region = document.querySelector('.study-motion-region')!;
   expect(region).toHaveAttribute('inert');
   expect(region).toHaveAttribute('aria-hidden', 'true');
+  expect(region).not.toHaveAttribute('hidden');
+  expect(field).toHaveValue('edited phrase');
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  expect(screen.getByTestId('dock')).toHaveAttribute('data-moving', 'true');
+  expect(latest().duration).toBe(.18);
+  act(() => latest().complete());
   expect(region).toHaveAttribute('hidden');
   expect(field).not.toBeInTheDocument();
-  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   expect(screen.getByTestId('dock')).toHaveAttribute('data-moving', 'false');
-  const transition = new Event('transitionend', { bubbles: true });
-  Object.defineProperty(transition, 'propertyName', { value: 'width' });
-  fireEvent(screen.getByTestId('dock'), transition);
-  expect(region).toHaveAttribute('hidden');
 });
 
-it('reverses toward the latest target without an obsolete timeout closing it', () => {
-  vi.useFakeTimers();
-  const view = render(<Panel open><p>Panel</p></Panel>);
-  view.rerender(<Panel open={false}><p>Panel</p></Panel>);
-  act(() => vi.advanceTimersByTime(150));
-  view.rerender(<Panel open><p>Panel</p></Panel>);
-  act(() => vi.advanceTimersByTime(200));
+it('reverses from the visible position and ignores the obsolete completion', () => {
+  const view = render(<Panel open><input aria-label="Draft" defaultValue="日本語" /></Panel>);
+  const input = screen.getByLabelText('Draft');
+  view.rerender(<Panel open={false}><input aria-label="Draft" defaultValue="日本語" /></Panel>);
+  const closing = latest();
+  act(() => closing.set(.4));
+  const panel = document.querySelector('aside')!;
+  const before = panel.style.transform;
+  view.rerender(<Panel open><input aria-label="Draft" defaultValue="日本語" /></Panel>);
+  expect(panel.style.transform).toBe(before);
+  expect(closing.stopped).toBe(true);
+  expect(latest().duration).toBeCloseTo(.24 * .4);
+  act(() => closing.obsoleteComplete());
   expect(screen.getByTestId('dock')).toHaveAttribute('data-open', 'true');
-  expect(screen.getByText('Panel').parentElement).not.toHaveAttribute('hidden');
-  act(() => vi.advanceTimersByTime(120));
+  act(() => latest().complete());
+  expect(panel.style.transform).toBe('translateX(0%)');
+  expect(screen.getByLabelText('Draft')).toBe(input);
   expect(screen.getByTestId('dock')).toHaveAttribute('data-moving', 'false');
+  act(() => vi.advanceTimersByTime(1000));
+  expect(panel).not.toHaveAttribute('hidden');
 });
 
-it('keeps a hidden transcription workspace mounted and logically inactive', () => {
+it('keeps a transcription workspace mounted and deactivates it during its exit', () => {
   const mounted = vi.fn();
   const unmounted = vi.fn();
   const stop = vi.fn();
@@ -68,24 +105,34 @@ it('keeps a hidden transcription workspace mounted and logically inactive', () =
   }
   const view = render(<StudyRegion open keepMounted freezeOnExit={false}><Workspace /></StudyRegion>);
   view.rerender(<StudyRegion open={false} keepMounted freezeOnExit={false}><Workspace /></StudyRegion>);
-  expect(screen.getByText('Inactive workspace').parentElement).toHaveAttribute('hidden');
+  const region = screen.getByText('Inactive workspace').parentElement!;
+  expect(region).toHaveAttribute('inert');
+  expect(region).not.toHaveAttribute('hidden');
   expect(stop).toHaveBeenCalledTimes(1);
+  act(() => latest().complete());
+  expect(region).toHaveAttribute('hidden');
   view.rerender(<StudyRegion open keepMounted freezeOnExit={false}><Workspace /></StudyRegion>);
   expect(mounted).toHaveBeenCalledTimes(1);
   expect(unmounted).not.toHaveBeenCalled();
 });
 
-it('switches tab content without retaining an outgoing view', () => {
-  const view = render(<StudyRegion open><p>Old tab</p></StudyRegion>);
-  view.rerender(<StudyRegion open={false}><p>Old tab</p></StudyRegion>);
+it('retains the outgoing tab inert for the overlap, then releases its content', () => {
+  const view = render(<StudyRegion open><button>Old tab</button></StudyRegion>);
+  view.rerender(<StudyRegion open={false}><button>Old tab</button></StudyRegion>);
+  const region = document.querySelector('.study-motion-region')!;
+  expect(screen.getByText('Old tab')).toBeInTheDocument();
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  expect(region).toHaveAttribute('data-motion-state', 'exiting');
+  expect(region).toHaveAttribute('inert');
+  act(() => latest().complete());
   expect(screen.queryByText('Old tab')).not.toBeInTheDocument();
-  expect(document.querySelector('.study-motion-region')).toHaveAttribute('hidden');
+  expect(region).toHaveAttribute('hidden');
 });
 
 it.each(['reduce', 'hidden', 'resize', 'timeout'])('settles a closing drawer on %s', reason => {
-  vi.useFakeTimers();
   const view = render(<Panel open><p>Panel</p></Panel>);
   view.rerender(<Panel open={false}><p>Panel</p></Panel>);
+  expect(screen.getByTestId('dock')).toHaveAttribute('data-moving', 'true');
   if (reason === 'reduce') {
     fixture.reducedMotion = true;
     view.rerender(<Panel open={false}><p>Panel</p></Panel>);

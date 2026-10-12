@@ -79,6 +79,7 @@ export function LibraryPage() {
   const dropRevision = useRef(0);
   const [transferOpen, setTransferOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const searchInput = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState('all');
   const dragging = useLibraryDrop({
     blocked: importBusy || transferOpen,
@@ -168,8 +169,8 @@ export function LibraryPage() {
             </div>
             <div className="search-box">
               <Search size={17} aria-hidden="true" />
-              <input placeholder={t('タイトルで検索', 'Search titles')} value={search} onChange={(event) => setSearch(event.target.value)} aria-label={t('ライブラリを検索', 'Search your library')} />
-              <MotionRegion mode="status" open={!!search} as="span"><button aria-label={t('検索をクリア', 'Clear search')} onClick={() => setSearch('')}><X size={16} /></button></MotionRegion>
+              <input ref={searchInput} placeholder={t('タイトルで検索', 'Search titles')} value={search} onChange={(event) => setSearch(event.target.value)} aria-label={t('ライブラリを検索', 'Search your library')} />
+              <MotionRegion mode="status" open={!!search} as="span"><button aria-label={t('検索をクリア', 'Clear search')} onClick={() => { setSearch(''); searchInput.current?.focus(); }}><X size={16} /></button></MotionRegion>
             </div>
           </div>
         </div>
@@ -202,7 +203,7 @@ export function LibraryPage() {
               description={filtering ? t('タイトルや種類の条件を変えて検索してください。', 'Try another title or content type.') : t('好きな動画や音声を追加してください。字幕のある教材なら、原文を読みながらすぐに聴き始められます。', 'Add a video or audio recording. With subtitles, you can start listening and reading right away.')}
             >
               <Button variant={filtering ? 'secondary' : 'primary'} onClick={() => {
-                if (filtering) { setSearch(''); setFilter('all'); }
+                if (filtering) { setSearch(''); setFilter('all'); searchInput.current?.focus(); }
                 else setImportOpen(true);
               }}>
                 {filtering ? t('条件をリセット', 'Reset filters') : <><Plus size={17} />{t('動画・音声を追加する', 'Add video or audio')}</>}

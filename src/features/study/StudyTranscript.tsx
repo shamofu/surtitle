@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import type { VirtualItem } from '@tanstack/react-virtual';
 import {
   AudioLines,
@@ -37,10 +37,14 @@ export interface TranscriptViewState {
   measurementCache?: {
     search: string;
     showTranslations: boolean;
+    markedOnly?: boolean;
     width: number;
     items: VirtualItem[];
   };
 }
+
+const isMarked = (cue: SubtitleSegment) => cue.status === 'generated_review' ||
+  cue.timingPrecision === 'source_block' || !!cue.reviewIssues?.length;
 
 export function StudyTranscript({
   media,
@@ -110,8 +114,14 @@ export function StudyTranscript({
     ['vocabulary', t('AI の提案', 'Suggestions')],
     ...(!transcriptionWorkspace ? [['draft', t('下書きから学ぶ', 'Study a draft')]] : []),
   ] as [TranscriptTab, string][];
+  const tabIndex = tabs.findIndex(([id]) => id === (transcriptionWorkspace ? visibleTab : tab));
+  const previousTabIndex = useRef(tabIndex);
+  const direction = tabIndex < previousTabIndex.current ? -1 : 1;
+  useLayoutEffect(() => { previousTabIndex.current = tabIndex; }, [tabIndex]);
   const { search, following, showTranslations } = viewState;
   const [markedOnly, setMarkedOnly] = useState(false);
+  const [focusedCue, setFocusedCue] = useState<string>();
+  const searchInput = useRef<HTMLInputElement>(null);
   const viewStateRef = useRef(viewState);
   viewStateRef.current = viewState;
   const updateView = useCallback((patch: Partial<TranscriptViewState>) => {
@@ -121,10 +131,10 @@ export function StudyTranscript({
   }, [onViewStateChange]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const followedSubtitle = useRef<string | undefined>(undefined);
-  const filtered = segments.filter(item => (!markedOnly || item.status === 'generated_review' || item.timingPrecision === 'source_block' || !!item.reviewIssues?.length) && `${item.text} ${item.translation || ''}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+  const filtered = segments.filter(item => (!markedOnly || isMarked(item)) && `${item.text} ${item.translation || ''}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
   const cached = viewState.measurementCache;
-  const initialMeasurements = cached?.search === search && cached.showTranslations === showTranslations ? cached : undefined;
-  const previousLayout = useRef({ search, showTranslations, width: initialMeasurements?.width });
+  const initialMeasurements = cached?.search === search && cached.showTranslations === showTranslations && (cached.markedOnly ?? false) === markedOnly ? cached : undefined;
+  const previousLayout = useRef({ search, showTranslations, markedOnly, width: initialMeasurements?.width });
   const virtualizer = useVirtualizer({
     // Scroll restoration and dynamic row measurements also run in layout effects.
     // Let React 19 batch these updates instead of re-entering a commit via flushSync.
@@ -139,6 +149,10 @@ export function StudyTranscript({
     initialMeasurementsCache: initialMeasurements?.items,
     estimateSize: () => showTranslations ? 156 : 126,
     overscan: 6,
+    rangeExtractor: range => {
+      const focusedIndex = filtered.findIndex(cue => cue.id === focusedCue);
+      return [...new Set([...defaultRangeExtractor(range), ...(focusedIndex >= 0 ? [focusedIndex] : [])])].sort((a, b) => a - b);
+    },
   });
   const viewportWidth = virtualizer.scrollRect?.width ?? 0;
   const viewportHeight = virtualizer.scrollRect?.height ?? 0;
@@ -151,17 +165,26 @@ export function StudyTranscript({
     const previous = previousLayout.current;
     // Keep measured heights when returning from the inspector. Replacing them
     // with estimates would cause the virtualizer to shift the restored offset.
-    if (previous.search !== search || previous.showTranslations !== showTranslations ||
-        (previous.width !== undefined && previous.width !== width)) virtualizer.measure();
-    previousLayout.current = { search, showTranslations, width };
-    if (!following || search) {
+    if (previous.search !== search || previous.showTranslations !== showTranslations || previous.markedOnly !== markedOnly ||
+        (previous.width !== undefined && previous.width !== width)) {
+      virtualizer.measure();
+      // Retained focused rows keep their DOM node and dimensions, so neither
+      // refs nor ResizeObserver remeasure them after the cache is cleared.
+      virtualizer.getVirtualItems();
+      scrollRef.current.querySelectorAll<HTMLElement>('.transcript-row').forEach(row => {
+        // Force the current size even while user-scroll measurement is deferred.
+        virtualizer.resizeItem(Number(row.dataset.index), row.offsetHeight);
+      });
+    }
+    previousLayout.current = { search, showTranslations, markedOnly, width };
+    if (!following || search || markedOnly) {
       virtualizer.scrollToOffset(viewStateRef.current.scrollOffset, { behavior: 'auto' });
     }
-  }, [active, tab, search, showTranslations, filtered.length, viewportWidth, viewportHeight]);
+  }, [active, tab, search, showTranslations, markedOnly, filtered.length, viewportWidth, viewportHeight]);
 
   useLayoutEffect(
     () => {
-      if (!active || !following || search || tab !== 'transcript') {
+      if (!active || !following || search || markedOnly || tab !== 'transcript') {
         followedSubtitle.current = undefined;
         return;
       }
@@ -179,7 +202,7 @@ export function StudyTranscript({
         if (scroll) virtualizer.scrollToOffset(scroll.scrollTop, { behavior: 'auto' });
       };
     },
-    [active, activeId, activeIndex, measuredActive?.start, measuredActive?.size, following, search, tab, filtered.length, showTranslations, reducedMotion, viewportWidth, viewportHeight]
+    [active, activeId, activeIndex, measuredActive?.start, measuredActive?.size, following, search, markedOnly, tab, filtered.length, showTranslations, reducedMotion, viewportWidth, viewportHeight]
   );
 
   return (
@@ -216,7 +239,7 @@ export function StudyTranscript({
         ))}
       </div>
       {(tab === 'transcript' || tab === 'vocabulary') && aiRuntime}
-      <div className="transcript-tab-content">
+      <div className="transcript-tab-content" data-motion-direction={direction}>
       {transcriptionWorkspace && <StudyRegion open={tab === 'transcription'} keepMounted freezeOnExit={false}><div
         className="transcription-view"
         role="tabpanel"
@@ -305,6 +328,7 @@ export function StudyTranscript({
                 <div className="search-box">
                   <Search size={16} />
                   <input
+                    ref={searchInput}
                     aria-label={t('字幕を検索', 'Search transcript')}
                     placeholder={t('字幕を検索', 'Search transcript')}
                     value={search}
@@ -313,7 +337,7 @@ export function StudyTranscript({
                   <MotionRegion mode="status" as="span" open={!!search}>{search &&
                     <IconButton
                       label={t('検索をクリア', 'Clear search')}
-                      onClick={() => updateView({ search: '', scrollOffset: 0 })}
+                      onClick={() => { updateView({ search: '', scrollOffset: 0 }); searchInput.current?.focus(); }}
                     >
                       <X size={14} />
                     </IconButton>}</MotionRegion>
@@ -333,7 +357,10 @@ export function StudyTranscript({
                   {showTranslations ? t('訳を隠す', 'Hide translations') : t('訳を表示', 'Show translations')}
                 </Button>
               </div>
-              {segments.some(cue => cue.status === 'generated_review' || cue.timingPrecision === 'source_block') && <label className="transcript-marked-filter"><input type="checkbox" checked={markedOnly} onChange={event => setMarkedOnly(event.target.checked)} /><span>{t('注意のある箇所だけ表示', 'Show marked passages only')}</span></label>}
+              {(markedOnly || segments.some(isMarked)) && <label className="transcript-marked-filter"><input type="checkbox" checked={markedOnly} onChange={event => {
+                setMarkedOnly(event.target.checked);
+                updateView({ scrollOffset: 0, following: false });
+              }} /><span>{t('注意のある箇所だけ表示', 'Show marked passages only')}</span></label>}
               <MotionRegion mode="status" open={!!error}>{error && <p
                 className="notice warning"
                 role="alert"
@@ -358,8 +385,14 @@ export function StudyTranscript({
                     <EmptyState
                       icon={<Search size={24} />}
                       title={t('一致する字幕はありません', 'No matching subtitles')}
-                      description={t('別の単語で検索してください。', 'Try another word.')}
-                    />
+                      description={t('検索語や注意のある箇所の絞り込みを変えてください。', 'Try another search or change the marked-passage filter.')}
+                    >
+                      <Button onClick={() => {
+                        setMarkedOnly(false);
+                        updateView({ search: '', scrollOffset: 0 });
+                        searchInput.current?.focus();
+                      }}>{t('絞り込みをリセット', 'Reset filters')}</Button>
+                    </EmptyState>
                   )
                   : (
                     <div
@@ -369,7 +402,7 @@ export function StudyTranscript({
                       aria-label={t('字幕一覧', 'Subtitle list')}
                       onScroll={event => { if (!active || tab !== 'transcript') return; updateView({
                         scrollOffset: event.currentTarget.scrollTop,
-                        measurementCache: { search, showTranslations, width: event.currentTarget.clientWidth, items: virtualizer.takeSnapshot() },
+                        measurementCache: { search, showTranslations, markedOnly, width: event.currentTarget.clientWidth, items: virtualizer.takeSnapshot() },
                       }); }}
                       onWheel={() => updateView({ following: false })}
                       onTouchMove={() => updateView({ following: false })}
@@ -393,6 +426,8 @@ export function StudyTranscript({
                               ref={virtualizer.measureElement}
                               className={`transcript-row ${activeId === segment.id ? 'playing' : ''} ${selectedId === segment.id ? 'selected' : ''}`}
                               style={{ transform: `translateY(${item.start}px)` }}
+                              onFocusCapture={() => { setFocusedCue(segment.id); updateView({ following: false }); }}
+                              onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocusedCue(undefined); }}
                             >
                               <button
                                 type="button"
@@ -425,7 +460,7 @@ export function StudyTranscript({
                                 {showTranslations && segment.translation &&
                                   <p className="segment-translation">{segment.translation}</p>}
                                 {segment.timingPrecision === 'source_block' && <p className="source-block-note">{t('本文は取得済み・字幕の時刻は未確定', 'Text received · subtitle timing unavailable')}<br />{t('取得元の音声範囲', 'Source audio range')}: {timestamp(segment.startMs)}–{timestamp(segment.endMs)}</p>}
-                                {(segment.status === 'generated_review' || !subtitleUsable(segment)) &&
+                                {(isMarked(segment) || !subtitleUsable(segment)) &&
                                   <Badge tone="warning">{t('要確認', 'Needs review')}</Badge>}
                                 <div className="segment-actions">
                                   {onTranscribeRange && <Button
@@ -464,13 +499,14 @@ export function StudyTranscript({
                   : t('本文で確認、時刻から再生', 'Select text to inspect; play from timestamp')} />
                 <button
                   type="button"
-                  className={following && !search ? 'following' : ''}
+                  className={following && !search && !markedOnly ? 'following' : ''}
                   onClick={() => {
+                    setMarkedOnly(false);
                     updateView({ search: '', following: true });
                   }}
                 >
                   <Crosshair size={15} />
-                  <MotionSwap as="span" stateKey={following && !search ? 'following' : 'manual'}>{following && !search
+                  <MotionSwap as="span" stateKey={following && !search && !markedOnly ? 'following' : 'manual'}>{following && !search && !markedOnly
                     ? t('自動追従中', 'Following playback')
                     : t('再生中の字幕へ', 'Show current subtitle')}</MotionSwap>
                 </button>
