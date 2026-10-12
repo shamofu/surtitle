@@ -29,6 +29,7 @@ public static class SurtitleNativePointer {
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
     [DllImport("user32.dll", SetLastError = true)] static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll", SetLastError = true)] static extern bool ClientToScreen(IntPtr window, ref Point point);
     [DllImport("user32.dll", SetLastError = true)] static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
@@ -37,21 +38,89 @@ public static class SurtitleNativePointer {
     [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder name, int maximum);
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool GetCursorPos(out Point point);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool GetClipCursor(out Rect rect);
     [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
     [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, Input[] inputs, int size);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint process);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr data, uint size, out uint needed);
+    [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+    [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthority(IntPtr sid, uint index);
+    static string Integrity(uint process) {
+        IntPtr handle = OpenProcess(0x1000, false, process), token = IntPtr.Zero, data = IntPtr.Zero;
+        try {
+            if (handle == IntPtr.Zero || !OpenProcessToken(handle, 8, out token)) return "unavailable";
+            GetTokenInformation(token, 25, IntPtr.Zero, 0, out uint size);
+            if (size == 0 || size > 4096) return "unavailable";
+            data = Marshal.AllocHGlobal((int)size);
+            if (!GetTokenInformation(token, 25, data, size, out _)) return "unavailable";
+            var sid = Marshal.ReadIntPtr(data);
+            byte count = Marshal.ReadByte(GetSidSubAuthorityCount(sid));
+            return count == 0 ? "unavailable" : Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)count - 1)).ToString();
+        } catch { return "unavailable"; }
+        finally {
+            if (data != IntPtr.Zero) Marshal.FreeHGlobal(data);
+            if (token != IntPtr.Zero) CloseHandle(token);
+            if (handle != IntPtr.Zero) CloseHandle(handle);
+        }
+    }
+    static string InputContext(IntPtr root) {
+        GetCursorPos(out Point cursor); GetClipCursor(out Rect clip);
+        IntPtr cursorWindow = WindowFromPoint(cursor), foreground = GetForegroundWindow();
+        GetWindowThreadProcessId(cursorWindow, out uint cursorProcess);
+        GetWindowThreadProcessId(foreground, out uint foregroundProcess);
+        var result = "cursor=(" + cursor.X + "," + cursor.Y + ") HWND=0x" + cursorWindow.ToInt64().ToString("X") + " PID=" + cursorProcess
+            + "; clip=(" + clip.Left + "," + clip.Top + "," + clip.Right + "," + clip.Bottom + ")"
+            + "; helperIntegrity=" + Integrity((uint)Process.GetCurrentProcess().Id)
+            + "; foregroundIntegrity=" + Integrity(foregroundProcess);
+        if (root != IntPtr.Zero) {
+            GetWindowThreadProcessId(root, out uint rootProcess); GetWindowRect(root, out Rect outer);
+            var origin = new Point(); ClientToScreen(root, ref origin);
+            result += "; rootIntegrity=" + Integrity(rootProcess) + "; rootExStyle=0x" + GetWindowLongPtr(root, -20).ToInt64().ToString("X")
+                + "; rootOuter=(" + outer.Left + "," + outer.Top + "," + outer.Right + "," + outer.Bottom + ")"
+                + "; clientOrigin=(" + origin.X + "," + origin.Y + ")";
+        }
+        return result;
+    }
     static void ValidateRoot(IntPtr root, uint expectedProcess) {
         GetWindowThreadProcessId(root, out uint actualProcess);
         if (actualProcess != expectedProcess || GetParent(root) != IntPtr.Zero || !IsWindowVisible(root)) throw new ArgumentException("Input target must remain the uniquely identified test application's visible root");
     }
-    static Input[] PointerClick(int x, int y) {
+    static void MovePointer(int x, int y) {
         int left = GetSystemMetrics(76), top = GetSystemMetrics(77), width = GetSystemMetrics(78), height = GetSystemMetrics(79);
         if (width < 2 || height < 2 || x < left || x >= left + width || y < top || y >= top + height) throw new Exception("The owned test point is outside the attached desktop; no input was sent");
-        return new[] {
+        var inputs = new[] {
             new Input { Mouse = new MouseInput { X = (int)((long)(x - left) * 65535 / (width - 1)), Y = (int)((long)(y - top) * 65535 / (height - 1)), Flags = 0x8000 | 0x4000 | 0x0001 } },
+        };
+        if (SendInput(1, inputs, Marshal.SizeOf<Input>()) != 1) throw new Win32Exception(Marshal.GetLastWin32Error(), "Owned pointer movement failed; no button input was sent");
+        var clock = Stopwatch.StartNew();
+        Point actual;
+        do {
+            if (!GetCursorPos(out actual)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not acknowledge owned pointer movement; no button input was sent");
+            if (actual.X == x && actual.Y == y) return;
+            Thread.Sleep(20);
+        } while (clock.ElapsedMilliseconds < 500);
+        GetClipCursor(out Rect clip);
+        var owner = WindowFromPoint(actual);
+        GetWindowThreadProcessId(owner, out uint ownerProcess);
+        throw new Exception("Owned pointer movement did not reach its verified point; no button input was sent. "
+            + "Expected=(" + x + "," + y + "); actual=(" + actual.X + "," + actual.Y + ")"
+            + "; desktop=(" + left + "," + top + "," + width + "," + height + ")"
+            + "; clip=(" + clip.Left + "," + clip.Top + "," + clip.Right + "," + clip.Bottom + ")"
+            + "; cursor HWND=0x" + owner.ToInt64().ToString("X") + " PID=" + ownerProcess + "; " + InputContext(IntPtr.Zero));
+    }
+    static void PressPointer() {
+        var inputs = new[] {
             new Input { Mouse = new MouseInput { Flags = 0x0002 } },
             new Input { Mouse = new MouseInput { Flags = 0x0004 } },
         };
+        if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) != inputs.Length) throw new Win32Exception(Marshal.GetLastWin32Error(), "Owned pointer button input failed");
+    }
+    static bool CursorRemainsAt(Point expected, IntPtr window) {
+        return GetCursorPos(out Point actual) && actual.X == expected.X && actual.Y == expected.Y && WindowFromPoint(actual) == window;
     }
     static void EnsureIdlePointer(IntPtr root) {
         foreach (int key in new[] { 1, 2, 4, 5, 6, 16, 17, 18, 91, 92 }) {
@@ -85,17 +154,18 @@ public static class SurtitleNativePointer {
             foreach (int divisor in new[] { 2, 3, 4 }) {
                 var point = new Point { X = outer.Left + (outer.Right - outer.Left) / divisor, Y = y };
                 if (!IsOwnedCaption(root, expectedProcess, point)) continue;
-                var inputs = PointerClick(point.X, point.Y);
+                EnsureIdlePointer(root);
+                MovePointer(point.X, point.Y);
                 if (!IsOwnedCaption(root, expectedProcess, point)) throw new Exception("The owned titlebar point changed before activation; no input was sent");
                 EnsureIdlePointer(root);
                 ValidateRoot(root, expectedProcess);
-                if (WindowFromPoint(point) != root) throw new Exception("The owned titlebar point lost pointer ownership before activation; no input was sent");
-                if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) != inputs.Length) throw new Win32Exception(Marshal.GetLastWin32Error(), "Owned titlebar activation input failed");
+                if (!CursorRemainsAt(point, root)) throw new Exception("The owned titlebar point lost pointer ownership before activation; no button input was sent");
+                PressPointer();
                 return;
             }
             Thread.Sleep(20);
         }
-        throw new Exception("No uncovered HTCAPTION point belongs to the owned test root; no input was sent");
+        throw new Exception("No uncovered HTCAPTION point belongs to the owned test root; no input was sent. " + InputContext(root));
     }
     static void ActivateCore(IntPtr root, uint expectedProcess) {
         ValidateRoot(root, expectedProcess);
@@ -117,7 +187,7 @@ public static class SurtitleNativePointer {
                 + "; foreground HWND=0x" + foreground.ToInt64().ToString("X") + " PID=" + foregroundProcess
                 + " class=" + className + "; SetForegroundWindow=" + (requested.HasValue ? requested.Value.ToString() : "not needed")
                 + "; owned caption clicked=" + captionClicked
-                + "; waitedMs=" + clock.ElapsedMilliseconds);
+                + "; waitedMs=" + clock.ElapsedMilliseconds + "; " + InputContext(root));
         }
         ValidateRoot(root, expectedProcess);
     }
@@ -135,13 +205,14 @@ public static class SurtitleNativePointer {
         try {
             ActivateCore(root, expectedProcess);
             if (WindowFromPoint(new Point { X = x, Y = y }) != video) throw new Exception("The retained video point is covered by another HWND; no input was sent");
-            var inputs = PointerClick(x, y);
+            EnsureIdlePointer(root);
+            MovePointer(x, y);
             EnsureIdlePointer(root);
             ValidateRoot(root, expectedProcess);
             GetWindowThreadProcessId(video, out uint finalVideoProcess);
             if (finalVideoProcess != expectedProcess || GetParent(video) != root || !IsWindowVisible(video)
-                || GetForegroundWindow() != root || WindowFromPoint(new Point { X = x, Y = y }) != video) throw new Exception("The owned native video lost foreground or pointer ownership before input; no video input was sent");
-            if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) != inputs.Length) throw new Win32Exception(Marshal.GetLastWin32Error(), "Native video pointer input failed");
+                || GetForegroundWindow() != root || !CursorRemainsAt(new Point { X = x, Y = y }, video)) throw new Exception("The owned native video lost foreground or pointer ownership before input; no video input was sent");
+            PressPointer();
         } finally { SetThreadDpiAwarenessContext(previous); }
     }
 }

@@ -142,7 +142,8 @@ Assert-Payload
 Probe-Production
 $audioRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) ($config.identifier + '/card-audio')
 New-Item -ItemType Directory -Path $audioRoot -Force | Out-Null
-& ffmpeg -v error -i (Join-Path $workspace 'test-results/fixtures/日本語 & sample.mp4') -t 1 -map '0:a:0' -ac 1 -ar 16000 -c:a pcm_s16le (Join-Path $audioRoot 'installer-retention.wav')
+$ffmpeg = if ($env:FFMPEG_PATH) { $env:FFMPEG_PATH } else { (Get-Command ffmpeg -CommandType Application -ErrorAction Stop).Source }
+& $ffmpeg -v error -i (Join-Path $workspace 'test-results/fixtures/日本語 & sample.mp4') -t 1 -map '0:a:0' -ac 1 -ar 16000 -c:a pcm_s16le (Join-Path $audioRoot 'installer-retention.wav')
 if ($LASTEXITCODE -ne 0) { throw 'Generated card-audio retention fixture failed.' }
 foreach ($dataRoot in $dataRoots) {
     New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null

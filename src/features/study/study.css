@@ -224,6 +224,8 @@
   .study-companion-dock { --study-panel-height: max(340px, calc(100dvh - 116px)); }
 }
 @media (max-width: 700px) and (max-height: 680px) {
+  /* Reserve the full speed value without adding a second transport row. */
+  .study-left .player-control-row { column-gap: 0; }
   .study-left .speed-select > span { display: none; }
   .study-left .play-button { width: 44px; padding-inline: 0; }
   .study-left .play-button > span:last-child { display: none; }

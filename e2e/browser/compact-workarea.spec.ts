@@ -15,6 +15,44 @@ async function noOverflow(page: Page) {
   expect(await page.locator('.page-content').evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
   await expect(page.getByText('Unimplemented visual-test command:', { exact: false })).toHaveCount(0);
 }
+async function speedAdjustmentKeepsReadingVisible(page: Page, label: string, caption: Locator) {
+  const trigger = page.getByRole('button', { name: label, exact: true });
+  await reachable(trigger);
+  const layout = () => page.evaluate(() => {
+    const rect = (selector: string) => {
+      const bounds = document.querySelector(selector)!.getBoundingClientRect();
+      return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+    };
+    const rate = document.querySelector<HTMLButtonElement>('.playback-rate-trigger')!;
+    return { row: rect('.player-control-row'), caption: rect('.current-caption'), text: rect('.current-caption-text'),
+      rateWidth: rate.offsetWidth, rateHeight: rate.offsetHeight };
+  });
+  const before = await layout();
+  expect(before.row.height).toBe(40);
+  expect(before.rateHeight).toBe(40);
+  await trigger.click();
+  const slider = page.getByRole('slider', { name: label, exact: true });
+  await expect(slider).toBeFocused();
+  await slider.press('Home');
+  await expect(slider).toHaveValue('0.25');
+  await expect.poll(layout).toEqual(before);
+  await expect(caption).toBeInViewport({ ratio: 1 });
+  for (const [name, value] of [['0.75', '0.75'], ['1.25', '1.25'], ['3.0', '3']]) {
+    await page.getByRole('button', { name, exact: true }).click();
+    await expect(slider).toHaveValue(value);
+    await expect.poll(layout).toEqual(before);
+    await expect(caption).toBeInViewport({ ratio: 1 });
+  }
+  await slider.press('ArrowLeft');
+  await expect(slider).toHaveValue('2.95');
+  await expect.poll(layout).toEqual(before);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.playback-rate-popover')).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await expect(trigger).toHaveText('2.95×');
+  await expect.poll(layout).toEqual(before);
+  await expect(caption).toBeInViewport({ ratio: 1 });
+}
 
 for (const size of [{ width: 640, height: 360 }, { width: 800, height: 600 }, { width: 1024, height: 700 }]) {
   for (const locale of ['ja', 'en'] as const) {
@@ -56,6 +94,7 @@ for (const size of [{ width: 640, height: 360 }, { width: 800, height: 600 }, { 
       const caption = page.getByRole('region', { name: t('いまの字幕', 'Current subtitle'), exact: true });
       await expect(caption).toBeInViewport({ ratio: 1 });
       await reachable(page.getByRole('button', { name: t('意味を調べる', 'Explore meaning'), exact: true }));
+      if (size.width === 640) await speedAdjustmentKeepsReadingVisible(page, t('再生速度', 'Playback speed'), caption);
       await noOverflow(page);
       await page.screenshot({ path: testInfo.outputPath('study.png'), animations: 'disabled' });
       const toggle = page.getByRole('button', { name: t('字幕一覧', 'Transcript'), exact: true });
@@ -111,6 +150,7 @@ for (const deviceScaleFactor of [1, 1.5, 2]) {
         await reachable(page.getByRole('button', { name: 'Play', exact: true }));
         await expect(page.getByRole('region', { name: 'Current subtitle', exact: true })).toBeInViewport({ ratio: 1 });
         await reachable(page.getByRole('button', { name: 'Explore meaning', exact: true }));
+        if (viewport.width === 640) await speedAdjustmentKeepsReadingVisible(page, 'Playback speed', page.getByRole('region', { name: 'Current subtitle', exact: true }));
         await expect(page.locator('.native-player-viewport')).toHaveAttribute('data-native-placement', 'ready');
         const geometry = await page.evaluate(() => {
           const rect = document.querySelector('.native-player-viewport')!.getBoundingClientRect();

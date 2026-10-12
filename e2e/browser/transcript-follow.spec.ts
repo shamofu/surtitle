@@ -83,9 +83,13 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     expect(await status.evaluate(element => getComputedStyle(element.closest('details')!).overflow)).toBe('visible');
     const after = await page.locator('.transcript-scroll').boundingBox();
     expect(after).toEqual(before);
-    await page.evaluate(() => { (window as FixtureWindow).__transcriptRefresh.fail = false; });
     await page.keyboard.press('Tab');
-    await expect(disclosure.getByRole('button', { name: 'Retry loading subtitles' })).toBeFocused();
+    const retry = disclosure.getByRole('button', { name: 'Retry loading subtitles' });
+    await expect(retry).toBeFocused();
+    // Keep automatic recovery failing until the real keyboard retry begins.
+    await retry.evaluate(element => element.addEventListener('keydown', () => {
+      (window as FixtureWindow).__transcriptRefresh.fail = false;
+    }, { once: true, capture: true }));
     await page.keyboard.press('Enter');
     await expect(status).toHaveCount(0);
     await expect(page.getByRole('textbox', { name: 'Search transcript' })).toBeFocused();

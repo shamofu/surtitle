@@ -2,6 +2,7 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { installLearningFixture } from './learning-fixture';
+import { recordScreencast } from './drawer-motion-fixture';
 
 test.use({ video: { mode: 'on', size: { width: 1440, height: 1000 } } });
 
@@ -44,27 +45,17 @@ async function installReviewFixture(page: Page) {
 
 /** Keep real compositor frames alongside numeric observations, not simulated screenshots. */
 async function record<T>(page: Page, info: TestInfo, name: string, action: () => Promise<T>): Promise<T> {
-  const session = await page.context().newCDPSession(page);
-  const images: string[] = [];
-  session.on('Page.screencastFrame', event => {
-    images.push(event.data);
-    void session.send('Page.screencastFrameAck', { sessionId: event.sessionId });
-  });
-  await session.send('Page.startScreencast', { format: 'jpeg', quality: 85, everyNthFrame: 1 });
-  try {
-    const result = await action();
-    await session.send('Page.stopScreencast');
-    const observations = info.outputPath(`${name}-frames.json`);
-    await writeFile(observations, JSON.stringify(result, null, 2));
-    await info.attach(`${name}-frames.json`, { path: observations, contentType: 'application/json' });
-    expect(images.length, 'actual browser frames were recorded').toBeGreaterThan(1);
-    for (let index = 0; index < Math.min(images.length, 8); index++) {
-      const path = info.outputPath(`${name}-${index + 1}.jpg`);
-      await writeFile(path, Buffer.from(images[index], 'base64'));
-      await info.attach(`${name}-${index + 1}.jpg`, { path, contentType: 'image/jpeg' });
-    }
-    return result;
-  } finally { await session.detach(); }
+  const { observed: result, images } = await recordScreencast(page, action, 85);
+  const observations = info.outputPath(`${name}-frames.json`);
+  await writeFile(observations, JSON.stringify(result, null, 2));
+  await info.attach(`${name}-frames.json`, { path: observations, contentType: 'application/json' });
+  expect(images.length, 'actual browser frames were recorded').toBeGreaterThan(1);
+  for (let index = 0; index < Math.min(images.length, 8); index++) {
+    const path = info.outputPath(`${name}-${index + 1}.jpg`);
+    await writeFile(path, Buffer.from(images[index].data, 'base64'));
+    await info.attach(`${name}-${index + 1}.jpg`, { path, contentType: 'image/jpeg' });
+  }
+  return result;
 }
 
 for (const viewport of [{ width: 1440, height: 1000 }, { width: 920, height: 900 }]) {

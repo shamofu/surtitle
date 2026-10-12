@@ -60,12 +60,11 @@ jobs:
           pwsh native/windows/native-smoke.ps1
       - name: Generate project-owned media without acquiring speech recordings
         run: |
-          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
+          & e2e/support/prepare-ffmpeg.ps1
           node e2e/support/generate-fixtures.mjs
       - name: Process the complete six-hour fixture without cloud calls
         timeout-minutes: 15
         run: |
-          $env:SURTITLE_TEST_FFMPEG = (Get-Command ffmpeg -CommandType Application).Source
           $env:SURTITLE_LONG_AUDIO_FILE = Join-Path $PWD 'test-results/fixtures/six-hour-silence.flac'
           pnpm test:rust:required windows-six-hour
       - uses: actions/upload-artifact@v7.0.1

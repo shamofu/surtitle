@@ -191,6 +191,7 @@ jobs:
           native/build/native-ci-artifact.test.mjs
           native/windows/native-installer-prepare.test.mjs
           e2e/support/frontend-bundle.test.mjs
+          e2e/support/prepare-ffmpeg.test.mjs
       - run: pnpm build
       - run: pnpm test:rust
       - name: Verify ordinary builds cannot bypass evaluation accounting
@@ -204,9 +205,9 @@ jobs:
         run: |
           pnpm setup:driver
           pwsh e2e/support/prepare-webdriver.ps1 -InstallRuntime
-          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
+          & e2e/support/prepare-ffmpeg.ps1
           pnpm test:fixtures
-          ffmpeg -v error -f lavfi -i 'testsrc2=size=320x180:rate=12:duration=3' -c:v libaom-av1 -cpu-used 8 -crf 50 -y work/e2e-av1.mkv
+          & $env:FFMPEG_PATH -v error -f lavfi -i 'testsrc2=size=320x180:rate=12:duration=3' -c:v libaom-av1 -cpu-used 8 -crf 50 -y work/e2e-av1.mkv
           pnpm build:fixtures
           # Create mutable SQLite files with the same permissions as the app.
           $seedArguments = ConvertTo-Json -Compress -InputObject @("$PWD/work/e2e-windows", "$PWD/test-results/fixtures/日本語 & sample.mp4")
@@ -220,7 +221,6 @@ jobs:
           "SURTITLE_E2E_FRONTEND_SCRIPT=$frontendScript" >> $env:GITHUB_ENV
       - name: Required FFmpeg, libmpv and Silero regressions
         run: |
-          $env:SURTITLE_TEST_FFMPEG = (Get-Command ffmpeg -CommandType Application).Source
           pnpm test:rust:required windows-native
       - name: WebView2 and libmpv E2E
         run: pnpm test:e2e
@@ -306,7 +306,7 @@ jobs:
         run: |
           pnpm setup:driver
           pwsh e2e/support/prepare-webdriver.ps1 -InstallRuntime
-          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
+          & e2e/support/prepare-ffmpeg.ps1
           pnpm test:fixtures
       - name: Test production installer and assemble source/SBOM
         run: pwsh native/windows/package-verify.ps1
