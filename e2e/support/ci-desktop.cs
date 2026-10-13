@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -45,6 +47,16 @@ public static class SurtitleCiDesktop {
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern int GetClassName(IntPtr window, StringBuilder name, int count);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll", SetLastError = true)] static extern bool ShowWindowAsync(IntPtr window, int command);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool QueryFullProcessImageName(IntPtr process, uint flags, StringBuilder name, ref uint size);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetProcessTimes(IntPtr process, out long created, out long exited, out long kernel, out long user);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern int GetPackageFamilyName(IntPtr process, ref uint size, StringBuilder name);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr data, uint size, out uint required);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr text);
+    [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr memory);
 
     public sealed class InputWindow {
         public string hwnd { get; set; }
@@ -70,8 +82,19 @@ public static class SurtitleCiDesktop {
         public string error { get; set; }
         public int? nativeErrorCode { get; set; }
         public string inspectionError { get; set; }
+        public string currentUserSid { get; set; }
+        public RunnerTerminalIdentity runnerTerminalBefore { get; set; }
+        public RunnerTerminalIdentity runnerTerminalAfter { get; set; }
         public InputConsoleSnapshot before { get; set; }
         public InputConsoleSnapshot after { get; set; }
+    }
+    public sealed class RunnerTerminalIdentity {
+        public InputWindow window { get; set; }
+        public string executablePath { get; set; }
+        public long creationTime { get; set; }
+        public string userSid { get; set; }
+        public string packageFamilyName { get; set; }
+        public bool packaged { get { return packageFamilyName != null; } }
     }
     public static InputConsoleReceipt LastInputConsoleReceipt { get; private set; }
 
@@ -133,6 +156,121 @@ public static class SurtitleCiDesktop {
             || state.rootOwner.className != original.rootOwner.className)
             throw new InvalidOperationException("Attached console ownership, class or session is invalid or changed; no other window will be hidden");
     }
+    public static void ValidateRunnerTerminal(RunnerTerminalIdentity candidate, uint currentSessionId, string currentUserSid) {
+        long windowHandle;
+        if (candidate == null || candidate.window == null || string.IsNullOrEmpty(candidate.window.hwnd)
+            || !candidate.window.hwnd.StartsWith("0x", StringComparison.Ordinal)
+            || !long.TryParse(candidate.window.hwnd.Substring(2), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out windowHandle) || windowHandle == 0
+            || candidate.window.processId == 0 || candidate.window.sessionId != currentSessionId
+            || candidate.window.className != "CASCADIA_HOSTING_WINDOW_CLASS"
+            || string.IsNullOrEmpty(currentUserSid) || candidate.userSid != currentUserSid || candidate.creationTime <= 0
+            || string.IsNullOrEmpty(candidate.executablePath) || !Path.IsPathFullyQualified(candidate.executablePath)
+            || !string.Equals(Path.GetFileName(candidate.executablePath), "WindowsTerminal.exe", StringComparison.OrdinalIgnoreCase)
+            || (candidate.packageFamilyName != null && candidate.packageFamilyName != "Microsoft.WindowsTerminal_8wekyb3d8bbwe"
+                && candidate.packageFamilyName != "Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe"))
+            throw new InvalidOperationException("Foreground runner Terminal identity, user or session is invalid; no window will be hidden");
+    }
+    public static void ValidateSameRunnerTerminal(RunnerTerminalIdentity original, RunnerTerminalIdentity current) {
+        if (original == null || current == null || original.window == null || current.window == null
+            || original.window.hwnd != current.window.hwnd || original.window.processId != current.window.processId
+            || original.window.sessionId != current.window.sessionId || original.window.className != current.window.className
+            || original.creationTime != current.creationTime || original.userSid != current.userSid
+            || original.packageFamilyName != current.packageFamilyName
+            || !string.Equals(original.executablePath, current.executablePath, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Captured runner Terminal identity changed; no other window will be hidden");
+    }
+    static string ProcessUserSid(IntPtr process) {
+        IntPtr token = IntPtr.Zero, data = IntPtr.Zero, text = IntPtr.Zero;
+        try {
+            if (!OpenProcessToken(process, 8, out token)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot inspect runner token user"); // TOKEN_QUERY
+            uint size;
+            GetTokenInformation(token, 1, IntPtr.Zero, 0, out size); // TokenUser
+            int error = Marshal.GetLastWin32Error();
+            if (error != 122 || size == 0 || size > 65536) throw new Win32Exception(error, "Cannot size runner token user");
+            data = Marshal.AllocHGlobal(checked((int)size));
+            if (!GetTokenInformation(token, 1, data, size, out size)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot read runner token user");
+            if (!ConvertSidToStringSid(Marshal.ReadIntPtr(data), out text)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot format runner token user");
+            return Marshal.PtrToStringUni(text);
+        } finally {
+            if (text != IntPtr.Zero) LocalFree(text);
+            if (data != IntPtr.Zero) Marshal.FreeHGlobal(data);
+            if (token != IntPtr.Zero) CloseHandle(token);
+        }
+    }
+    static RunnerTerminalIdentity RunnerTerminalState(IntPtr process, IntPtr window) {
+        uint status = WaitForSingleObject(process, 0);
+        if (status == 0xffffffff) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot inspect runner Terminal lifetime");
+        if (status != 258) throw new InvalidOperationException("Captured runner Terminal process exited"); // WAIT_TIMEOUT means still running
+        var path = new StringBuilder(32768);
+        uint pathSize = checked((uint)path.Capacity);
+        if (!QueryFullProcessImageName(process, 0, path, ref pathSize)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot inspect runner Terminal executable");
+        long created, exited, kernel, user;
+        if (!GetProcessTimes(process, out created, out exited, out kernel, out user)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot inspect runner Terminal creation time");
+        uint familySize = 0;
+        int packageError = GetPackageFamilyName(process, ref familySize, null);
+        string family = null;
+        if (packageError == 122 && familySize > 0 && familySize <= 1024) {
+            var package = new StringBuilder(checked((int)familySize));
+            packageError = GetPackageFamilyName(process, ref familySize, package);
+            if (packageError != 0) throw new Win32Exception(packageError, "Cannot read runner Terminal package identity");
+            family = package.ToString();
+        } else if (packageError != 15700) { // APPMODEL_ERROR_NO_PACKAGE is an explicit unpackaged identity.
+            throw new Win32Exception(packageError, "Cannot inspect runner Terminal package identity");
+        }
+        return new RunnerTerminalIdentity { window = InputWindowSnapshot(window), executablePath = path.ToString(),
+            creationTime = created, userSid = ProcessUserSid(process), packageFamilyName = family };
+    }
+    static void HideInputWindow(InputConsoleReceipt receipt, InputWindow target, Func<bool, InputWindow> validate) {
+        var window = new IntPtr(Convert.ToInt64(target.hwnd.Substring(2), 16));
+        var current = validate(true);
+        if (current.visible) {
+            receipt.requestedHide = true;
+            bool accepted = ShowWindowAsync(window, 0); // SW_HIDE
+            int error = Marshal.GetLastWin32Error();
+            receipt.hideRequestAccepted = accepted;
+            if (!accepted) throw new Win32Exception(error, "Cannot request hiding the CI console");
+        }
+        var timeout = Stopwatch.StartNew();
+        while (true) {
+            current = validate(false);
+            receipt.after = InputConsoleState();
+            if (!current.visible && receipt.after.foreground.hwnd != target.hwnd) return;
+            if (timeout.ElapsedMilliseconds >= 3000) throw new InvalidOperationException("CI console did not leave the visible foreground within three seconds");
+            Thread.Sleep(50);
+        }
+    }
+    static void PrepareRunnerTerminal(InputConsoleReceipt receipt) {
+        var target = receipt.before.foreground;
+        if (target.className != "CASCADIA_HOSTING_WINDOW_CLASS") {
+            receipt.outcome = "no-runner-terminal";
+            receipt.after = InputConsoleState();
+            return;
+        }
+        // Hosted jobs own a fresh VM. Runner.Worker itself is started with
+        // CREATE_NO_WINDOW, so its shell cannot identify the runner's Terminal via GetConsoleWindow.
+        // https://github.com/actions/runner/blob/main/src/Runner.Listener/JobDispatcher.cs
+        var process = OpenProcess(0x00101000, false, target.processId); // QUERY_LIMITED_INFORMATION | SYNCHRONIZE
+        if (process == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot inspect the captured runner Terminal");
+        try {
+            var window = new IntPtr(Convert.ToInt64(target.hwnd.Substring(2), 16));
+            receipt.currentUserSid = ProcessUserSid(new IntPtr(-1)); // GetCurrentProcess pseudo-handle
+            var original = RunnerTerminalState(process, window);
+            receipt.runnerTerminalBefore = original;
+            if (original.window.processId != target.processId || original.window.hwnd != target.hwnd)
+                throw new InvalidOperationException("Captured foreground Terminal window changed before inspection");
+            ValidateRunnerTerminal(original, receipt.before.sessionId, receipt.currentUserSid);
+            HideInputWindow(receipt, target, beforeHide => {
+                var current = RunnerTerminalState(process, window);
+                receipt.runnerTerminalAfter = current;
+                ValidateRunnerTerminal(current, receipt.before.sessionId, receipt.currentUserSid);
+                ValidateSameRunnerTerminal(original, current);
+                if (beforeHide && GetForegroundWindow() != window)
+                    throw new InvalidOperationException("Captured runner Terminal is no longer foreground; no other window will be hidden");
+                return current.window;
+            });
+            receipt.outcome = receipt.requestedHide ? "runner-terminal-hidden" : "runner-terminal-already-hidden";
+        } finally { CloseHandle(process); }
+    }
     public static InputConsoleReceipt PrepareInputConsole() {
         RequireHostedRunner();
         var receipt = new InputConsoleReceipt();
@@ -140,30 +278,14 @@ public static class SurtitleCiDesktop {
         try {
             receipt.before = InputConsoleState();
             if (receipt.before.attachedConsole.hwnd == "0x0") {
-                receipt.outcome = "no-console";
-                receipt.after = InputConsoleState();
-                if (receipt.after.attachedConsole.hwnd != "0x0") throw new InvalidOperationException("Console attachment changed during CI input preparation");
+                PrepareRunnerTerminal(receipt);
             } else {
                 ValidateConsoleOwnership(receipt.before, receipt.before);
-                var current = InputConsoleState();
-                ValidateConsoleOwnership(current, receipt.before);
-                if (current.rootOwner.visible) {
-                    var root = new IntPtr(Convert.ToInt64(current.rootOwner.hwnd.Substring(2), 16));
-                    receipt.requestedHide = true;
-                    bool accepted = ShowWindowAsync(root, 0); // SW_HIDE
-                    int error = Marshal.GetLastWin32Error();
-                    receipt.hideRequestAccepted = accepted;
-                    if (!accepted) throw new Win32Exception(error, "Cannot request hiding the attached CI console");
-                }
-                var timeout = Stopwatch.StartNew();
-                while (true) {
-                    current = InputConsoleState();
-                    receipt.after = current;
+                HideInputWindow(receipt, receipt.before.rootOwner, beforeHide => {
+                    var current = InputConsoleState();
                     ValidateConsoleOwnership(current, receipt.before);
-                    if (!current.rootOwner.visible && current.foreground.hwnd != current.rootOwner.hwnd) break;
-                    if (timeout.ElapsedMilliseconds >= 3000) throw new InvalidOperationException("Attached CI console did not leave the visible foreground within three seconds");
-                    Thread.Sleep(50);
-                }
+                    return current.rootOwner;
+                });
                 receipt.outcome = receipt.requestedHide ? "hidden" : "already-hidden";
             }
             receipt.passed = true;

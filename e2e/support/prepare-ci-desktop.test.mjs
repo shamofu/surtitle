@@ -76,6 +76,11 @@ test.runIf(process.platform === 'win32')('compiles the Win32 layout and refuses 
     $ErrorActionPreference = 'Stop'
     Add-Type -Path $env:SURTITLE_CI_DESKTOP_SOURCE
     if ([Runtime.InteropServices.Marshal]::SizeOf([type][SurtitleCiDesktop+DevMode]) -ne 220) { throw 'Invalid DEVMODEW layout' }
+    # Read only this PowerShell process; HWND zero cannot name a hide target.
+    $probe = [SurtitleCiDesktop].GetMethod('RunnerTerminalState', [Reflection.BindingFlags]'NonPublic,Static')
+    $identity = $probe.Invoke($null, [object[]]@([IntPtr]::new(-1), [IntPtr]::Zero))
+    if ([IO.Path]::GetFileName($identity.executablePath) -ine 'pwsh.exe' -or $identity.creationTime -le 0) { throw 'Current process identity was not read correctly' }
+    if ($identity.userSid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or $identity.window.hwnd -ne '0x0') { throw 'Current token user or zero-window probe changed' }
     try { [SurtitleCiDesktop]::RequireHostedRunner(); throw 'Unexpected local permission' }
     catch { if ($_.Exception.Message -notmatch 'restricted to GitHub-hosted') { throw }; 'Local display untouched' }
     try { [SurtitleCiDesktop]::PrepareInputConsole(); throw 'Unexpected local console access' }
@@ -99,6 +104,69 @@ test.runIf(process.platform === 'win32')('console preparation refuses local and 
       assert.deepEqual(readdirSync(cwd), []);
     }
   } finally { rmSync(cwd, { recursive: true }); }
+}, 15000);
+
+test.runIf(process.platform === 'win32')('detached runner terminal policy rejects foreign owners and changed foreground process identities', () => {
+  // Exercise only the pure identity checks. No hosted environment is fabricated
+  // and no native window/process discovery or visibility API is invoked.
+  const result = execFileSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', String.raw`
+    $ErrorActionPreference = 'Stop'
+    Add-Type -Path $env:SURTITLE_CI_DESKTOP_SOURCE
+    function New-Identity {
+      [SurtitleCiDesktop+RunnerTerminalIdentity]@{
+        window = [SurtitleCiDesktop+InputWindow]@{
+          hwnd = '0x123'; processId = 42; sessionId = 2
+          className = 'CASCADIA_HOSTING_WINDOW_CLASS'; visible = $true
+        }
+        executablePath = 'C:\Program Files\WindowsApps\Microsoft.WindowsTerminal_1.0_x64__8wekyb3d8bbwe\WindowsTerminal.exe'
+        creationTime = 123456789; userSid = 'S-1-5-21-1-2-3-1001'
+        packageFamilyName = 'Microsoft.WindowsTerminal_8wekyb3d8bbwe'
+      }
+    }
+    function Assert-Rejected([scriptblock]$action) {
+      try { & $action } catch { return }
+      throw 'An unrelated or changed terminal identity was accepted'
+    }
+    $original = New-Identity
+    foreach ($family in @('Microsoft.WindowsTerminal_8wekyb3d8bbwe', 'Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe', $null)) {
+      $candidate = New-Identity
+      # PowerShell coerces a null string-property assignment to an empty string.
+      $candidate.GetType().GetProperty('packageFamilyName').SetValue($candidate, $family)
+      [SurtitleCiDesktop]::ValidateRunnerTerminal($candidate, 2, $original.userSid)
+    }
+    $cases = @(
+      @{ userSid = 'S-1-5-21-1-2-3-1002' },
+      @{ executablePath = 'C:\Tools\pwsh.exe' },
+      @{ executablePath = 'WindowsTerminal.exe' },
+      @{ creationTime = 0 },
+      @{ packageFamilyName = 'Unrelated.Package_untrusted' }
+    )
+    foreach ($change in $cases) {
+      $candidate = New-Identity
+      foreach ($key in $change.Keys) { $candidate.$key = $change[$key] }
+      Assert-Rejected { [SurtitleCiDesktop]::ValidateRunnerTerminal($candidate, 2, $original.userSid) }
+    }
+    foreach ($change in @(@{ hwnd = '0x0' }, @{ processId = 0 }, @{ sessionId = 3 }, @{ className = 'UnrelatedWindow' })) {
+      $candidate = New-Identity
+      foreach ($key in $change.Keys) { $candidate.window.$key = $change[$key] }
+      Assert-Rejected { [SurtitleCiDesktop]::ValidateRunnerTerminal($candidate, 2, $original.userSid) }
+    }
+    foreach ($change in @(@{ hwnd = '0x456' }, @{ processId = 43 }, @{ sessionId = 3 }, @{ className = 'UnrelatedWindow' })) {
+      $candidate = New-Identity
+      foreach ($key in $change.Keys) { $candidate.window.$key = $change[$key] }
+      Assert-Rejected { [SurtitleCiDesktop]::ValidateSameRunnerTerminal($original, $candidate) }
+    }
+    foreach ($change in @(@{ creationTime = 123456790 }, @{ userSid = 'S-1-5-21-1-2-3-1002' }, @{ executablePath = 'C:\Other\WindowsTerminal.exe' }, @{ packageFamilyName = 'Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe' })) {
+      $candidate = New-Identity
+      foreach ($key in $change.Keys) { $candidate.$key = $change[$key] }
+      Assert-Rejected { [SurtitleCiDesktop]::ValidateSameRunnerTerminal($original, $candidate) }
+    }
+    $hidden = New-Identity
+    $hidden.window.visible = $false
+    [SurtitleCiDesktop]::ValidateSameRunnerTerminal($original, $hidden)
+    'Runner terminal ownership policy verified without native input'
+  `], { encoding: 'utf8', windowsHide: true, env: { ...process.env, CI: '', GITHUB_ACTIONS: '', RUNNER_ENVIRONMENT: '', SURTITLE_CI_DESKTOP_SOURCE: fileURLToPath(new URL('./ci-desktop.cs', import.meta.url)) } });
+  assert.match(result, /Runner terminal ownership policy verified without native input/);
 }, 15000);
 test('both native Windows jobs prepare desktop capacity before Rust or application builds and retain the receipt', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');

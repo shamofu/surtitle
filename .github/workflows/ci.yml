@@ -147,8 +147,11 @@ jobs:
           package-manager-cache: false
       - name: Prepare hosted Windows desktop capacity
         run: node e2e/support/prepare-ci-desktop.mjs
-      - name: Verify restricted native input desktop access
-        run: node e2e/support/prepare-native-input.mjs
+      - name: Prepare and verify native input desktop
+        run: |
+          node e2e/support/prepare-native-input.mjs
+          & e2e/support/ci-desktop.ps1 -Action prepare-input
+          Copy-Item -LiteralPath test-results/windows-input-console.json -Destination test-results/windows-input-console-pre-build.json
       - name: Read the native Rust toolchain pin
         id: rust
         shell: bash
@@ -230,7 +233,7 @@ jobs:
       - name: WebView2 and libmpv E2E
         timeout-minutes: 50
         run: |
-          # Resolve the inherited terminal from this outer shell before lowering the test process tree.
+          # Prepare the runner desktop before lowering the test process tree for ordinary-user input.
           & e2e/support/ci-desktop.ps1 -Action prepare-input
           pnpm test:e2e
         env:
