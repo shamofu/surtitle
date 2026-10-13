@@ -78,8 +78,27 @@ test.runIf(process.platform === 'win32')('compiles the Win32 layout and refuses 
     if ([Runtime.InteropServices.Marshal]::SizeOf([type][SurtitleCiDesktop+DevMode]) -ne 220) { throw 'Invalid DEVMODEW layout' }
     try { [SurtitleCiDesktop]::RequireHostedRunner(); throw 'Unexpected local permission' }
     catch { if ($_.Exception.Message -notmatch 'restricted to GitHub-hosted') { throw }; 'Local display untouched' }
+    try { [SurtitleCiDesktop]::PrepareInputConsole(); throw 'Unexpected local console access' }
+    catch { if ($_.Exception.Message -notmatch 'restricted to GitHub-hosted') { throw }; 'Local console untouched' }
   `], { encoding: 'utf8', windowsHide: true, env: { ...process.env, CI: '', GITHUB_ACTIONS: '', RUNNER_ENVIRONMENT: '', SURTITLE_CI_DESKTOP_SOURCE: fileURLToPath(new URL('./ci-desktop.cs', import.meta.url)) } });
   assert.match(result, /Local display untouched/);
+  assert.match(result, /Local console untouched/);
+}, 15000);
+
+test.runIf(process.platform === 'win32')('console preparation refuses local and self-hosted runs before creating evidence', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'surtitle-ci-console-'));
+  try {
+    for (const environment of [{}, { ...hosted, RUNNER_ENVIRONMENT: 'self-hosted' }]) {
+      const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File',
+        fileURLToPath(new URL('./ci-desktop.ps1', import.meta.url)), '-Action', 'prepare-input'], {
+        cwd, encoding: 'utf8', windowsHide: true,
+        env: { ...process.env, CI: '', GITHUB_ACTIONS: '', RUNNER_ENVIRONMENT: '', ...environment },
+      });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /restricted to GitHub-hosted/);
+      assert.deepEqual(readdirSync(cwd), []);
+    }
+  } finally { rmSync(cwd, { recursive: true }); }
 }, 15000);
 test('both native Windows jobs prepare desktop capacity before Rust or application builds and retain the receipt', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');

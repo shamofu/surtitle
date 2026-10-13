@@ -229,7 +229,10 @@ jobs:
           pnpm test:rust:required windows-native
       - name: WebView2 and libmpv E2E
         timeout-minutes: 50
-        run: pnpm test:e2e
+        run: |
+          # Resolve the inherited terminal from this outer shell before lowering the test process tree.
+          & e2e/support/ci-desktop.ps1 -Action prepare-input
+          pnpm test:e2e
         env:
           SURTITLE_E2E_BINARY: ${{ github.workspace }}\target\debug\surtitle.exe
           SURTITLE_E2E_DATA_DIR: ${{ github.workspace }}\work\e2e-windows
