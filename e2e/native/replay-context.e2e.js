@@ -20,6 +20,13 @@ let originalSettings, originalTool, originalCues = [], nominalCues = [], ledgerB
 const savedCards = [];
 
 const ledger = () => readFeeLedger(dataDirectory);
+async function timedStep(label, run) {
+  const started = Date.now();
+  console.info(`[replay-context] ${label}: started`);
+  const result = await run();
+  console.info(`[replay-context] ${label}: completed in ${Date.now() - started} ms`);
+  return result;
+}
 function readClip(card) {
   assert(card.audioPath && isAbsolute(card.audioPath), 'Expected an absolute saved clip path');
   const inside = relative(resolve(dataDirectory, 'card-audio'), resolve(card.audioPath));
@@ -222,40 +229,51 @@ async function assertNominalUnchanged() {
     await assertNominalUnchanged();
   });
 
-  it('records actual PCM extraction ranges and preserves existing clips after setting and source edits', async () => {
-    await control({ action: 'pause' });
-    const candidate = (await invoke('scan_external_tools')).find(item => item.toolId === 'ffmpeg' && item.selectable);
-    assert(candidate, 'Select a compatible existing FFmpeg/ffprobe pair on PATH for this native test');
-    await invoke('set_tool_provider', { request: { toolId: 'ffmpeg', provider: 'external', path: candidate.path } });
-    for (const context of [0, 150, 1000]) {
-      const before = await snapshot();
-      await invoke('update_settings', { settings: { ...before.settings, replayContextMs: context } });
-      const cue = nominalCues[1];
-      await invoke('save_card', { request: { mediaId, segmentId: cue.id, term: `replay context ${context}`, meaning: 'A context regression fixture', example: cue.text, explanation: 'Saved explanation from the original subtitle.' } });
-      const card = (await snapshot()).cards.find(item => !before.cards.some(previous => previous.id === item.id));
-      assert(card, 'Saving the source did not produce a card');
-      savedCards.push(card);
-      assert.equal(card.startMs, 3000);
-      assert.equal(card.endMs, 3750);
-      assert.deepEqual(card.sourceCues, [cue]);
-      assert.deepEqual(card.audioClipRange, { startMs: 3000 - context, endMs: 3750 + context });
-      const clip = readClip(card);
-      assert.equal(clip.sampleCount, (750 + context * 2) * 16, 'Extracted PCM duration does not match its stored actual source range');
-      card.testClip = clip;
+  describe('retained PCM card clips', () => {
+    const contexts = [0, 150, 1000];
+    before(async () => {
+      await control({ action: 'pause' });
+      const candidate = (await timedStep('scan external tools', () => invoke('scan_external_tools'))).find(item => item.toolId === 'ffmpeg' && item.selectable);
+      assert(candidate, 'Select a compatible existing FFmpeg/ffprobe pair on PATH for this native test');
+      await timedStep('select external FFmpeg', () => invoke('set_tool_provider', { request: { toolId: 'ffmpeg', provider: 'external', path: candidate.path } }));
+    });
+    // Each save hashes and probes the real external tools before extracting PCM.
+    // Give each extraction its own test budget; retain all clips for one restart.
+    for (const context of contexts) {
+      it(`records the actual PCM extraction range with ${context} ms of context`, async () => {
+        const before = await snapshot();
+        await invoke('update_settings', { settings: { ...before.settings, replayContextMs: context } });
+        const cue = nominalCues[1];
+        await timedStep(`extract card with ${context} ms context`, () => invoke('save_card', { request: { mediaId, segmentId: cue.id, term: `replay context ${context}`, meaning: 'A context regression fixture', example: cue.text, explanation: 'Saved explanation from the original subtitle.' } }));
+        const card = (await snapshot()).cards.find(item => !before.cards.some(previous => previous.id === item.id));
+        assert(card, 'Saving the source did not produce a card');
+        savedCards.push(card);
+        assert.equal(card.startMs, 3000);
+        assert.equal(card.endMs, 3750);
+        assert.deepEqual(card.sourceCues, [cue]);
+        assert.deepEqual(card.audioClipRange, { startMs: 3000 - context, endMs: 3750 + context });
+        const clip = readClip(card);
+        assert.equal(clip.sampleCount, (750 + context * 2) * 16, 'Extracted PCM duration does not match its stored actual source range');
+        card.testClip = clip;
+      });
     }
-    const beforeChange = await snapshot();
-    await invoke('update_settings', { settings: { ...beforeChange.settings, replayContextMs: 0 } });
-    await invoke('edit_segment', { segment: { ...nominalCues[1], startMs: 3100, endMs: 3800, text: 'Edited source after the audio was saved.' } });
-    await browser.reloadSession();
-    await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__));
-    const persisted = await snapshot();
-    assert.equal(persisted.settings.replayContextMs, 0);
-    for (const saved of savedCards) {
-      const card = persisted.cards.find(item => item.id === saved.id);
-      const { testClip, ...original } = saved;
-      assert.deepEqual(card, original, 'A settings/source edit changed the frozen learning card');
-      assert.deepEqual(readClip(card), testClip, 'A settings/source edit changed an existing audio clip');
-    }
-    assert.deepEqual(ledger(), ledgerBefore);
+    it('preserves all three PCM clips after setting and source edits and a native restart', async () => {
+      assert.equal(savedCards.length, contexts.length, 'All context extractions must finish before checking persistence');
+      assert(savedCards.every(card => card.testClip), 'All context clips must pass PCM validation before checking persistence');
+      const beforeChange = await snapshot();
+      await invoke('update_settings', { settings: { ...beforeChange.settings, replayContextMs: 0 } });
+      await invoke('edit_segment', { segment: { ...nominalCues[1], startMs: 3100, endMs: 3800, text: 'Edited source after the audio was saved.' } });
+      await timedStep('restart native session', () => browser.reloadSession());
+      await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__));
+      const persisted = await snapshot();
+      assert.equal(persisted.settings.replayContextMs, 0);
+      for (const saved of savedCards) {
+        const card = persisted.cards.find(item => item.id === saved.id);
+        const { testClip, ...original } = saved;
+        assert.deepEqual(card, original, 'A settings/source edit changed the frozen learning card');
+        assert.deepEqual(readClip(card), testClip, 'A settings/source edit changed an existing audio clip');
+      }
+      assert.deepEqual(ledger(), ledgerBefore);
+    });
   });
 });

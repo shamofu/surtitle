@@ -24,8 +24,12 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await expect(transcript).toHaveAttribute('aria-expanded', 'false');
       await expect(transcript).toBeInViewport({ ratio: 1 });
       const expectTabBesideVideo = async () => {
-        const video = await page.getByTestId('native-player-viewport').boundingBox();
-        const tab = await transcript.boundingBox();
+        // The player and dock resize together, so compare geometry from one frame.
+        const [video, tab] = await page.evaluate(elements => elements.map(element => {
+          if (!element || ['hidden', 'collapse'].includes(getComputedStyle(element).visibility)) return null;
+          const rect = element.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0 ? rect.toJSON() : null;
+        }), [await page.getByTestId('native-player-viewport').elementHandle(), await transcript.elementHandle()]);
         expect(video).not.toBeNull(); expect(tab).not.toBeNull();
         expect(video!.x + video!.width <= tab!.x + 1 || video!.y + video!.height <= tab!.y + 1).toBe(true);
         expect(await transcript.evaluate(element => !element.closest('[inert], [hidden], [aria-hidden="true"]'))).toBe(true);

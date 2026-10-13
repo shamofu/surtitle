@@ -39,6 +39,7 @@ public static class SurtitleNativePointer {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder name, int maximum);
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll", SetLastError = true)] static extern bool GetCursorPos(out Point point);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll", SetLastError = true)] static extern bool GetClipCursor(out Rect rect);
     [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
     [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
@@ -72,10 +73,13 @@ public static class SurtitleNativePointer {
         IntPtr cursorWindow = WindowFromPoint(cursor), foreground = GetForegroundWindow();
         GetWindowThreadProcessId(cursorWindow, out uint cursorProcess);
         GetWindowThreadProcessId(foreground, out uint foregroundProcess);
+        var foregroundClass = new StringBuilder(256);
+        GetClassName(foreground, foregroundClass, foregroundClass.Capacity);
         var result = "cursor=(" + cursor.X + "," + cursor.Y + ") HWND=0x" + cursorWindow.ToInt64().ToString("X") + " PID=" + cursorProcess
             + "; clip=(" + clip.Left + "," + clip.Top + "," + clip.Right + "," + clip.Bottom + ")"
             + "; helperIntegrity=" + Integrity((uint)Process.GetCurrentProcess().Id)
-            + "; foregroundIntegrity=" + Integrity(foregroundProcess);
+            + "; foregroundIntegrity=" + Integrity(foregroundProcess)
+            + "; foreground HWND=0x" + foreground.ToInt64().ToString("X") + " PID=" + foregroundProcess + " class=" + foregroundClass;
         if (root != IntPtr.Zero) {
             GetWindowThreadProcessId(root, out uint rootProcess); GetWindowRect(root, out Rect outer);
             var origin = new Point(); ClientToScreen(root, ref origin);
@@ -140,6 +144,22 @@ public static class SurtitleNativePointer {
         int coordinates = unchecked((int)((uint)(ushort)point.Y << 16 | (ushort)point.X));
         return SendMessageTimeout(root, 0x0084, UIntPtr.Zero, new IntPtr(coordinates), 0x23, 200, out UIntPtr hit) != IntPtr.Zero && hit.ToUInt64() == 2;
     }
+    static void PositionOwnedCaption(IntPtr root, uint expectedProcess, Point point) {
+        if (!IsOwnedCaption(root, expectedProcess, point)) throw new Exception("The caption positioning target is not owned; no input was sent");
+        EnsureIdlePointer(root);
+        // SendInput movement may be blocked while an elevated CI console is
+        // foreground. Position only over our verified, uncovered caption; the
+        // following button event still uses SendInput and its integrity checks.
+        // SetCursorPos requires the current input desktop and station access.
+        // Never switch desktops, change permissions or inject into that console.
+        if (!SetCursorPos(point.X, point.Y)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not position over the owned caption; no button input was sent");
+        var clock = Stopwatch.StartNew();
+        do {
+            if (CursorRemainsAt(point, root)) return;
+            Thread.Sleep(20);
+        } while (clock.ElapsedMilliseconds < 500);
+        throw new Exception("The owned caption did not acknowledge pointer positioning; no button input was sent. " + InputContext(root));
+    }
     static void ActivateCaption(IntPtr root, uint expectedProcess) {
         ValidateRoot(root, expectedProcess);
         // Raise only the test window, preserving its position, size and inactive
@@ -155,11 +175,15 @@ public static class SurtitleNativePointer {
                 var point = new Point { X = outer.Left + (outer.Right - outer.Left) / divisor, Y = y };
                 if (!IsOwnedCaption(root, expectedProcess, point)) continue;
                 EnsureIdlePointer(root);
-                MovePointer(point.X, point.Y);
+                IntPtr previousForeground = GetForegroundWindow();
+                PositionOwnedCaption(root, expectedProcess, point);
                 if (!IsOwnedCaption(root, expectedProcess, point)) throw new Exception("The owned titlebar point changed before activation; no input was sent");
                 EnsureIdlePointer(root);
                 ValidateRoot(root, expectedProcess);
                 if (!CursorRemainsAt(point, root)) throw new Exception("The owned titlebar point lost pointer ownership before activation; no button input was sent");
+                IntPtr currentForeground = GetForegroundWindow();
+                if (currentForeground == root) return;
+                if (currentForeground != previousForeground) throw new Exception("Foreground ownership changed during caption positioning; no button input was sent. " + InputContext(root));
                 PressPointer();
                 return;
             }

@@ -173,6 +173,7 @@ for (const locale of ['en', 'ja'] as const) {
     const back = page.getByRole('button', { name: locale === 'ja' ? '字幕一覧へ戻る' : 'Back to transcript', exact: true });
     await search.fill('coast');
     await translations.click();
+    await expect(search).toHaveValue('coast');
     await list.dispatchEvent('wheel', { deltaY: 1200 });
     await list.evaluate(element => { element.scrollTop = 1200; element.dispatchEvent(new Event('scroll', { bubbles: true })); });
     await expect.poll(() => list.evaluate(element => element.scrollTop)).toBeGreaterThan(1000);
@@ -184,7 +185,9 @@ for (const locale of ['en', 'ja'] as const) {
       });
     });
     expect(index).toBeGreaterThanOrEqual(0);
-    const initialPlay = list.locator('.transcript-row').nth(index).locator('.segment-time');
+    const initialRow = list.locator('.transcript-row').nth(index);
+    await expect(initialRow.locator('.segment-text')).toContainText('coast');
+    const initialPlay = initialRow.locator('.segment-time');
     const time = (await initialPlay.textContent())!.trim();
     const playName = (await initialPlay.getAttribute('aria-label'))!;
     // Search is cleared after playback starts, so identify the cue independently

@@ -348,6 +348,42 @@ async function inspectCurrent() {
   await screen.findByRole('button', { name: 'Resume from original position' });
 }
 
+it('marks a visible opening panel disabled until native placement accepts input, then retains search and focus', async () => {
+  mount();
+  await ready();
+  const viewport = document.querySelector<HTMLElement>('.native-player-viewport')!;
+  const holdPlacement = (event: Event) => {
+    if (event instanceof CustomEvent && event.detail?.immediate) viewport.dataset.nativePlacement = 'pending';
+  };
+  window.addEventListener('surtitle-player-layout', holdPlacement);
+  try {
+    await openTranscript();
+    const panel = document.querySelector<HTMLElement>('.study-companion')!;
+    const search = screen.getByLabelText('Search transcript');
+    expect(panel).toBeVisible();
+    expect(panel).toHaveAttribute('inert');
+    // Inert prevents actual focus; explicit disabled semantics also tell input
+    // automation and accessibility clients that a visible field is not ready.
+    expect(search.closest('[aria-disabled="true"]')).toBe(panel);
+    await act(async () => { viewport.dataset.nativePlacement = 'ready'; });
+    expect(panel).not.toHaveAttribute('inert');
+    expect(panel).not.toHaveAttribute('aria-disabled');
+    search.focus();
+    fireEvent.change(search, { target: { value: 'coast' } });
+    fireEvent.resize(window);
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue('coast');
+    expect(panel).not.toHaveAttribute('aria-disabled');
+    fireEvent.click(screen.getByRole('button', { name: 'Transcript' }));
+    await waitFor(() => expect(panel).toHaveAttribute('aria-disabled', 'true'));
+    await openTranscript();
+    await act(async () => { viewport.dataset.nativePlacement = 'ready'; });
+    expect(screen.getByLabelText('Search transcript')).toBe(search);
+    expect(search).toHaveValue('coast');
+    expect(panel).not.toHaveAttribute('aria-disabled');
+  } finally { window.removeEventListener('surtitle-player-layout', holdPlacement); }
+});
+
 it('distinguishes initial study loading, failure, and a genuinely missing material', async () => {
   fixture.snapshotAvailable = false;
   fixture.snapshotLoading = true;

@@ -11,7 +11,7 @@ const invoke = (command, args = {}) => browser.execute(async (name, parameters) 
 const snapshot = () => invoke('get_app_snapshot');
 const navigate = path => browser.execute(next => { window.history.pushState({}, '', next); window.dispatchEvent(new PopStateEvent('popstate')); }, path);
 const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex');
-let server, serverUrl, originalSettings, originalFfmpeg;
+let server, serverUrl, originalSettings, originalFfmpeg, managedMediaId;
 async function ready() { await browser.setTimeout({ script: 180000 }); await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__)); await $('h1').waitForDisplayed(); }
 async function playerReady() {
   await browser.waitUntil(async () => {
@@ -54,6 +54,14 @@ async function replaceValue(element, value) {
   await expect(element).toHaveValue(value);
 }
 async function cardArticle() { await navigate('/cards'); const search = $('[aria-label="Search your phrases"]'); await search.waitForEnabled(); await replaceValue(search, 'managed phrase'); await browser.waitUntil(async () => (await $$('.phrase-card')).length === 1); return $('.phrase-card'); }
+async function importMultitrack(title) {
+  assert(existsSync(source), 'Generate the multitrack fixture before native E2E');
+  const imported = await invoke('import_local_media', { request: { kind: 'local', pathOrUrl: source, title, learningLanguage: 'en', explanationLanguage: 'ja' } });
+  assert(imported.created, 'Each media-management case must start with a fresh imported media record');
+  managedMediaId = imported.mediaId;
+  await navigate(`/study/${managedMediaId}`); await playerReady();
+  return managedMediaId;
+}
 
 (process.platform === 'win32' ? describe : describe.skip)('native media management and background downloads', () => {
   before(async () => {
@@ -65,19 +73,25 @@ async function cardArticle() { await navigate('/cards'); const search = $('[aria
     assert(ffmpeg); await invoke('set_tool_provider', { request: { toolId: 'ffmpeg', provider: 'external', path: ffmpeg.path } });
     await browser.refresh(); await ready();
   });
+  beforeEach(async () => { await navigate('/'); await browser.refresh(); await ready(); });
+  afterEach(async () => {
+    if (!managedMediaId) return;
+    const current = await snapshot();
+    for (const card of current.cards.filter(item => item.mediaId === managedMediaId)) await invoke('delete_card', { cardId: card.id });
+    if (current.media.some(item => item.id === managedMediaId)) await invoke('remove_media', { mediaId: managedMediaId });
+    managedMediaId = undefined;
+  });
   after(async () => {
     if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
     if (originalFfmpeg) await invoke('set_tool_provider', { request: { toolId: 'ffmpeg', provider: originalFfmpeg.provider, ...(originalFfmpeg.provider === 'external' ? { path: originalFfmpeg.path } : {}) } });
     if (originalSettings) await invoke('update_settings', { settings: originalSettings });
   });
 
-  it('retains selected tracks, subtitle versions and saved cards through restart and media removal', async function () {
-    this.timeout(600000);
-    assert(existsSync(source), 'Generate the multitrack fixture before native E2E');
-    await invoke('import_media', { request: { kind: 'local', pathOrUrl: source, title: 'Multitrack regression', learningLanguage: 'en', explanationLanguage: 'ja' } });
-    const mediaId = (await snapshot()).media.find(item => item.title === 'Multitrack regression').id;
-    await browser.refresh(); await ready();
-    await navigate(`/study/${mediaId}`); await playerReady();
+  // WDIO captures the timeout before entering the callback; this.timeout() inside
+  // a long test cannot extend its wrapper. Keep real tool operations in separate
+  // cases with fresh records so a slow subtitle run cannot consume the card budget.
+  it('retains the selected audio track and resume position through restart', async () => {
+    const mediaId = await importMultitrack('Multitrack resume regression');
     const tracks = (await invoke('get_player_state')).tracks;
     const english = tracks.find(track => track.kind === 'audio' && track.ffIndex === 2);
     assert(english && english.id !== english.ffIndex, 'Fixture must distinguish mpv ID from FFmpeg index');
@@ -92,12 +106,21 @@ async function cardArticle() { await navigate('/cards'); const search = $('[aria
     assert(state.paused && state.positionMs >= 4900 && state.positionMs <= 5300, `Wrong resume position: ${state.positionMs}`);
     assert.equal(state.tracks.find(track => track.kind === 'audio' && track.selected).ffIndex, 2);
     await browser.saveScreenshot(resolve('test-results/native/media-resume-tracks.png'));
+  });
 
+  it('preserves edited subtitle versions when switching and restoring sources', async () => {
+    const mediaId = await importMultitrack('Multitrack subtitle regression');
+    await invoke('select_audio_stream', { mediaId, streamIndex: 2 });
+    const assertAudioSelection = async () => {
+      assert.equal((await snapshot()).media.find(item => item.id === mediaId).audioStreamIndex, 2, 'Subtitle changes must preserve the saved audio selection');
+      assert.equal((await invoke('get_player_state')).tracks.find(track => track.kind === 'audio' && track.selected)?.ffIndex, 2, 'Subtitle changes must preserve the playing audio track');
+    };
     await openSubtitles();
     await chooseSubtitle('3');
     await $('button=Use these subtitles').click();
     await browser.waitUntil(async () => (await invoke('list_segments', { mediaId })).some(cue => cue.text.includes('日本語')), { timeout: 60000 });
     await dialogClosed();
+    await assertAudioSelection();
     const original = (await invoke('list_segments', { mediaId }))[0];
     await invoke('edit_segment', { segment: { ...original, text: '日本語の字幕を編集しました。' } });
     await assert.rejects(invoke('extract_embedded_subtitles', { mediaId, streamIndex: 1, replaceExisting: false }), /Confirm replacement/);
@@ -109,6 +132,7 @@ async function cardArticle() { await navigate('/cards'); const search = $('[aria
     await $('button=Use these subtitles').click();
     await browser.waitUntil(async () => (await invoke('list_segments', { mediaId }))[0]?.text === 'English track one.', { timeout: 60000 });
     await dialogClosed();
+    await assertAudioSelection();
     const versions = await invoke('list_subtitle_versions', { mediaId }); assert.equal(versions.length, 1);
     assert.equal(versions[0].streamIndex, 3); assert.equal(versions[0].segments[0].text, '日本語の字幕を編集しました。');
     await $('button=Add or switch subtitles').click();
@@ -118,8 +142,14 @@ async function cardArticle() { await navigate('/cards'); const search = $('[aria
     await $('button=Use these subtitles').click();
     await browser.waitUntil(async () => (await invoke('list_segments', { mediaId }))[0]?.text === '日本語の字幕を編集しました。', { timeout: 60000 });
     await dialogClosed();
+    await assertAudioSelection();
     assert.equal((await snapshot()).media.find(item => item.id === mediaId).subtitleStreamIndex, 3);
+  });
 
+  it('retains saved source audio and card edits through media removal', async () => {
+    const mediaId = await importMultitrack('Multitrack card regression');
+    await invoke('select_audio_stream', { mediaId, streamIndex: 2 });
+    await invoke('extract_embedded_subtitles', { mediaId, streamIndex: 3, replaceExisting: false });
     const sourceCues = await invoke('list_segments', { mediaId });
     const segment = sourceCues[0];
     const before = await snapshot();

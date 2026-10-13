@@ -132,7 +132,9 @@ jobs:
   windows:
     needs: [native-build]
     runs-on: windows-2025
-    timeout-minutes: 60
+    # Native build/runtime checks precede the sequential desktop suites.
+    # Leave headroom after the E2E limit to upload failure evidence.
+    timeout-minutes: 90
     defaults:
       run:
         shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
@@ -223,6 +225,7 @@ jobs:
         run: |
           pnpm test:rust:required windows-native
       - name: WebView2 and libmpv E2E
+        timeout-minutes: 50
         run: pnpm test:e2e
         env:
           SURTITLE_E2E_BINARY: ${{ github.workspace }}\target\debug\surtitle.exe
