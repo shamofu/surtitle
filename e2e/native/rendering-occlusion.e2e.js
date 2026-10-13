@@ -25,9 +25,42 @@ const contains = (rect, x, y) => x >= rect.Left && y >= rect.Top && x < rect.Rig
   });
   after(async () => { await control({ action: 'pause' }); await control({ action: 'loop' }); });
 
+  it('keeps video through rounded speed-popup corners and closes with its trigger in both themes', async () => {
+    await resizeNativeWindow(1440, 900);
+    await control({ action: 'pause' });
+    await control({ action: 'seek', value: 200 });
+    for (const theme of ['light', 'dark']) {
+      await invoke('update_appearance', { theme });
+      await browser.waitUntil(() => browser.execute(expected => document.documentElement.dataset.theme === expected, theme));
+      const trigger = $('button[aria-label="Playback speed"]');
+      await trigger.click();
+      await $('.playback-rate-popover').waitForDisplayed();
+      await browser.waitUntil(() => browser.execute(() => !document.querySelector('[data-native-occlusion="pending"]')));
+      const during = await assertNativeVideoBounds();
+      const card = await browser.execute(() => {
+        const rect = document.querySelector('.playback-rate-popover').getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      });
+      const viewport = during.dom.viewport, scale = during.dom.devicePixelRatio;
+      const native = during.native.find(row => row.parent === during.native[0].handle && row.className.toLowerCase() === 'static');
+      const corners = [[card.x + 1, card.y + 1], [card.x + card.width - 2, card.y + 1]]
+        .filter(([x, y]) => x >= viewport.x && y >= viewport.y && x < viewport.x + viewport.width && y < viewport.y + viewport.height);
+      assert(corners.length > 0, 'At least one rounded popup corner must overlap the actual video');
+      for (const [x, y] of corners) assert(native.regionRectangles.some(rect => contains(rect,
+        Math.floor(x * scale) - Math.round(viewport.x * scale), Math.floor(y * scale) - Math.round(viewport.y * scale))),
+      'A transparent popup corner removed native video');
+      assert.equal((await state()).surfaceVisible, true);
+      await saveNativeScreenshot(resolve(`test-results/native/rounded-speed-${theme}.png`));
+      await trigger.click();
+      await $('.playback-rate-popover').waitForExist({ reverse: true });
+      assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
+      await assertNativeVideoBounds();
+    }
+  });
+
   it('preserves video size, actual HWND pixels and input while an opaque dialog is open', async () => {
     const observations = [];
-    for (const [width, height] of [[1024, 700], [1280, 800], [1440, 900], [1440, 940]]) {
+    for (const [width, height] of [[1280, 720], [1280, 800], [1440, 900], [1440, 940]]) {
       await resizeNativeWindow(width, height);
       await control({ action: 'seek', value: 200 });
       await control({ action: 'pause' });
@@ -96,7 +129,7 @@ const contains = (rect, x, y) => x >= rect.Left && y >= rect.Top && x < rect.Rig
       await browser.execute(path => { history.pushState({}, '', path); dispatchEvent(new PopStateEvent('popstate')); }, `/study/${fixture.mediaId}`);
       await $('.play-button').waitForEnabled();
       await browser.waitUntil(async () => (await state()).ready);
-      for (const [width, height] of [[1440, 900], [1024, 700]]) {
+      for (const [width, height] of [[1440, 900], [1280, 720]]) {
         await resizeNativeWindow(width, height);
         await control({ action: 'seek', value: 200 });
         await control({ action: 'pause' });

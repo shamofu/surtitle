@@ -13,7 +13,7 @@ function snapshot(width = 1024, height = 768, dpi = 96) {
   const scale = dpi / 96;
   return {
     bounds: { width, height }, workArea: { width, height: height - 48 }, dpi,
-    requiredClient: { width: 1440, height: 940 }, requiredOuter: { width: Math.ceil(1456 * scale), height: Math.ceil(979 * scale) },
+    requiredClient: { width: 1600, height: 940 }, requiredOuter: { width: Math.ceil(1616 * scale), height: Math.ceil(979 * scale) },
     modes: [[1024, 768], [1920, 1080], [2560, 1440], [3840, 2160]].map(([width, height], index) => ({ index, width, height, bitsPerPixel: 32, frequency: 60, interlaced: false })),
   };
 }
@@ -34,6 +34,15 @@ test('keeps a sufficient desktop unchanged and validates the observed result aft
   assertDesktopCapacity(snapshot(1920, 1080));
   const unchanged = snapshot(); selectDesktopMode(unchanged);
   assert.throws(() => assertDesktopCapacity(unchanged), /at least 1920x1080/);
+});
+
+test('reserves the new default width as well as the existing tallest native fixture', () => {
+  const initialWindow = JSON.parse(readFileSync(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8')).app.windows[0];
+  const required = snapshot(1920, 1080).requiredClient;
+  assert(required.width >= initialWindow.width && required.height >= initialWindow.height);
+  const narrowWorkArea = snapshot(1920, 1080); narrowWorkArea.workArea.width = 1500;
+  assert.throws(() => assertDesktopCapacity(narrowWorkArea), /1600x940/);
+  assert.equal(selectDesktopMode(narrowWorkArea).width, 2560);
 });
 test('accounts for actual DPI, window frame and taskbar instead of only raw resolution', () => {
   const scaled = snapshot(1920, 1080, 144);

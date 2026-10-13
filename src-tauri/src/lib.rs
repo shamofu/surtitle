@@ -101,6 +101,7 @@ pub fn run() -> tauri::Result<()> {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::window::set_window_size_preset,
             commands::synchronization::get_change_checkpoint,
             commands::synchronization::get_snapshot_patch,
             commands::continuations::save_ai_continuation,

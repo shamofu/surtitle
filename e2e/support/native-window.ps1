@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('inspect', 'resize', 'resize-maximize', 'capture', 'sample', 'monitor', 'move-monitor', 'close', 'maximize', 'restore')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('inspect', 'resize', 'resize-maximize', 'capture', 'sample', 'monitor', 'move-monitor', 'snap-edge', 'close', 'maximize', 'restore')][string]$Action,
     [Parameter(Mandatory)][string]$Application,
     [int]$Width,
     [int]$Height,
     [string]$Screenshot,
     [long]$Monitor,
+    [ValidateSet('left', 'right', 'top', 'bottom', 'top-left', 'bottom-right')][string]$Edge,
     [ValidateRange(100, 5000)][int]$DurationMs = 1500,
     [ValidateRange(5, 100)][int]$IntervalMs = 10
 )
@@ -30,6 +31,9 @@ if ($Action -eq 'monitor') {
 }
 if ($Action -eq 'move-monitor') {
     [SurtitleNativeWindow]::MoveToMonitor($window, $Monitor)
+}
+if ($Action -eq 'snap-edge') {
+    [SurtitleNativeWindow]::SnapToEdge($window, $Edge)
 }
 if ($Action -eq 'sample') {
     # Warm the interop process before the test triggers its short animation.

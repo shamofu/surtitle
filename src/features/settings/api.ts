@@ -3,6 +3,7 @@ import { call } from '../../shared/native/transport';
 import type { ToolId, AppSettings } from '../../shared/contracts/settings';
 
 export const settingsApi = {
+  setWindowSizePreset: (preset: 'hd' | 'standard' | 'full-hd') => call('set_window_size_preset', { preset }),
   state: () => call('get_settings_state'),
   patch: (expectedRevision: string, patch: Record<string, unknown>) =>
     call('update_settings_patch', { expectedRevision, patch }),

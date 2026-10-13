@@ -187,7 +187,7 @@ test('pending native preparation blocks body shortcuts and resumes slider after 
     return prevented;
   });
   expect(modifiedKeys).toEqual([false, false, false]);
-  for (const key of ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Home', 'End', 'PageUp', 'PageDown', 'Space', 'Enter']) await page.keyboard.press(key);
+  for (const key of ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Home', 'End', 'PageUp', 'PageDown']) await page.keyboard.press(key);
   await expect(popup(page)).toHaveAttribute('data-state', 'open');
   expect((await actions(page)).filter((action: any) => ['rate', 'seek', 'toggle-pause', 'play'].includes(action.action))).toEqual([]);
   await page.evaluate(() => Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => false }));
@@ -197,6 +197,33 @@ test('pending native preparation blocks body shortcuts and resumes slider after 
   await expect(slider(page)).toBeFocused(); await slider(page).press('ArrowRight'); await expect(slider(page)).toHaveValue('1.05');
   await page.keyboard.press('Escape'); await expect(popup(page)).toHaveCount(0); await expect(trigger).toBeFocused();
 });
+
+test('the same trigger closes and reopens the widget with pointer or keyboard activation', async ({ page }) => {
+  const trigger = await openStudy(page);
+  await trigger.click(); await expect(slider(page)).toBeFocused();
+  await trigger.click(); await expect(popup(page)).toHaveCount(0); await expect(trigger).toBeFocused();
+  for (const key of ['Enter', 'Space']) {
+    await trigger.press(key); await expect(slider(page)).toBeFocused();
+    await trigger.focus(); await expect(popup(page)).toHaveAttribute('data-state', 'open');
+    await trigger.press(key); await expect(popup(page)).toHaveCount(0); await expect(trigger).toBeFocused();
+  }
+  expect((await actions(page)).filter((action: any) => ['rate', 'seek', 'toggle-pause', 'play'].includes(action.action))).toEqual([]);
+});
+
+for (const method of ['pointer', 'Enter', 'Space']) {
+  test(`the trigger dismisses pending native preparation with ${method}`, async ({ page }) => {
+    const trigger = await openStudy(page); await delayPlacement(page); await trigger.click();
+    await expect(popup(page)).toHaveAttribute('data-native-occlusion', 'pending');
+    if (method === 'pointer') await trigger.click();
+    else { await trigger.focus(); await trigger.press(method); }
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false'); await expect(trigger).toBeFocused();
+    await page.evaluate(() => (window as any).__releaseRatePlacement());
+    await expect(popup(page)).toHaveCount(0);
+    await expect(page.getByTestId('native-player-viewport')).toHaveAttribute('data-native-placement', 'ready');
+    await trigger.click(); await expect(slider(page)).toBeFocused();
+    expect((await actions(page)).filter((action: any) => ['rate', 'seek', 'toggle-pause', 'play'].includes(action.action))).toEqual([]);
+  });
+}
 
 test('Escape dismisses a hidden pending popup from body focus before native acknowledgement', async ({ page }) => {
   const trigger = await openStudy(page); await delayPlacement(page); await trigger.click();

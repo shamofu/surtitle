@@ -75,6 +75,10 @@ export async function inspectNativeMonitor() {
 }
 
 export const inspectNativeWindow = () => nativeWindow('inspect');
+export function snapNativeWindow(edge) {
+  assert(['left', 'right', 'top', 'bottom', 'top-left', 'bottom-right'].includes(edge), 'Invalid snap edge');
+  return nativeWindow('snap-edge', ['-Edge', edge]);
+}
 export function resizeThenMaximizeNativeWindow(width, height) {
   validateNativeSize(width, height);
   return nativeWindow('resize-maximize', ['-Width', String(width), '-Height', String(height)]);

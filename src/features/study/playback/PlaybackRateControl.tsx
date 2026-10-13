@@ -174,7 +174,7 @@ export function PlaybackRateControl({ label, decreaseLabel, increaseLabel, close
       if (event.isComposing || event.keyCode === 229 || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
       if (document.activeElement === triggerRef.current
         && document.querySelector('[data-native-popup="playback-rate"][data-native-occlusion="pending"]')
-        && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', 'Enter', ' '].includes(event.key)) {
+        && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) {
         event.preventDefault(); event.stopPropagation(); return;
       }
       if (event.key !== 'Escape') return;
@@ -209,6 +209,7 @@ export function PlaybackRateControl({ label, decreaseLabel, increaseLabel, close
       <Gauge size={18} aria-hidden="true" /><span id={rateValueId}>{displayed}×</span>
     </Button>
     <Popover className="playback-rate-popover" placement="top end" offset={6} isNonModal
+      shouldCloseOnInteractOutside={target => !triggerRef.current?.contains(target)}
       isExiting={!isOpen && retained} data-native-popup="playback-rate" data-state={isOpen ? 'open' : 'closing'}>
       <RatePopupContent open={isOpen} triggerRef={triggerRef} onExited={finishExit}>
         <Dialog className="playback-rate-dialog" aria-label={label}>

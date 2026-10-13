@@ -171,6 +171,36 @@ it('keeps the unloaded or disabled player speed control unavailable', async () =
   expect(changeRate).not.toHaveBeenCalled();
 });
 
+it('closes on a second trigger click and reopens on the next without changing the rate', async () => {
+  renderSession();
+  const user = userEvent.setup();
+  const button = trigger();
+  await user.click(button);
+  expect(slider()).toHaveFocus();
+  await user.click(button);
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Playback speed' })).not.toBeInTheDocument());
+  expect(button).toHaveFocus();
+  expect(button).toHaveAttribute('aria-expanded', 'false');
+  await user.click(button);
+  expect(slider()).toHaveFocus();
+  expect(button).toHaveAttribute('aria-expanded', 'true');
+  expect(changeRate).not.toHaveBeenCalled();
+});
+
+it.each(['{Enter}', ' '])('lets %s close the focused trigger while native clipping is pending', async key => {
+  renderSession();
+  const user = userEvent.setup();
+  const button = trigger();
+  await user.click(button);
+  document.querySelector<HTMLElement>('.playback-rate-popover')!.dataset.nativeOcclusion = 'pending';
+  act(() => button.focus());
+  expect(button).toHaveAttribute('aria-expanded', 'true');
+  await user.keyboard(key);
+  expect(button).toHaveAttribute('aria-expanded', 'false');
+  expect(button).toHaveFocus();
+  expect(changeRate).not.toHaveBeenCalled();
+});
+
 it('serializes native requests and coalesces rapid adjustments to the latest target while masking stale reported values', async () => {
   const first = deferred(), last = deferred();
   changeRate.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => last.promise);

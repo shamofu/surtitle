@@ -798,8 +798,8 @@ function StudySession({ mediaId }: { mediaId: string }) {
             ref={companion.panelRef}
             id="study-companion"
             hidden={!companion.visible}
-            inert={!panel}
-            aria-hidden={!panel || undefined}
+            inert={!panel || !companion.ready}
+            aria-hidden={!panel || !companion.ready || undefined}
             className={`study-companion transcript-panel ${presentedPanel === 'phrase' ? 'phrase-panel' : ''}`}
             aria-label={presentedPanel === 'phrase' ? t('意味とフレーズ', 'Meaning and phrases') : presentedPanel === 'activity' ? t('処理・管理', 'Activity & tools') : t('字幕パネル', 'Transcript panel')}
           >

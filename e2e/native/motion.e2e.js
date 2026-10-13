@@ -75,9 +75,12 @@ async function observeHeldAcknowledgement(kind) {
     const sample = () => {
       const element = document.querySelector(surface === 'panel' ? '.study-companion' : '[role="dialog"]');
       const style = getComputedStyle(element);
+      const dock = document.querySelector('.study-companion-dock');
       frames.push({ at: performance.now(), visibility: style.visibility, opacity: style.opacity,
         placement: document.querySelector('.native-player-viewport').dataset.nativePlacement,
-        occlusion: element.dataset.nativeOcclusion ?? null });
+        occlusion: element.dataset.nativeOcclusion ?? null,
+        nativeSafeLeft: (dock.getBoundingClientRect().left + Number(dock.dataset.nativeClipLeft || 0)) * devicePixelRatio,
+        inert: element.inert });
       // Hold beyond the entrance duration: a timer must not expose unacknowledged UI.
       if (performance.now() - startedAt >= 450) done(frames);
       else requestAnimationFrame(sample);
@@ -228,7 +231,7 @@ async function releaseNativeAcknowledgements() {
         await assertNativeVideoBounds();
       });
 
-      it('keeps panel and modal concealed until the real native placement and exclusion responses are delivered', async () => {
+      it('protects drawer pixels and withholds modals until real native placement responses are delivered', async () => {
         const before = await assertNativeVideoBounds();
         const observations = [];
         for (const kind of ['panel', 'modal']) {
@@ -239,13 +242,17 @@ async function releaseNativeAcknowledgements() {
             assert(frames.length > 1, 'The held response must be observed across animation frames');
             for (const frame of frames) {
               assert.equal(frame.placement, 'pending', 'Native placement was acknowledged before response delivery');
-              assert.equal(frame.visibility, 'hidden', `${kind} became visible before native acknowledgement`);
-              if (kind === 'modal') assert.equal(frame.occlusion, 'pending');
+              if (kind === 'modal') {
+                assert.equal(frame.visibility, 'hidden', 'Modal became visible before native acknowledgement');
+                assert.equal(frame.occlusion, 'pending');
+              } else assert.equal(frame.inert, true, 'An unacknowledged drawer became interactive');
             }
             const native = await inspectNativeWindow();
             const video = nativeVideo(native);
             assert(video, 'A delayed response must not hide the native video');
             if (kind === 'modal') assert(video.regionRectangles?.length, 'The real native exclusion must precede its delayed acknowledgement');
+            else for (const frame of frames) assert(frame.nativeSafeLeft >= video.screen.Right - native[0].origin.X - 1,
+              'Visible drawer pixels overlapped possible native video bounds');
             if (locale === 'ja' && theme === 'light') await saveNativeScreenshot(resolve(`test-results/native/motion-${scenario}-${kind}-pending.png`));
             const requests = await releaseNativeAcknowledgements();
             assert(requests.some(request => request.deliveredAt - request.receivedAt >= 450), 'A real native response was not delayed');

@@ -314,6 +314,9 @@ export const commandArguments = {
   "set_tool_provider": {
     "request": "object"
   },
+  "set_window_size_preset": {
+    "preset": "string"
+  },
   "start_url_import": {
     "request": "object"
   },
@@ -439,6 +442,7 @@ export const commandResults = {
   "select_transcript_range_source": "TranscriptReview",
   "select_transcript_reparse": "TranscriptReview",
   "set_tool_provider": "()",
+  "set_window_size_preset": "()",
   "start_url_import": "String",
   "suspend_card": "()",
   "update_appearance": "()",
@@ -543,6 +547,7 @@ export interface CommandResults {
   select_transcript_range_source: import('../contracts/transcript').TranscriptReview;
   select_transcript_reparse: import('../contracts/transcript').TranscriptReview;
   set_tool_provider: void;
+  set_window_size_preset: void;
   start_url_import: string;
   suspend_card: void;
   update_appearance: void;

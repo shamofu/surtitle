@@ -59,7 +59,7 @@ async function record<T>(page: Page, info: TestInfo, name: string, action: () =>
 }
 
 for (const viewport of [{ width: 1440, height: 1000 }, { width: 920, height: 900 }]) {
-  test(`opaque drawer reverses safely through player resize and panel slide (${viewport.width}px)`, async ({ page }, info) => {
+  test(`opaque drawer reverses safely through simultaneous player and panel motion (${viewport.width}px)`, async ({ page }, info) => {
     await page.clock.install();
     await page.setViewportSize(viewport);
     await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -74,7 +74,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 920, height: 900
       const rail = document.querySelector<HTMLElement>('.study-transcript-rail')!;
       const frame = () => { window.__drawerFrameRequested = true; return new Promise(requestAnimationFrame); };
       const committed = async (open: boolean) => {
-        const matches = () => toggle.getAttribute('aria-expanded') === String(open) && panel.inert === !open;
+        const matches = () => toggle.getAttribute('aria-expanded') === String(open) && (open || panel.inert);
         if (matches()) return;
         await new Promise<void>(resolve => {
           const observer = new MutationObserver(() => { if (matches()) { observer.disconnect(); resolve(); } });
@@ -87,12 +87,14 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 920, height: 900
         const box = video.getBoundingClientRect();
         const railBox = rail.getBoundingClientRect();
         const panelBox = panel.getBoundingClientRect();
+        const remaining = innerWidth < 1000 ? Math.abs(matrix.m42)
+          : Math.max(0, parseFloat(getComputedStyle(dock).getPropertyValue('--study-panel-width')) - dock.getBoundingClientRect().width + 44);
         let nativeSafe = true;
         for (let node: Element | null = video; node; node = node.parentElement) {
           const ancestor = getComputedStyle(node);
           nativeSafe &&= ancestor.opacity === '1' && ancestor.transform === 'none' && ancestor.translate === 'none';
         }
-        return { at: performance.now(), x: matrix.m41, y: matrix.m42, opacity: style.opacity, visibility: style.visibility,
+        return { at: performance.now(), x: matrix.m41, y: matrix.m42, remaining, opacity: style.opacity, visibility: style.visibility,
           moving: dock.dataset.moving === 'true', hidden: panel.hidden, inert: panel.inert, nativeSafe,
           panelExtent: innerWidth < 1000 ? panelBox.height : panelBox.width,
           placement: video.dataset.nativePlacement, railX: railBox.x,
@@ -115,7 +117,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 920, height: 900
       const reversal = [];
       for (let index = 0; index < 120; index++) {
         await frame(); const current = read(); reversal.push(current);
-        if (Math.abs(innerWidth < 1000 ? current.y : current.x) > 8) break;
+        if (current.remaining > 8) break;
       }
       const before = read();
       toggle.click();
@@ -130,7 +132,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 920, height: 900
       const closing = await settle();
       return { initial, opening, reversal, reopening, before, after, closing };
     })));
-    const distance = (frame: typeof observed.before) => Math.abs(viewport.width < 1000 ? frame.y : frame.x);
+    const distance = (frame: typeof observed.before) => frame.remaining;
     const moving = observed.opening.filter(frame => frame.moving && frame.visibility === 'visible');
     expect(moving.filter(frame => distance(frame) > 1).length, 'visible intermediate slide frames').toBeGreaterThan(2);
     expect(new Set(moving.map(distance)).size).toBeGreaterThan(2);
@@ -141,15 +143,14 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 920, height: 900
     if (viewport.width >= 1000) {
       const resizing = observed.opening.filter(frame => frame.video.width > finalWidth + 1 && frame.video.width < observed.initial.video.width - 1);
       expect(new Set(resizing.map(frame => frame.video.width)).size, 'desktop player has intermediate resize widths').toBeGreaterThan(1);
-      expect(resizing.every(frame => frame.visibility === 'hidden')).toBe(true);
+      expect(resizing.every(frame => frame.visibility === 'visible')).toBe(true);
       for (const frame of [...observed.opening, ...observed.reversal, ...observed.closing]) {
         expect(frame.video.height).toBeCloseTo(observed.initial.video.height, 1);
         expect(frame.video.y).toBeCloseTo(observed.initial.video.y, 1);
         expect(frame.railX, 'rail never crosses the native video viewport').toBeGreaterThanOrEqual(frame.video.x + frame.video.width - 1);
       }
       for (const frame of moving) {
-        expect(frame.video.width).toBeCloseTo(finalWidth, 1);
-        expect(frame.placement).toBe('ready');
+        expect(frame.video.width - finalWidth, 'drawer reveal and player resize share one progress').toBeCloseTo(frame.remaining, 1);
       }
       expect(observed.closing.some(frame => frame.video.width > finalWidth + 1 && frame.video.width < observed.initial.video.width - 1)).toBe(true);
       expect(observed.closing.at(-1)!.video.width).toBeCloseTo(observed.initial.video.width, 1);
@@ -173,7 +174,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 920, height: 900
   });
 }
 
-test('closing during desktop resize reverses the player width without revealing the panel', async ({ page }) => {
+test('closing during desktop reveal reverses both the panel and player from the current width', async ({ page }) => {
   await page.clock.install();
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await installLearningFixture(page, 'en', 'light');
@@ -186,7 +187,7 @@ test('closing during desktop resize reverses the player width without revealing 
     const video = document.querySelector<HTMLElement>('.native-player-viewport')!;
     const frame = () => { window.__drawerFrameRequested = true; return new Promise(requestAnimationFrame); };
     const committed = async (open: boolean) => {
-      const matches = () => toggle.getAttribute('aria-expanded') === String(open) && panel.inert === !open;
+      const matches = () => toggle.getAttribute('aria-expanded') === String(open) && (open || panel.inert);
       if (matches()) return;
       await new Promise<void>(resolve => {
         const observer = new MutationObserver(() => { if (matches()) { observer.disconnect(); resolve(); } });
@@ -201,7 +202,7 @@ test('closing during desktop resize reverses the player width without revealing 
     for (let index = 0; index < 120; index++) {
       await frame();
       const before = read();
-      if (initial.width - before.width <= 8 || before.visibility !== 'hidden') continue;
+      if (initial.width - before.width <= 8 || before.visibility !== 'visible') continue;
       toggle.click();
       await committed(false);
       const after = read();
@@ -221,7 +222,8 @@ test('closing during desktop resize reverses the player width without revealing 
     expect(frame.width, 'committed reversal expands from its visible width').toBeGreaterThanOrEqual(previousWidth - 1);
     previousWidth = frame.width;
   }
-  expect(observed.closing.filter(frame => frame.moving).every(frame => frame.visibility === 'hidden' && frame.inert)).toBe(true);
+  expect(observed.closing.filter(frame => frame.moving).every(frame => frame.inert
+    && (frame.visibility === 'visible' || Math.abs(frame.width - observed.initial.width) <= 1))).toBe(true);
   expect(observed.closing.at(-1)).toMatchObject({ hidden: true, moving: false, inert: true });
   expect(observed.closing.at(-1)!.width).toBeCloseTo(observed.initial.width, 1);
 });
@@ -372,10 +374,11 @@ test('live reduced motion settles a genuinely moving drawer at its latest endpoi
   const before = await runDrawerFrames(page, () => page.evaluate(async () => {
     document.querySelector<HTMLButtonElement>('.study-transcript-toggle')!.click();
     const panel = document.querySelector<HTMLElement>('.study-companion')!;
+    const dock = document.querySelector<HTMLElement>('.study-companion-dock')!;
     for (let index = 0; index < 120; index++) {
       window.__drawerFrameRequested = true;
       await new Promise(requestAnimationFrame);
-      const x = new DOMMatrix(getComputedStyle(panel).transform).m41;
+      const x = parseFloat(getComputedStyle(dock).getPropertyValue('--study-panel-width')) - dock.getBoundingClientRect().width + 44;
       if (getComputedStyle(panel).visibility === 'visible' && x > 8 && x < panel.getBoundingClientRect().width - 8) return x;
     }
     throw new Error('The drawer did not produce an intermediate frame');
@@ -383,13 +386,14 @@ test('live reduced motion settles a genuinely moving drawer at its latest endpoi
   await info.attach('reduction-intermediate.json', { body: JSON.stringify({ before }), contentType: 'application/json' });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
-  await expect.poll(() => page.locator('.study-companion').evaluate(element => new DOMMatrix(getComputedStyle(element).transform).m41)).toBe(0);
+  await expect.poll(() => page.locator('.study-companion-dock').evaluate(element => Math.abs(
+    parseFloat(getComputedStyle(element).getPropertyValue('--study-panel-width')) - element.getBoundingClientRect().width + 44))).toBeLessThan(1);
   await expect(page.getByLabel('Search transcript')).toBeVisible();
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
 });
 
-test('resize cannot expose or focus a drawer before native placement acknowledges its bounds', async ({ page }) => {
+test('resize clips a drawer against unacknowledged native bounds and delays its focus', async ({ page }) => {
   await installLearningFixture(page, 'en', 'light');
   await page.route(/\/src\/shared\/native\/transport\.ts(?:\?|$)/, route => route.fulfill({
     contentType: 'application/javascript', body: `
@@ -405,16 +409,25 @@ test('resize cannot expose or focus a drawer before native placement acknowledge
   }));
   await page.goto('/study/visual-fixture');
   await expect(page.locator('.native-player-viewport')).toHaveAttribute('data-native-placement', 'ready');
+  const nativeRight = await page.locator('.native-player-viewport').evaluate(element => element.getBoundingClientRect().right);
   await page.evaluate(() => { (window as any).__holdPlacement = true; document.querySelector<HTMLButtonElement>('.study-transcript-toggle')!.click(); });
   const panel = page.locator('.study-companion');
   await expect(page.locator('.native-player-viewport')).toHaveAttribute('data-native-placement', 'pending');
-  await expect(panel).toHaveCSS('visibility', 'hidden');
+  const protectedPixels = () => page.locator('.study-companion-dock').evaluate((element, right) => {
+    const rect = element.getBoundingClientRect();
+    const inset = Number((element as HTMLElement).dataset.nativeClipLeft || 0);
+    return inset >= rect.width - 1 || rect.left + inset >= right - 1;
+  }, nativeRight);
+  await expect(panel).toHaveAttribute('inert', '');
+  await expect.poll(protectedPixels).toBe(true);
   await page.setViewportSize({ width: 1300, height: 960 });
-  await expect(panel).toHaveCSS('visibility', 'hidden');
+  await expect(panel).toHaveAttribute('inert', '');
+  await expect.poll(protectedPixels).toBe(true);
   expect(await panel.evaluate(element => element.contains(document.activeElement))).toBe(false);
   await page.evaluate(() => { (window as any).__holdPlacement = false; (window as any).__releasePlacement(); });
   await expect(page.locator('.native-player-viewport')).toHaveAttribute('data-native-placement', 'ready');
   await expect(panel).toHaveCSS('visibility', 'visible');
+  await expect(panel).not.toHaveAttribute('inert');
   await expect(page.getByLabel('Search transcript')).toBeVisible();
 });
 

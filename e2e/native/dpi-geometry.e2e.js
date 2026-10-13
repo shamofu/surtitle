@@ -19,7 +19,7 @@ async function fittedGeometry() {
     const display = await inspectNativeMonitor();
     const monitor = display.monitors.find(item => item.handle === display.current);
     result = { geometry, monitor };
-    return fits(geometry.native[0].screen, monitor.workArea);
+    return fits(geometry.native[0].visibleFrame, monitor.workArea);
   }, { timeout: 15000, timeoutMsg: 'The normal application window exceeds its current physical monitor workarea' });
   return result;
 }
@@ -56,7 +56,12 @@ async function assertPrimaryControlsInside() {
       const { geometry: before } = await fittedGeometry();
       assert.equal(before.native[0].dpi, expectedDpi, 'Actual HWND DPI differs from requested physical test scale');
       assert.equal(before.dom.devicePixelRatio, expectedDpi / 96);
-      observations.push({ phase: 'requested-minimum', requestedLogicalClient: { width: 1024, height: 700 }, geometry: before, outerFitsWorkArea: true });
+      const native = before.native[0], area = (await inspectNativeMonitor()).monitors.find(item => item.handle === originalMonitor).workArea;
+      const frameWidth = native.visibleFrame.Right - native.visibleFrame.Left - (native.client.Right - native.client.Left);
+      const frameHeight = native.visibleFrame.Bottom - native.visibleFrame.Top - (native.client.Bottom - native.client.Top);
+      assert.equal(native.client.Right - native.client.Left, Math.min(Math.floor(1280 * before.dom.devicePixelRatio), area.Right - area.Left - frameWidth));
+      assert.equal(native.client.Bottom - native.client.Top, Math.min(Math.floor(720 * before.dom.devicePixelRatio), area.Bottom - area.Top - frameHeight));
+      observations.push({ phase: 'below-minimum-request', requestedLogicalClient: { width: 1024, height: 700 }, geometry: before, outerFitsWorkArea: true });
       const monitor = (await inspectNativeMonitor()).monitors.find(item => item.handle === originalMonitor);
       await assertPrimaryControlsInside();
       await saveNativeScreenshot(resolve(`test-results/native/dpi-${expectedDpi}-study.png`));
@@ -77,7 +82,7 @@ async function assertPrimaryControlsInside() {
       await browser.keys(Key.Escape);
       await $('[role="dialog"]').waitForExist({ reverse: true });
       await browser.waitUntil(async () => browser.execute(() => document.activeElement?.textContent?.includes('Playback settings')));
-      observations.push({ phase: 'primary', before, during, monitor, outerFitsWorkArea: fits(before.native[0].screen, monitor.workArea) });
+      observations.push({ phase: 'primary', before, during, monitor, outerFitsWorkArea: fits(before.native[0].visibleFrame, monitor.workArea) });
 
       if (mixed) {
         const secondary = display.monitors.find(item => item.handle !== originalMonitor);
@@ -96,7 +101,7 @@ async function assertPrimaryControlsInside() {
           await assertPrimaryControlsInside();
           const state = await browser.execute(() => { const field = document.querySelector('.save-phrase-form input'); return { value: field.value, start: field.selectionStart, end: field.selectionEnd, focused: document.activeElement === field }; });
           assert.deepEqual(state, { value: '日本語 mixed monitor phrase', start: 4, end: 9, focused: true });
-          observations.push({ phase, geometry, monitor: destination, input: state, outerFitsWorkArea: fits(geometry.native[0].screen, destination.workArea) });
+          observations.push({ phase, geometry, monitor: destination, input: state, outerFitsWorkArea: fits(geometry.native[0].visibleFrame, destination.workArea) });
           await saveNativeScreenshot(resolve(`test-results/native/dpi-${expectedDpi}-${phase}.png`));
         }
       }

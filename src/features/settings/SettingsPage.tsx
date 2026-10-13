@@ -2,6 +2,7 @@
 import { PausedJobs } from './PausedJobs';
 import { RecoveredInputs } from './RecoveredInputs';
 import { ToolRow } from './ToolRow';
+import { WindowSizeSettings } from './WindowSizeSettings';
 import { settingsEditor, settingsFields, settingsFromFields } from './editing';
 import { useEditingSession } from '../../shared/editing/useEditingSession';
 import { useQueryClient } from '@tanstack/react-query';
@@ -447,6 +448,7 @@ export function SettingsPage() {
                 </Field>
               </div>
             </fieldset>
+            <WindowSizeSettings />
           </section>
           <section id="ai" className="settings-group" aria-labelledby="ai-settings-heading">
             <h2 id="ai-settings-heading">{t('AI', 'AI')}</h2>

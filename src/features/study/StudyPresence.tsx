@@ -2,11 +2,12 @@
 import { createContext, useContext, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { animate as motionAnimate, motionValue } from 'motion';
 import { MotionRegion, motionDistances, motionDurations, motionEase, motionRevealEase, useAppMotion } from '../../shared/motion';
+import { nativeDockInset, subscribeSurfaceFootprint } from './playback/surfaceFootprint';
 
 const StudyRegionActivity = createContext(true);
 export const useStudyRegionActive = () => useContext(StudyRegionActivity);
 
-/** Resize the desktop player before revealing UI beside its native window. */
+/** One desktop extent reveals the companion while resizing its native player. */
 export function useStudyPresence(open: boolean) {
   const { reducedMotion } = useAppMotion();
   const panelRef = useRef<HTMLElement>(null);
@@ -36,23 +37,29 @@ export function useStudyPresence(open: boolean) {
       let generation = 0;
       const width = parseFloat(getComputedStyle(dock).getPropertyValue('--study-panel-width')) || (window.innerWidth >= 1400 ? 360 : 320);
       const viewport = dock.closest('.study-grid')?.querySelector<HTMLElement>('.native-player-viewport');
+      const clip = () => {
+        if (disposed) return;
+        const inset = nativeDockInset(dock.getBoundingClientRect(), window.devicePixelRatio || 1);
+        dock.style.clipPath = inset > 0 ? `inset(0px 0px 0px ${inset}px)` : '';
+        dock.dataset.nativeClipLeft = String(inset);
+      };
       const render = () => {
         dock.style.width = `${44 + width * extent.get()}px`;
-        panel.style.transform = `translateX(${position.get() * 100}%)`;
-        // During resize the rail remains at the old, rightmost screen position.
-        // It enters the released space only after the native endpoint is ready.
-        if (rail) rail.style.transform = `translateX(${width * (extent.get() < 1 ? extent.get() : position.get())}px)`;
+        // The fixed-width contents move with the dock. Its overflow reveals
+        // them without a second transform or a second animation phase.
+        panel.style.transform = '';
+        if (rail) rail.style.transform = '';
+        clip();
       };
       const unsubscribeExtent = extent.on('change', () => {
         render();
         window.dispatchEvent(new Event('surtitle-player-layout'));
       });
-      const unsubscribePosition = position.on('change', render);
+      const unsubscribeFootprint = subscribeSurfaceFootprint(clip);
       const cancel = () => { generation += 1; stop?.(); stop = undefined; clearTimeout(timer); observer?.disconnect(); };
       const finish = () => {
         if (disposed) return;
         cancel();
-        extent.jump(open ? 1 : 0);
         position.jump(open ? 0 : 1);
         render();
         // Keep the closing endpoint hidden until React commits retained=false;
@@ -76,63 +83,55 @@ export function useStudyPresence(open: boolean) {
         window.dispatchEvent(new CustomEvent('surtitle-player-layout', { detail: { immediate: true } }));
         accept();
       };
-      const animate = (value: typeof extent, endpoint: number, seconds: number, complete: () => void) => {
+      const endpoint = open ? 1 : 0;
+      const complete = () => {
+        // Hidden documents have no visible overlap and native visibility has
+        // its own hide barrier. Do not wait for a superseded placement callback.
+        if (document.hidden) finish();
+        else acknowledge(finish);
+      };
+      const animate = () => {
         cancel();
-        const distance = Math.abs(value.get() - endpoint);
-        if (reducedMotion || document.hidden || resized || distance < .001) { value.jump(endpoint); complete(); return; }
+        const distance = Math.abs(extent.get() - endpoint);
+        if (reducedMotion || document.hidden || resized || distance < .001) { extent.jump(endpoint); complete(); return; }
         const version = generation;
         setAnimating(true);
         const done = () => {
           if (disposed || version !== generation) return;
           stop?.(); stop = undefined; clearTimeout(timer);
-          value.jump(endpoint);
+          extent.jump(endpoint);
           complete();
         };
-        const controls = motionAnimate(value, endpoint, { duration: seconds * distance, ease: motionRevealEase, onComplete: done });
+        const seconds = open ? motionDurations.studyResize : motionDurations.studyCollapse;
+        const controls = motionAnimate(extent, endpoint, { duration: seconds * distance, ease: motionRevealEase, onComplete: done });
         stop = () => controls.stop();
         timer = setTimeout(done, seconds * distance * 1000 + 100);
       };
-      const reveal = () => {
-        panel.style.visibility = '';
-        setReady(true);
-        animate(position, 0, motionDurations.studySlide, finish);
-      };
-      const collapse = () => {
-        panel.style.visibility = 'hidden';
-        animate(extent, 0, motionDurations.studyCollapse, () => acknowledge(finish));
-      };
       render();
-      if (open) {
-        setRetained(true);
-        if (extent.get() < 1 || resized || viewport?.dataset.nativePlacement === 'pending') {
-          setReady(false);
-          panel.style.visibility = 'hidden';
-          position.jump(1);
-          animate(extent, 1, motionDurations.studyResize, () => acknowledge(reveal));
-        } else reveal();
-      } else {
-        setReady(false);
-        if (extent.get() < 1 || position.get() >= 1) collapse();
-        else animate(position, 1, motionDurations.studySlideOut, collapse);
-      }
+      if (open) setRetained(true);
+      // A settled workspace keeps its focused input through resize/reduction.
+      // Newly opening or reversing drawers still wait for endpoint placement.
+      setReady(current => open && settled ? current : false);
+      panel.style.visibility = '';
+      animate();
       const visibility = () => {
         if (!document.hidden) return;
         cancel();
-        panel.style.visibility = 'hidden';
-        position.jump(1);
         extent.jump(open ? 1 : 0);
-        acknowledge(finish);
+        finish();
       };
       window.addEventListener('resize', resize);
       document.addEventListener('visibilitychange', visibility);
       return () => {
-        disposed = true; cancel(); unsubscribeExtent(); unsubscribePosition();
+        disposed = true; cancel(); unsubscribeExtent(); unsubscribeFootprint();
+        dock.style.clipPath = '';
+        delete dock.dataset.nativeClipLeft;
         window.removeEventListener('resize', resize);
         document.removeEventListener('visibilitychange', visibility);
       };
     }
     // Stacked layouts retain their existing stationary player and sliding panel.
-    if (dock) dock.style.width = '';
+    if (dock) { dock.style.width = ''; dock.style.clipPath = ''; delete dock.dataset.nativeClipLeft; }
     if (rail) rail.style.transform = '';
     extent.jump(open ? 1 : 0);
     let disposed = false;

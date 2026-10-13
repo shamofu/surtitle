@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
-import { inspectNativeMonitor, inspectNativeWindow, moveNativeWindowToMonitor, requestNativeWindowCommand, resizeNativeWindow, resizeThenMaximizeNativeWindow, saveNativeScreenshot } from '../support/native-window.mjs';
+import { inspectNativeMonitor, inspectNativeWindow, moveNativeWindowToMonitor, requestNativeWindowCommand, requestNativeWindowSize, resizeNativeWindow, resizeThenMaximizeNativeWindow, saveNativeScreenshot, snapNativeWindow } from '../support/native-window.mjs';
 
 const profile = process.env.SURTITLE_E2E_DATA_DIR;
 const fixture = JSON.parse(readFileSync(resolve(profile, 'fixture.json'), 'utf8'));
@@ -29,6 +29,56 @@ async function openFixtureCard() {
 }
 
 (process.platform === 'win32' ? describe : describe.skip)('native window continuity', () => {
+  it('applies presets, enforces the HD minimum and preserves visible edge alignment after restart', async () => {
+    await ready();
+    if ((await inspectNativeWindow())[0].maximized) {
+      await requestNativeWindowCommand('restore');
+      await browser.waitUntil(async () => !(await inspectNativeWindow())[0].maximized);
+    }
+    await moveNativeWindowToMonitor((await inspectNativeMonitor()).current);
+    await browser.execute(() => { history.pushState({}, '', '/settings'); dispatchEvent(new PopStateEvent('popstate')); });
+    const standard = $('button*=1600 × 900');
+    await standard.waitForExist();
+    await browser.execute(element => element.scrollIntoView({ block: 'center', behavior: 'instant' }), await standard);
+    await standard.waitForClickable();
+    for (const [label, width, height] of [['1280 × 720', 1280, 720], ['1600 × 900', 1600, 900], ['1920 × 1080', 1920, 1080]]) {
+      await $(`button*=${label}`).click();
+      await browser.waitUntil(async () => {
+        const root = (await inspectNativeWindow())[0];
+        const display = await inspectNativeMonitor(), work = display.monitors.find(item => item.handle === display.current).workArea;
+        const innerWidth = root.client.Right - root.client.Left, innerHeight = root.client.Bottom - root.client.Top;
+        const frameWidth = root.visibleFrame.Right - root.visibleFrame.Left - innerWidth;
+        const frameHeight = root.visibleFrame.Bottom - root.visibleFrame.Top - innerHeight;
+        return innerWidth === Math.min(Math.round(width * root.dpi / 96), work.Right - work.Left - frameWidth)
+          && innerHeight === Math.min(Math.round(height * root.dpi / 96), work.Bottom - work.Top - frameHeight);
+      }, { timeoutMsg: `Window preset ${label} did not fit the actual work area` });
+    }
+    await requestNativeWindowCommand('maximize');
+    await browser.waitUntil(async () => (await inspectNativeWindow())[0].maximized);
+    await standard.click();
+    await browser.waitUntil(async () => !(await inspectNativeWindow())[0].maximized);
+    await requestNativeWindowSize(1024, 700);
+    await browser.waitUntil(async () => browser.execute(() => innerWidth === 1280 && innerHeight === 720));
+    await assert.rejects(invoke('set_window_size_preset', { preset: 'invalid' }));
+    const initial = (await inspectNativeWindow())[0].client;
+    for (const edge of ['left', 'right', 'top', 'bottom', 'bottom-right', 'top-left']) {
+      await snapNativeWindow(edge);
+      await browser.waitUntil(async () => {
+        const root = (await inspectNativeWindow())[0];
+        assert.deepEqual(root.client, initial, 'Magnetic snapping resized the client');
+        const display = await inspectNativeMonitor(), area = display.monitors.find(item => item.handle === display.current).workArea;
+        return (!edge.includes('left') || root.visibleFrame.Left === area.Left)
+          && (!edge.includes('right') || root.visibleFrame.Right === area.Right)
+          && (!edge.includes('top') || root.visibleFrame.Top === area.Top)
+          && (!edge.includes('bottom') || root.visibleFrame.Bottom === area.Bottom);
+      }, { timeoutMsg: `Visible frame did not snap to ${edge}` });
+    }
+    const snapped = (await inspectNativeWindow())[0];
+    await browser.waitUntil(() => placement().x === snapped.screen.Left && placement().y === snapped.screen.Top);
+    await browser.reloadSession(); await ready();
+    assert.deepEqual((await inspectNativeWindow())[0].visibleFrame, snapped.visibleFrame, 'Restart lost the visible snapped alignment');
+  });
+
   it('restores normal bounds and maximization, follows saved appearance, and closes after checkpointing pending input', async () => {
     await ready();
     const original = (await snapshot()).settings;
@@ -41,14 +91,14 @@ async function openFixtureCard() {
         await browser.waitUntil(async () => !(await inspectNativeWindow())[0].maximized);
       }
       await moveNativeWindowToMonitor((await inspectNativeMonitor()).current);
-      await resizeNativeWindow(1200, 760);
-      await browser.waitUntil(() => { const state = placement(); return state.width === 1200 && state.height === 760 && !state.maximized; });
+      await resizeNativeWindow(1280, 760);
+      await browser.waitUntil(() => { const state = placement(); return state.width === 1280 && state.height === 760 && !state.maximized; });
       const normal = placement();
-      await saveNativeScreenshot('test-results/native/window-light-1200x760.png');
+      await saveNativeScreenshot('test-results/native/window-light-1280x760.png');
       await $('[aria-label="Toggle theme"]').click();
       await browser.waitUntil(async () => (await snapshot()).settings.theme === 'dark'
         && await browser.execute(() => document.documentElement.dataset.theme === 'dark'));
-      await saveNativeScreenshot('test-results/native/window-dark-1200x760.png');
+      await saveNativeScreenshot('test-results/native/window-dark-1280x760.png');
       await $('[aria-label="Toggle theme"]').click();
       await browser.waitUntil(async () => (await snapshot()).settings.theme === 'light'
         && await browser.execute(() => document.documentElement.dataset.theme === 'light'));

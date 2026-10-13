@@ -59,7 +59,8 @@ public static class SurtitleCiDesktop {
             if (probe == IntPtr.Zero) throw new Win32Exception();
             uint dpi = GetDpiForWindow(probe);
             if (dpi < 96 || dpi > 768) throw new InvalidOperationException("Invalid primary monitor DPI");
-            var outer = new Rect { Right = checked((int)Math.Ceiling(1440 * dpi / 96.0)), Bottom = checked((int)Math.Ceiling(940 * dpi / 96.0)) };
+            // Capacity envelope includes both the new default and the tallest native fixture.
+            var outer = new Rect { Right = checked((int)Math.Ceiling(1600 * dpi / 96.0)), Bottom = checked((int)Math.Ceiling(940 * dpi / 96.0)) };
             if (!AdjustWindowRectExForDpi(ref outer, 0x00cf0000, false, 0, dpi)) throw new Win32Exception();
             var modes = new List<object>();
             for (int index = 0; index < 4096; index++) {
@@ -67,7 +68,7 @@ public static class SurtitleCiDesktop {
                 if (!EnumDisplaySettings(info.Device, index, ref mode)) break;
                 modes.Add(new { index, width = mode.PelsWidth, height = mode.PelsHeight, bitsPerPixel = mode.BitsPerPel, frequency = mode.DisplayFrequency, interlaced = (mode.DisplayFlags & 2) != 0 });
             }
-            return new { device = info.Device, bounds = Size(info.Bounds), workArea = Size(info.WorkArea), dpi, requiredClient = new { width = 1440, height = 940 }, requiredOuter = Size(outer), modes = modes.ToArray() };
+            return new { device = info.Device, bounds = Size(info.Bounds), workArea = Size(info.WorkArea), dpi, requiredClient = new { width = 1600, height = 940 }, requiredOuter = Size(outer), modes = modes.ToArray() };
         } finally { if (probe != IntPtr.Zero) DestroyWindow(probe); SetThreadDpiAwarenessContext(previous); }
     }
     public static void Apply(int index, int width, int height) {

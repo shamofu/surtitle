@@ -23,12 +23,13 @@ import {
 import { playerApi } from './api';
 import { VolumeControl } from './VolumeControl';
 import { PlaybackRateControl } from './PlaybackRateControl';
+import { nativeSurfaceFootprint, publishSurfaceFootprint } from './surfaceFootprint';
 
 import { nativeAvailable } from '../../../shared/native/transport';
 
 import type { Media } from '../../../shared/contracts/media';
 import type { CaptionGapMode } from '../../../shared/contracts/settings';
-import type { PlayerControlRequest, PlayerState, PlayerSurfaceRect } from '../../../shared/contracts/player';
+import type { PlayerControlRequest, PlayerState, PlayerSurfaceOcclusion, PlayerSurfaceRect } from '../../../shared/contracts/player';
 import type { SubtitleSegment } from '../../../shared/contracts/media';
 
 import {
@@ -50,6 +51,18 @@ type SurfacePlacement = {
 };
 const noOccludingElements: readonly HTMLElement[] = [];
 const surfaceRect = (rect: DOMRect): PlayerSurfaceRect => ({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+function surfaceOcclusion(element: HTMLElement): PlayerSurfaceOcclusion {
+  const rect = surfaceRect(element.getBoundingClientRect());
+  // Native occluding shells use a uniform circular radius and stay stationary
+  // while their contents animate. Keep their transparent corners as video.
+  const radius = getComputedStyle(element).borderTopLeftRadius;
+  const parsed = Number.parseFloat(radius);
+  const borderRadius = Number.isFinite(parsed) ? Math.max(0, Math.min(
+    radius.endsWith('%') ? parsed / 100 * Math.min(rect.width, rect.height) : parsed,
+    rect.width / 2, rect.height / 2,
+  )) : 0;
+  return borderRadius > 0 ? { ...rect, borderRadius } : rect;
+}
 function intersection(a: PlayerSurfaceRect, b: PlayerSurfaceRect): PlayerSurfaceRect {
   const x = Math.max(a.x, b.x), y = Math.max(a.y, b.y);
   return { x, y, width: Math.max(0, Math.min(a.x + a.width, b.x + b.width) - x),
@@ -65,17 +78,21 @@ function placementSignature(request: SurfacePlacement['request']) {
   const round = (value: number) => value < 0 ? -Math.round(-value) : Math.round(value);
   const x = round(bounds.x * scale), y = round(bounds.y * scale);
   const width = Math.round(bounds.width * scale), height = Math.round(bounds.height * scale);
-  const rectangle = (rect: PlayerSurfaceRect, exclude: boolean) => {
+  const rectangle = (rect: PlayerSurfaceRect, exclude: boolean, clamp = true) => {
     const low = exclude ? Math.floor : Math.ceil;
     const high = exclude ? Math.ceil : Math.floor;
-    const left = Math.max(0, Math.min(width, low(rect.x * scale - x)));
-    const top = Math.max(0, Math.min(height, low(rect.y * scale - y)));
-    return [left, top, Math.max(left, Math.min(width, high((rect.x + rect.width) * scale - x))),
-      Math.max(top, Math.min(height, high((rect.y + rect.height) * scale - y)))];
+    const limit = (value: number, maximum: number) => clamp ? Math.max(0, Math.min(maximum, value)) : value;
+    const left = limit(low(rect.x * scale - x), width);
+    const top = limit(low(rect.y * scale - y), height);
+    return [left, top, Math.max(left, limit(high((rect.x + rect.width) * scale - x), width)),
+      Math.max(top, limit(high((rect.y + rect.height) * scale - y), height))];
   };
   return JSON.stringify([x, y, width, height,
     bounds.clip ? rectangle(bounds.clip, false) : [0, 0, width, height],
-    bounds.occlusions?.filter(rect => rect.width > 0 && rect.height > 0).map(rect => rectangle(rect, true)) ?? [],
+    bounds.occlusions?.filter(rect => rect.width > 0 && rect.height > 0).map(rect => {
+      const diameter = Math.round(Math.min((rect.borderRadius ?? 0) * 2, rect.width, rect.height) * scale);
+      return diameter > 0 ? [...rectangle(rect, true, false), diameter] : rectangle(rect, true);
+    }) ?? [],
     !!bounds.inputBlocked]);
 }
 
@@ -86,6 +103,7 @@ const surfacePlacement = (() => {
   let hide: SurfacePlacement | undefined;
   let active = false;
   let confirmed: SurfacePlacement | undefined;
+  let uncertain: PlayerSurfaceRect[] = [];
   const same = (a: SurfacePlacement | undefined, b: SurfacePlacement) =>
     a?.owner === b.owner && a.signature === b.signature;
   const flush = () => {
@@ -99,8 +117,15 @@ const surfacePlacement = (() => {
       return;
     }
     active = true;
+    // Publish before IPC: native expansion may precede its response. On shrink
+    // retain the previous footprint until that response confirms the old pixels
+    // are clear. This also protects a new player from the preceding owner's HWND.
+    const possible = [...uncertain, ...nativeSurfaceFootprint(confirmed?.request), ...nativeSurfaceFootprint(next.request)];
+    publishSurfaceFootprint(possible);
     void playerApi.player(next.request).then(() => {
       confirmed = next;
+      uncertain = [];
+      publishSurfaceFootprint(nativeSurfaceFootprint(next.request));
       if (!hide && same(wanted, next)) {
         const complete = wanted?.complete;
         wanted = undefined;
@@ -108,6 +133,9 @@ const surfacePlacement = (() => {
       }
     }, error => {
       confirmed = undefined;
+      // A failed placement can have partially changed native geometry. Keep its
+      // possible pixels protected until replacement or recovery hide succeeds.
+      uncertain = possible;
       if (!hide && same(wanted, next)) {
         const complete = wanted?.complete;
         // A completion may enqueue recovery work. Clear the old slot first so
@@ -427,10 +455,10 @@ export function NativePlayer({
         const windowRect = { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
         const pageClip = main ? intersection(surfaceRect(main), windowRect) : windowRect;
         const clip = rect ? intersection(surfaceRect(rect), pageClip) : pageClip;
-        const occlusions: PlayerSurfaceRect[] = [];
+        const occlusions: PlayerSurfaceOcclusion[] = [];
         for (const element of occludingElements) {
           if (!element.isConnected) continue;
-          const card = surfaceRect(element.getBoundingClientRect());
+          const card = surfaceOcclusion(element);
           const overlap = intersection(card, clip);
           if (overlap.width <= 0 || overlap.height <= 0) continue;
           occlusions.push(card);

@@ -67,6 +67,19 @@ describe('real native playback speed popup', () => {
     if (originalSettings) await invoke('update_settings', { settings: originalSettings });
   });
 
+  it('closes from the same trigger and reopens without changing playback', async () => {
+    const before = await state();
+    await openSpeed();
+    await $(triggerSelector).click();
+    await expectClosed();
+    await openSpeed();
+    await browser.keys(Key.Escape);
+    await expectClosed();
+    const after = await state();
+    assert.equal(after.rate, before.rate);
+    assert.equal(after.paused, before.paused);
+  });
+
   it('adjusts the real player through the slider, fine steps and slow-first presets without seeking or toggling playback', async () => {
     const before = await state();
     assert.equal(await $(triggerSelector).getAttribute('aria-haspopup'), 'dialog');
@@ -154,6 +167,16 @@ describe('real native playback speed popup', () => {
     assert(native?.regionRectangles?.length, 'Native video has no explicit retained region');
     assert(!native.regionRectangles.some(rect => contains(rect, x, y)), 'Native video pixels cover speed choices');
     assert(native.regionRectangles.some(rect => rect.Right > rect.Left && rect.Bottom > rect.Top), 'The speed popup removed all video pixels');
+    const corners = [[card.x + 1, card.y + 1], [card.x + card.width - 2, card.y + 1],
+      [card.x + 1, card.y + card.height - 2], [card.x + card.width - 2, card.y + card.height - 2]]
+      .filter(([x, y]) => x >= viewport.x && y >= viewport.y && x < viewport.x + viewport.width && y < viewport.y + viewport.height);
+    assert(corners.length, 'Speed popup has no transparent corner inside the test video');
+    for (const [cornerX, cornerY] of corners) {
+      const physicalX = Math.floor(cornerX * scale) - Math.round(viewport.x * scale);
+      const physicalY = Math.floor(cornerY * scale) - Math.round(viewport.y * scale);
+      assert(native.regionRectangles.some(rect => contains(rect, physicalX, physicalY)),
+        `Rounded corner (${cornerX}, ${cornerY}) removed the video and exposed a black square`);
+    }
     await browser.keys(Key.Escape);
     await expectClosed();
     const after = await assertNativeVideoBounds();

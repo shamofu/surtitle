@@ -14,3 +14,4 @@ pub(crate) mod transcript;
 pub(crate) mod transcript_study;
 pub(crate) mod transfer;
 pub(crate) mod ui_drafts;
+pub(crate) mod window;

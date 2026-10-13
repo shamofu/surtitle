@@ -5,6 +5,7 @@ import { NativePlayer } from '../features/study/playback/NativePlayer';
 import { playerApi } from '../features/study/playback/api';
 import type { Media } from '../shared/contracts/media';
 import type { PlayerState } from '../shared/contracts/player';
+import { nativeDockInset } from '../features/study/playback/surfaceFootprint';
 
 const fixture = vi.hoisted(() => ({
   hidden: false, notify: vi.fn(), ready: vi.fn(), position: vi.fn(),
@@ -421,6 +422,44 @@ it('coalesces animated bounds while one placement is pending and sends the final
   await waitFor(() => expect(placementRequests().filter(request => request.action === 'bounds').map(request => request.bounds?.width)).toEqual([320, 240]));
 });
 
+it('protects confirmed and in-flight native pixels until shrink, expansion and hide acknowledge', async () => {
+  const view = render(player());
+  await waitFor(() => expect(document.querySelector('.native-player-viewport')).toHaveAttribute('data-native-placement', 'ready'));
+  const dock = { x: 200, y: 0, width: 240, height: 400 };
+  expect(nativeDockInset(dock, 1)).toBe(120);
+  const shrink = deferred<void>();
+  const expand = deferred<void>();
+  const hide = deferred<void>();
+  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'hide' ? hide.promise
+    : request.action === 'bounds' ? request.bounds!.width === 240 ? shrink.promise : expand.promise : Promise.resolve());
+  await resizeSurface(240);
+  expect(nativeDockInset(dock, 1)).toBe(120);
+  await act(async () => shrink.resolve());
+  expect(nativeDockInset(dock, 1)).toBe(40);
+  await resizeSurface(400);
+  // Expansion is protected before its response can arrive.
+  expect(nativeDockInset(dock, 1)).toBe(200);
+  await act(async () => expand.resolve());
+  view.unmount();
+  expect(nativeDockInset(dock, 1)).toBe(200);
+  await act(async () => hide.resolve());
+  expect(nativeDockInset(dock, 1)).toBe(0);
+});
+
+it('retains uncertain native pixels after a failed resize until recovery hide acknowledges', async () => {
+  render(player());
+  await waitFor(() => expect(document.querySelector('.native-player-viewport')).toHaveAttribute('data-native-placement', 'ready'));
+  const resize = deferred<void>(), hide = deferred<void>();
+  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? resize.promise
+    : request.action === 'hide' ? hide.promise : Promise.resolve());
+  await resizeSurface(240);
+  await act(async () => resize.reject(new Error('Placement rejected')));
+  const dock = { x: 200, y: 0, width: 240, height: 400 };
+  expect(nativeDockInset(dock, 1)).toBe(120);
+  await act(async () => hide.resolve());
+  expect(nativeDockInset(dock, 1)).toBe(0);
+});
+
 it('deduplicates CSS widths that produce the same physical bounds and clipping', async () => {
   render(player());
   await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
@@ -456,6 +495,29 @@ it('retains outward occlusion changes while deduplicating the same physical regi
   left = 10;
   await resizeSurface(320);
   expect(placementRequests()).toHaveLength(1);
+});
+
+it('sends the rounded shell shape and updates it when only its physical corner radius changes', async () => {
+  const card = document.createElement('section');
+  card.style.borderTopLeftRadius = '12px';
+  document.body.append(card);
+  fixture.occludingElements = [card];
+  vi.spyOn(card, 'getBoundingClientRect').mockImplementation(() => new DOMRect(-20, 10, 60, 40));
+  render(player());
+  await waitFor(() => expect(placementRequests().at(-1)?.bounds?.occlusions).toEqual([
+    { x: -20, y: 10, width: 60, height: 40, borderRadius: 12 },
+  ]));
+  vi.mocked(playerApi.player).mockClear();
+  card.style.borderTopLeftRadius = '12.1px';
+  await resizeSurface(320);
+  expect(placementRequests()).toEqual([]);
+  card.style.borderTopLeftRadius = '8px';
+  await resizeSurface(320);
+  expect(placementRequests()).toHaveLength(1);
+  expect(placementRequests()[0].bounds?.occlusions?.[0].borderRadius).toBe(8);
+  card.style.borderTopLeftRadius = '0px';
+  await resizeSurface(320);
+  expect(placementRequests().at(-1)?.bounds?.occlusions).toEqual([{ x: -20, y: 10, width: 60, height: 40 }]);
 });
 
 it('matches native rounding away from zero for negative half-pixel positions', async () => {

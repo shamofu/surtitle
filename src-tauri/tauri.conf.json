@@ -14,8 +14,8 @@
       {
         "label": "main",
         "title": "Surtitle",
-        "width": 1440,
-        "height": 940,
+        "width": 1600,
+        "height": 900,
         "visible": false,
         "backgroundColor": "#202328"
       }

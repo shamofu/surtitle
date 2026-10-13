@@ -36,8 +36,8 @@ async function expectPageTop(path) {
 describe('real native learning workflow (no cloud requests)', () => {
   before(async () => {
     await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__), { timeoutMsg: 'Native IPC was not available' });
-    // Exercise the same compact layout as the hosted Windows desktop.
-    if (process.platform === 'win32') await resizeNativeWindow(1028, 750);
+    // Exercise the minimum supported desktop client size.
+    if (process.platform === 'win32') await resizeNativeWindow(1280, 720);
     const initial = await snapshot();
     await invoke('update_settings', { settings: { ...initial.settings, locale: 'en', dailyBudgetUsd: 0 } });
     await browser.refresh();

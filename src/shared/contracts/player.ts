@@ -33,6 +33,11 @@ export interface PlayerSurfaceRect {
   height: number;
 }
 
+export interface PlayerSurfaceOcclusion extends PlayerSurfaceRect {
+  /** Uniform circular CSS border radius; omitted for rectangular surfaces. */
+  borderRadius?: number;
+}
+
 export interface PlayerControlRequest {
   action:
     | 'source-seek'
@@ -63,8 +68,8 @@ export interface PlayerControlRequest {
     scaleFactor: number;
     /** Visible intersection with the page, in the same CSS coordinates. */
     clip?: PlayerSurfaceRect;
-    /** Opaque UI rectangles to subtract without resizing the video. */
-    occlusions?: PlayerSurfaceRect[];
+    /** Opaque UI shapes to subtract without resizing the video. */
+    occlusions?: PlayerSurfaceOcclusion[];
     /** Modal input ownership is independent from video visibility. */
     inputBlocked?: boolean;
   };

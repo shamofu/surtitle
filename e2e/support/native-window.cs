@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -16,6 +17,8 @@ public static class SurtitleNativeWindow {
     [DllImport("user32.dll", SetLastError = true)] static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr root, EnumWindow callback, IntPtr parameter);
     [DllImport("user32.dll", SetLastError = true)] static extern bool GetWindowRect(IntPtr handle, out Rect rect);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr handle, uint attribute, out Rect value, int size);
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SendMessageTimeout(IntPtr handle, uint message, IntPtr wParam, ref Rect lParam, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll", SetLastError = true)] static extern bool GetClientRect(IntPtr handle, out Rect rect);
     [DllImport("user32.dll", SetLastError = true)] static extern bool ClientToScreen(IntPtr handle, ref Point point);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr handle);
@@ -54,8 +57,34 @@ public static class SurtitleNativeWindow {
         var origin = new Point();
         if (!ClientToScreen(handle, ref origin)) throw new Win32Exception();
         var name = new StringBuilder(256); GetClassName(handle, name, 256);
-        return new { handle = handle.ToInt64(), parent = GetParent(handle).ToInt64(), className = name.ToString(), visible = IsWindowVisible(handle), maximized = IsZoomed(handle), dpi = GetDpiForWindow(handle), screen, client, origin,
+        var visibleFrame = VisibleFrame(handle, screen);
+        return new { handle = handle.ToInt64(), parent = GetParent(handle).ToInt64(), className = name.ToString(), visible = IsWindowVisible(handle), maximized = IsZoomed(handle), dpi = GetDpiForWindow(handle), screen, visibleFrame, client, origin,
             regionRectangles = name.ToString().Equals("STATIC", StringComparison.OrdinalIgnoreCase) ? RegionRectangles(handle) : null };
+    }
+    static Rect VisibleFrame(IntPtr handle, Rect fallback) {
+        return DwmGetWindowAttribute(handle, 9, out Rect frame, Marshal.SizeOf<Rect>()) == 0
+            && frame.Right > frame.Left && frame.Bottom > frame.Top ? frame : fallback;
+    }
+    public static void SnapToEdge(IntPtr root, string edge) {
+        if (GetParent(root) != IntPtr.Zero || IsZoomed(root)) throw new ArgumentException("Snap target must be a normal top-level window");
+        if (!new[] { "left", "right", "top", "bottom", "top-left", "bottom-right" }.Contains(edge)) throw new ArgumentException("Invalid snap edge");
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        if (previous == IntPtr.Zero) throw new Win32Exception();
+        try {
+            if (!GetWindowRect(root, out Rect outer)) throw new Win32Exception();
+            var visible = VisibleFrame(root, outer);
+            var area = ReadMonitor(MonitorFromWindow(root, 2)).WorkArea;
+            int gap = checked((int)Math.Round(8 * GetDpiForWindow(root) / 96.0));
+            int x = edge.Contains("left") ? area.Left + gap - visible.Left : edge.Contains("right") ? area.Right - gap - visible.Right : 0;
+            int y = edge.Contains("top") ? area.Top + gap - visible.Top : edge.Contains("bottom") ? area.Bottom - gap - visible.Bottom : 0;
+            var proposed = new Rect { Left = outer.Left + x, Top = outer.Top + y, Right = outer.Right + x, Bottom = outer.Bottom + y };
+            // Exercise the application's actual move hook without taking over the user's mouse.
+            if (SendMessageTimeout(root, 0x0216, IntPtr.Zero, ref proposed, 2, 2000, out IntPtr handled) == IntPtr.Zero || handled == IntPtr.Zero)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Application did not handle the native drag message");
+            if (proposed.Right - proposed.Left != outer.Right - outer.Left || proposed.Bottom - proposed.Top != outer.Bottom - outer.Top)
+                throw new InvalidOperationException("Magnetic snapping changed window size");
+            if (!SetWindowPos(root, IntPtr.Zero, proposed.Left, proposed.Top, 0, 0, 0x0001 | 0x0004 | 0x0010)) throw new Win32Exception();
+        } finally { SetThreadDpiAwarenessContext(previous); }
     }
     public static object[] Inspect(IntPtr root) {
         var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));

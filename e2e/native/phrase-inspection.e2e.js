@@ -52,7 +52,7 @@ async function replaceValue(element, value) {
     await control({ action: 'pause' });
   });
   it('keeps the full native surface visible when opening panels and resizing at the minimum window size', async () => {
-    for (const [width, height] of [[1440, 900], [1024, 700]]) {
+    for (const [width, height] of [[1440, 900], [1280, 720]]) {
       await resizeNativeWindow(width, height);
       await browser.waitUntil(async () => {
         const state = await player();
@@ -101,7 +101,7 @@ async function replaceValue(element, value) {
     try {
       await invoke('edit_segment', { segment: { ...original, text: 'Sometimes a longer sentence needs more space to stay readable. We can take a little detour, listen again, and discover how the same words fit into the world around us without losing the picture or the playback controls.' } });
       await browser.refresh();
-      await resizeNativeWindow(1024, 700);
+      await resizeNativeWindow(1280, 720);
       await browser.waitUntil(async () => (await player()).ready);
       await control({ action: 'pause' });
       await control({ action: 'seek', value: original.startMs });

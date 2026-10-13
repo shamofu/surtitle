@@ -17,14 +17,15 @@ function validateSnapshot(snapshot) {
   }
   assert(Number.isInteger(snapshot.dpi) && snapshot.dpi >= 96 && snapshot.dpi <= 768, 'Invalid desktop DPI');
   assert(snapshot.workArea.width <= snapshot.bounds.width && snapshot.workArea.height <= snapshot.bounds.height, 'Work area exceeds the monitor');
-  assert.deepEqual(snapshot.requiredClient, { width: 1440, height: 940 });
-  assert(snapshot.requiredOuter.width >= Math.ceil(1440 * snapshot.dpi / 96) && snapshot.requiredOuter.height >= Math.ceil(940 * snapshot.dpi / 96), 'Window frame capacity omits the requested logical client');
+  // Covers the 1600x900 default and existing 1440x940 rendering checks.
+  assert.deepEqual(snapshot.requiredClient, { width: 1600, height: 940 });
+  assert(snapshot.requiredOuter.width >= Math.ceil(1600 * snapshot.dpi / 96) && snapshot.requiredOuter.height >= Math.ceil(940 * snapshot.dpi / 96), 'Window frame capacity omits the requested logical client');
 }
 export function assertDesktopCapacity(snapshot) {
   validateSnapshot(snapshot);
   assert(snapshot.bounds.width >= 1920 && snapshot.bounds.height >= 1080, 'Hosted desktop must be at least 1920x1080 physical pixels');
   assert(snapshot.workArea.width >= snapshot.requiredOuter.width && snapshot.workArea.height >= snapshot.requiredOuter.height,
-    `Desktop work area ${snapshot.workArea.width}x${snapshot.workArea.height} cannot hold the 1440x940 client at ${snapshot.dpi} DPI with its ${snapshot.requiredOuter.width}x${snapshot.requiredOuter.height} window frame`);
+    `Desktop work area ${snapshot.workArea.width}x${snapshot.workArea.height} cannot hold the 1600x940 test envelope at ${snapshot.dpi} DPI with its ${snapshot.requiredOuter.width}x${snapshot.requiredOuter.height} window frame`);
 }
 export function selectDesktopMode(snapshot) {
   validateSnapshot(snapshot);

@@ -15,7 +15,7 @@ import { aiApi } from '../features/ai/api';
 import type { AppSettings } from '../shared/contracts/settings';
 import type { AppSnapshot } from '../shared/contracts/snapshot';
 const context = vi.hoisted(() => ({ data: undefined as AppSnapshot | undefined, error: null as Error | null, loading: false, native: true, refresh: vi.fn(async () => {}), notify: vi.fn(), revision: 0 }));
-vi.mock('../features/settings/api', () => ({ settingsApi: { state: vi.fn(), patch: vi.fn(), scanExternalTools: vi.fn(), setToolProvider: vi.fn(), importCredential: vi.fn() } }));
+vi.mock('../features/settings/api', () => ({ settingsApi: { state: vi.fn(), patch: vi.fn(), scanExternalTools: vi.fn(), setToolProvider: vi.fn(), importCredential: vi.fn(), setWindowSizePreset: vi.fn() } }));
 vi.mock('../features/ai/api', () => ({ aiApi: { vertexModels: vi.fn(), vertexPrice: vi.fn() } }));
 vi.mock('../features/ai/continuations', () => ({ continuationApi: { list: vi.fn().mockResolvedValue([]) } }));
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => context.native }));
@@ -52,6 +52,7 @@ beforeEach(() => {
   });
   vi.mocked(settingsApi.scanExternalTools).mockResolvedValue([]);
   vi.mocked(settingsApi.importCredential).mockResolvedValue(true);
+  vi.mocked(settingsApi.setWindowSizePreset).mockResolvedValue(undefined);
   vi.mocked(aiApi.vertexModels).mockResolvedValue([]);
 });
 afterEach(async () => { cleanup(); await act(async () => {}); clients.splice(0).forEach(client => client.clear()); vi.clearAllMocks(); });
@@ -65,8 +66,41 @@ it('keeps disabled settings readable in the browser preview without inventing pe
   expect(screen.getByRole('combobox', { name: 'Learning language' })).toBeDisabled();
   expect(screen.getByRole('textbox', { name: /Monthly AI budget/ })).toBeDisabled();
   expect(screen.getByRole('textbox', { name: /Monthly AI budget/ })).toHaveValue('');
+  expect(screen.getByRole('button', { name: '1600 × 900 (Default)' })).toBeDisabled();
   expect(screen.queryByText(/Could not load settings/)).not.toBeInTheDocument();
   expect(settingsApi.patch).not.toHaveBeenCalled();
+});
+
+it('applies each window preset independently of unfinished settings and prevents duplicate requests', async () => {
+  await mount();
+  const input = screen.getByRole('textbox', { name: /Playback context on each side/ });
+  fireEvent.change(input, { target: { value: '-' } });
+  let finish!: () => void;
+  vi.mocked(settingsApi.setWindowSizePreset).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const standard = screen.getByRole('button', { name: '1600 × 900 (Default)' });
+  fireEvent.click(standard);
+  fireEvent.click(standard);
+  expect(settingsApi.setWindowSizePreset).toHaveBeenCalledExactlyOnceWith('standard');
+  expect(standard).toBeDisabled();
+  expect(screen.getByRole('button', { name: '1280 × 720 (HD)' })).toBeDisabled();
+  await act(async () => finish());
+  expect(standard).toBeEnabled();
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '1280 × 720 (HD)' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '1920 × 1080 (Full HD)' })); });
+  expect(vi.mocked(settingsApi.setWindowSizePreset).mock.calls).toEqual([['standard'], ['hd'], ['full-hd']]);
+  expect(input).toHaveValue('-');
+  expect(settingsApi.patch).not.toHaveBeenCalled();
+});
+
+it('reports a failed window resize and allows retry', async () => {
+  await mount();
+  vi.mocked(settingsApi.setWindowSizePreset).mockRejectedValueOnce(new Error('Window resize failed'));
+  const button = screen.getByRole('button', { name: '1600 × 900 (Default)' });
+  await act(async () => { fireEvent.click(button); });
+  expect(context.notify).toHaveBeenCalledWith('Error: Window resize failed', 'error');
+  expect(button).toBeEnabled();
+  await act(async () => { fireEvent.click(button); });
+  expect(settingsApi.setWindowSizePreset).toHaveBeenCalledTimes(2);
 });
 
 it('recovers an initial snapshot failure without replacing the loaded editing session', async () => {

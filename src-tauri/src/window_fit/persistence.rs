@@ -1,5 +1,5 @@
 //! Device-local window placement. Learning backups and preference revisions do not include it.
-use super::{Environment, plan};
+use super::{Environment, invisible_insets, plan};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -146,6 +146,7 @@ impl Persistence {
                 requested.height + frame.height,
             ),
             PhysicalPosition::new(placement.x, placement.y),
+            invisible_insets(window).scaled(frame_scale),
         );
         window.set_position(fit.position)?;
         window.set_size(fit.size)?;
@@ -251,6 +252,7 @@ mod tests {
             requested,
             PhysicalSize::new(requested.width + 24, requested.height + 70),
             PhysicalPosition::new(placement().x, placement().y),
+            super::super::Insets::default(),
         );
         assert!(fitted.size.width + 24 <= left.size.width);
         assert!(fitted.size.height + 70 <= left.size.height);

@@ -68,7 +68,7 @@ pub struct Bounds {
     #[serde(default)]
     pub clip: Option<SurfaceRect>,
     #[serde(default)]
-    pub occlusions: Vec<SurfaceRect>,
+    pub occlusions: Vec<SurfaceOcclusion>,
     #[serde(default)]
     #[cfg_attr(
         not(target_os = "windows"),
@@ -93,6 +93,45 @@ impl SurfaceRect {
             .all(|v| v.is_finite() && v.abs() <= 1_000_000.)
             && self.width >= 0.
             && self.height >= 0.
+    }
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SurfaceOcclusion {
+    #[serde(flatten)]
+    pub rect: SurfaceRect,
+    #[serde(default)]
+    pub border_radius: f64,
+}
+impl SurfaceOcclusion {
+    fn valid(&self) -> bool {
+        self.rect.valid()
+            && self.border_radius.is_finite()
+            && (0. ..=1_000_000.).contains(&self.border_radius)
+    }
+}
+#[cfg(test)]
+mod surface_geometry_tests {
+    use super::*;
+
+    #[test]
+    fn rectangular_occlusions_remain_compatible_and_radius_is_validated() {
+        let mut card: SurfaceOcclusion = serde_json::from_value(serde_json::json!({
+            "x": 10, "y": 20, "width": 60, "height": 40
+        }))
+        .unwrap();
+        assert_eq!(card.border_radius, 0.);
+        assert!(card.valid());
+        for radius in [-1., f64::NAN, f64::INFINITY, 1_000_001.] {
+            card.border_radius = radius;
+            assert!(!card.valid());
+        }
+        let rounded: SurfaceOcclusion = serde_json::from_value(serde_json::json!({
+            "x": 10, "y": 20, "width": 60, "height": 40, "borderRadius": 12
+        }))
+        .unwrap();
+        assert_eq!(rounded.border_radius, 12.);
+        assert!(rounded.valid());
     }
 }
 #[derive(Debug, Clone, Deserialize)]
@@ -485,7 +524,7 @@ impl Player {
                 );
                 ensure!(
                     b.occlusions.len() <= 64
-                        && b.occlusions.iter().all(SurfaceRect::valid)
+                        && b.occlusions.iter().all(SurfaceOcclusion::valid)
                         && b.clip.as_ref().is_none_or(SurfaceRect::valid),
                     "invalid player occlusions"
                 );

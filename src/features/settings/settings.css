@@ -448,3 +448,7 @@ body:has(.settings-page) .toast-stack { bottom: 112px; }
   .settings-nav { position: static; }
   .settings-save { margin-top: 16px; }
 }
+.window-size-presets { margin-top: 16px; }
+.window-size-presets legend { font-size: 13px; font-weight: 600; }
+.window-size-presets .field-hint { margin-top: 4px; color: var(--faint); font-size: 12px; line-height: 1.8; }
+.window-size-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }

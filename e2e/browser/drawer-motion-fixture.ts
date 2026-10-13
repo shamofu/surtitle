@@ -3,7 +3,7 @@ import { expect, type Page, type TestInfo } from '@playwright/test';
 type Box = { x: number; y: number; width: number; height: number; right: number; bottom: number };
 type Frame = { at: number; video: Box; dock: Box; rail: Box; panel: Box; scrollTop: number; hidden: boolean; inert: boolean; expanded: boolean; opaque: boolean; overflow: boolean };
 
-/** Observe immediate layout and subsequent frames; native surfaces must not animate. */
+/** Observe shared drawer/player layout progress without transforming native ancestors. */
 export async function observeDrawer(page: Page) {
   return page.evaluate(async () => {
     const toggle = document.querySelector<HTMLButtonElement>('.study-transcript-toggle')!;

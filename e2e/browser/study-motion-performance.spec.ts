@@ -65,7 +65,7 @@ for (const segmentCount of [120, 10000]) test(`study motion cadence with ${segme
       const expanded = toggle.getAttribute('aria-expanded') === 'true', elapsed = at - start;
       const endpointReady = endpoint.open === undefined || (expanded === endpoint.open && panel.hidden === !endpoint.open);
       const phase = endpoint.open === undefined ? 'content-motion' : moving
-        ? panelVisibility === 'hidden' ? 'resizing-or-native-wait' : 'panel-slide'
+        ? panelVisibility === 'hidden' ? 'native-wait' : 'companion-and-player'
         : !endpointReady ? 'awaiting-commit' : pending ? 'native-placement' : 'settled';
       return { at, sampledAt: performance.now(), elapsed, phase, moving, pending, expanded, panelHidden: panel.hidden,
         panelVisibility, panelInert: panel.inert, toggleDisabled: toggle.disabled, width: rect.width, height: rect.height,

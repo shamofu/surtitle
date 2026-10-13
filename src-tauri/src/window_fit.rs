@@ -8,7 +8,50 @@ use std::sync::{
 };
 use std::time::Duration;
 use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow, WindowEvent};
+#[cfg(windows)]
+mod native;
 mod persistence;
+#[cfg(any(windows, test))]
+mod snapping;
+
+const MINIMUM_WIDTH: f64 = 1280.0;
+const MINIMUM_HEIGHT: f64 = 720.0;
+
+/// Physical resize borders outside the visible DWM frame. These may extend
+/// beyond the work area while the visible titlebar and client remain inside it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Insets {
+    left: u32,
+    top: u32,
+    right: u32,
+    bottom: u32,
+}
+
+impl Insets {
+    fn scaled(self, scale: f64) -> Self {
+        Self {
+            left: (f64::from(self.left) * scale).round() as u32,
+            top: (f64::from(self.top) * scale).round() as u32,
+            right: (f64::from(self.right) * scale).round() as u32,
+            bottom: (f64::from(self.bottom) * scale).round() as u32,
+        }
+    }
+}
+
+fn invisible_insets(window: &WebviewWindow) -> Insets {
+    #[cfg(windows)]
+    {
+        window
+            .hwnd()
+            .map(|handle| native::insets(handle.0))
+            .unwrap_or_default()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+        Insets::default()
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Environment {
@@ -29,29 +72,52 @@ fn plan(
     inner: PhysicalSize<u32>,
     outer: PhysicalSize<u32>,
     position: PhysicalPosition<i32>,
+    insets: Insets,
 ) -> Fit {
     let frame = PhysicalSize::new(
         outer.width.saturating_sub(inner.width),
         outer.height.saturating_sub(inner.height),
     );
+    let leading = PhysicalSize::new(insets.left.min(frame.width), insets.top.min(frame.height));
+    let visible_frame = PhysicalSize::new(
+        frame
+            .width
+            .saturating_sub(leading.width)
+            .saturating_sub(insets.right),
+        frame
+            .height
+            .saturating_sub(leading.height)
+            .saturating_sub(insets.bottom),
+    );
     let available = PhysicalSize::new(
-        environment.size.width.saturating_sub(frame.width).max(1),
-        environment.size.height.saturating_sub(frame.height).max(1),
+        environment
+            .size
+            .width
+            .saturating_sub(visible_frame.width)
+            .max(1),
+        environment
+            .size
+            .height
+            .saturating_sub(visible_frame.height)
+            .max(1),
     );
     // Floor before clamping so fractional DPI never adds a pixel outside the work area.
     let minimum = PhysicalSize::new(
-        ((1024.0 * environment.scale).floor() as u32).clamp(1, available.width),
-        ((700.0 * environment.scale).floor() as u32).clamp(1, available.height),
+        ((MINIMUM_WIDTH * environment.scale).floor() as u32).clamp(1, available.width),
+        ((MINIMUM_HEIGHT * environment.scale).floor() as u32).clamp(1, available.height),
     );
     let size = PhysicalSize::new(
         inner.width.clamp(minimum.width, available.width),
         inner.height.clamp(minimum.height, available.height),
     );
-    let clamp_axis = |current: i32, origin: i32, area: u32, client: u32, border: u32| {
-        let start = i64::from(origin);
-        let end = start + i64::from(area.saturating_sub(client.saturating_add(border)));
-        i64::from(current).clamp(start, end) as i32
-    };
+    let clamp_axis =
+        |current: i32, origin: i32, area: u32, client: u32, border: u32, inset: u32| {
+            let start = i64::from(origin) - i64::from(inset);
+            let end = start + i64::from(area.saturating_sub(client.saturating_add(border)));
+            i64::from(current)
+                .clamp(start, end)
+                .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+        };
     Fit {
         minimum,
         size,
@@ -61,14 +127,16 @@ fn plan(
                 environment.origin.x,
                 environment.size.width,
                 size.width,
-                frame.width,
+                visible_frame.width,
+                leading.width,
             ),
             clamp_axis(
                 position.y,
                 environment.origin.y,
                 environment.size.height,
                 size.height,
-                frame.height,
+                visible_frame.height,
+                leading.height,
             ),
         ),
     }
@@ -98,7 +166,13 @@ fn apply(window: &WebviewWindow, state: &mut State) -> tauri::Result<()> {
     };
     let inner = window.inner_size()?;
     let position = window.outer_position()?;
-    let fit = plan(environment, inner, window.outer_size()?, position);
+    let fit = plan(
+        environment,
+        inner,
+        window.outer_size()?,
+        position,
+        invisible_insets(window),
+    );
     let changed_environment = state.environment != Some(environment);
     if state.minimum != Some(fit.minimum) {
         window.set_min_size(Some(fit.minimum))?;
@@ -116,7 +190,70 @@ fn apply(window: &WebviewWindow, state: &mut State) -> tauri::Result<()> {
     Ok(())
 }
 
+fn preset_size(preset: &str) -> anyhow::Result<PhysicalSize<u32>> {
+    match preset {
+        "hd" => Ok(PhysicalSize::new(1280, 720)),
+        "standard" => Ok(PhysicalSize::new(1600, 900)),
+        "full-hd" => Ok(PhysicalSize::new(1920, 1080)),
+        _ => anyhow::bail!("Unknown window size preset: {preset}"),
+    }
+}
+
+/// Apply a device-local window action; existing placement events save the result.
+pub async fn apply_preset(window: WebviewWindow, preset: &str) -> anyhow::Result<()> {
+    let logical = preset_size(preset)?;
+    let target = window.clone();
+    let (send, receive) = tokio::sync::oneshot::channel();
+    window.run_on_main_thread(move || {
+        let result = (|| -> anyhow::Result<()> {
+            if target.is_fullscreen()? {
+                target.set_fullscreen(false)?;
+            }
+            if target.is_minimized()? {
+                target.unminimize()?;
+            }
+            if target.is_maximized()? {
+                target.unmaximize()?;
+            }
+            let monitor = target
+                .current_monitor()?
+                .or(target.primary_monitor()?)
+                .ok_or_else(|| anyhow::anyhow!("No display is available for the window"))?;
+            let area = monitor.work_area();
+            let scale = target.scale_factor()?;
+            let inner = target.inner_size()?;
+            let outer = target.outer_size()?;
+            let requested = PhysicalSize::new(
+                (f64::from(logical.width) * scale).round() as u32,
+                (f64::from(logical.height) * scale).round() as u32,
+            );
+            let fit = plan(
+                Environment {
+                    origin: area.position,
+                    size: area.size,
+                    scale,
+                },
+                requested,
+                PhysicalSize::new(
+                    requested.width + outer.width.saturating_sub(inner.width),
+                    requested.height + outer.height.saturating_sub(inner.height),
+                ),
+                target.outer_position()?,
+                invisible_insets(&target),
+            );
+            target.set_min_size(Some(fit.minimum))?;
+            target.set_size(fit.size)?;
+            target.set_position(fit.position)?;
+            Ok(())
+        })();
+        let _ = send.send(result);
+    })?;
+    receive.await?
+}
+
 pub fn install(window: &WebviewWindow, path: PathBuf) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    native::install(window)?;
     let mut persistence = persistence::Persistence::open(path);
     let maximized = match persistence.restore(window) {
         Ok(maximized) => maximized,
@@ -261,8 +398,9 @@ mod tests {
             PhysicalSize::new(1800, 1175),
             PhysicalSize::new(1816, 1219),
             PhysicalPosition::new(50, 50),
+            Insets::default(),
         );
-        assert_eq!(fit.minimum, PhysicalSize::new(1280, 875));
+        assert_eq!(fit.minimum, PhysicalSize::new(1600, 900));
         assert_eq!(fit.size, PhysicalSize::new(1800, 1175));
         assert_eq!(fit.position, PhysicalPosition::new(50, 50));
     }
@@ -274,8 +412,9 @@ mod tests {
             PhysicalSize::new(2880, 1880),
             PhysicalSize::new(2906, 1951),
             PhysicalPosition::new(0, 0),
+            Insets::default(),
         );
-        assert_eq!(fit.minimum, PhysicalSize::new(2048, 1273));
+        assert_eq!(fit.minimum, PhysicalSize::new(2534, 1273));
         assert_eq!(fit.size, PhysicalSize::new(2534, 1273));
         assert_eq!(fit.size.height as f64 / 2.0, 636.5);
         assert_eq!(fit.position, PhysicalPosition::new(0, 0));
@@ -288,6 +427,7 @@ mod tests {
             PhysicalSize::new(2160, 1410),
             PhysicalSize::new(2180, 1465),
             PhysicalPosition::new(400, 300),
+            Insets::default(),
         );
         assert_eq!(fit.minimum, PhysicalSize::new(1260, 665));
         assert_eq!(fit.size, fit.minimum);
@@ -303,6 +443,7 @@ mod tests {
             PhysicalSize::new(1440, 940),
             PhysicalSize::new(1456, 979),
             PhysicalPosition::new(-1000, -40),
+            Insets::default(),
         );
         assert_eq!(fit.position, PhysicalPosition::new(-1456, 50));
         assert_eq!(fit.size, PhysicalSize::new(1440, 940));
@@ -315,6 +456,7 @@ mod tests {
             PhysicalSize::new(2880, 1880),
             PhysicalSize::new(2906, 1951),
             PhysicalPosition::new(0, 0),
+            Insets::default(),
         );
         let mut destination = environment(1920, 1040, 1.0);
         destination.origin = PhysicalPosition::new(2560, 0);
@@ -323,17 +465,78 @@ mod tests {
             PhysicalSize::new(compact.size.width / 2, compact.size.height / 2),
             PhysicalSize::new(compact.size.width / 2 + 16, compact.size.height / 2 + 39),
             PhysicalPosition::new(2600, 100),
+            Insets::default(),
         );
-        assert_eq!(normal.minimum, PhysicalSize::new(1024, 700));
-        assert_eq!(normal.size, PhysicalSize::new(1267, 700));
+        assert_eq!(normal.minimum, PhysicalSize::new(1280, 720));
+        assert_eq!(normal.size, PhysicalSize::new(1280, 720));
         assert_eq!(
             plan(
                 destination,
                 normal.size,
                 PhysicalSize::new(normal.size.width + 16, normal.size.height + 39),
-                normal.position
+                normal.position,
+                Insets::default(),
             ),
             normal
         );
+    }
+
+    #[test]
+    fn invisible_resize_borders_remain_outside_without_moving_the_visible_frame() {
+        let area = environment(1920, 1040, 1.0);
+        let inner = PhysicalSize::new(1280, 720);
+        let outer = PhysicalSize::new(1296, 759);
+        let insets = Insets {
+            left: 7,
+            top: 0,
+            right: 7,
+            bottom: 7,
+        };
+        for position in [
+            PhysicalPosition::new(-7, 0),
+            PhysicalPosition::new(631, 288),
+        ] {
+            let fit = plan(area, inner, outer, position, insets);
+            assert_eq!(fit.position, position);
+            assert_eq!(fit.size, inner);
+        }
+        let large = plan(
+            area,
+            PhysicalSize::new(1920, 1080),
+            PhysicalSize::new(1936, 1119),
+            PhysicalPosition::new(100, 100),
+            insets,
+        );
+        assert_eq!(large.size, PhysicalSize::new(1918, 1008));
+        assert_eq!(large.position, PhysicalPosition::new(-7, 0));
+    }
+
+    #[test]
+    fn all_presets_use_the_same_work_area_policy_and_reject_unknown_ids() {
+        for (id, expected) in [
+            ("hd", (1280, 720)),
+            ("standard", (1600, 900)),
+            ("full-hd", (1920, 1080)),
+        ] {
+            let requested = preset_size(id).unwrap();
+            assert_eq!(requested, PhysicalSize::from(expected));
+            let fit = plan(
+                environment(3840, 2160, 1.0),
+                requested,
+                PhysicalSize::new(requested.width + 16, requested.height + 39),
+                PhysicalPosition::new(20, 20),
+                Insets::default(),
+            );
+            assert_eq!(fit.size, requested);
+            let small = plan(
+                environment(1024, 720, 1.0),
+                requested,
+                PhysicalSize::new(requested.width + 16, requested.height + 39),
+                PhysicalPosition::new(20, 20),
+                Insets::default(),
+            );
+            assert_eq!(small.size, PhysicalSize::new(1008, 681));
+        }
+        assert!(preset_size("custom").is_err());
     }
 }

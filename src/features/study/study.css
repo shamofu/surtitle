@@ -34,11 +34,10 @@
 .study-secondary-tools p { max-width: 65ch; font-size: 12px; line-height: 1.6; color: var(--muted); padding: 4px 12px; }
 .study-secondary-tools .button { font-size: 12px; flex-shrink: 0; }
 .study-grid { --study-panel-width: 320px; display: grid; grid-template-columns: minmax(0, 1fr) auto; flex: 1; min-height: 0; gap: 8px; }
-/* Fixed panel contents sit inside a dock whose reserved width can animate. */
+/* One dock width reveals fixed-size contents while the adjacent player resizes. */
 .study-companion-dock { display: grid; grid-template-columns: 44px var(--study-panel-width); width: 44px; min-width: 0; min-height: 0; overflow: clip; }
 .study-companion-dock[data-open='true'] { width: calc(44px + var(--study-panel-width)); }
 .study-transcript-rail { min-width: 0; padding-top: 16px; }
-.study-companion-dock[data-moving='true'] > .study-transcript-rail { will-change: transform; }
 .study-transcript-toggle { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 44px; min-height: 132px; padding: 12px 8px; border: 1px solid var(--border); border-radius: 8px 0 0 8px; background: var(--surface); color: var(--muted); }
 .study-transcript-toggle span { writing-mode: vertical-rl; font-size: 13px; font-weight: 600; letter-spacing: .04em; }
 .study-transcript-toggle:hover { background: var(--surface-hover); color: var(--text); }
