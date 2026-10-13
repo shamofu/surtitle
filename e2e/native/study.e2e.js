@@ -166,10 +166,25 @@ describe('real native learning workflow (no cloud requests)', () => {
     const subtitleInput = $('[role="dialog"] textarea');
     if (process.platform === 'win32') {
       // WebView2's WebDriver clear can omit the input event for controlled fields.
-      // Use editing keys, as in replay-context, and verify replacement before saving.
+      // Wait for draft loading and the native exclusion/entrance before clicking.
+      await $('button=Confirm and save').waitForEnabled();
+      await browser.waitUntil(async () => browser.execute(node => {
+        const dialog = node.closest('[role="dialog"]');
+        const body = node.closest('.modal-body');
+        return dialog?.dataset.nativeOcclusion !== 'pending' && body &&
+          !body.style.transform && !body.style.opacity &&
+          document.querySelector('[data-testid="native-player-viewport"]')?.dataset.nativePlacement !== 'pending';
+      }, await subtitleInput), { timeoutMsg: 'The subtitle editor did not finish its native exclusion and entrance' });
+      await subtitleInput.waitForClickable();
       await subtitleInput.click();
+      await expect(subtitleInput).toBeFocused();
       await browser.keys([Key.Ctrl, 'a']);
-      await browser.keys(Key.Backspace);
+      await browser.waitUntil(async () => browser.execute(node =>
+        document.activeElement === node && node.selectionStart === 0 && node.selectionEnd === node.value.length,
+      await subtitleInput), { timeoutMsg: 'Ctrl+A did not select the subtitle text in the focused editor' });
+      // Send deletion to the verified editor through WebDriver's element key
+      // input, rather than a separate global action that may target a native HWND.
+      await subtitleInput.addValue(Key.Backspace);
       await expect(subtitleInput).toHaveValue('');
       await subtitleInput.addValue('Milliseconds survive a text-only edit.');
     } else {

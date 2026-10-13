@@ -1,18 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-[CmdletBinding()]
-param([Parameter(Mandatory)][string]$Application, [switch]$ActivateOnly)
+[CmdletBinding(DefaultParameterSetName = 'Input')]
+param(
+    [Parameter(Mandatory, ParameterSetName = 'Input')][string]$Application,
+    [Parameter(ParameterSetName = 'Input')][switch]$ActivateOnly,
+    [Parameter(Mandatory, ParameterSetName = 'Inspect')][switch]$InspectInputDesktop
+)
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows) { throw 'Native video pointer input requires Windows.' }
-if (-not [IO.Path]::IsPathFullyQualified($Application) -or -not (Test-Path -LiteralPath $Application -PathType Leaf)) { throw 'Application must be an existing absolute executable path.' }
-$expected = (Resolve-Path -LiteralPath $Application).ProviderPath
-if ([IO.Path]::GetExtension($expected) -ine '.exe') { throw 'Application must be an executable.' }
-$apps = @(Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($expected)) -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $expected -and $_.MainWindowHandle -ne [IntPtr]::Zero })
-if ($apps.Count -ne 1) { throw "Expected exactly one window for the configured test executable, found $($apps.Count)." }
-$root = $apps[0].MainWindowHandle
-$expectedProcess = [uint32]$apps[0].Id
 Add-Type -Path (Join-Path $PSScriptRoot 'native-window.cs')
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -50,6 +48,103 @@ public static class SurtitleNativePointer {
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr data, uint size, out uint needed);
     [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
     [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthority(IntPtr sid, uint index);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr memory);
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr GetProcessWindowStation();
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr GetThreadDesktop(uint thread);
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr OpenWindowStation(string name, bool inherit, uint access);
+    [DllImport("user32.dll")] static extern bool CloseWindowStation(IntPtr station);
+    [DllImport("user32.dll")] static extern bool CloseDesktop(IntPtr desktop);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool GetUserObjectInformation(IntPtr handle, int kind, IntPtr data, uint length, out uint needed);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool GetUserObjectSecurity(IntPtr handle, ref uint information, IntPtr data, uint length, out uint needed);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertSecurityDescriptorToStringSecurityDescriptor(IntPtr descriptor, uint revision, uint information, out IntPtr text, out uint length);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr text);
+    [StructLayout(LayoutKind.Sequential)] struct SidAndAttributes { public IntPtr Sid; public uint Attributes; }
+    static object Failure(int error) { return new { error, message = new Win32Exception(error).Message }; }
+    static object UserObjectValue(IntPtr handle, int kind) {
+        if (handle == IntPtr.Zero) return Failure(6);
+        GetUserObjectInformation(handle, kind, IntPtr.Zero, 0, out uint size);
+        int error = Marshal.GetLastWin32Error();
+        if (size == 0 || size > 65536) return Failure(error);
+        IntPtr data = Marshal.AllocHGlobal((int)size);
+        try {
+            if (!GetUserObjectInformation(handle, kind, data, size, out _)) return Failure(Marshal.GetLastWin32Error());
+            if (kind == 2) return Marshal.PtrToStringUni(data);
+            // USEROBJECTFLAGS: two BOOLs followed by DWORD dwFlags.
+            if (kind == 1) return new { inherit = Marshal.ReadInt32(data) != 0, reserved = Marshal.ReadInt32(data, 4) != 0, flags = unchecked((uint)Marshal.ReadInt32(data, 8)) };
+            return Marshal.ReadInt32(data) != 0; // UOI_IO
+        } finally { Marshal.FreeHGlobal(data); }
+    }
+    static object UserObjectSecurity(IntPtr handle, uint information) {
+        GetUserObjectSecurity(handle, ref information, IntPtr.Zero, 0, out uint size);
+        int error = Marshal.GetLastWin32Error();
+        if (size == 0 || size > 65536) return Failure(error);
+        IntPtr data = Marshal.AllocHGlobal((int)size), text = IntPtr.Zero;
+        try {
+            if (!GetUserObjectSecurity(handle, ref information, data, size, out _)) return Failure(Marshal.GetLastWin32Error());
+            if (!ConvertSecurityDescriptorToStringSecurityDescriptor(data, 1, information, out text, out _)) return Failure(Marshal.GetLastWin32Error());
+            return Marshal.PtrToStringUni(text);
+        } finally { if (text != IntPtr.Zero) LocalFree(text); Marshal.FreeHGlobal(data); }
+    }
+    static object TokenGroups(IntPtr token, int kind) {
+        GetTokenInformation(token, kind, IntPtr.Zero, 0, out uint size);
+        int error = Marshal.GetLastWin32Error();
+        if (size == 0 || size > 65536) return Failure(error);
+        IntPtr data = Marshal.AllocHGlobal((int)size);
+        try {
+            if (!GetTokenInformation(token, kind, data, size, out _)) return Failure(Marshal.GetLastWin32Error());
+            int count = Marshal.ReadInt32(data), offset = IntPtr.Size, stride = Marshal.SizeOf<SidAndAttributes>();
+            if (count < 0 || count > (size - offset) / stride) throw new Exception("Invalid token group buffer");
+            var groups = new List<object>();
+            for (int index = 0; index < count; index++) {
+                var group = Marshal.PtrToStructure<SidAndAttributes>(IntPtr.Add(data, offset + index * stride));
+                if (!ConvertSidToStringSid(group.Sid, out IntPtr text)) { groups.Add(Failure(Marshal.GetLastWin32Error())); continue; }
+                try { groups.Add(new { sid = Marshal.PtrToStringUni(text), attributes = "0x" + group.Attributes.ToString("X8") }); }
+                finally { LocalFree(text); }
+            }
+            return new { count, groups };
+        } finally { Marshal.FreeHGlobal(data); }
+    }
+    // Read-only preflight: never switches desktops, changes ACLs, moves the
+    // cursor, activates a window, or calls any input API.
+    public static object InspectInputDesktop() {
+        IntPtr station = GetProcessWindowStation(), desktop = GetThreadDesktop(GetCurrentThreadId());
+        object stationName = UserObjectValue(station, 2);
+        IntPtr input = OpenInputDesktop(0, false, 0x0001); // DESKTOP_READOBJECTS only
+        int inputError = input == IntPtr.Zero ? Marshal.GetLastWin32Error() : 0;
+        // Probe the exact SetCursorPos access prerequisite, independently of
+        // read/diagnostic rights. Opening the handle never changes attributes.
+        IntPtr writable = stationName is string name ? OpenWindowStation(name, false, 0x0010) : IntPtr.Zero;
+        int writeError = writable == IntPtr.Zero ? (stationName is string ? Marshal.GetLastWin32Error() : 6) : 0;
+        IntPtr token = IntPtr.Zero;
+        object groups = null, restrictedGroups = null;
+        try {
+            if (OpenProcessToken(Process.GetCurrentProcess().Handle, 8, out token)) {
+                groups = TokenGroups(token, 2); restrictedGroups = TokenGroups(token, 11);
+            } else { groups = Failure(Marshal.GetLastWin32Error()); }
+            return new {
+                processId = Process.GetCurrentProcess().Id, sessionId = Process.GetCurrentProcess().SessionId,
+                integrity = Integrity((uint)Process.GetCurrentProcess().Id), stationName,
+                inputContext = InputContext(IntPtr.Zero),
+                stationFlags = UserObjectValue(station, 1), threadDesktopName = UserObjectValue(desktop, 2),
+                threadDesktopIsInput = UserObjectValue(desktop, 6),
+                inputDesktopName = input != IntPtr.Zero ? UserObjectValue(input, 2) : Failure(inputError),
+                inputDesktopError = inputError, writeAttributesAccess = writable != IntPtr.Zero,
+                writeAttributesError = writeError, writeAttributesMessage = writeError == 0 ? null : new Win32Exception(writeError).Message,
+                // Owner/group/DACL and the mandatory label are read separately:
+                // unavailable READ_CONTROL never hides the successful access probes.
+                stationSecurity = UserObjectSecurity(station, 0x7), stationLabel = UserObjectSecurity(station, 0x10),
+                desktopSecurity = UserObjectSecurity(desktop, 0x7), desktopLabel = UserObjectSecurity(desktop, 0x10),
+                groups, restrictedGroups
+            };
+        } finally {
+            if (token != IntPtr.Zero) CloseHandle(token);
+            if (input != IntPtr.Zero) CloseDesktop(input);
+            if (writable != IntPtr.Zero) CloseWindowStation(writable);
+            // GetProcessWindowStation/GetThreadDesktop handles are borrowed.
+        }
+    }
     static string Integrity(uint process) {
         IntPtr handle = OpenProcess(0x1000, false, process), token = IntPtr.Zero, data = IntPtr.Zero;
         try {
@@ -152,7 +247,11 @@ public static class SurtitleNativePointer {
         // following button event still uses SendInput and its integrity checks.
         // SetCursorPos requires the current input desktop and station access.
         // Never switch desktops, change permissions or inject into that console.
-        if (!SetCursorPos(point.X, point.Y)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not position over the owned caption; no button input was sent");
+        if (!SetCursorPos(point.X, point.Y)) {
+            int error = Marshal.GetLastWin32Error();
+            throw new Win32Exception(error, "SetCursorPos failed; Win32Error=" + error + " (" + new Win32Exception(error).Message
+                + "); no button input was sent. " + InputContext(root));
+        }
         var clock = Stopwatch.StartNew();
         do {
             if (CursorRemainsAt(point, root)) return;
@@ -241,6 +340,18 @@ public static class SurtitleNativePointer {
     }
 }
 '@
+if ($InspectInputDesktop) {
+    [SurtitleNativePointer]::InspectInputDesktop() | ConvertTo-Json -Depth 6
+    exit 0
+}
+if (-not [IO.Path]::IsPathFullyQualified($Application) -or -not (Test-Path -LiteralPath $Application -PathType Leaf)) { throw 'Application must be an existing absolute executable path.' }
+$expected = (Resolve-Path -LiteralPath $Application).ProviderPath
+if ([IO.Path]::GetExtension($expected) -ine '.exe') { throw 'Application must be an executable.' }
+$apps = @(Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($expected)) -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $expected -and $_.MainWindowHandle -ne [IntPtr]::Zero })
+if ($apps.Count -ne 1) { throw "Expected exactly one window for the configured test executable, found $($apps.Count)." }
+$root = $apps[0].MainWindowHandle
+$expectedProcess = [uint32]$apps[0].Id
+try {
 if ($ActivateOnly) {
     [SurtitleNativePointer]::Activate($root, $expectedProcess)
     @{ rootHandle = $root.ToInt64(); activated = $true } | ConvertTo-Json
@@ -257,3 +368,8 @@ $x = $video.origin.X + [int][Math]::Floor(($region.Left + $region.Right) / 2)
 $y = $video.origin.Y + [int][Math]::Floor(($region.Top + $region.Bottom) / 2)
 [SurtitleNativePointer]::Click($root, $expectedProcess, [IntPtr]$video.handle, $x, $y)
 @{ videoHandle = $video.handle; x = $x; y = $y; retainedRegion = $region } | ConvertTo-Json -Depth 3
+} catch {
+    try { [Console]::Error.WriteLine('Native input desktop: ' + ([SurtitleNativePointer]::InspectInputDesktop() | ConvertTo-Json -Depth 6 -Compress)) }
+    catch { [Console]::Error.WriteLine('Native input desktop diagnostics failed: ' + $_.Exception.Message) }
+    throw
+}

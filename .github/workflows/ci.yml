@@ -147,6 +147,8 @@ jobs:
           package-manager-cache: false
       - name: Prepare hosted Windows desktop capacity
         run: node e2e/support/prepare-ci-desktop.mjs
+      - name: Verify restricted native input desktop access
+        run: node e2e/support/prepare-native-input.mjs
       - name: Read the native Rust toolchain pin
         id: rust
         shell: bash
@@ -188,6 +190,7 @@ jobs:
           native/windows/package-production-smoke.test.mjs
           e2e/support/native-e2e-database.test.mjs
           e2e/support/prepare-ci-desktop.test.mjs
+          e2e/support/prepare-native-input.test.mjs
           e2e/support/native-window.test.mjs
           e2e/support/native-window-resize.test.mjs
           native/build/native-ci-artifact.test.mjs
