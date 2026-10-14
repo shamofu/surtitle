@@ -14,7 +14,7 @@ if (process.argv[2] === workerFlag) {
 } else {
   const worker = fileURLToPath(import.meta.url);
   const child = spawnWebDriver(process.execPath, [worker, workerFlag, 'run', './wdio.conf.js', ...process.argv.slice(2)],
-    { stdio: 'inherit', env: process.env });
+    { stdio: 'inherit', env: process.env, foregroundApplication: process.env.SURTITLE_E2E_BINARY });
   let launchFailed = false;
   let requestedSignal;
   const running = () => child.pid && child.exitCode === null && child.signalCode === null;

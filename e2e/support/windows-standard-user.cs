@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 
 // CI-only launcher. The application itself never receives a debugging bypass.
 public static class SurtitleWindowsStandardUser
@@ -15,7 +19,17 @@ public static class SurtitleWindowsStandardUser
     const uint Infinite = 0xffffffff;
 
     public static int Run(string application, string[] arguments, string directory)
+    { return Run(application, arguments, directory, null); }
+
+    public static int Run(string application, string[] arguments, string directory, string foregroundApplication)
     {
+        if (!String.IsNullOrEmpty(foregroundApplication))
+        {
+            if (!Path.IsPathFullyQualified(foregroundApplication) || !File.Exists(foregroundApplication)
+                || !String.Equals(Path.GetExtension(foregroundApplication), ".exe", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("ForegroundApplication must be an existing absolute .exe path.");
+            foregroundApplication = Path.GetFullPath(foregroundApplication);
+        }
         var commandLine = new StringBuilder(QuoteArgument(application));
         foreach (string argument in arguments)
             commandLine.Append(' ').Append(QuoteArgument(argument));
@@ -93,7 +107,14 @@ public static class SurtitleWindowsStandardUser
             finally { CloseHandle(childToken); }
             Console.Error.WriteLine("[restricted-medium] pid={0} {1}", process.dwProcessId, childSecurity);
             Check(ResumeThread(process.hThread) != Infinite, "Resume verified standard-user process");
-            Check(WaitForSingleObject(process.hProcess, Infinite) == 0, "Wait for standard-user process");
+            if (String.IsNullOrEmpty(foregroundApplication) || !RequiresForegroundHandoff(parentIntegrity))
+            {
+                if (!String.IsNullOrEmpty(foregroundApplication))
+                    WriteForegroundReceipt(new { outcome = "skipped-medium-parent", application = foregroundApplication, parentIntegrity });
+                Check(WaitForSingleObject(process.hProcess, Infinite) == 0, "Wait for standard-user process");
+            }
+            else
+                WaitWithForegroundHandoff(process.hProcess, job, foregroundApplication, user, session, parentIntegrity);
             uint exitCode;
             Check(GetExitCodeProcess(process.hProcess, out exitCode), "Read child exit code");
             completed = true;
@@ -117,6 +138,257 @@ public static class SurtitleWindowsStandardUser
             if (currentToken != IntPtr.Zero) CloseHandle(currentToken);
         }
     }
+
+    public sealed class ForegroundIdentity
+    {
+        public uint processId { get; set; }
+        public long creationTime { get; set; }
+        public string executablePath { get; set; }
+        public string userSid { get; set; }
+        public int sessionId { get; set; }
+        public uint integrity { get; set; }
+        public bool inJob { get; set; }
+        public long window { get; set; }
+        public long root { get; set; }
+        public long owner { get; set; }
+        public bool visible { get; set; }
+    }
+
+    // Ordinary local runs retain the existing owned-caption activation path.
+    // Only a high/system parent needs to hand its medium child the foreground.
+    public static bool RequiresForegroundHandoff(uint parentIntegrity)
+    { return parentIntegrity >= 0x3000; }
+
+    // Also used by tests with synthetic identities; this performs no interop.
+    public static void ValidateForegroundIdentity(ForegroundIdentity value, string application, string user, int session)
+    {
+        if (value == null || value.processId == 0 || value.creationTime <= 0 || !value.inJob)
+            throw new InvalidOperationException("Foreground target must be a live process in the launcher's exact child job.");
+        if (!String.Equals(value.executablePath, application, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Foreground target executable does not match the explicitly configured application.");
+        if (value.userSid != user || value.sessionId != session || value.integrity != MediumIntegrity)
+            throw new InvalidOperationException("Foreground target must preserve the caller's user and session at medium integrity.");
+        if (value.window == 0 || value.root != value.window || value.owner != 0 || !value.visible)
+            throw new InvalidOperationException("Foreground target must be a visible, unowned top-level window.");
+    }
+
+    sealed class ForegroundProcess : IDisposable
+    {
+        public IntPtr Handle;
+        public uint Id;
+        public long Creation;
+        public readonly Stopwatch Startup = Stopwatch.StartNew();
+        public readonly HashSet<long> Acknowledged = new HashSet<long>();
+        public void Dispose() { if (Handle != IntPtr.Zero) CloseHandle(Handle); Handle = IntPtr.Zero; }
+    }
+
+    static void WaitWithForegroundHandoff(IntPtr child, IntPtr job, string application, string user, int session, uint parentIntegrity)
+    {
+        var targets = new Dictionary<uint, ForegroundProcess>();
+        try
+        {
+            while (true)
+            {
+                uint waited = WaitForSingleObject(child, 100);
+                if (waited == 0) return;
+                Check(waited == 258, "Wait for standard-user process during foreground handoff");
+                foreach (uint id in JobProcesses(job))
+                {
+                    if (targets.ContainsKey(id)) continue;
+                    IntPtr handle = OpenProcess(0x00101000, false, id); // QUERY_LIMITED_INFORMATION | SYNCHRONIZE
+                    if (handle == IntPtr.Zero) continue; // A job member can exit between snapshot and open.
+                    try
+                    {
+                        if (WaitForSingleObject(handle, 0) != 258) continue;
+                        Check(IsProcessInJob(handle, job, out bool inJob), "Check foreground process job membership");
+                        if (!inJob || !String.Equals(ProcessImage(handle), application, StringComparison.OrdinalIgnoreCase)) continue;
+                        Check(GetProcessTimes(handle, out long creation, out _, out _, out _), "Read foreground process creation time");
+                        targets.Add(id, new ForegroundProcess { Handle = handle, Id = id, Creation = creation });
+                        handle = IntPtr.Zero; // Held until this exact process exits, including throughout activation.
+                    }
+                    catch (Win32Exception) when (WaitForSingleObject(handle, 0) == 0) { }
+                    finally { if (handle != IntPtr.Zero) CloseHandle(handle); }
+                }
+                var exited = new List<uint>();
+                foreach (ForegroundProcess target in targets.Values)
+                {
+                    uint state = WaitForSingleObject(target.Handle, 0);
+                    if (state == 0) { exited.Add(target.Id); continue; }
+                    Check(state == 258, "Check foreground process lifetime");
+                    // Activation belongs to startup. Do not inspect or refocus
+                    // later windows while the application is already in use.
+                    if (target.Acknowledged.Count != 0) continue;
+                    List<IntPtr> windows = ProcessRootWindows(target);
+                    if (windows.Count > 1)
+                        throw new InvalidOperationException("The configured foreground process has multiple visible unowned roots; refusing ambiguous activation.");
+                    if (windows.Count == 0)
+                    {
+                        if (target.Acknowledged.Count == 0 && target.Startup.ElapsedMilliseconds >= 30000)
+                            throw new TimeoutException("The configured foreground process did not create a visible unowned root within 30 seconds.");
+                        continue;
+                    }
+                    IntPtr window = windows[0];
+                    if (target.Acknowledged.Contains(window.ToInt64())) continue;
+                    if (HandoffForeground(target, window, job, application, user, session, parentIntegrity))
+                        target.Acknowledged.Add(window.ToInt64());
+                }
+                foreach (uint id in exited) { targets[id].Dispose(); targets.Remove(id); }
+            }
+        }
+        catch (Exception error)
+        {
+            WriteForegroundReceipt(new { outcome = "failed", application, parentIntegrity, foreground = ForegroundSnapshot(),
+                error = error.Message, win32Error = (error as Win32Exception)?.NativeErrorCode });
+            throw;
+        }
+        finally { foreach (ForegroundProcess target in targets.Values) target.Dispose(); }
+    }
+
+    static IEnumerable<uint> JobProcesses(IntPtr job)
+    {
+        int capacity = 64;
+        while (capacity <= 65536)
+        {
+            int length = checked(8 + capacity * IntPtr.Size);
+            IntPtr buffer = Marshal.AllocHGlobal(length);
+            try
+            {
+                if (!QueryInformationJobObject(job, 3, buffer, (uint)length, out _)) // JobObjectBasicProcessIdList
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    if (error != 234) throw new Win32Exception(error, "Read the owned job's process list");
+                    capacity *= 2;
+                    continue;
+                }
+                int count = Marshal.ReadInt32(buffer, 4);
+                if (count < 0 || count > capacity) throw new InvalidOperationException("Invalid owned job process count.");
+                var ids = new List<uint>(count);
+                for (int index = 0; index < count; index++)
+                    ids.Add(checked((uint)Marshal.ReadIntPtr(buffer, 8 + index * IntPtr.Size).ToInt64()));
+                return ids;
+            }
+            finally { Marshal.FreeHGlobal(buffer); }
+        }
+        throw new InvalidOperationException("The owned job exceeds the foreground monitor's process limit.");
+    }
+
+    static string ProcessImage(IntPtr handle)
+    {
+        var path = new StringBuilder(32768);
+        uint length = (uint)path.Capacity;
+        Check(QueryFullProcessImageNameW(handle, 0, path, ref length), "Read foreground process executable");
+        return path.ToString();
+    }
+
+    static List<IntPtr> ProcessRootWindows(ForegroundProcess target)
+    {
+        var windows = new List<IntPtr>();
+        // Enumerate only threads of a held, executable-validated job member.
+        // No system-wide window search or foreign foreground mutation is needed.
+        try
+        {
+            using (Process process = Process.GetProcessById(checked((int)target.Id)))
+            {
+                foreach (ProcessThread thread in process.Threads)
+                {
+                    using (thread)
+                    {
+                        EnumThreadWindows((uint)thread.Id, (window, unused) => {
+                            GetWindowThreadProcessId(window, out uint id);
+                            if (id == target.Id && IsWindowVisible(window) && GetAncestor(window, 2) == window
+                                && GetWindow(window, 4) == IntPtr.Zero && !windows.Contains(window)) windows.Add(window);
+                            return true;
+                        }, IntPtr.Zero);
+                    }
+                }
+            }
+        }
+        catch (InvalidOperationException) { if (WaitForSingleObject(target.Handle, 0) != 0) throw; }
+        catch (ArgumentException) { if (WaitForSingleObject(target.Handle, 0) != 0) throw; }
+        catch (Win32Exception) { if (WaitForSingleObject(target.Handle, 0) != 0) throw; }
+        return windows;
+    }
+
+    static ForegroundIdentity ReadForegroundIdentity(ForegroundProcess target, IntPtr window, IntPtr job, string user, int session)
+    {
+        if (WaitForSingleObject(target.Handle, 0) != 258) throw new InvalidOperationException("Foreground target exited before acknowledgement.");
+        GetWindowThreadProcessId(window, out uint id);
+        if (id != target.Id) throw new InvalidOperationException("Foreground window process identity changed before acknowledgement.");
+        Check(GetProcessTimes(target.Handle, out long creation, out _, out _, out _), "Recheck foreground process creation time");
+        if (creation != target.Creation) throw new InvalidOperationException("Foreground process creation identity changed.");
+        Check(IsProcessInJob(target.Handle, job, out bool inJob), "Recheck foreground process job membership");
+        Check(OpenProcessToken(target.Handle, TokenQuery, out IntPtr token), "Read foreground process token");
+        try
+        {
+            VerifyToken(token, user, session, "foreground target");
+            return new ForegroundIdentity { processId = id, creationTime = creation, executablePath = ProcessImage(target.Handle),
+                userSid = TokenUser(token), sessionId = TokenInteger(token, 12), integrity = TokenIntegrity(token), inJob = inJob,
+                window = window.ToInt64(), root = GetAncestor(window, 2).ToInt64(), owner = GetWindow(window, 4).ToInt64(),
+                visible = IsWindowVisible(window) };
+        }
+        finally { CloseHandle(token); }
+    }
+
+    static void ValidateForegroundWindow(ForegroundProcess target, IntPtr window)
+    {
+        if (WaitForSingleObject(target.Handle, 0) != 258 || !IsWindowVisible(window)
+            || GetAncestor(window, 2) != window || GetWindow(window, 4) != IntPtr.Zero)
+            throw new InvalidOperationException("Foreground target window or process changed before activation.");
+        // Token/path reads can take time. Recheck HWND ownership last, immediately
+        // before requesting activation, to reject a destroyed/reused HWND.
+        GetWindowThreadProcessId(window, out uint id);
+        if (id != target.Id) throw new InvalidOperationException("Foreground HWND ownership changed before activation.");
+    }
+
+    static bool HandoffForeground(ForegroundProcess target, IntPtr window, IntPtr job, string application, string user, int session, uint parentIntegrity)
+    {
+        var clock = Stopwatch.StartNew();
+        object before = ForegroundSnapshot();
+        ForegroundIdentity expected = null;
+        int attempts = 0;
+        bool accepted = false, acknowledged = false, exited = false;
+        string failure = null;
+        try
+        {
+            do
+            {
+                expected = ReadForegroundIdentity(target, window, job, user, session);
+                ValidateForegroundIdentity(expected, application, user, session);
+                ValidateForegroundWindow(target, window);
+                if (GetForegroundWindow() == window) { acknowledged = true; return true; }
+                if (!accepted)
+                {
+                    // This existing parent requests only its verified medium child.
+                    // SetForegroundWindow still enforces Windows foreground policy:
+                    // https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-setforegroundwindow
+                    ValidateForegroundWindow(target, window);
+                    accepted = SetForegroundWindow(window);
+                    attempts++;
+                }
+                System.Threading.Thread.Sleep(50);
+            } while (clock.ElapsedMilliseconds < 3000);
+            throw new TimeoutException("The owned medium application did not acknowledge the launcher's foreground handoff within 3 seconds.");
+        }
+        catch (Exception) when (WaitForSingleObject(target.Handle, 0) == 0) { exited = true; return false; }
+        catch (Exception error) { failure = error.Message; throw; }
+        finally
+        {
+            WriteForegroundReceipt(new { outcome = acknowledged ? "acknowledged" : exited ? "target-exited" : "failed", application, parentIntegrity,
+                expected, before, after = ForegroundSnapshot(), attempts, accepted, elapsedMs = clock.ElapsedMilliseconds, error = failure });
+        }
+    }
+
+    static object ForegroundSnapshot()
+    {
+        IntPtr window = GetForegroundWindow();
+        GetWindowThreadProcessId(window, out uint id);
+        var name = new StringBuilder(256);
+        GetClassNameW(window, name, name.Capacity);
+        return new { window = window.ToInt64(), processId = id, className = name.ToString() };
+    }
+
+    static void WriteForegroundReceipt(object value)
+    { Console.Error.WriteLine("[native-foreground] " + JsonSerializer.Serialize(value)); }
 
     // Windows CRT argv rules: quotes and backslashes must be escaped together.
     public static string QuoteArgument(string value)
@@ -369,6 +641,20 @@ public static class SurtitleWindowsStandardUser
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateJobObjectW(IntPtr attributes, string name);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetInformationJobObject(IntPtr job, int type, ref JOBOBJECT_EXTENDED_LIMIT_INFORMATION information, uint size);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool QueryInformationJobObject(IntPtr job, int type, IntPtr information, uint length, out uint returned);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint id);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool QueryFullProcessImageNameW(IntPtr process, uint flags, StringBuilder path, ref uint length);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetProcessTimes(IntPtr process, out long creation, out long exit, out long kernel, out long user);
+    delegate bool EnumWindowCallback(IntPtr window, IntPtr parameter);
+    [DllImport("user32.dll")] static extern bool EnumThreadWindows(uint thread, EnumWindowCallback callback, IntPtr parameter);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window, uint flags);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassNameW(IntPtr window, StringBuilder name, int length);
     [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr GetStdHandle(int identifier);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool DuplicateHandle(IntPtr sourceProcess, IntPtr source, IntPtr targetProcess, out IntPtr target, uint access, bool inherit, uint options);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr attributes, uint creation, uint flags, IntPtr template);

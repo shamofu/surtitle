@@ -11,10 +11,12 @@ const launcher = fileURLToPath(new URL('./run-windows-standard-user.ps1', import
 // to restricted medium integrity, including for installed production binaries.
 // The Windows launcher checks groups and privileges, independently of UAC mode.
 export function spawnWebDriver(application, args, options = {}) {
-  if (process.platform !== 'win32') return spawn(application, args, options);
+  const { foregroundApplication, ...spawnOptions } = options;
+  if (process.platform !== 'win32') return spawn(application, args, spawnOptions);
   return spawn('pwsh.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', launcher,
-    '-Application', application, '-ArgumentsBase64', Buffer.from(JSON.stringify(args)).toString('base64')],
-  { ...options, windowsHide: true });
+    '-Application', application, '-ArgumentsBase64', Buffer.from(JSON.stringify(args)).toString('base64'),
+    ...(foregroundApplication ? ['-ForegroundApplication', foregroundApplication] : [])],
+  { ...spawnOptions, windowsHide: true });
 }
 
 // The intermediary can accept TCP connections before its native driver starts.

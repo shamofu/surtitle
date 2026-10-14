@@ -152,6 +152,7 @@ jobs:
           node e2e/support/prepare-native-input.mjs
           & e2e/support/ci-desktop.ps1 -Action prepare-input
           Copy-Item -LiteralPath test-results/windows-input-console.json -Destination test-results/windows-input-console-pre-build.json
+          node e2e/support/native-input-smoke.mjs
       - name: Read the native Rust toolchain pin
         id: rust
         shell: bash
@@ -187,6 +188,7 @@ jobs:
         run: >
           pnpm test:scripts
           e2e/support/webdriver-process.test.mjs
+          e2e/support/foreground-handoff.test.mjs
           e2e/support/run-required-rust-tests.test.mjs
           native/windows/vc-prerequisite.test.mjs
           native/windows/package-installer-smoke.test.mjs
@@ -194,6 +196,7 @@ jobs:
           e2e/support/native-e2e-database.test.mjs
           e2e/support/prepare-ci-desktop.test.mjs
           e2e/support/prepare-native-input.test.mjs
+          e2e/support/native-input-smoke.test.mjs
           e2e/support/native-window.test.mjs
           e2e/support/native-window-resize.test.mjs
           native/build/native-ci-artifact.test.mjs

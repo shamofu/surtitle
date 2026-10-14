@@ -60,8 +60,27 @@ public static class SurtitleNativePointer {
     [DllImport("user32.dll", SetLastError = true)] static extern bool GetUserObjectSecurity(IntPtr handle, ref uint information, IntPtr data, uint length, out uint needed);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertSecurityDescriptorToStringSecurityDescriptor(IntPtr descriptor, uint revision, uint information, out IntPtr text, out uint length);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr text);
+    [DllImport("ntdll.dll")] static extern int NtQueryObject(IntPtr handle, int kind, IntPtr data, uint length, out uint needed);
     [StructLayout(LayoutKind.Sequential)] struct SidAndAttributes { public IntPtr Sid; public uint Attributes; }
     static object Failure(int error) { return new { error, message = new Win32Exception(error).Message }; }
+    static object UserObjectHandleAccess(IntPtr handle) {
+        // PUBLIC_OBJECT_BASIC_INFORMATION is 56 bytes on both Win32/Win64:
+        // ULONG Attributes, ACCESS_MASK GrantedAccess, two ULONG counts and
+        // ULONG Reserved[10]. Query the existing handle, not a fresh open.
+        const uint size = 56;
+        IntPtr data = Marshal.AllocHGlobal((int)size);
+        try {
+            int status = NtQueryObject(handle, 0, data, size, out uint needed);
+            bool success = status == 0 && needed == size;
+            uint? access = success ? unchecked((uint)Marshal.ReadInt32(data, 4)) : (uint?)null;
+            return new { ntStatus = "0x" + unchecked((uint)status).ToString("X8"), returnedSize = needed,
+                grantedAccess = access, grantedAccessHex = access.HasValue ? "0x" + access.Value.ToString("X8") : null };
+        } catch (EntryPointNotFoundException error) {
+            return new { ntStatus = (string)null, grantedAccess = (uint?)null, error = error.Message };
+        } catch (DllNotFoundException error) {
+            return new { ntStatus = (string)null, grantedAccess = (uint?)null, error = error.Message };
+        } finally { Marshal.FreeHGlobal(data); }
+    }
     static object UserObjectValue(IntPtr handle, int kind) {
         if (handle == IntPtr.Zero) return Failure(6);
         GetUserObjectInformation(handle, kind, IntPtr.Zero, 0, out uint size);
@@ -128,10 +147,12 @@ public static class SurtitleNativePointer {
                 integrity = Integrity((uint)Process.GetCurrentProcess().Id), stationName,
                 inputContext = InputContext(IntPtr.Zero),
                 stationFlags = UserObjectValue(station, 1), threadDesktopName = UserObjectValue(desktop, 2),
+                stationHandleAccess = UserObjectHandleAccess(station), desktopHandleAccess = UserObjectHandleAccess(desktop),
                 threadDesktopIsInput = UserObjectValue(desktop, 6),
                 inputDesktopName = input != IntPtr.Zero ? UserObjectValue(input, 2) : Failure(inputError),
                 inputDesktopError = inputError, writeAttributesAccess = writable != IntPtr.Zero,
                 writeAttributesError = writeError, writeAttributesMessage = writeError == 0 ? null : new Win32Exception(writeError).Message,
+                freshWriteAttributesHandleAccess = writable != IntPtr.Zero ? UserObjectHandleAccess(writable) : null,
                 // Owner/group/DACL and the mandatory label are read separately:
                 // unavailable READ_CONTROL never hides the successful access probes.
                 stationSecurity = UserObjectSecurity(station, 0x7), stationLabel = UserObjectSecurity(station, 0x10),

@@ -16,6 +16,12 @@ export function assertNativeInputDesktop(snapshot) {
     `The restricted process cannot open the input desktop: ${JSON.stringify(snapshot.inputDesktopName)}`);
   assert.equal(typeof snapshot.threadDesktopName, 'string', 'The restricted process could not inspect its thread desktop');
   assert.equal(snapshot.threadDesktopName, snapshot.inputDesktopName, 'The restricted process is attached to a different desktop than the input desktop');
+  const stationHandle = snapshot.stationHandleAccess;
+  assert(stationHandle?.ntStatus === '0x00000000' && stationHandle.returnedSize === 56
+    && Number.isInteger(stationHandle.grantedAccess) && stationHandle.grantedAccess >= 0 && stationHandle.grantedAccess <= 0xffffffff,
+    `The restricted process could not query its existing window station handle access: ${JSON.stringify(stationHandle)}`);
+  assert((stationHandle.grantedAccess & 0x10) !== 0,
+    `The restricted process's existing window station handle lacks WINSTA_WRITEATTRIBUTES: ${stationHandle.grantedAccessHex}. A successful fresh open does not grant access to the existing handle; inspect windows-input-desktop.json`);
   assert.equal(snapshot.writeAttributesAccess, true,
     `The restricted process cannot obtain WINSTA_WRITEATTRIBUTES on ${snapshot.stationName}: Win32Error=${snapshot.writeAttributesError} (${snapshot.writeAttributesMessage}). Native cursor input is not available; inspect the parent/restricted security descriptors in windows-input-desktop.json`);
 }

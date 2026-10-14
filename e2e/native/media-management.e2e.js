@@ -12,6 +12,8 @@ const snapshot = () => invoke('get_app_snapshot');
 const navigate = path => browser.execute(next => { window.history.pushState({}, '', next); window.dispatchEvent(new PopStateEvent('popstate')); }, path);
 const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 let server, serverUrl, originalSettings, originalFfmpeg, managedMediaId;
+let retainManagedMedia = false;
+const mediaToolTimeout = 180000;
 async function ready() { await browser.setTimeout({ script: 180000 }); await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__)); await $('h1').waitForDisplayed(); }
 async function playerReady() {
   await browser.waitUntil(async () => {
@@ -42,8 +44,12 @@ async function openDownloads() {
   return dialog;
 }
 async function chooseSubtitle(value) {
-  await $(`[role="dialog"] option[value="${value}"]`).waitForExist({ timeout: 60000 });
-  await $('[role="dialog"] select').waitForEnabled({ timeout: 60000 });
+  // A cold inspection hashes/probes the real FFmpeg pair before ffprobe runs.
+  // Match the native IPC budget while loading, then assert the requested option.
+  const started = Date.now();
+  await $('[role="dialog"] select').waitForEnabled({ timeout: mediaToolTimeout });
+  console.info(`[media-management] subtitle choices ready in ${Date.now() - started} ms`);
+  await expect($(`[role="dialog"] option[value="${value}"]`)).toExist();
   await $('[role="dialog"] select').selectByAttribute('value', String(value));
 }
 async function replaceValue(element, value) {
@@ -62,6 +68,13 @@ async function importMultitrack(title) {
   await navigate(`/study/${managedMediaId}`); await playerReady();
   return managedMediaId;
 }
+async function removeManagedMedia() {
+  if (!managedMediaId) return;
+  const current = await snapshot();
+  for (const card of current.cards.filter(item => item.mediaId === managedMediaId)) await invoke('delete_card', { cardId: card.id });
+  if (current.media.some(item => item.id === managedMediaId)) await invoke('remove_media', { mediaId: managedMediaId });
+  managedMediaId = undefined;
+}
 
 (process.platform === 'win32' ? describe : describe.skip)('native media management and background downloads', () => {
   before(async () => {
@@ -73,13 +86,12 @@ async function importMultitrack(title) {
     assert(ffmpeg); await invoke('set_tool_provider', { request: { toolId: 'ffmpeg', provider: 'external', path: ffmpeg.path } });
     await browser.refresh(); await ready();
   });
-  beforeEach(async () => { await navigate('/'); await browser.refresh(); await ready(); });
+  beforeEach(async () => {
+    if (retainManagedMedia) return;
+    await navigate('/'); await browser.refresh(); await ready();
+  });
   afterEach(async () => {
-    if (!managedMediaId) return;
-    const current = await snapshot();
-    for (const card of current.cards.filter(item => item.mediaId === managedMediaId)) await invoke('delete_card', { cardId: card.id });
-    if (current.media.some(item => item.id === managedMediaId)) await invoke('remove_media', { mediaId: managedMediaId });
-    managedMediaId = undefined;
+    if (!retainManagedMedia) await removeManagedMedia();
   });
   after(async () => {
     if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
@@ -108,42 +120,62 @@ async function importMultitrack(title) {
     await browser.saveScreenshot(resolve('test-results/native/media-resume-tracks.png'));
   });
 
-  it('preserves edited subtitle versions when switching and restoring sources', async () => {
-    const mediaId = await importMultitrack('Multitrack subtitle regression');
-    await invoke('select_audio_stream', { mediaId, streamIndex: 2 });
+  describe('edited subtitle versions across source replacement', () => {
+    let mediaId, savedVersion;
+    // Keep one owned record across the workflow's phases. Each cold inspection
+    // and extraction retains the normal test budget instead of sharing one timer.
+    before(async () => {
+      retainManagedMedia = true;
+      await navigate('/'); await browser.refresh(); await ready();
+      mediaId = await importMultitrack('Multitrack subtitle regression');
+      await invoke('select_audio_stream', { mediaId, streamIndex: 2 });
+    });
+    after(async () => {
+      try { await removeManagedMedia(); }
+      finally { retainManagedMedia = false; }
+    });
     const assertAudioSelection = async () => {
       assert.equal((await snapshot()).media.find(item => item.id === mediaId).audioStreamIndex, 2, 'Subtitle changes must preserve the saved audio selection');
       assert.equal((await invoke('get_player_state')).tracks.find(track => track.kind === 'audio' && track.selected)?.ffIndex, 2, 'Subtitle changes must preserve the playing audio track');
     };
-    await openSubtitles();
-    await chooseSubtitle('3');
-    await $('button=Use these subtitles').click();
-    await browser.waitUntil(async () => (await invoke('list_segments', { mediaId })).some(cue => cue.text.includes('日本語')), { timeout: 60000 });
-    await dialogClosed();
-    await assertAudioSelection();
-    const original = (await invoke('list_segments', { mediaId }))[0];
-    await invoke('edit_segment', { segment: { ...original, text: '日本語の字幕を編集しました。' } });
-    await assert.rejects(invoke('extract_embedded_subtitles', { mediaId, streamIndex: 1, replaceExisting: false }), /Confirm replacement/);
-    await browser.refresh(); await ready(); await openSubtitles();
-    await chooseSubtitle('1');
-    await $('button=Use these subtitles').waitForEnabled();
-    assert.match(await $('[role="dialog"]').getText(), /Keep the current subtitles as a saved version/);
-    assert.equal((await $$('[role="dialog"] input[type="checkbox"]')).length, 0, 'Selecting the replacement source should not need a second confirmation');
-    await $('button=Use these subtitles').click();
-    await browser.waitUntil(async () => (await invoke('list_segments', { mediaId }))[0]?.text === 'English track one.', { timeout: 60000 });
-    await dialogClosed();
-    await assertAudioSelection();
-    const versions = await invoke('list_subtitle_versions', { mediaId }); assert.equal(versions.length, 1);
-    assert.equal(versions[0].streamIndex, 3); assert.equal(versions[0].segments[0].text, '日本語の字幕を編集しました。');
-    await $('button=Add or switch subtitles').click();
-    await $('[role="dialog"]').$('button=Saved subtitles').click();
-    await chooseSubtitle(versions[0].id);
-    await $('button=Use these subtitles').waitForEnabled();
-    await $('button=Use these subtitles').click();
-    await browser.waitUntil(async () => (await invoke('list_segments', { mediaId }))[0]?.text === '日本語の字幕を編集しました。', { timeout: 60000 });
-    await dialogClosed();
-    await assertAudioSelection();
-    assert.equal((await snapshot()).media.find(item => item.id === mediaId).subtitleStreamIndex, 3);
+    it('imports Japanese embedded subtitles without changing the selected audio track', async () => {
+      await openSubtitles();
+      await chooseSubtitle('3');
+      await $('button=Use these subtitles').click();
+      await browser.waitUntil(async () => (await invoke('list_segments', { mediaId })).some(cue => cue.text.includes('日本語')), { timeout: mediaToolTimeout });
+      await dialogClosed();
+      await assertAudioSelection();
+    });
+    it('preserves edited Japanese subtitles when switching to English after reload', async () => {
+      const original = (await invoke('list_segments', { mediaId }))[0];
+      assert(original?.text.includes('日本語'), 'The Japanese extraction must finish before testing replacement');
+      await invoke('edit_segment', { segment: { ...original, text: '日本語の字幕を編集しました。' } });
+      await assert.rejects(invoke('extract_embedded_subtitles', { mediaId, streamIndex: 1, replaceExisting: false }), /Confirm replacement/);
+      await browser.refresh(); await ready(); await openSubtitles();
+      await chooseSubtitle('1');
+      await $('button=Use these subtitles').waitForEnabled();
+      assert.match(await $('[role="dialog"]').getText(), /Keep the current subtitles as a saved version/);
+      assert.equal((await $$('[role="dialog"] input[type="checkbox"]')).length, 0, 'Selecting the replacement source should not need a second confirmation');
+      await $('button=Use these subtitles').click();
+      await browser.waitUntil(async () => (await invoke('list_segments', { mediaId }))[0]?.text === 'English track one.', { timeout: mediaToolTimeout });
+      await dialogClosed();
+      await assertAudioSelection();
+      const versions = await invoke('list_subtitle_versions', { mediaId }); assert.equal(versions.length, 1);
+      assert.equal(versions[0].streamIndex, 3); assert.equal(versions[0].segments[0].text, '日本語の字幕を編集しました。');
+      savedVersion = versions[0];
+    });
+    it('restores the edited saved subtitle version without changing audio selection', async () => {
+      assert(savedVersion, 'Source replacement must preserve a validated subtitle version before restoring it');
+      await $('button=Add or switch subtitles').click();
+      await $('[role="dialog"]').$('button=Saved subtitles').click();
+      await chooseSubtitle(savedVersion.id);
+      await $('button=Use these subtitles').waitForEnabled();
+      await $('button=Use these subtitles').click();
+      await browser.waitUntil(async () => (await invoke('list_segments', { mediaId }))[0]?.text === '日本語の字幕を編集しました。', { timeout: 60000 });
+      await dialogClosed();
+      await assertAudioSelection();
+      assert.equal((await snapshot()).media.find(item => item.id === mediaId).subtitleStreamIndex, 3);
+    });
   });
 
   it('retains saved source audio and card edits through media removal', async () => {

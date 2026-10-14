@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Application,
-    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ArgumentsBase64
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ArgumentsBase64,
+    [string]$ForegroundApplication
 )
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows) { throw 'The standard-user launcher requires Windows and PowerShell 7.' }
@@ -43,5 +44,5 @@ try {
 }
 
 Add-Type -Path (Join-Path $PSScriptRoot 'windows-standard-user.cs')
-$exitCode = [SurtitleWindowsStandardUser]::Run($applicationPath, $arguments.ToArray(), $workingDirectory)
+$exitCode = [SurtitleWindowsStandardUser]::Run($applicationPath, $arguments.ToArray(), $workingDirectory, $ForegroundApplication)
 exit $exitCode
