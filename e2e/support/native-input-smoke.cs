@@ -28,6 +28,9 @@ public static class SurtitleNativeInputSmoke
     [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, Input[] input, int size);
     [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateWindowExW(uint extendedStyle, string className, string title, uint style,
+        int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr parameter);
+    [DllImport("user32.dll")] static extern bool DestroyWindow(IntPtr window);
 
     public sealed class Receipt
     {
@@ -82,8 +85,15 @@ public static class SurtitleNativeInputSmoke
         var receipt = new Receipt { processId = Process.GetCurrentProcess().Id };
         IntPtr previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
         if (previous == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        IntPtr utility = IntPtr.Zero;
         try
         {
+            // Match Tao's visible, unowned, zero-area event target alongside
+            // the real form. The launcher must ignore its utility styles, not
+            // just accept the first visible root or blacklist a class name.
+            utility = CreateWindowExW(0x080800A0, "STATIC", "Surtitle CI event target", 0x90000000,
+                0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+            if (utility == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "Create owned utility window");
             using (var form = new Form())
             using (var timer = new System.Windows.Forms.Timer())
             {
@@ -179,7 +189,11 @@ public static class SurtitleNativeInputSmoke
                 timer.Stop();
             }
         }
-        finally { SetThreadDpiAwarenessContext(previous); }
+        finally
+        {
+            if (utility != IntPtr.Zero) DestroyWindow(utility);
+            SetThreadDpiAwarenessContext(previous);
+        }
         return receipt;
     }
 }

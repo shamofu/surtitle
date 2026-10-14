@@ -189,6 +189,7 @@ jobs:
           pnpm test:scripts
           e2e/support/webdriver-process.test.mjs
           e2e/support/foreground-handoff.test.mjs
+          e2e/support/foreground-window-discovery.test.mjs
           e2e/support/run-required-rust-tests.test.mjs
           native/windows/vc-prerequisite.test.mjs
           native/windows/package-installer-smoke.test.mjs

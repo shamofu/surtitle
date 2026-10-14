@@ -152,6 +152,13 @@ public static class SurtitleWindowsStandardUser
         public long root { get; set; }
         public long owner { get; set; }
         public bool visible { get; set; }
+        public string className { get; set; }
+        public uint style { get; set; }
+        public uint extendedStyle { get; set; }
+        public int clientWidth { get; set; }
+        public int clientHeight { get; set; }
+        public int outerWidth { get; set; }
+        public int outerHeight { get; set; }
     }
 
     // Ordinary local runs retain the existing owned-caption activation path.
@@ -168,8 +175,32 @@ public static class SurtitleWindowsStandardUser
             throw new InvalidOperationException("Foreground target executable does not match the explicitly configured application.");
         if (value.userSid != user || value.sessionId != session || value.integrity != MediumIntegrity)
             throw new InvalidOperationException("Foreground target must preserve the caller's user and session at medium integrity.");
-        if (value.window == 0 || value.root != value.window || value.owner != 0 || !value.visible)
-            throw new InvalidOperationException("Foreground target must be a visible, unowned top-level window.");
+        if (!IsForegroundApplicationWindow(value))
+            throw new InvalidOperationException("Foreground target must be a visible, decorated application window with a nonempty client area.");
+    }
+
+    public static bool IsForegroundApplicationWindow(ForegroundIdentity value)
+    {
+        // Tao's event target is a technically visible, unowned popup. It exists
+        // before the main window: tao 0.35.3 windows/event_loop.rs create_event_target_window.
+        // Require the normal caption/system-menu styles shared by Surtitle and
+        // the Forms smoke fixture, without assuming their runtime class names.
+        const uint frame = 0x00C80000; // WS_CAPTION | WS_SYSMENU
+        const uint excluded = 0xC8000000; // WS_CHILD | WS_POPUP | WS_DISABLED
+        const uint excludedExtended = 0x080000A0; // NOACTIVATE | TOOLWINDOW | TRANSPARENT
+        return value != null && value.window != 0 && value.root == value.window && value.owner == 0 && value.visible
+            && !String.IsNullOrEmpty(value.className)
+            && (value.style & frame) == frame && (value.style & excluded) == 0
+            && (value.extendedStyle & excludedExtended) == 0
+            && value.clientWidth > 0 && value.clientHeight > 0 && value.outerWidth > 0 && value.outerHeight > 0;
+    }
+
+    // Unidentified job members can be protected WebView2 children. A failed
+    // discovery read confers no authority; confirmed app identity reads fail closed.
+    public static string ReadForegroundProcessImage(Func<string> readImage, bool confirmed)
+    {
+        try { return readImage(); }
+        catch (Win32Exception error) when (!confirmed && error.NativeErrorCode == 5) { return null; }
     }
 
     sealed class ForegroundProcess : IDisposable
@@ -185,6 +216,7 @@ public static class SurtitleWindowsStandardUser
     static void WaitWithForegroundHandoff(IntPtr child, IntPtr job, string application, string user, int session, uint parentIntegrity)
     {
         var targets = new Dictionary<uint, ForegroundProcess>();
+        var inaccessible = new HashSet<uint>();
         try
         {
             while (true)
@@ -195,19 +227,8 @@ public static class SurtitleWindowsStandardUser
                 foreach (uint id in JobProcesses(job))
                 {
                     if (targets.ContainsKey(id)) continue;
-                    IntPtr handle = OpenProcess(0x00101000, false, id); // QUERY_LIMITED_INFORMATION | SYNCHRONIZE
-                    if (handle == IntPtr.Zero) continue; // A job member can exit between snapshot and open.
-                    try
-                    {
-                        if (WaitForSingleObject(handle, 0) != 258) continue;
-                        Check(IsProcessInJob(handle, job, out bool inJob), "Check foreground process job membership");
-                        if (!inJob || !String.Equals(ProcessImage(handle), application, StringComparison.OrdinalIgnoreCase)) continue;
-                        Check(GetProcessTimes(handle, out long creation, out _, out _, out _), "Read foreground process creation time");
-                        targets.Add(id, new ForegroundProcess { Handle = handle, Id = id, Creation = creation });
-                        handle = IntPtr.Zero; // Held until this exact process exits, including throughout activation.
-                    }
-                    catch (Win32Exception) when (WaitForSingleObject(handle, 0) == 0) { }
-                    finally { if (handle != IntPtr.Zero) CloseHandle(handle); }
+                    ForegroundProcess discovered = DiscoverForegroundProcess(job, id, application, inaccessible);
+                    if (discovered != null) targets.Add(id, discovered);
                 }
                 var exited = new List<uint>();
                 foreach (ForegroundProcess target in targets.Values)
@@ -242,6 +263,68 @@ public static class SurtitleWindowsStandardUser
             throw;
         }
         finally { foreach (ForegroundProcess target in targets.Values) target.Dispose(); }
+    }
+
+    static ForegroundProcess DiscoverForegroundProcess(IntPtr job, uint id, string application, HashSet<uint> inaccessible)
+    {
+        IntPtr handle = OpenProcess(0x00101000, false, id); // QUERY_LIMITED_INFORMATION | SYNCHRONIZE
+        if (handle == IntPtr.Zero)
+        {
+            int error = Marshal.GetLastWin32Error();
+            if (error == 5) ReportUnknownForegroundProcess(id, inaccessible);
+            return null; // No process identity was established; never select this PID.
+        }
+        try
+        {
+            if (WaitForSingleObject(handle, 0) != 258) return null;
+            Check(IsProcessInJob(handle, job, out bool inJob), "Check foreground process job membership");
+            if (!inJob) return null;
+            string image = ReadForegroundProcessImage(() => ProcessImage(handle), false);
+            if (image == null) { ReportUnknownForegroundProcess(id, inaccessible); return null; }
+            if (!String.Equals(image, application, StringComparison.OrdinalIgnoreCase)) return null;
+            // The image now matches: all subsequent reads remain strict while alive.
+            Check(GetProcessTimes(handle, out long creation, out _, out _, out _), "Read foreground process creation time");
+            var target = new ForegroundProcess { Handle = handle, Id = id, Creation = creation };
+            handle = IntPtr.Zero; // Held through selection and acknowledgement.
+            return target;
+        }
+        catch (Win32Exception) when (WaitForSingleObject(handle, 0) == 0) { return null; }
+        finally { if (handle != IntPtr.Zero) CloseHandle(handle); }
+    }
+
+    static void ReportUnknownForegroundProcess(uint id, HashSet<uint> inaccessible)
+    {
+        if (inaccessible.Add(id))
+            WriteForegroundReceipt(new { outcome = "unidentified-job-member", processId = id, win32Error = 5 });
+    }
+
+    // A read-only entry point exercises the production job discovery and root
+    // selector on ordinary local runners. It cannot activate or send input.
+    public static ForegroundIdentity[] InspectForegroundJob(IntPtr job, string foregroundApplication)
+    {
+        if (job == IntPtr.Zero || !Path.IsPathFullyQualified(foregroundApplication))
+            throw new ArgumentException("Inspection requires an explicit job handle and absolute application path.");
+        Check(OpenProcessToken(GetCurrentProcess(), TokenQuery, out IntPtr token), "Read inspection caller token");
+        string user;
+        int session;
+        try { user = TokenUser(token); session = TokenInteger(token, 12); }
+        finally { CloseHandle(token); }
+        var result = new List<ForegroundIdentity>();
+        var inaccessible = new HashSet<uint>();
+        foreach (uint id in JobProcesses(job))
+        {
+            using (ForegroundProcess target = DiscoverForegroundProcess(job, id, Path.GetFullPath(foregroundApplication), inaccessible))
+            {
+                if (target == null) continue;
+                foreach (IntPtr window in ProcessRootWindows(target))
+                {
+                    ForegroundIdentity identity = ReadForegroundIdentity(target, window, job, user, session);
+                    ValidateForegroundIdentity(identity, Path.GetFullPath(foregroundApplication), user, session);
+                    result.Add(identity);
+                }
+            }
+        }
+        return result.ToArray();
     }
 
     static IEnumerable<uint> JobProcesses(IntPtr job)
@@ -295,8 +378,8 @@ public static class SurtitleWindowsStandardUser
                     {
                         EnumThreadWindows((uint)thread.Id, (window, unused) => {
                             GetWindowThreadProcessId(window, out uint id);
-                            if (id == target.Id && IsWindowVisible(window) && GetAncestor(window, 2) == window
-                                && GetWindow(window, 4) == IntPtr.Zero && !windows.Contains(window)) windows.Add(window);
+                            if (id == target.Id && IsForegroundApplicationWindow(ReadForegroundWindow(window))
+                                && !windows.Contains(window)) windows.Add(window);
                             return true;
                         }, IntPtr.Zero);
                     }
@@ -321,23 +404,37 @@ public static class SurtitleWindowsStandardUser
         try
         {
             VerifyToken(token, user, session, "foreground target");
-            return new ForegroundIdentity { processId = id, creationTime = creation, executablePath = ProcessImage(target.Handle),
-                userSid = TokenUser(token), sessionId = TokenInteger(token, 12), integrity = TokenIntegrity(token), inJob = inJob,
-                window = window.ToInt64(), root = GetAncestor(window, 2).ToInt64(), owner = GetWindow(window, 4).ToInt64(),
-                visible = IsWindowVisible(window) };
+            ForegroundIdentity identity = ReadForegroundWindow(window);
+            identity.processId = id; identity.creationTime = creation;
+            identity.executablePath = ReadForegroundProcessImage(() => ProcessImage(target.Handle), true);
+            identity.userSid = TokenUser(token); identity.sessionId = TokenInteger(token, 12);
+            identity.integrity = TokenIntegrity(token); identity.inJob = inJob;
+            return identity;
         }
         finally { CloseHandle(token); }
     }
 
     static void ValidateForegroundWindow(ForegroundProcess target, IntPtr window)
     {
-        if (WaitForSingleObject(target.Handle, 0) != 258 || !IsWindowVisible(window)
-            || GetAncestor(window, 2) != window || GetWindow(window, 4) != IntPtr.Zero)
+        if (WaitForSingleObject(target.Handle, 0) != 258 || !IsForegroundApplicationWindow(ReadForegroundWindow(window)))
             throw new InvalidOperationException("Foreground target window or process changed before activation.");
         // Token/path reads can take time. Recheck HWND ownership last, immediately
         // before requesting activation, to reject a destroyed/reused HWND.
         GetWindowThreadProcessId(window, out uint id);
         if (id != target.Id) throw new InvalidOperationException("Foreground HWND ownership changed before activation.");
+    }
+
+    static ForegroundIdentity ReadForegroundWindow(IntPtr window)
+    {
+        var name = new StringBuilder(256);
+        GetClassNameW(window, name, name.Capacity);
+        bool clientRead = GetClientRect(window, out Rect client), outerRead = GetWindowRect(window, out Rect outer);
+        return new ForegroundIdentity { window = window.ToInt64(), root = GetAncestor(window, 2).ToInt64(),
+            owner = GetWindow(window, 4).ToInt64(), visible = IsWindowVisible(window), className = name.ToString(),
+            style = unchecked((uint)GetWindowLongPtrW(window, -16).ToInt64()),
+            extendedStyle = unchecked((uint)GetWindowLongPtrW(window, -20).ToInt64()),
+            clientWidth = clientRead ? client.Right - client.Left : 0, clientHeight = clientRead ? client.Bottom - client.Top : 0,
+            outerWidth = outerRead ? outer.Right - outer.Left : 0, outerHeight = outerRead ? outer.Bottom - outer.Top : 0 };
     }
 
     static bool HandoffForeground(ForegroundProcess target, IntPtr window, IntPtr job, string application, string user, int session, uint parentIntegrity)
@@ -591,6 +688,7 @@ public static class SurtitleWindowsStandardUser
     static void Check(bool success, string operation) { if (!success) ThrowLastError(operation); }
     static void ThrowLastError(string operation) { throw new Win32Exception(Marshal.GetLastWin32Error(), operation); }
 
+    [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] struct SID_AND_ATTRIBUTES { public IntPtr Sid; public uint Attributes; }
     [StructLayout(LayoutKind.Sequential)] struct LUID { public uint LowPart; public int HighPart; }
     [StructLayout(LayoutKind.Sequential)] struct LUID_AND_ATTRIBUTES { public LUID Luid; public uint Attributes; }
@@ -650,6 +748,9 @@ public static class SurtitleWindowsStandardUser
     [DllImport("user32.dll")] static extern bool EnumThreadWindows(uint thread, EnumWindowCallback callback, IntPtr parameter);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window, out Rect rectangle);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out Rect rectangle);
+    [DllImport("user32.dll")] static extern IntPtr GetWindowLongPtrW(IntPtr window, int index);
     [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window, uint flags);
     [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
