@@ -190,6 +190,7 @@ jobs:
           e2e/support/webdriver-process.test.mjs
           e2e/support/foreground-handoff.test.mjs
           e2e/support/foreground-window-discovery.test.mjs
+          e2e/support/run-native-e2e.test.mjs
           e2e/support/run-required-rust-tests.test.mjs
           native/windows/vc-prerequisite.test.mjs
           native/windows/package-installer-smoke.test.mjs
@@ -204,6 +205,10 @@ jobs:
           native/windows/native-installer-prepare.test.mjs
           e2e/support/frontend-bundle.test.mjs
           e2e/support/prepare-ffmpeg.test.mjs
+      - name: Verify native activation when foreground requests are denied
+        run: pnpm test:scripts e2e/support/foreground-activation.test.mjs
+        env:
+          SURTITLE_E2E_NATIVE_INPUT: '1'
       - run: pnpm build
       - run: pnpm test:rust
       - name: Verify ordinary builds cannot bypass evaluation accounting
@@ -235,17 +240,33 @@ jobs:
         run: |
           pnpm test:rust:required windows-native
       - name: WebView2 and libmpv E2E
+        id: native-e2e
         timeout-minutes: 50
         run: |
           # Prepare the runner desktop before lowering the test process tree for ordinary-user input.
           & e2e/support/ci-desktop.ps1 -Action prepare-input
-          pnpm test:e2e
+          pnpm test:e2e --exclude ./e2e/native/playback-rate.e2e.js
         env:
           SURTITLE_E2E_BINARY: ${{ github.workspace }}\target\debug\surtitle.exe
           SURTITLE_E2E_DATA_DIR: ${{ github.workspace }}\work\e2e-windows
           SURTITLE_E2E_AI_RECOVERY: translation
           SURTITLE_E2E_TRANSCRIPT_REVIEW: boundary
           SURTITLE_E2E_AV1_FIXTURE: ${{ github.workspace }}\work\e2e-av1.mkv
+          SURTITLE_TAURI_DRIVER: ${{ github.workspace }}\work\driver\bin\tauri-driver.exe
+      - name: Native pointer and playback speed E2E
+        if: ${{ !cancelled() && (steps.native-e2e.outcome == 'success' || steps.native-e2e.outcome == 'failure') }}
+        timeout-minutes: 10
+        run: |
+          $seedArguments = ConvertTo-Json -Compress -InputObject @("$PWD/work/e2e-windows-pointer", "$PWD/test-results/fixtures/日本語 & sample.mp4")
+          $seedArgumentsBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($seedArguments))
+          & pwsh -NoProfile -File e2e/support/run-windows-standard-user.ps1 -Application "$PWD/target/debug/examples/seed_fixture.exe" -ArgumentsBase64 $seedArgumentsBase64
+          if ($LASTEXITCODE -ne 0) { throw 'Native pointer fixture preparation failed.' }
+          & e2e/support/ci-desktop.ps1 -Action prepare-input
+          pnpm test:e2e --spec ./e2e/native/playback-rate.e2e.js
+        env:
+          SURTITLE_E2E_NATIVE_INPUT: '1'
+          SURTITLE_E2E_BINARY: ${{ github.workspace }}\target\debug\surtitle.exe
+          SURTITLE_E2E_DATA_DIR: ${{ github.workspace }}\work\e2e-windows-pointer
           SURTITLE_TAURI_DRIVER: ${{ github.workspace }}\work\driver\bin\tauri-driver.exe
       - uses: actions/upload-artifact@v7.0.1
         if: always()

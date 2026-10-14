@@ -10,7 +10,7 @@ afterEach(() => vi.clearAllMocks());
 
 test('foreground handoff is an explicit outer-launcher option and never leaks into spawn options', () => {
   const application = 'C:\\owned\\driver.exe', foregroundApplication = 'C:\\owned\\app 日本語.exe';
-  const env = { SURTITLE_E2E_BINARY: foregroundApplication };
+  const env = { SURTITLE_E2E_BINARY: foregroundApplication, SURTITLE_E2E_NATIVE_INPUT: '1' };
   spawnWebDriver(application, ['literal & argument'], { env, foregroundApplication, stdio: 'pipe' });
   const [command, args, options] = spawn.mock.calls[0];
   assert.equal(options.env, env);

@@ -161,6 +161,25 @@ public static class SurtitleWindowsStandardUser
         public int outerHeight { get; set; }
     }
 
+    public sealed class ForegroundHandoffReceipt
+    {
+        public string outcome { get; set; }
+        public string application { get; set; }
+        public uint parentIntegrity { get; set; }
+        public ForegroundIdentity expected { get; set; }
+        public object before { get; set; }
+        public object after { get; set; }
+        public bool accepted { get; set; }
+        public int attempts { get; set; }
+        public bool captionClicked { get; set; }
+        public bool acknowledged { get; set; }
+        public uint? captionInserted { get; set; }
+        public long elapsedMs { get; set; }
+        public string error { get; set; }
+        public int? nativeErrorCode { get; set; }
+        public string partialCleanup { get; set; }
+    }
+
     // Ordinary local runs retain the existing owned-caption activation path.
     // Only a high/system parent needs to hand its medium child the foreground.
     public static bool RequiresForegroundHandoff(uint parentIntegrity)
@@ -250,7 +269,7 @@ public static class SurtitleWindowsStandardUser
                     }
                     IntPtr window = windows[0];
                     if (target.Acknowledged.Contains(window.ToInt64())) continue;
-                    if (HandoffForeground(target, window, job, application, user, session, parentIntegrity))
+                    if (HandoffForeground(target, window, job, application, user, session, parentIntegrity).acknowledged)
                         target.Acknowledged.Add(window.ToInt64());
                 }
                 foreach (uint id in exited) { targets[id].Dispose(); targets.Remove(id); }
@@ -325,6 +344,42 @@ public static class SurtitleWindowsStandardUser
             }
         }
         return result.ToArray();
+    }
+
+    // Explicit owned-job activation for the native fixture. Production calls the
+    // same handoff only from its already-high parent; no fake integrity override.
+    public static ForegroundHandoffReceipt ActivateForegroundJob(IntPtr job, string foregroundApplication)
+    {
+        if (job == IntPtr.Zero || !Path.IsPathFullyQualified(foregroundApplication))
+            throw new ArgumentException("Activation requires an explicit job handle and absolute application path.");
+        string application = Path.GetFullPath(foregroundApplication);
+        Check(OpenProcessToken(GetCurrentProcess(), TokenQuery, out IntPtr token), "Read activation caller token");
+        string user;
+        int session;
+        uint integrity;
+        try { user = TokenUser(token); session = TokenInteger(token, 12); integrity = TokenIntegrity(token); }
+        finally { CloseHandle(token); }
+        var targets = new List<ForegroundProcess>();
+        var inaccessible = new HashSet<uint>();
+        try
+        {
+            ForegroundProcess selected = null;
+            IntPtr selectedWindow = IntPtr.Zero;
+            foreach (uint id in JobProcesses(job))
+            {
+                ForegroundProcess target = DiscoverForegroundProcess(job, id, application, inaccessible);
+                if (target == null) continue;
+                targets.Add(target);
+                foreach (IntPtr window in ProcessRootWindows(target))
+                {
+                    if (selected != null) throw new InvalidOperationException("Owned-job activation requires exactly one application window.");
+                    selected = target; selectedWindow = window;
+                }
+            }
+            if (selected == null) throw new InvalidOperationException("No verified application window exists in the owned job.");
+            return HandoffForeground(selected, selectedWindow, job, application, user, session, integrity);
+        }
+        finally { foreach (ForegroundProcess target in targets) target.Dispose(); }
     }
 
     static IEnumerable<uint> JobProcesses(IntPtr job)
@@ -437,42 +492,165 @@ public static class SurtitleWindowsStandardUser
             outerWidth = outerRead ? outer.Right - outer.Left : 0, outerHeight = outerRead ? outer.Bottom - outer.Top : 0 };
     }
 
-    static bool HandoffForeground(ForegroundProcess target, IntPtr window, IntPtr job, string application, string user, int session, uint parentIntegrity)
+    static ForegroundHandoffReceipt HandoffForeground(ForegroundProcess target, IntPtr window, IntPtr job, string application, string user, int session, uint parentIntegrity)
     {
         var clock = Stopwatch.StartNew();
-        object before = ForegroundSnapshot();
-        ForegroundIdentity expected = null;
-        int attempts = 0;
-        bool accepted = false, acknowledged = false, exited = false;
-        string failure = null;
+        var receipt = new ForegroundHandoffReceipt { outcome = "failed", application = application,
+            parentIntegrity = parentIntegrity, before = ForegroundSnapshot() };
+        IntPtr dpi = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        Check(dpi != IntPtr.Zero, "Set foreground handoff DPI context");
+        Action validate = () => {
+            receipt.expected = ReadForegroundIdentity(target, window, job, user, session);
+            ValidateForegroundIdentity(receipt.expected, application, user, session);
+            ValidateForegroundWindow(target, window);
+        };
         try
         {
-            do
+            validate();
+            if (GetForegroundWindow() != window)
             {
-                expected = ReadForegroundIdentity(target, window, job, user, session);
-                ValidateForegroundIdentity(expected, application, user, session);
                 ValidateForegroundWindow(target, window);
-                if (GetForegroundWindow() == window) { acknowledged = true; return true; }
-                if (!accepted)
-                {
-                    // This existing parent requests only its verified medium child.
-                    // SetForegroundWindow still enforces Windows foreground policy:
-                    // https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-setforegroundwindow
-                    ValidateForegroundWindow(target, window);
-                    accepted = SetForegroundWindow(window);
-                    attempts++;
-                }
-                System.Threading.Thread.Sleep(50);
-            } while (clock.ElapsedMilliseconds < 3000);
-            throw new TimeoutException("The owned medium application did not acknowledge the launcher's foreground handoff within 3 seconds.");
+                receipt.accepted = SetForegroundWindow(window);
+                receipt.attempts = 1;
+                if (!WaitForForeground(target, window, 500))
+                    ClickOwnedCaption(target, window, validate, receipt);
+            }
+            if (!WaitForForeground(target, window, 2000))
+                throw new TimeoutException("The owned application did not acknowledge foreground activation after one request and one caption click.");
+            validate();
+            if (GetForegroundWindow() != window)
+                throw new InvalidOperationException("The verified application lost foreground before acknowledgement.");
+            receipt.acknowledged = true;
+            receipt.outcome = "acknowledged";
+            return receipt;
         }
-        catch (Exception) when (WaitForSingleObject(target.Handle, 0) == 0) { exited = true; return false; }
-        catch (Exception error) { failure = error.Message; throw; }
+        catch (Exception) when (WaitForSingleObject(target.Handle, 0) == 0) { receipt.outcome = "target-exited"; return receipt; }
+        catch (Exception error) { receipt.error = error.Message; receipt.nativeErrorCode = (error as Win32Exception)?.NativeErrorCode; throw; }
         finally
         {
-            WriteForegroundReceipt(new { outcome = acknowledged ? "acknowledged" : exited ? "target-exited" : "failed", application, parentIntegrity,
-                expected, before, after = ForegroundSnapshot(), attempts, accepted, elapsedMs = clock.ElapsedMilliseconds, error = failure });
+            receipt.after = ForegroundSnapshot();
+            receipt.elapsedMs = clock.ElapsedMilliseconds;
+            SetThreadDpiAwarenessContext(dpi);
+            WriteForegroundReceipt(receipt);
         }
+    }
+
+    static bool WaitForForeground(ForegroundProcess target, IntPtr window, int milliseconds)
+    {
+        var clock = Stopwatch.StartNew();
+        do
+        {
+            ValidateForegroundWindow(target, window);
+            if (GetForegroundWindow() == window) return true;
+            System.Threading.Thread.Sleep(20);
+        } while (clock.ElapsedMilliseconds < milliseconds);
+        return false;
+    }
+
+    static void IdleCaptionInput(IntPtr window, IntPtr foreground)
+    {
+        foreach (int key in new[] { 1, 2, 4, 5, 6, 16, 17, 18, 91, 92 })
+            if (GetAsyncKeyState(key) < 0) throw new InvalidOperationException("A mouse button or modifier is held; no caption input was sent.");
+        foreach (IntPtr candidate in new[] { window, foreground })
+        {
+            uint thread = GetWindowThreadProcessId(candidate, out _);
+            if (thread == 0) throw new InvalidOperationException("Could not verify GUI ownership; no caption input was sent.");
+            var info = new GuiThread { Size = (uint)Marshal.SizeOf<GuiThread>() };
+            Check(GetGUIThreadInfo(thread, ref info), "Inspect caption input ownership");
+            if (info.Capture != IntPtr.Zero || (info.Flags & 0x1e) != 0)
+                throw new InvalidOperationException("A GUI thread has capture, menu or move/size activity; no caption input was sent.");
+        }
+    }
+
+    static bool OwnedCaption(ForegroundProcess target, IntPtr window, Point point)
+    {
+        ValidateForegroundWindow(target, window);
+        if (point.X < short.MinValue || point.X > short.MaxValue || point.Y < short.MinValue || point.Y > short.MaxValue
+            || WindowFromPoint(point) != window) return false;
+        int coordinates = unchecked((int)((uint)(ushort)point.Y << 16 | (ushort)point.X));
+        return SendMessageTimeoutW(window, 0x0084, UIntPtr.Zero, new IntPtr(coordinates), 0x23, 200, out UIntPtr hit) != IntPtr.Zero
+            && hit.ToUInt64() == 2; // WM_NCHITTEST must report HTCAPTION, never a button or client control.
+    }
+
+    static bool CursorAtCaption(IntPtr window, Point point)
+    { return GetCursorPos(out Point actual) && actual.X == point.X && actual.Y == point.Y && WindowFromPoint(actual) == window; }
+
+    static void ClickOwnedCaption(ForegroundProcess target, IntPtr window, Action validate, ForegroundHandoffReceipt receipt)
+    {
+        // A background-window click lets Windows perform the activation:
+        // https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-locksetforegroundwindow
+        validate();
+        IntPtr foreground = GetForegroundWindow();
+        GetWindowThreadProcessId(foreground, out uint foregroundProcess);
+        IdleCaptionInput(window, foreground);
+        ValidateForegroundWindow(target, window);
+        // Expose only our root while retaining position, size and inactive state.
+        Check(SetWindowPos(window, IntPtr.Zero, 0, 0, 0, 0, 0x4000 | 0x0010 | 0x0002 | 0x0001), "Expose owned caption without activation");
+        var clock = Stopwatch.StartNew();
+        while (clock.ElapsedMilliseconds < 1200)
+        {
+            Check(GetWindowRect(window, out Rect outer), "Read owned caption bounds");
+            var client = new Point();
+            Check(ClientToScreen(window, ref client), "Read owned client origin");
+            int y = outer.Top + (client.Y - outer.Top) / 2;
+            foreach (int divisor in new[] { 2, 3, 4 })
+            {
+                var point = new Point { X = outer.Left + (outer.Right - outer.Left) / divisor, Y = y };
+                if (!OwnedCaption(target, window, point)) continue;
+                validate();
+                IdleCaptionInput(window, foreground);
+                if (!OwnedCaption(target, window, point))
+                    throw new InvalidOperationException("The caption target changed before pointer positioning; no input was sent.");
+                RequireStableForeground(foreground, foregroundProcess);
+                Check(SetCursorPos(point.X, point.Y), "Position pointer over verified owned caption");
+                var positioned = Stopwatch.StartNew();
+                while (!CursorAtCaption(window, point) && positioned.ElapsedMilliseconds < 500) System.Threading.Thread.Sleep(20);
+                if (!CursorAtCaption(window, point) || !OwnedCaption(target, window, point))
+                    throw new InvalidOperationException("The owned caption did not retain the verified pointer point; no button input was sent.");
+                if (GetForegroundWindow() == window) return;
+                validate();
+                IdleCaptionInput(window, foreground);
+                RequireStableForeground(foreground, foregroundProcess);
+                if (!CursorAtCaption(window, point) || !OwnedCaption(target, window, point))
+                    throw new InvalidOperationException("The caption point changed before input; no button input was sent.");
+                ValidateForegroundWindow(target, window);
+                RequireStableForeground(foreground, foregroundProcess);
+                if (!CursorAtCaption(window, point))
+                    throw new InvalidOperationException("The caption point lost pointer ownership before input; no button input was sent.");
+                var input = new[] { new Input { Mouse = new MouseInput { Flags = 2 } }, new Input { Mouse = new MouseInput { Flags = 4 } } };
+                uint inserted = SendInput(2, input, Marshal.SizeOf<Input>());
+                int error = Marshal.GetLastWin32Error();
+                receipt.captionInserted = inserted;
+                receipt.captionClicked = inserted == 2;
+                if (inserted == 1)
+                {
+                    try
+                    {
+                        // Release only our partial down, and only while this same
+                        // owned caption still owns the pointer and foreground.
+                        ValidateForegroundWindow(target, window);
+                        if (GetForegroundWindow() != window || !CursorAtCaption(window, point))
+                            throw new InvalidOperationException("The partial caption click no longer owns foreground and pointer.");
+                        var release = new[] { new Input { Mouse = new MouseInput { Flags = 4 } } };
+                        receipt.partialCleanup = SendInput(1, release, Marshal.SizeOf<Input>()) == 1
+                            ? "released-owned-down" : "release-failed: " + Marshal.GetLastWin32Error();
+                    }
+                    catch (Exception cleanup) { receipt.partialCleanup = "refused: " + cleanup.Message; }
+                }
+                if (inserted != 2) throw new Win32Exception(error, "Owned caption button input was incomplete: " + inserted);
+                return;
+            }
+            System.Threading.Thread.Sleep(20);
+        }
+        throw new TimeoutException("No uncovered HTCAPTION point belongs to the verified application; no input was sent.");
+    }
+
+    static void RequireStableForeground(IntPtr expected, uint expectedProcess)
+    {
+        IntPtr current = GetForegroundWindow();
+        GetWindowThreadProcessId(current, out uint process);
+        if (current != expected || process != expectedProcess)
+            throw new InvalidOperationException("Foreground ownership changed before caption input; no input was sent.");
     }
 
     static object ForegroundSnapshot()
@@ -689,6 +867,10 @@ public static class SurtitleWindowsStandardUser
     static void ThrowLastError(string operation) { throw new Win32Exception(Marshal.GetLastWin32Error(), operation); }
 
     [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] struct MouseInput { public int X, Y; public uint Data, Flags, Time; public UIntPtr Extra; }
+    [StructLayout(LayoutKind.Sequential)] struct Input { public uint Type; public MouseInput Mouse; }
+    [StructLayout(LayoutKind.Sequential)] struct GuiThread { public uint Size, Flags; public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret; public Rect CaretRect; }
     [StructLayout(LayoutKind.Sequential)] struct SID_AND_ATTRIBUTES { public IntPtr Sid; public uint Attributes; }
     [StructLayout(LayoutKind.Sequential)] struct LUID { public uint LowPart; public int HighPart; }
     [StructLayout(LayoutKind.Sequential)] struct LUID_AND_ATTRIBUTES { public LUID Luid; public uint Attributes; }
@@ -749,7 +931,17 @@ public static class SurtitleWindowsStandardUser
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window, out Rect rectangle);
-    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out Rect rectangle);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool GetWindowRect(IntPtr window, out Rect rectangle);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool ClientToScreen(IntPtr window, ref Point point);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SendMessageTimeoutW(IntPtr window, uint message, UIntPtr wParam, IntPtr lParam, uint flags, uint timeout, out UIntPtr result);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool GetGUIThreadInfo(uint thread, ref GuiThread info);
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool GetCursorPos(out Point point);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, Input[] input, int size);
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] static extern IntPtr GetWindowLongPtrW(IntPtr window, int index);
     [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window, uint flags);
     [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);

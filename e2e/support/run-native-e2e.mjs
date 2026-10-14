@@ -13,8 +13,12 @@ if (process.argv[2] === workerFlag) {
   await run();
 } else {
   const worker = fileURLToPath(import.meta.url);
+  // DOM/IPC specs do not need OS foreground ownership. Opt in only for an
+  // explicit native-pointer run; Windows may legitimately deny activation.
+  const foregroundApplication = process.env.SURTITLE_E2E_NATIVE_INPUT === '1'
+    ? process.env.SURTITLE_E2E_BINARY : undefined;
   const child = spawnWebDriver(process.execPath, [worker, workerFlag, 'run', './wdio.conf.js', ...process.argv.slice(2)],
-    { stdio: 'inherit', env: process.env, foregroundApplication: process.env.SURTITLE_E2E_BINARY });
+    { stdio: 'inherit', env: process.env, foregroundApplication });
   let launchFailed = false;
   let requestedSignal;
   const running = () => child.pid && child.exitCode === null && child.signalCode === null;
