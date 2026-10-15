@@ -1,5 +1,7 @@
 # Source-only build context. No host dependency trees, outputs or credentials.
 *
+!.config/
+!.config/nextest.toml
 !.devcontainer/
 !.devcontainer/**
 !.github/

@@ -59,12 +59,11 @@ async function settingsFixture(page: Page, locale: 'ja' | 'en', theme: 'light' |
   await expect(page.getByRole('heading', { name: locale === 'ja' ? '設定' : 'Settings', exact: true })).toBeVisible();
 }
 
-test('browser preview clearly separates UI from the native service', async ({ page }, testInfo) => {
+test('browser preview clearly separates UI from the native service', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByText('ブラウザーで UI をプレビュー中です。', { exact: false })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'ライブラリ', exact: true })).toBeVisible();
   await expect(page.locator('.media-card')).toHaveCount(0);
-  await page.screenshot({ path: testInfo.outputPath('library-dark.png'), fullPage: true, animations: 'disabled' });
   await page.getByRole('button', { name: 'Switch to English' }).click();
   await expect(page.getByRole('heading', { name: 'Library', exact: true })).toBeVisible();
   const prevented = await page.locator('.library-page').evaluate(element => {
@@ -79,19 +78,17 @@ test('browser preview clearly separates UI from the native service', async ({ pa
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByRole('button', { name: 'Toggle theme' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-  await page.screenshot({ path: testInfo.outputPath('library-light.png'), fullPage: true, animations: 'disabled' });
   await page.getByRole('button', { name: 'Add video or audio', exact: true }).first().click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add to library', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Choose a video or audio file', exact: false })).toBeDisabled();
   await expect(page.getByRole('dialog').getByRole('alert')).toContainText('Open Surtitle desktop to use this feature.');
-  await page.screenshot({ path: testInfo.outputPath('import-dialog.png'), fullPage: true, animations: 'disabled' });
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.locator('.media-card')).toHaveCount(0);
 });
 
-test('settings stay readable at compact width and cannot save fabricated state', async ({ page }, testInfo) => {
+test('settings stay readable at compact width and cannot save fabricated state', async ({ page }) => {
   await page.setViewportSize({ width: 800, height: 900 });
   await page.goto('/settings');
   await expect(page.getByRole('heading', { name: '設定', exact: true })).toBeVisible();
@@ -100,37 +97,35 @@ test('settings stay readable at compact width and cannot save fabricated state',
   await expect(page.getByLabel('1か月のAI予算（USD）', { exact: false })).toHaveValue('');
   await expect(page.getByLabel('1か月のAI予算（USD）', { exact: false })).toBeDisabled();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.screenshot({ path: testInfo.outputPath('settings-compact.png'), fullPage: true, animations: 'disabled' });
 });
 
 for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'] as const) {
   for (const size of [{ width: 1440, height: 900 }, { width: 800, height: 700 }]) {
-    test(`settings controls and automatic persistence ${locale} ${theme} ${size.width}x${size.height}`, async ({ page }, testInfo) => {
+    test(`settings controls and automatic persistence ${locale} ${theme} ${size.width}x${size.height}`, async ({ page }) => {
       await page.setViewportSize(size);
       await settingsFixture(page, locale, theme);
       const status = page.locator('.autosave-footer [role="status"]');
       await expect(page.getByRole('button', { name: locale === 'ja' ? '変更を保存' : 'Save changes', exact: true })).toHaveCount(0);
       const scroll = page.locator('.settings-layout');
-      const capture = async (name: string) => {
+      const assertLayout = async () => {
         await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
         await expect(status).toBeInViewport();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         expect(await scroll.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
-        await page.screenshot({ path: testInfo.outputPath(`${name}.png`), animations: 'disabled' });
       };
       await expect(status).toHaveText(locale === 'ja' ? '変更は自動保存されます' : 'Changes save automatically');
-      await capture('learning');
+      await assertLayout();
       const project = page.getByRole('textbox', { name: locale === 'ja' ? /^プロジェクト ID/ : /^Project ID/ });
       await project.scrollIntoViewIfNeeded();
       await expect(project).toHaveValue('json-imported-project');
       await expect(project).toHaveAttribute('readonly', '');
-      await capture('credentials');
+      await assertLayout();
       const fetch = page.getByRole('button', { name: locale === 'ja' ? 'Vertexからモデル候補を取得' : 'Fetch Vertex model candidates', exact: true });
       await expect(fetch).toHaveCount(1);
       await fetch.click();
       await expect(page.locator('.model-editor datalist option[value="gemini-shared-fixture"]')).toHaveCount(4);
       expect(await page.evaluate(() => (window as any).__learningFixture.calls.filter((call: any) => call.command === 'list_vertex_models').length)).toBe(1);
-      await capture('models');
+      await assertLayout();
       const detailedModels = page.locator('#ai-models > details');
       await detailedModels.locator('summary').filter({ hasText: locale === 'ja' ? '用途ごとの詳細設定' : 'Detailed settings by purpose' }).click();
       await expect(detailedModels).toHaveAttribute('open', '');
@@ -138,13 +133,13 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
         has: page.getByRole('heading', { name: locale === 'ja' ? '文字起こし' : 'Transcription', exact: true }),
       });
       await transcription.scrollIntoViewIfNeeded();
-      await capture('transcription');
+      await assertLayout();
       const outputLimit = transcription.getByRole('combobox', { name: locale === 'ja' ? /^回答の長さの上限/ : /^Output limit/ });
       await outputLimit.selectOption('custom');
       const tokens = transcription.getByRole('textbox', { name: locale === 'ja' ? /^1要求の出力トークン上限/ : /^Maximum output tokens/ });
       await tokens.fill('131072');
       await tokens.scrollIntoViewIfNeeded();
-      await capture('custom-output');
+      await assertLayout();
       await outputLimit.selectOption('standard');
       const vocabulary = detailedModels.locator('.model-preference').filter({
         has: page.getByRole('heading', { name: locale === 'ja' ? '語彙・イディオム' : 'Vocabulary & idioms', exact: true }),
@@ -154,7 +149,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await monthly.fill('20');
       await monthly.blur();
       await expect.poll(() => page.evaluate(() => (window as any).__learningFixture.snapshot.settings.monthlyBudgetUsd)).toBe(20);
-      await capture('budget-saved');
+      await assertLayout();
       await expect(status).toHaveText(locale === 'ja' ? '変更は自動保存されます' : 'Changes save automatically');
       const ffmpeg = page.locator('.tool-row').filter({ has: page.getByRole('heading', { name: /FFmpeg/ }) });
       await ffmpeg.getByRole('button', { name: locale === 'ja' ? '外部を使う' : 'External', exact: true }).click();
@@ -164,7 +159,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       const path = ffmpeg.getByRole('textbox', { name: locale === 'ja' ? /^使用する実行ファイルの絶対パス/ : /^Absolute executable path/ });
       await expect(path).toHaveValue(candidatePath);
       await path.scrollIntoViewIfNeeded();
-      await capture('external-tool-selected');
+      await assertLayout();
       const candidate = ffmpeg.locator('.tool-candidate');
       const selectRect = await select.boundingBox();
       const candidateRect = await candidate.boundingBox();
@@ -173,9 +168,9 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await expect(ffmpeg.locator('.external-picker')).toHaveCount(0);
       await expect(ffmpeg.locator('.tool-current-path code')).toHaveText(candidatePath);
       await expect(status).toHaveText(locale === 'ja' ? '変更は自動保存されます' : 'Changes save automatically');
-      await capture('external-tool-applied');
+      await assertLayout();
       await scroll.evaluate(element => { element.scrollTop = element.scrollHeight; });
-      await capture('bottom');
+      await assertLayout();
       const saved = await page.evaluate(() => (window as any).__learningFixture.snapshot.settings);
       expect(saved).toMatchObject({ monthlyBudgetUsd: 20, dailyBudgetUsd: 20, perJobBudgetUsd: 20,
         vertexProject: 'json-imported-project', aiModels: { vocabulary: { modelId: 'gemini-shared-fixture' } } });

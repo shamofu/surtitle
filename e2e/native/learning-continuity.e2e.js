@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
+import { nativeArtifact } from '../support/native-artifacts.mjs';
+import { invokeNative as invoke, expectNativeRejection, restartNativeSession, prepareNativeSession, waitForNativeInput, clickNative, replaceNativeValue } from '../support/native-app.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -7,7 +9,6 @@ import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
 
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
-const invoke = (command, args = {}) => browser.execute(async (name, parameters) => window.__TAURI_INTERNALS__.invoke(name, parameters), command, args);
 const snapshot = () => invoke('get_app_snapshot');
 const player = () => invoke('get_player_state');
 const control = request => invoke('player_control', { request });
@@ -21,28 +22,19 @@ function processId() {
   assert.equal(ids.length, 1, 'Expected exactly one owned application process');
   return ids[0];
 }
-async function ready() {
-  await browser.setTimeout({ script: 180000 });
-  await browser.waitUntil(() => browser.execute(() => !!window.__TAURI_INTERNALS__));
-  await $('h1').waitForDisplayed();
-}
-async function replaceValue(element, value) {
-  // EdgeDriver clear() bypasses React's input event and can append to stale state.
-  await element.click(); await browser.keys([Key.Control, 'a']); await browser.keys(Key.Backspace);
-  if (value) await element.addValue(value);
-  await expect(element).toHaveValue(value);
-}
+const ready = prepareNativeSession;
+const replaceValue = replaceNativeValue;
 async function openCard(term) {
   await navigate('/cards');
   const search = $('[aria-label="Search your phrases"]');
   await search.waitForEnabled(); await replaceValue(search, term);
   const edit = $('[aria-label="Edit phrase"]');
-  await edit.waitForClickable(); await edit.click();
+  await edit.waitForClickable(); await clickNative(edit);
   await $('[role="dialog"] input').waitForEnabled();
 }
 const immutable = card => Object.fromEntries(['id', 'mediaId', 'segmentId', 'language', 'dueAt', 'createdAt', 'reviewCount', 'audioPath', 'audioClipRange', 'audioStreamIndex', 'suspended'].map(key => [key, card[key]]));
 
-(process.platform === 'win32' ? describe : describe.skip)('installed learning data continuity', () => {
+describe('installed learning data continuity', () => {
   it('keeps real source audio, autosaved edits and unfinished input across an application process restart', async () => {
     await ready();
     const initial = await snapshot();
@@ -54,18 +46,22 @@ const immutable = card => Object.fromEntries(['id', 'mediaId', 'segmentId', 'lan
     try {
       await invoke('update_settings', { settings: { ...originalSettings, locale: 'en', sentencePause: false } });
       await browser.refresh(); await ready();
+      // Job display messages follow the selected locale. Compare snapshots from
+      // the same locale while still checking every persisted job and its costs.
+      const originalJobs = (await snapshot()).jobs;
       const ffmpeg = (await invoke('scan_external_tools')).find(tool => tool.toolId === 'ffmpeg' && tool.selectable);
       assert(ffmpeg, 'A real available FFmpeg pair is required for source-audio continuity');
       await invoke('set_tool_provider', { request: { toolId: 'ffmpeg', provider: 'external', path: ffmpeg.path } });
       await navigate(`/study/${fixture.mediaId}`);
       await $('.play-button').waitForEnabled(); await browser.waitUntil(async () => (await player()).ready);
       await control({ action: 'pause' }); await control({ action: 'seek', value: 200 });
-      await $('button[aria-label="Explore meaning"]').waitForEnabled(); await $('button[aria-label="Explore meaning"]').click();
-      await $('.phrase-save-toggle').click();
+      await $('button[aria-label="Explore meaning"]').waitForEnabled(); await clickNative($('button[aria-label="Explore meaning"]'));
+      await waitForNativeInput($('.phrase-save-toggle'));
+      await clickNative($('.phrase-save-toggle'));
       const term = `Continuity ${Date.now()}`;
       await replaceValue($('.save-phrase-form input'), term);
       await replaceValue($('.save-phrase-form textarea'), 'Original meaning');
-      await $('.save-phrase-form').$('button=Save phrase').click();
+      await clickNative($('.save-phrase-form').$('button=Save phrase'));
       await browser.waitUntil(async () => (await snapshot()).cards.some(card => card.term === term), { timeout: 180000 });
       saved = (await snapshot()).cards.find(card => card.term === term);
       assert(saved.audioPath && existsSync(saved.audioPath));
@@ -76,13 +72,9 @@ const immutable = card => Object.fromEntries(['id', 'mediaId', 'segmentId', 'lan
       const request = Object.fromEntries(['id', 'term', 'meaning', 'example', 'translation', 'explanation'].map(key => [key, editState.card[key]]));
       const committed = await invoke('save_card_edit', { request: { ...request, meaning: 'Committed by first writer' }, expectedRevision: editState.revision });
       assert.notEqual(committed.revision, editState.revision);
-      const staleResult = await browser.execute(async (request, expectedRevision) => {
-        try { await window.__TAURI_INTERNALS__.invoke('save_card_edit', { request, expectedRevision }); return { rejected: false }; }
-        // A top-level `error` property is treated as a WebDriver error envelope.
-        catch (error) { return { rejected: true, reason: String(error) }; }
-      }, { ...request, meaning: 'Stale writer must not win' }, editState.revision);
-      assert(staleResult.rejected, 'A stale native writer unexpectedly overwrote the card');
-      assert.match(staleResult.reason, /Card changed; reload before saving/);
+      await expectNativeRejection(invoke('save_card_edit', {
+        request: { ...request, meaning: 'Stale writer must not win' }, expectedRevision: editState.revision,
+      }), /Card changed; reload before saving/);
       assert.equal((await snapshot()).cards.find(card => card.id === saved.id).meaning, 'Committed by first writer');
       await openCard(term);
       await replaceValue($('[role="dialog"] textarea'), '自動保存された意味');
@@ -98,7 +90,7 @@ const immutable = card => Object.fromEntries(['id', 'mediaId', 'segmentId', 'lan
       // Closing explicitly checkpoints invalid input; it does not overwrite the saved card.
       await browser.waitUntil(async () => (await invoke('list_ui_drafts')).some(draft => draft.entityId === saved.id && draft.fields.term === '' && draft.fields.meaning === '再起動後に続ける入力'));
       const beforePid = processId();
-      await browser.reloadSession(); await ready();
+      await restartNativeSession();
       const afterPid = processId();
       assert.notEqual(afterPid, beforePid, 'The native application process did not restart');
       const persisted = (await snapshot()).cards.find(card => card.id === saved.id);
@@ -119,8 +111,8 @@ const immutable = card => Object.fromEntries(['id', 'mediaId', 'segmentId', 'lan
       await control({ action: 'pause' });
       const final = await snapshot();
       assert.equal(final.budget.spentUsd, 0); assert.equal(final.budget.reservedUsd, 0);
-      assert.deepEqual(final.jobs, initial.jobs);
-      writeFileSync(resolve('test-results/native/learning-continuity.json'), JSON.stringify({
+      assert.deepEqual(final.jobs, originalJobs);
+      writeFileSync(nativeArtifact('learning-continuity.json'), JSON.stringify({
         passed: true, testedAt: new Date().toISOString(), beforePid, afterPid,
         sourceAudioHash: audioHash, savedCardId: saved.id, unicodeTextPreserved: true,
         closedImmediatelyAfterEditing: true, staleNativeWriterRejected: true,

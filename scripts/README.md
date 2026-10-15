@@ -18,7 +18,7 @@ libmpv と ORT の source archive は `native/build/native_source_archive.py` �
 
 通常のアプリ変更では native 依存の Docker cache を再利用し、アプリ・installer の動作を検証します。runtime DLL・notice・ビルド証跡のハッシュ照合、CI・配布時の監査ゲートはありません。`consume` と Windows の準備処理は無視対象の出力先へ配置し、Git 管理下の runtime manifest を書き換えません。ソース取得・Silero モデル・別管理の CLI ツールの既存チェックは維持します。作業後の容量整理は標準 `cargo clean` や対象 container の `docker stop` / `docker rm` を使います。専用の整理スクリプトはありません。
 
-実行手順は [開発コマンド](../README.md#development)、[E2E](../e2e/README.md)、[native build / package](../docs/native-runtime.md)、[source rebuild](../native/SOURCE-REBUILD.md) を参照してください。自動実行の入口は [CI](../.github/workflows/ci.yml)、[native build](../.github/workflows/native-build.yml)、[手動 native acceptance](../.github/workflows/native-acceptance.yml) です。
+実行手順は [開発コマンド](../README.md#development)、[E2E](../e2e/README.md)、[native build / package](../docs/native-runtime.md)、[source rebuild](../native/SOURCE-REBUILD.md) を参照してください。自動実行の入口は [CI](../.github/workflows/ci.yml) と [native build](../.github/workflows/native-build.yml) です。維持するテストは適用するOSの通常CIで実行し、結果は `summarize-tests.mjs` がJUnit・ブラウザ結果・ステップ成否から集約します。
 
 リリースは [main の保護ルールとタグ作成手順](../README.md#ci-and-releases) に従います。`main` への直接 push が可能で、PR は任意です（PR を使う場合は Squash merge を推奨）。PR の承認・レビュー会話の解決・更新前の CI 成功は必須ではありません。CI は push 後と PR で引き続き実行されます。線形履歴の必須化と force push・ブランチ削除の禁止は維持します。直接 push または PR のマージ後、そのコミットの `main` push CI 成功を確認してから所有者がバージョンタグを作成・push します。集約チェック `ci` は `validate`・browser・native build・Linux・Windows・package がすべて成功した場合だけ通り、タグの CI 成功後に同じ実行の成果物を公開します。`main` の push や PR では公開しません。
 

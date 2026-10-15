@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
+import { nativeArtifact } from '../support/native-artifacts.mjs';
+import { invokeNative as invoke, clickNative } from '../support/native-app.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
 import { assertNativeVideoBounds, resizeNativeWindow, saveNativeScreenshot } from '../support/native-window.mjs';
 
-const invoke = (command, args = {}) => browser.execute(async (name, value) => window.__TAURI_INTERNALS__.invoke(name, value), command, args);
 const control = request => invoke('player_control', { request });
 const state = () => invoke('get_player_state');
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
 const contains = (rect, x, y) => x >= rect.Left && y >= rect.Top && x < rect.Right && y < rect.Bottom;
 
-(process.platform === 'win32' ? describe : describe.skip)('opaque UI above the real native video', () => {
+describe('opaque UI above the real native video', () => {
   before(async () => {
     await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__));
     const initial = await invoke('get_app_snapshot');
@@ -33,7 +34,7 @@ const contains = (rect, x, y) => x >= rect.Left && y >= rect.Top && x < rect.Rig
       await invoke('update_appearance', { theme });
       await browser.waitUntil(() => browser.execute(expected => document.documentElement.dataset.theme === expected, theme));
       const trigger = $('button[aria-label="Playback speed"]');
-      await trigger.click();
+      await clickNative(trigger);
       await $('.playback-rate-popover').waitForDisplayed();
       await browser.waitUntil(() => browser.execute(() => !document.querySelector('[data-native-occlusion="pending"]')));
       const during = await assertNativeVideoBounds();
@@ -50,8 +51,8 @@ const contains = (rect, x, y) => x >= rect.Left && y >= rect.Top && x < rect.Rig
         Math.floor(x * scale) - Math.round(viewport.x * scale), Math.floor(y * scale) - Math.round(viewport.y * scale))),
       'A transparent popup corner removed native video');
       assert.equal((await state()).surfaceVisible, true);
-      await saveNativeScreenshot(resolve(`test-results/native/rounded-speed-${theme}.png`));
-      await trigger.click();
+      await saveNativeScreenshot(nativeArtifact(`rounded-speed-${theme}.png`));
+      await clickNative(trigger);
       await $('.playback-rate-popover').waitForExist({ reverse: true });
       assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
       await assertNativeVideoBounds();
@@ -65,8 +66,8 @@ const contains = (rect, x, y) => x >= rect.Left && y >= rect.Top && x < rect.Rig
       await control({ action: 'seek', value: 200 });
       await control({ action: 'pause' });
       const before = await assertNativeVideoBounds();
-      await saveNativeScreenshot(resolve(`test-results/native/redesign-video-${width}x${height}-before.png`));
-      await $('button=Playback settings').click();
+      await saveNativeScreenshot(nativeArtifact(`redesign-video-${width}x${height}-before.png`));
+      await clickNative($('button=Playback settings'));
       await $('[role="dialog"]').waitForDisplayed();
       await browser.waitUntil(async () => browser.execute(() => !document.querySelector('[data-native-occlusion="pending"]')));
       assert(await browser.execute(() => document.querySelector('[role="dialog"]').contains(document.activeElement)),
@@ -75,7 +76,7 @@ const contains = (rect, x, y) => x >= rect.Left && y >= rect.Top && x < rect.Rig
       await browser.keys(Key.Escape);
       await $('[role="dialog"]').waitForExist({ reverse: true });
       await browser.waitUntil(async () => browser.execute(() => document.activeElement?.textContent?.includes('Playback settings')));
-      await $('button=Playback settings').click();
+      await clickNative($('button=Playback settings'));
       await $('[role="dialog"]').waitForDisplayed();
       await browser.waitUntil(async () => browser.execute(() => !document.querySelector('[data-native-occlusion="pending"]')));
       const during = await assertNativeVideoBounds();
@@ -101,12 +102,12 @@ const contains = (rect, x, y) => x >= rect.Left && y >= rect.Top && x < rect.Rig
       await control({ action: 'pause' });
       const checkbox = await $('[role="dialog"] input[type="checkbox"]');
       const selected = await checkbox.isSelected();
-      await checkbox.click();
+      await clickNative(checkbox);
       await browser.waitUntil(async () => await checkbox.isSelected() !== selected);
-      await checkbox.click();
+      await clickNative(checkbox);
       await browser.keys(Key.Tab);
       assert(await browser.execute(() => document.querySelector('[role="dialog"]').contains(document.activeElement)), 'Tab escaped the active modal');
-      await saveNativeScreenshot(resolve(`test-results/native/redesign-video-${width}x${height}-dialog.png`));
+      await saveNativeScreenshot(nativeArtifact(`redesign-video-${width}x${height}-dialog.png`));
       await browser.keys(Key.Escape);
       await $('[role="dialog"]').waitForExist({ reverse: true });
       await browser.waitUntil(async () => browser.execute(() => document.activeElement?.textContent?.includes('Playback settings')));
@@ -114,10 +115,9 @@ const contains = (rect, x, y) => x >= rect.Left && y >= rect.Top && x < rect.Rig
       const restored = after.native.find(row => row.parent === after.native[0].handle && row.className.toLowerCase() === 'static');
       assert(restored.regionRectangles.some(rect => contains(rect, x, y)), 'Closing left a stale hole in the video');
       observations.push({ width, height, devicePixelRatio: scale, viewport, card, regionRectangles: native.regionRectangles,
-        immediateEscapeBeforeInteraction: true,
-        hardwareRequested: process.env.SURTITLE_E2E_HARDWARE_RENDERING === '1' });
+        immediateEscapeBeforeInteraction: true });
     }
-    writeFileSync(resolve('test-results/native/redesign-rendering.json'), JSON.stringify({ observations,
+    writeFileSync(nativeArtifact('redesign-rendering.json'), JSON.stringify({ observations,
       limits: ['Native input and clipping verified; Japanese IME and other monitor DPI values require separate execution.'] }, null, 2));
   });
 
@@ -134,14 +134,14 @@ const contains = (rect, x, y) => x >= rect.Left && y >= rect.Top && x < rect.Rig
         await control({ action: 'seek', value: 200 });
         await control({ action: 'pause' });
         await assertNativeVideoBounds();
-        await saveNativeScreenshot(resolve(`test-results/native/final-native-study-ja-${width}x${height}.png`));
-        await $('button=再生設定').click();
+        await saveNativeScreenshot(nativeArtifact(`final-native-study-ja-${width}x${height}.png`));
+        await clickNative($('button=再生設定'));
         await $('[role="dialog"]').waitForDisplayed();
         await browser.waitUntil(async () => browser.execute(() => !document.querySelector('[data-native-occlusion="pending"]')));
         await assertNativeVideoBounds();
         assert(await browser.execute(() => document.querySelector('[role="dialog"]').contains(document.activeElement)),
           'Native occlusion acknowledgement lost the Japanese dialog focus');
-        await saveNativeScreenshot(resolve(`test-results/native/final-native-dialog-ja-${width}x${height}.png`));
+        await saveNativeScreenshot(nativeArtifact(`final-native-dialog-ja-${width}x${height}.png`));
         await browser.keys(Key.Escape);
         await $('[role="dialog"]').waitForExist({ reverse: true });
         await browser.waitUntil(async () => browser.execute(() => document.activeElement?.textContent?.includes('再生設定')));

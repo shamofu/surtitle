@@ -121,7 +121,7 @@ test('saving blocks close, backdrop and Escape until unlocked', async ({ page })
 });
 
 for (const viewport of [{ width: 1024, height: 700 }, { width: 1440, height: 900 }, { width: 800, height: 900 }]) {
-  test(`notifications remain reachable after scrolling a long dialog at ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
+  test(`notifications remain reachable after scrolling a long dialog at ${viewport.width}x${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.getByRole('button', { name: 'Open long editor' }).click();
     const dialog = page.getByRole('dialog', { name: 'Editor' });
@@ -145,7 +145,6 @@ for (const viewport of [{ width: 1024, height: 700 }, { width: 1440, height: 900
       };
     });
     expect(geometry).toEqual({ separated: true, contained: true, reachable: true });
-    await page.screenshot({ path: testInfo.outputPath('long-dialog-notification.png') });
     await notification.click();
     await expect(notification).toHaveCount(0);
     await expect(dialog.getByRole('textbox', { name: 'Phrase 20', exact: true })).toHaveValue('An editable phrase');

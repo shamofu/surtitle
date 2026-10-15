@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
+import { nativeArtifact } from '../support/native-artifacts.mjs';
+import { invokeNative as invoke, waitForNativeInput, clickNative, replaceNativeValue } from '../support/native-app.mjs';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
@@ -7,17 +9,12 @@ import { assertNativeVideoBounds, resizeNativeWindow, saveNativeScreenshot } fro
 
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
 const mediaId = fixture.mediaId;
-const invoke = (command, args = {}) => browser.execute(async (name, parameters) => window.__TAURI_INTERNALS__.invoke(name, parameters), command, args);
 const control = request => invoke('player_control', { request });
 const player = () => invoke('get_player_state');
 const navigate = path => browser.execute(next => { history.pushState({}, '', next); dispatchEvent(new PopStateEvent('popstate')); }, path);
-async function replaceValue(element, value) {
-  await element.click(); await browser.keys([Key.Control, 'a']); await browser.keys(Key.Backspace);
-  if (value) await element.addValue(value);
-  await expect(element).toHaveValue(value);
-}
+const replaceValue = replaceNativeValue;
 
-(process.platform === 'win32' ? describe : describe.skip)('watch, inspect, and return with the Windows native surface', () => {
+describe('watch, inspect, and return with the Windows native surface', () => {
   let originalSettings;
   const savedCardIds = [];
   before(async () => {
@@ -58,7 +55,7 @@ async function replaceValue(element, value) {
         const state = await player();
         return state.surfaceVisible && state.videoWidth === 640 && state.videoHeight === 360;
       }, { timeoutMsg: 'Native video is clipped or has not decoded the fixture dimensions' });
-      await $('button=Transcript').click();
+      await clickNative($('button=Transcript'));
       await $('[aria-label="Subtitle list"]').waitForDisplayed();
       await browser.waitUntil(async () => (await player()).surfaceVisible);
       const geometry = await browser.execute(() => {
@@ -70,8 +67,8 @@ async function replaceValue(element, value) {
       assert(geometry.video.right <= geometry.panel.left + 1 || geometry.video.bottom <= geometry.panel.top + 1, 'The HTML transcript overlaps the native video');
       assert(geometry.controlsBottom <= geometry.height, 'Basic playback controls are below the window edge');
       await assertNativeVideoBounds();
-      await saveNativeScreenshot(resolve(`test-results/native/learning-${width}x${height}.png`));
-      await $('button=Transcript').click();
+      await saveNativeScreenshot(nativeArtifact(`learning-${width}x${height}.png`));
+      await clickNative($('button=Transcript'));
     }
   });
   it('pauses to inspect, keeps the selected context during replay, and returns to its starting position', async () => {
@@ -79,18 +76,20 @@ async function replaceValue(element, value) {
     await control({ action: 'seek', value: 200 });
     await browser.waitUntil(async () => (await player()).positionMs < 500);
     await $('button[aria-label="Explore meaning"]').waitForEnabled();
-    await $('button[aria-label="Explore meaning"]').click();
+    await clickNative($('button[aria-label="Explore meaning"]'));
     await $('button=Resume from original position').waitForDisplayed();
     assert.equal((await player()).paused, true);
     const returnPosition = (await player()).positionMs;
     const originalContext = await $('.phrase-panel .context-sentence').getText();
-    await $('.phrase-panel').$('button=Play this passage').click();
+    const passage = $('.phrase-panel').$('button=Play this passage');
+    await waitForNativeInput(passage);
+    await clickNative(passage);
     await browser.waitUntil(async () => !(await player()).paused);
     await browser.waitUntil(async () => (await player()).paused, { timeout: 12000 });
     assert.equal(await $('.phrase-panel .context-sentence').getText(), originalContext);
-    await $('[aria-label="Repeat selected segment"]').click();
+    await clickNative($('[aria-label="Repeat selected segment"]'));
     await $('[aria-label="Repeat selected segment"]').waitForDisplayed();
-    await $('button=Resume from original position').click();
+    await clickNative($('button=Resume from original position'));
     await browser.waitUntil(async () => { const state = await player(); return !state.paused && state.positionMs >= returnPosition; });
     await browser.waitUntil(async () => (await player()).positionMs > 1600, { timeout: 6000, timeoutMsg: 'Returning retained the old range stop or repeat' });
     await control({ action: 'pause' });
@@ -106,7 +105,7 @@ async function replaceValue(element, value) {
       await control({ action: 'pause' });
       await control({ action: 'seek', value: original.startMs });
       await browser.waitUntil(async () => (await $('.current-caption-text').getText()).startsWith('Sometimes a longer sentence'));
-      await $('button=Activity & tools').click();
+      await clickNative($('button=Activity & tools'));
       await browser.waitUntil(async () => (await player()).surfaceVisible);
       const inside = await browser.execute(() => {
         const page = document.querySelector('.page-content').getBoundingClientRect();
@@ -116,7 +115,7 @@ async function replaceValue(element, value) {
       });
       assert(inside, 'A long current subtitle or expanded export management toolbar clipped the native video or controls');
       await assertNativeVideoBounds();
-      await saveNativeScreenshot(resolve('test-results/native/learning-long-caption-more.png'));
+      await saveNativeScreenshot(nativeArtifact('learning-long-caption-more.png'));
     } finally {
       await invoke('edit_segment', { segment: original });
       await browser.refresh();
@@ -132,15 +131,15 @@ async function replaceValue(element, value) {
     const firstCue = (await invoke('list_segments', { mediaId }))[0];
     await browser.waitUntil(async () => (await $('.current-caption-text').getText()) === firstCue.text);
     await $('button[aria-label="Explore meaning"]').waitForEnabled();
-    await $('button[aria-label="Explore meaning"]').click();
-    await $('.phrase-save-toggle').waitForEnabled();
-    await $('.phrase-save-toggle').click();
+    await clickNative($('button[aria-label="Explore meaning"]'));
+    await waitForNativeInput($('.phrase-save-toggle'));
+    await clickNative($('.phrase-save-toggle'));
     await expect($('[role="dialog"]')).not.toExist();
-    await $('.save-phrase-form input').setValue('native inline phrase');
-    await $('.save-phrase-form textarea').setValue('Saved through the phrase panel');
+    await replaceValue($('.save-phrase-form input'), 'native inline phrase');
+    await replaceValue($('.save-phrase-form textarea'), 'Saved through the phrase panel');
     const save = $('.save-phrase-form').$('button=Save phrase');
     await browser.execute(element => element.scrollIntoView({ block: 'center', behavior: 'instant' }), await save);
-    await save.click();
+    await clickNative(save);
     // Debug builds verify large external tool hashes before each real FFmpeg operation.
     await browser.waitUntil(async () => (await invoke('get_app_snapshot')).cards.some(card => card.term === 'native inline phrase'), { timeout: 180000 });
     const saved = (await invoke('get_app_snapshot')).cards.find(card => card.term === 'native inline phrase');
@@ -151,16 +150,16 @@ async function replaceValue(element, value) {
     assert(statSync(saved.audioPath).size > 44);
     await expect($('.save-phrase-form')).not.toExist();
     await expect($('.phrase-saved')).toBeDisplayed();
-    await $('button=Resume from original position').click();
+    await clickNative($('button=Resume from original position'));
     await browser.waitUntil(async () => !(await player()).paused);
     await control({ action: 'pause' });
   });
   it('retains uncovered native video for playback settings and restores focus without closing the background panel on Escape', async () => {
     await control({ action: 'pause' });
     const transcript = $('.study-transcript-toggle');
-    if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
+    if ((await transcript.getAttribute('aria-expanded')) !== 'true') await clickNative(transcript);
     await $('.transcript-panel').waitForDisplayed();
-    await $('button=Playback settings').click();
+    await clickNative($('button=Playback settings'));
     await $('[role="dialog"]').waitForDisplayed();
     await browser.waitUntil(async () => (await player()).surfaceVisible);
     await browser.execute(() => document.querySelector('[role="dialog"]').focus());
@@ -172,8 +171,8 @@ async function replaceValue(element, value) {
     await browser.waitUntil(async () => (await player()).surfaceVisible);
     await expect($('button=Playback settings')).toBeFocused();
     await assertNativeVideoBounds();
-    await saveNativeScreenshot(resolve('test-results/native/surface-modal-escape.png'));
-    await transcript.click();
+    await saveNativeScreenshot(nativeArtifact('surface-modal-escape.png'));
+    await clickNative(transcript);
     await expect($('.transcript-panel')).not.toBeDisplayed();
   });
   it('autosaves edits directly and restores the visible edit action without a confirmation', async () => {
@@ -183,19 +182,19 @@ async function replaceValue(element, value) {
       await navigate('/cards');
       const row = () => $(`summary[aria-label="Actions for ${original.term}"]`).$('..').$('..').$('..');
       const edit = () => row().$('[aria-label="Edit phrase"]');
-      await edit().click();
+      await clickNative(edit());
       const editor = $('[role="dialog"]');
       const meaning = editor.$('textarea');
       await meaning.waitForEnabled();
       await replaceValue(meaning, 'Native automatic edit');
-      await editor.$('input').click();
+      await clickNative(editor.$('input'));
       await browser.waitUntil(async () => (await invoke('get_app_snapshot')).cards.find(card => card.id === original.id)?.meaning === 'Native automatic edit');
       await expect(meaning).toBeEnabled();
       assert.equal((await $$('[role="dialog"]')).length, 1);
-      await editor.$('[aria-label="Close"]').click();
+      await clickNative(editor.$('[aria-label="Close"]'));
       await expect($('[role="dialog"]')).not.toExist();
       await expect(edit()).toBeFocused();
-      await saveNativeScreenshot(resolve('test-results/native/card-autosave-return.png'));
+      await saveNativeScreenshot(nativeArtifact('card-autosave-return.png'));
     } finally {
       await invoke('edit_card', { request: { id: original.id, term: original.term, meaning: original.meaning,
         example: original.example, translation: original.translation, explanation: original.explanation } });
@@ -210,7 +209,7 @@ async function replaceValue(element, value) {
     try {
       await navigate('/cards');
       const edit = () => $(`summary[aria-label="Actions for ${original.term}"]`).$('..').$('..').$('..').$('[aria-label="Edit phrase"]');
-      await edit().click();
+      await clickNative(edit());
       const editor = $('[role="dialog"]');
       const term = editor.$('input'), meaning = editor.$('textarea');
       await term.waitForEnabled();
@@ -219,13 +218,17 @@ async function replaceValue(element, value) {
       await browser.keys(Key.Escape);
       await expect($('[role="dialog"]')).not.toExist();
       assert.equal((await invoke('get_app_snapshot')).cards.find(card => card.id === original.id).term, original.term);
-      await edit().click();
-      await term.waitForEnabled();
-      await expect(term).toHaveValue('');
-      await expect(meaning).toHaveValue('Native unfinished phrase edit');
+      await clickNative(edit());
+      // Closing unmounts the dialog. Resolve the newly mounted inputs instead
+      // of asking WebDriver to recover references to the previous DOM nodes.
+      const reopenedEditor = $('[role="dialog"]');
+      const reopenedTerm = reopenedEditor.$('input');
+      await reopenedTerm.waitForEnabled();
+      await expect(reopenedTerm).toHaveValue('');
+      await expect(reopenedEditor.$('textarea')).toHaveValue('Native unfinished phrase edit');
       assert.equal((await $$('[role="dialog"]')).length, 1);
-      await replaceValue(term, original.term);
-      await editor.$('[aria-label="Close"]').click();
+      await replaceValue(reopenedTerm, original.term);
+      await clickNative(reopenedEditor.$('[aria-label="Close"]'));
       await expect($('[role="dialog"]')).not.toExist();
       await browser.waitUntil(async () => (await invoke('get_app_snapshot')).cards.find(card => card.id === original.id)?.meaning === 'Native unfinished phrase edit');
     } finally {
@@ -239,11 +242,11 @@ async function replaceValue(element, value) {
   });
   it('restores video bounds after fullscreen and page scrolling', async () => {
     const fullscreen = $('[aria-label="Toggle fullscreen"]');
-    await fullscreen.click();
+    await clickNative(fullscreen);
     await expect(fullscreen).toHaveAttribute('aria-pressed', 'true');
     await browser.waitUntil(async () => (await player()).surfaceVisible);
     await assertNativeVideoBounds();
-    await fullscreen.click();
+    await clickNative(fullscreen);
     await expect(fullscreen).toHaveAttribute('aria-pressed', 'false');
     await browser.execute(() => {
       const content = document.querySelector('.page-content');
@@ -255,12 +258,13 @@ async function replaceValue(element, value) {
     await browser.waitUntil(async () => (await player()).surfaceVisible);
     await assertNativeVideoBounds();
   });
-  it('opens job details with Space without starting playback', async function () {
+  for (const [kind, fixtureMediaId] of [['translation', 'e2e-ai-recovery'], ['transcription', 'e2e-transcript-review']]) {
+  it(`opens ${kind} job details with Space without starting playback`, async () => {
     const snapshot = await invoke('get_app_snapshot');
     const job = snapshot.jobs.find(item =>
-      (item.status !== 'completed' || item.pendingResults > 0 || item.transcriptReview) &&
+      item.mediaId === fixtureMediaId && (item.status !== 'completed' || item.pendingResults > 0 || item.transcriptReview) &&
       snapshot.media.some(media => media.id === item.mediaId));
-    if (!job) { this.skip(); return; }
+    assert(job, `The isolated ${kind} job fixture must exist; this case cannot skip`);
     try {
       await navigate(`/study/${job.mediaId}`);
       await $('.play-button').waitForEnabled();
@@ -268,14 +272,17 @@ async function replaceValue(element, value) {
       const transcription = job.kind === 'transcribe' || job.automaticTranscript;
       if (transcription) {
         const transcript = $('.study-transcript-toggle');
-        if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
-        await $('.transcript-tabs').$('button=Transcription').click();
+        if ((await transcript.getAttribute('aria-expanded')) !== 'true') await clickNative(transcript);
+        const tab = $('.transcript-tabs').$('button=Transcription');
+        await waitForNativeInput(tab);
+        await clickNative(tab);
         await $('.transcription-workspace').waitForDisplayed();
+      } else {
+        await clickNative($('button=Activity & tools'));
       }
       const details = transcription ? $('.transcription-workspace > details') : $('.study-jobs');
       const summary = details.$('summary');
-      await browser.execute(node => node.scrollIntoView({ block: 'center', behavior: 'instant' }), await summary);
-      await summary.waitForDisplayed();
+      await waitForNativeInput(summary);
       const wasOpen = await details.getAttribute('open');
       await browser.execute(node => node.focus(), await summary);
       await browser.keys(Key.Space);
@@ -286,4 +293,5 @@ async function replaceValue(element, value) {
       await $('.play-button').waitForEnabled();
     }
   });
+  }
 });

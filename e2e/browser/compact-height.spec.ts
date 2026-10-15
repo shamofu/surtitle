@@ -63,7 +63,7 @@ for (const locale of ['ja', 'en'] as const) {
 }
 
 for (const locale of ['ja', 'en'] as const) for (const height of [600, 636]) {
-  test(`short workarea retains the learning controls and video ${locale} ${height}`, async ({ page }, info) => {
+  test(`short workarea retains the learning controls and video ${locale} ${height}`, async ({ page }) => {
     await page.setViewportSize({ width: 1024, height });
     await installLearningFixture(page, locale, 'dark', { segmentOverrides: { 10: {
       text: 'A longer sentence remains readable while the video keeps its own space. '.repeat(20),
@@ -77,14 +77,13 @@ for (const locale of ['ja', 'en'] as const) for (const height of [600, 636]) {
     expect(bounds.height).toBeGreaterThanOrEqual(240);
     await page.locator('.caption-actions button[aria-pressed]').click();
     await expect(page.locator('.caption-translation-scroll')).toBeVisible();
-    // Visibility begins during the reveal. Check the readable height at its
-    // endpoint, rather than treating one arbitrary compositor frame as final.
-    await expect(page.locator('.caption-body')).toHaveCSS('row-gap', '8px');
+    // Visibility begins during the reveal. Wait for a readable line instead of
+    // depending on the animation's frame count or its decorative gap value.
     await expectPrimaryControlsInside(page);
     expect((await video.boundingBox())!.height).toBe(bounds.height);
     for (const area of ['.caption-source-scroll', '.caption-translation-scroll']) {
+      await expect.poll(() => page.locator(area).evaluate(element => element.clientHeight >= parseFloat(getComputedStyle(element.firstElementChild!).lineHeight))).toBe(true);
       const metrics = await page.locator(area).evaluate(element => ({ height: element.clientHeight, content: element.scrollHeight, overflow: getComputedStyle(element).overflowY }));
-      expect(metrics.height).toBeGreaterThanOrEqual(36);
       expect(metrics.content).toBeGreaterThan(metrics.height);
       expect(metrics.overflow).toBe('auto');
     }
@@ -104,6 +103,5 @@ for (const locale of ['ja', 'en'] as const) for (const height of [600, 636]) {
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expectPrimaryControlsInside(page);
-    await page.screenshot({ path: info.outputPath('compact-study.png') });
   });
 }

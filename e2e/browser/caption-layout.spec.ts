@@ -36,7 +36,7 @@ async function expectStableControls(page: Page, action: { click: string } | { cu
 }
 
 for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 700 }, { width: 800, height: 900 }]) {
-  test(`caption controls stay fixed with independently scrolling source and translation at ${size.width}x${size.height}`, async ({ page }, testInfo) => {
+  test(`caption controls stay fixed with independently scrolling source and translation at ${size.width}x${size.height}`, async ({ page }) => {
     await page.setViewportSize(size);
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await installLearningFixture(page, 'en', 'light', { segmentOverrides: {
@@ -62,11 +62,9 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 700 }, 
     expect(Math.abs(sourceBounds!.height - translationBounds!.height)).toBeLessThan(2);
     expect(sourceBounds!.y + sourceBounds!.height).toBeLessThanOrEqual(translationBounds!.y + 1);
     expect(sourceBounds!.height).toBeLessThan(closedHeight);
-    if (size.width === 1024) await page.screenshot({ path: testInfo.outputPath('caption-short.png'), animations: 'disabled' });
 
     await expectStableControls(page, { cue: 11 });
     await expect(page.locator('.current-caption-text')).toHaveText(longSource.trim());
-    if (size.width === 1024) await page.screenshot({ path: testInfo.outputPath('caption-long.png'), animations: 'disabled' });
     for (const region of [source, translation]) {
       expect(await region.evaluate(element => ({
         overflow: getComputedStyle(element).overflowY, scrollable: element.scrollHeight > element.clientHeight,

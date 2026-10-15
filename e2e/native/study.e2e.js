@@ -2,31 +2,27 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import assert from 'node:assert/strict';
+import { invokeNative as invoke, NativeIpcError, waitForNativeInput, clickNative, replaceNativeValue } from '../support/native-app.mjs';
 import { Key } from 'webdriverio';
-import { resizeNativeWindow, saveNativeScreenshot } from '../support/native-window.mjs';
+import { resizeNativeWindow } from '../support/native-window.mjs';
 
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
 const mediaId = fixture.mediaId || 'fixture-media';
 const cardId = fixture.cardId || 'fixture-card';
-async function invoke(command, args = {}) {
-  return browser.execute(async (name, parameters) => window.__TAURI_INTERNALS__.invoke(name, parameters), command, args);
-}
 async function snapshot() { return invoke('get_app_snapshot'); }
 async function navigate(path) {
   await browser.execute(nextPath => { window.history.pushState({}, '', nextPath); window.dispatchEvent(new PopStateEvent('popstate')); }, path);
 }
 async function clickInView(selector) {
   const element = $(selector);
-  await element.waitForDisplayed();
-  // Keep controls reachable when the page or auxiliary panel has scrolled.
-  await browser.execute(node => node.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }), await element);
-  await element.waitForClickable();
-  await element.click();
+  await waitForNativeInput(element);
+  await clickNative(element);
 }
 async function openTranscript() {
   const transcript = $('button=Transcript');
-  await transcript.waitForClickable();
-  if (!(await $('[aria-label="Search transcript"]').isDisplayed())) await transcript.click();
+  await waitForNativeInput(transcript);
+  if (await transcript.getAttribute('aria-expanded') !== 'true') await clickNative(transcript);
+  await waitForNativeInput($('[aria-label="Search transcript"]'));
 }
 async function expectPageTop(path) {
   await browser.waitUntil(async () => browser.execute(expected =>
@@ -71,13 +67,14 @@ describe('real native learning workflow (no cloud requests)', () => {
     assert(rows.length > 0 && rows.length < 80, `Expected virtualized DOM, got ${rows.length} rows`);
     await browser.execute(() => document.querySelector('.transcript-scroll').dispatchEvent(new WheelEvent('wheel', { deltaY: 650, bubbles: true })));
     await expect($('button=Show current subtitle')).toBeDisplayed();
-    await $('[aria-label="Search transcript"]').setValue('19999');
+    const search = $('[aria-label="Search transcript"]');
+    await waitForNativeInput(search);
+    await replaceNativeValue(search, '19999');
     await browser.waitUntil(async () => (await $$('.transcript-row')).length === 1);
     await expect($('.transcript-row')).toHaveText(expect.stringContaining('Practice sentence 19999. Repeat repeat.'));
     await clickInView('button=Show current subtitle');
     await expect($('[aria-label="Search transcript"]')).toHaveValue('');
     await expect($('button=Following playback')).toBeDisplayed();
-    await browser.saveScreenshot(resolve('test-results/native/study.png'));
   });
   it('checks tool updates without changing AI usage and resets page scroll through normal navigation', async () => {
     const before = await snapshot();
@@ -97,7 +94,7 @@ describe('real native learning workflow (no cloud requests)', () => {
     assertNoManagedCli(before.tools);
     try {
       await $('.main-nav a[href="/settings"]').waitForClickable();
-      await $('.main-nav a[href="/settings"]').click();
+      await clickNative($('.main-nav a[href="/settings"]'));
       await $('button=Check updates').waitForEnabled();
       await clickInView('button=Check updates');
       assert((await browser.execute(() => document.querySelector('.settings-layout').scrollTop)) > 0,
@@ -113,7 +110,7 @@ describe('real native learning workflow (no cloud requests)', () => {
       assert.deepEqual(after.jobs, before.jobs, 'Checking metadata must not create, send, or change AI jobs');
     } finally {
       await $('.main-nav a[href="/"]').waitForClickable();
-      await $('.main-nav a[href="/"]').click();
+      await clickNative($('.main-nav a[href="/"]'));
       await expectPageTop('/');
       await clickInView(`.media-card[href="/study/${encodeURIComponent(mediaId)}"]`);
       await openTranscript();
@@ -121,9 +118,8 @@ describe('real native learning workflow (no cloud requests)', () => {
       await expectPageTop(`/study/${mediaId}`);
     }
   });
-  it('plays one selected interval, pauses at its end, changes speed, and retains uncovered video for a modal', async function () {
+  (process.platform === 'win32' ? it : it.skip)('plays one selected interval, pauses at its end, changes speed, and retains uncovered video for a modal', async () => {
     // Linux CI validates the application flow; libmpv native HWND playback is Windows-only.
-    if (process.platform !== 'win32') { this.skip(); return; }
     await navigate(`/study/${mediaId}`);
     await invoke('load_media', { mediaId });
     await browser.waitUntil(async () => { const state = await invoke('get_player_state'); return state.surfaceVisible && state.videoWidth === 640 && state.videoHeight === 360; }, { timeoutMsg: 'Native surface was not shown or video was not decoded at its fixture dimensions' });
@@ -131,11 +127,10 @@ describe('real native learning workflow (no cloud requests)', () => {
     await browser.waitUntil(async () => { const state = await invoke('get_player_state'); return state.paused && state.positionMs >= 1400; }, { timeout: 12000, timeoutMsg: 'Selected interval did not stop at its end' });
     await invoke('player_control', { request: { action: 'rate', value: 1.25 } });
     assert.equal((await invoke('get_player_state')).rate, 1.25);
-    await $('button=Playback settings').click();
+    await clickNative($('button=Playback settings'));
     await expect($('[role="dialog"]')).toBeDisplayed();
     await browser.waitUntil(async () => (await invoke('get_player_state')).surfaceVisible, { timeoutMsg: 'Native video disappeared while the modal was open' });
-    await browser.saveScreenshot(resolve('test-results/native/ai-modal.png'));
-    await $('button[aria-label="Close"]').click();
+    await clickNative($('button[aria-label="Close"]'));
     await expect($('[role="dialog"]')).not.toExist();
     await browser.waitUntil(async () => (await invoke('get_player_state')).surfaceVisible, { timeoutMsg: 'Native surface did not return after closing the modal' });
   });
@@ -158,16 +153,17 @@ describe('real native learning workflow (no cloud requests)', () => {
     await clickInView('.transcript-row[data-index="0"] .segment-options summary');
     const editSubtitle = editedRow.$('[aria-label="Edit subtitle"]');
     await editSubtitle.waitForClickable();
-    await editSubtitle.click();
+    await clickNative(editSubtitle);
     await $('[role="dialog"]').waitForDisplayed();
     const times = await $$('[role="dialog"] .field-row input');
     await expect(times[0]).toHaveValue('0:00.125');
     await expect(times[1]).toHaveValue('0:00.875');
     const subtitleInput = $('[role="dialog"] textarea');
+    await $('button=Confirm and save').waitForEnabled();
+    await waitForNativeInput(subtitleInput);
     if (process.platform === 'win32') {
       // WebView2's WebDriver clear can omit the input event for controlled fields.
       // Wait for draft loading and the native exclusion/entrance before clicking.
-      await $('button=Confirm and save').waitForEnabled();
       await browser.waitUntil(async () => browser.execute(node => {
         const dialog = node.closest('[role="dialog"]');
         const body = node.closest('.modal-body');
@@ -176,7 +172,7 @@ describe('real native learning workflow (no cloud requests)', () => {
           document.querySelector('[data-testid="native-player-viewport"]')?.dataset.nativePlacement !== 'pending';
       }, await subtitleInput), { timeoutMsg: 'The subtitle editor did not finish its native exclusion and entrance' });
       await subtitleInput.waitForClickable();
-      await subtitleInput.click();
+      await clickNative(subtitleInput);
       await expect(subtitleInput).toBeFocused();
       await browser.keys([Key.Ctrl, 'a']);
       await browser.waitUntil(async () => browser.execute(node =>
@@ -188,10 +184,10 @@ describe('real native learning workflow (no cloud requests)', () => {
       await expect(subtitleInput).toHaveValue('');
       await subtitleInput.addValue('Milliseconds survive a text-only edit.');
     } else {
-      await subtitleInput.setValue('Milliseconds survive a text-only edit.');
+      await replaceNativeValue(subtitleInput, 'Milliseconds survive a text-only edit.');
     }
     await expect(subtitleInput).toHaveValue('Milliseconds survive a text-only edit.');
-    await $('button=Confirm and save').click();
+    await clickNative($('button=Confirm and save'));
     await expect($('[role="dialog"]')).not.toExist();
     const saved = (await invoke('list_segments', { mediaId })).find(segment => segment.id === original.id);
     assert.equal(saved.startMs, 125);
@@ -210,15 +206,11 @@ describe('real native learning workflow (no cloud requests)', () => {
   });
   it('keeps quotes blocked without credentials even when the budget is unlimited', async () => {
     assert.equal((await snapshot()).settings.credentialConfigured, false);
-    // WebKit's WebDriver cannot serialize a rejected IPC promise reliably.
-    const result = JSON.parse(await browser.execute(async (id) => {
-      try {
-        const quote = await window.__TAURI_INTERNALS__.invoke('create_quote', { request: { mediaId: id, kind: 'translate', startMs: 0, endMs: 2000 } });
-        return JSON.stringify({ canApprove: quote.canApprove, rejectionMessage: null });
-      } catch (error) {
-        return JSON.stringify({ canApprove: null, rejectionMessage: String(error) });
-      }
-    }, mediaId));
+    const result = await invoke('create_quote', { request: { mediaId, kind: 'translate', startMs: 0, endMs: 2000 } })
+      .then(quote => ({ canApprove: quote.canApprove }), error => {
+        if (!(error instanceof NativeIpcError)) throw error;
+        return { rejectionMessage: error.reason };
+      });
     if (result.rejectionMessage) assert.match(result.rejectionMessage, /budget|credential|service.account|price|pricing|auth|model|予算|認証|料金/i);
     else assert.equal(result.canApprove, false);
     const state = await snapshot();
@@ -247,7 +239,6 @@ describe('real native learning workflow (no cloud requests)', () => {
       await invoke('player_control', { request: { action: 'rate', value: 1.5 } });
       assert.equal((await invoke('get_player_state')).rate, 1.5);
       await browser.waitUntil(async () => { const text = await $('.player-time').getText(); return text.includes('5:00') && text.includes('6:00:00'); }, { timeoutMsg: 'The player UI did not show the six-hour timeline and far seek' });
-      await browser.saveScreenshot(resolve('test-results/native/six-hour-playback.png'));
     }
     const afterTool = (await snapshot()).tools.find(tool => tool.id === 'ffmpeg');
     const identity = tool => ({ provider: tool?.provider, status: tool?.status, path: tool?.path, version: tool?.version });
@@ -259,17 +250,14 @@ describe('real native learning workflow (no cloud requests)', () => {
     await navigate('/review');
     await $('.review-card').waitForDisplayed();
     await expect($('.rating-button.good')).toBeDisabled();
-    await saveNativeScreenshot(resolve('test-results/native/review-question.png'));
     await clickInView('button*=Reveal meaning');
     await $('.rating-button.good').waitForEnabled();
-    await saveNativeScreenshot(resolve('test-results/native/review-revealed.png'));
     await clickInView('.rating-button.good');
     await browser.waitUntil(async () => (await snapshot()).cards.find(card => card.id === cardId).reviewCount === before.reviewCount + 1);
     await browser.refresh();
     const after = (await snapshot()).cards.find(card => card.id === cardId);
     assert.equal(after.reviewCount, before.reviewCount + 1);
     assert(Date.parse(after.dueAt) > Date.parse(before.dueAt));
-    await browser.saveScreenshot(resolve('test-results/native/review-complete.png'));
   });
   it('uses an explicitly selected PATH FFmpeg to preserve real card audio and explanation independently of subtitle edits', async () => {
     const candidates = await invoke('scan_external_tools');

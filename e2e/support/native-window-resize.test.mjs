@@ -55,7 +55,7 @@ test('keeps the requested size strict and records the observed work-area clamp',
     return true;
   });
   const [path, contents] = mocks.write.mock.calls[0];
-  assert.equal(path, resolve('test-results/native/native-window-resize-1440x900.json'));
+  assert.equal(path, resolve('test-results/native/session/native-window-resize-1440x900.json'));
   const evidence = JSON.parse(contents);
   assert.deepEqual(evidence.requested, { width: 1440, height: 900 });
   assert.deepEqual(evidence.dom, dom);
@@ -92,6 +92,6 @@ test('continues validating native geometry after an exact resize without collect
   mocks.execute.mockResolvedValue({ stdout: JSON.stringify([fitted, renderer]) });
   await resizeNativeWindow(1440, 900);
   assert.equal(mocks.write.mock.calls.length, 1);
-  assert.equal(mocks.write.mock.calls[0][0], resolve('test-results/native/native-window-bounds-passed.json'));
+  assert.equal(mocks.write.mock.calls[0][0], resolve('test-results/native/session/native-window-bounds-passed.json'));
   assert(!mocks.execute.mock.calls.some(([, args]) => actionOf(args) === 'monitor'));
 });

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { validateNativeSize, verifyNativeGeometry } from './native-window.mjs';
 
 function geometry(ratio = 1) {
-  const root = { handle: 1, parent: 0, className: 'Tauri Window', visible: true, origin: { X: 34, Y: 57 }, client: { Left: 0, Top: 0, Right: 1440 * ratio, Bottom: 900 * ratio } };
+  const root = { handle: 1, parent: 0, dpi: ratio * 96, className: 'Tauri Window', visible: true, origin: { X: 34, Y: 57 }, client: { Left: 0, Top: 0, Right: 1440 * ratio, Bottom: 900 * ratio } };
   const renderer = { ...root, client: { ...root.client }, origin: { ...root.origin }, handle: 2, parent: 3, className: 'Chrome_RenderWidgetHostHWND' };
   const viewport = { x: 24.25, y: 151.5, width: 592.5, height: 249.5 };
   const left = root.origin.X + Math.round(viewport.x * ratio);
@@ -24,6 +24,12 @@ test('rejects the observed EdgeDriver child offset even when native video matche
   // Observed HWND origins after browser.setWindowSize: root (34,57), renderer (102,171).
   native[1].origin = { X: 102, Y: 171 };
   assert.throws(() => verifyNativeGeometry(native, dom), /WebView is horizontally displaced/);
+});
+
+test('rejects a WebView scale override that disagrees with the actual HWND DPI', () => {
+  const { native, dom } = geometry(1.5);
+  native[0].dpi = 96;
+  assert.throws(() => verifyNativeGeometry(native, dom), /actual HWND DPI/);
 });
 test('rejects resized Chromium content inside an unchanged outer native window', () => {
   const { native, dom } = geometry();

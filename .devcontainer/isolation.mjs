@@ -7,6 +7,11 @@ export const maskedDirectories = ['.pnpm', '.cargo', 'node_modules', 'target', '
   'playwright-report', 'src-tauri/gen', 'src-tauri/resources/native', 'src-tauri/resources/notices'];
 export const maskTargets = maskedDirectories.map(path => workspace + '/' + path);
 
+export function verificationCommand(script = '.devcontainer/verify.sh', log = '/opt/surtitle-build/verification.log') {
+  // Pass paths as arguments so spaces and shell metacharacters stay literal.
+  return ['bash', '-o', 'pipefail', '-lc', 'bash "$1" 2>&1 | tee "$2"', 'surtitle-verification', script, log];
+}
+
 export function readDefinition(root) {
   const config = JSON.parse(readFileSync(resolve(root, '.devcontainer/devcontainer.json'), 'utf8').replace(/^\uFEFF/, ''));
   // Native artifact builds have their own input policy and may use BuildKit secrets.

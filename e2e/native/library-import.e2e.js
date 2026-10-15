@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
+import { nativeArtifact } from '../support/native-artifacts.mjs';
+import { invokeNative as invoke, clickNative } from '../support/native-app.mjs';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const dataDirectory = resolve(process.env.SURTITLE_E2E_DATA_DIR);
 const fixture = JSON.parse(readFileSync(join(dataDirectory, 'fixture.json'), 'utf8'));
-const invoke = (command, args = {}) => browser.execute(
-  async (name, parameters) => window.__TAURI_INTERNALS__.invoke(name, parameters), command, args,
-);
 const snapshot = () => invoke('get_app_snapshot');
 const player = () => invoke('get_player_state');
 const control = request => invoke('player_control', { request });
@@ -43,7 +42,7 @@ async function waitForImportDelivery(previousRevision) {
   { timeoutMsg: 'The delivered import was not persisted and settled' });
 }
 
-(process.platform === 'win32' ? describe : describe.skip)('native library import and synthetic Tauri drag delivery', () => {
+describe('native library import and synthetic Tauri drag delivery', () => {
   let originalSettings, temporaryDirectory, apiFile, droppedFile, invalidFile, apiCanonical;
   const createdMediaIds = new Set();
 
@@ -159,8 +158,8 @@ async function waitForImportDelivery(previousRevision) {
     assert.equal((await $$('[role="dialog"] .import-file-row')).length, 2, 'Repeated drop added duplicate queue entries');
     assert.equal((await snapshot()).media.length, before + 1, 'Repeated delivery duplicated native media');
     assert((await open.getAttribute('href')).endsWith(`/study/${imported.id}`));
-    await browser.saveScreenshot(resolve('test-results/native/library-import-results.png'));
-    await $('[role="dialog"] .modal-footer').$('button=Close').click();
+    await browser.saveScreenshot(nativeArtifact('library-import-results.png'));
+    await clickNative($('[role="dialog"] .modal-footer').$('button=Close'));
     await $('[role="dialog"]').waitForExist({ reverse: true });
 
     const reopenRevision = await importRevision();
@@ -170,14 +169,14 @@ async function waitForImportDelivery(previousRevision) {
     assert.equal((await $$('[role="dialog"] .import-file-row')).length, 2, 'Closing the panel discarded its app-owned import results');
     assert((await $('[role="dialog"] .import-file-row.imported a').getAttribute('href')).endsWith(`/study/${imported.id}`));
     // Clear only the view, then revalidate the same file against native storage.
-    await $('[role="dialog"]').$('button=Clear list').click();
+    await clickNative($('[role="dialog"]').$('button=Clear list'));
     await $('[role="dialog"] .import-file-row').waitForExist({ reverse: true });
     await syntheticTauriDrag('tauri://drag-drop', { paths: [droppedFile], position: payload.position });
     await $('[role="dialog"] .import-file-row.existing').waitForDisplayed();
     assert.match(await $('[role="dialog"] .import-file-row.existing').getText(), /Already in library/);
     assert.equal((await snapshot()).media.length, before + 1, 'Revalidating an existing file duplicated media');
     assert((await $('[role="dialog"] .import-file-row.existing a').getAttribute('href')).endsWith(`/study/${imported.id}`));
-    await $('[role="dialog"] [aria-label="Close"]').click();
+    await clickNative($('[role="dialog"] [aria-label="Close"]'));
     await $('[role="dialog"]').waitForExist({ reverse: true });
   });
 
@@ -192,13 +191,13 @@ async function waitForImportDelivery(previousRevision) {
     await control({ action: 'sentence-pause', value: 0 });
     await control({ action: 'seek', value: 2200 });
     await browser.waitUntil(async () => (await $('.current-caption-text').getText()).includes('Practice sentence 2.'));
-    await $('.current-caption [aria-label="Previous subtitle"]').click();
+    await clickNative($('.current-caption [aria-label="Previous subtitle"]'));
     await browser.waitUntil(async () => {
       const state = await player();
       return state.paused && state.positionMs >= 990 && state.positionMs < 1150;
     }, { timeoutMsg: 'Previous caption did not seek to 1 second while preserving pause' });
     await $('.current-caption [aria-label="Next subtitle"]').waitForEnabled();
-    await $('.current-caption [aria-label="Next subtitle"]').click();
+    await clickNative($('.current-caption [aria-label="Next subtitle"]'));
     await browser.waitUntil(async () => {
       const state = await player();
       return state.paused && state.positionMs >= 1990 && state.positionMs < 2150;
@@ -209,7 +208,7 @@ async function waitForImportDelivery(previousRevision) {
     await control({ action: 'seek', value: 200 });
     await browser.waitUntil(async () => (await $('.current-caption-text').getText()).includes('Make yourself at home.'));
     await control({ action: 'play' });
-    await $('.current-caption [aria-label="Next subtitle"]').click();
+    await clickNative($('.current-caption [aria-label="Next subtitle"]'));
     await browser.waitUntil(async () => {
       const state = await player();
       return !state.paused && state.positionMs >= 990 && state.positionMs < 1900;

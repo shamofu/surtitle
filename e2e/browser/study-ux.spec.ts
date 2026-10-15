@@ -280,7 +280,7 @@ test('caption navigation preserves playback state and inspector input without AI
 });
 
 for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'] as const) {
-  test(`unfinished phrases layout ${locale} ${theme} 1024x700`, async ({ page }, testInfo) => {
+  test(`unfinished phrases layout ${locale} ${theme} 1024x700`, async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 700 });
     await openStudy(page, locale, theme);
     await createDraft(page, locale);
@@ -290,7 +290,6 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
     await expect(page.locator('.caption-navigation')).toBeInViewport();
     await expect(page.getByRole('button', { name: locale === 'ja' ? '次の字幕' : 'Next subtitle', exact: true })).toBeInViewport();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: testInfo.outputPath('unfinished-phrases.png'), animations: 'disabled', fullPage: true });
     await page.locator('.study-phrase-draft > .button').click();
     await expect(page.getByLabel(locale === 'ja' ? '語彙・フレーズ' : 'Word or phrase', { exact: true })).toHaveValue('take a little detour');
     await page.locator('.save-phrase-form').getByRole('button', { name: locale === 'ja' ? '入力を破棄' : 'Discard draft', exact: true }).click();
@@ -300,7 +299,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
 
 for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'] as const) {
   for (const size of [{ width: 1024, height: 700 }, { width: 1440, height: 900 }, { width: 800, height: 900 }]) {
-  test(`study keeps controls reachable with drafts, notices, tools and expanded history ${locale} ${theme} ${size.width}x${size.height}`, async ({ page }, testInfo) => {
+  test(`study keeps controls reachable with drafts, notices, tools and expanded history ${locale} ${theme} ${size.width}x${size.height}`, async ({ page }) => {
     await page.setViewportSize(size);
     await installLearningFixture(page, locale, theme);
     await page.route(/\/src\/shared\/native\/transport\.ts(?:\?|$)/, route => route.fulfill({
@@ -361,7 +360,6 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
     const videoAfterHistory = await page.getByTestId('native-player-viewport').boundingBox();
     expect(videoAfterHistory!.width).toBeCloseTo(videoBeforeHistory!.width, 0);
     expect(videoAfterHistory!.height).toBeCloseTo(videoBeforeHistory!.height, 0);
-    await page.screenshot({ path: testInfo.outputPath('study-expanded-history.png'), animations: 'disabled' });
     await page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true }).click();
     await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
     for (const control of [
@@ -375,7 +373,28 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       })).toBe(true);
     }
     expect(await page.locator('.page-content').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
-    await page.screenshot({ path: testInfo.outputPath('study-controls-and-transcript.png'), animations: 'disabled' });
   });
   }
+}
+
+for (const segmentCount of [120, 10000]) {
+  test(`transcript search filters ${segmentCount} subtitles without rendering the whole collection`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await installLearningFixture(page, 'en', 'light', { segmentCount });
+    await page.goto('/study/visual-fixture');
+    await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+    const search = page.getByLabel('Search transcript');
+    const rows = page.locator('.transcript-row');
+    await search.fill('coast');
+    await expect(rows.first()).toContainText('coast');
+    await expect.poll(() => rows.locator('.segment-text').evaluateAll(elements =>
+      elements.length > 0 && elements.every(element => element.textContent?.includes('coast')))).toBe(true);
+    expect(await rows.count()).toBeLessThan(100);
+    await search.fill('no matching subtitle fixture');
+    await expect(page.getByRole('heading', { name: 'No matching subtitles', exact: true })).toBeVisible();
+    await expect(rows).toHaveCount(0);
+    await search.fill('');
+    await expect(rows.first()).toBeVisible();
+    expect(await rows.count()).toBeLessThan(100);
+  });
 }

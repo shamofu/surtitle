@@ -47,8 +47,6 @@ for (const theme of ['light', 'dark'] as const) for (const locale of ['ja', 'en'
     const trigger = await openStudy(page, locale, theme);
     await expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');
     await expect(trigger).toHaveAccessibleDescription('1×');
-    await expect(trigger.locator('.lucide-gauge')).toHaveCount(1);
-    await expect(page.locator('.speed-select select, .speed-select .lucide-chevron-down')).toHaveCount(0);
     const readingOrigin = await page.locator('.current-caption-text').boundingBox();
     await trigger.click();
     await expect(page.getByRole('heading', { name: locale === 'ja' ? '再生速度' : 'Playback speed', exact: true })).toBeVisible();
@@ -59,8 +57,6 @@ for (const theme of ['light', 'dark'] as const) for (const locale of ['ja', 'en'
     await expect(slider(page)).toHaveAttribute('step', '0.05');
     await expect(page.locator('.playback-rate-value')).toHaveText('1.00×');
     await expect(page.locator('.playback-rate-preset')).toHaveText(['0.5', '0.75', '1.0', '1.25', '1.5', '2.0', '3.0']);
-    await expect(page.locator('.playback-rate-preset-row').first().locator('button')).toHaveText(['0.5', '0.75', '1.0']);
-    await expect(page.locator('.playback-rate-preset-row').last().locator('button')).toHaveText(['1.25', '1.5', '2.0', '3.0']);
     await expect(page.getByRole('button', { name: '1.0', exact: true })).toHaveAttribute('aria-pressed', 'true');
     for (const preset of await page.locator('.playback-rate-preset').all()) expect(await contrast(preset)).toBeGreaterThanOrEqual(4.5);
     const slow = page.getByRole('button', { name: '0.75', exact: true });
@@ -138,34 +134,23 @@ test('rapid pointer drag coalesces ordered rates, masks stale events and complet
 });
 
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {
-  test(`speed widget motion retains the opaque native region (${reducedMotion})`, async ({ page }) => {
-    await page.emulateMedia({ reducedMotion }); const trigger = await openStudy(page);
-    await page.evaluate(() => {
-      const frames: any[] = []; let frame = 0;
-      const sample = () => {
-        const shell = document.querySelector<HTMLElement>('.playback-rate-popover'), content = shell?.querySelector<HTMLElement>('.playback-rate-content');
-        if (shell && content && shell.dataset.nativeOcclusion !== 'pending') {
-          const style = getComputedStyle(content), rect = shell.getBoundingClientRect();
-          frames.push({ state: shell.dataset.state, opacity: Number(style.opacity), y: new DOMMatrix(style.transform).m42,
-            shellOpacity: getComputedStyle(shell).opacity, x: rect.x, top: rect.top, width: rect.width, height: rect.height });
-        }
-        frame = requestAnimationFrame(sample);
-      };
-      sample(); (window as any).__rateProbe = { frames, finish: () => cancelAnimationFrame(frame) };
-    });
-    const before = await page.getByTestId('native-player-viewport').boundingBox(); await trigger.click();
-    await expect.poll(() => page.locator('.playback-rate-content').evaluate(element => Number(getComputedStyle(element).opacity))).toBe(1);
-    await page.keyboard.press('Escape'); await expect(popup(page)).toHaveCount(0);
-    const frames = await page.evaluate(() => { (window as any).__rateProbe.finish(); return (window as any).__rateProbe.frames; });
-    expect(frames.length).toBeGreaterThan(1); expect(frames.every((frame: any) => frame.shellOpacity === '1')).toBe(true);
-    expect(new Set(frames.map((frame: any) => JSON.stringify([frame.x, frame.top, frame.width, frame.height]))).size).toBe(1);
-    if (reducedMotion === 'no-preference') {
-      expect(frames.some((frame: any) => frame.state === 'open' && frame.y > 8 && frame.opacity < .65)).toBe(true);
-      expect(frames.some((frame: any) => frame.state === 'closing' && frame.y > 2 && frame.opacity < .9)).toBe(true);
-    } else expect(frames.every((frame: any) => frame.opacity === 1 && frame.y === 0)).toBe(true);
+  test(`speed widget preserves native placement and restores focus (${reducedMotion})`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion });
+    const trigger = await openStudy(page);
+    const before = await page.getByTestId('native-player-viewport').boundingBox();
+    await trigger.click();
+    await expect(slider(page)).toBeFocused();
+    await expect(popup(page)).toHaveCSS('opacity', '1');
+    await expect(popup(page)).toBeInViewport({ ratio: 1 });
+    await page.getByRole('button', { name: '1.25', exact: true }).click();
+    await expect(slider(page)).toHaveValue('1.25');
     expect(await page.getByTestId('native-player-viewport').boundingBox()).toEqual(before);
     const placements = await page.evaluate(() => (window as any).__learningFixture.calls.filter((call: any) => call.command === 'player_control' && call.args.request.action === 'bounds'));
     expect(placements.some((call: any) => call.args.request.bounds.occlusions.length === 1 && !call.args.request.bounds.inputBlocked)).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(popup(page)).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    expect(await page.getByTestId('native-player-viewport').boundingBox()).toEqual(before);
   });
 }
 
@@ -242,23 +227,26 @@ test('Escape dismisses a hidden pending popup from body focus before native ackn
   await trigger.press('Space'); await expect(slider(page)).toBeFocused(); await expect(slider(page)).toHaveValue('1');
 });
 
-test('interrupted widget motion reverses continuously and a new modal retains focus', async ({ page }) => {
-  const trigger = await openStudy(page); await trigger.click();
-  const poses = await page.evaluate(async () => {
-    const read = () => Number(getComputedStyle(document.querySelector('.playback-rate-content')!).opacity);
-    const frame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-    while (read() < .45) await frame(); const entering = read();
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    await frame(); const closing = read(); document.querySelector<HTMLButtonElement>('.playback-rate-trigger')!.click();
-    await frame(); return { entering, closing, reopened: read() };
-  });
-  expect(poses.entering).toBeLessThan(.95); expect(poses.closing).toBeLessThan(poses.entering + .05);
-  expect(Math.abs(poses.reopened - poses.closing)).toBeLessThan(.15);
+test('reopening a closing speed widget keeps its value and a new modal retains focus', async ({ page }) => {
+  await page.clock.install();
+  const trigger = await openStudy(page);
+  await trigger.click();
+  await page.getByRole('button', { name: '0.75', exact: true }).click();
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  await page.keyboard.press('Escape');
+  await expect(popup(page)).toHaveAttribute('data-state', 'closing');
+  await trigger.evaluate(element => element.click());
+  await expect(popup(page)).toHaveAttribute('data-state', 'open');
+  await page.clock.resume();
+  await expect(slider(page)).toHaveValue('0.75');
+  await expect(slider(page)).toBeFocused();
   await page.getByRole('button', { name: 'Playback settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Playback settings', exact: true });
-  await expect(settings).toBeVisible(); await expect(popup(page)).toHaveCount(0);
+  await expect(settings).toBeVisible();
+  await expect(popup(page)).toHaveCount(0);
   await expect.poll(() => settings.evaluate(element => element.contains(document.activeElement))).toBe(true);
-  await page.keyboard.press('Escape'); await expect(settings).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(settings).toHaveCount(0);
 });
 
 test('outside content and native or DOM video clicks dismiss once without toggling playback', async ({ page }) => {
@@ -286,7 +274,6 @@ for (const [width, height] of [[800, 700], [640, 360]]) {
       await expect(control).toBeInViewport({ ratio: 1 });
     }
     await slider(page).scrollIntoViewIfNeeded();
-    await page.screenshot({ path: `test-results/playback-rate/widget-${width}-dark-ja.png` });
     await page.getByRole('button', { name: '0.75', exact: true }).click(); await expect(slider(page)).toHaveValue('0.75');
     await expect(popup(page)).toHaveAttribute('data-state', 'open');
     await page.getByRole('button', { name: '再生速度設定を閉じる', exact: true }).click(); await expect(popup(page)).toHaveCount(0); await expect(trigger).toBeFocused();

@@ -1,108 +1,75 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { spawnWebDriver, waitForWebDriver } from './e2e/support/webdriver-process.mjs';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { resolve, isAbsolute } from 'node:path';
+import { basename, resolve } from 'node:path';
+import { NativeWorker, initializeNativeRun } from './e2e/support/native-session.mjs';
+import { nativePlatformName, nativeSpecsForPlatform } from './e2e/support/native-suite.mjs';
+import { artifactIdentity } from './e2e/support/native-artifacts.mjs';
+import { captureNativeFailure } from './e2e/support/native-diagnostics.mjs';
+import { prepareNativeSession } from './e2e/support/native-app.mjs';
+import { assertNativeRunSucceeded, recordNativeRunFailure } from './e2e/support/native-run-status.mjs';
 
-let driver;
-const binary = process.env.SURTITLE_E2E_BINARY;
-const dataDir = process.env.SURTITLE_E2E_DATA_DIR;
+let worker;
+let startupFailure;
+let testSequence = 0;
+let hookSequence = 0;
 const port = Number(process.env.SURTITLE_WEBDRIVER_PORT || 4444);
-function stopDriver() {
-  process.removeListener('exit', stopDriver);
-  if (driver && !driver.killed && driver.exitCode === null && driver.signalCode === null) driver.kill();
+const fullTitle = item => typeof item.fullTitle === 'function' ? item.fullTitle() : [item.parent, item.title].filter(Boolean).join(' / ');
+async function failure(kind, item, result) {
+  if (!result.error) return;
+  const previous = process.env.SURTITLE_E2E_TEST_ID;
+  if (kind !== 'test') process.env.SURTITLE_E2E_TEST_ID = `${kind}-${++hookSequence}-${artifactIdentity(fullTitle(item))}`;
+  try {
+    await captureNativeFailure({ kind, title: fullTitle(item), error: result.error, sessionId: globalThis.browser?.sessionId, port });
+  } catch (error) { console.error(`[native] Could not preserve ${kind} diagnostics: ${error.message}`); }
+  finally {
+    if (previous === undefined) delete process.env.SURTITLE_E2E_TEST_ID;
+    else process.env.SURTITLE_E2E_TEST_ID = previous;
+  }
 }
+
 export const config = {
-  hostname: '127.0.0.1', port, specs: ['./e2e/native/**/*.e2e.js'], maxInstances: 1,
-  capabilities: [{ maxInstances: 1, 'tauri:options': { application: binary || '' } }],
-  logLevel: 'warn', reporters: ['spec'], framework: 'mocha',
+  hostname: '127.0.0.1', port, specs: nativeSpecsForPlatform(), maxInstances: 1,
+  capabilities: [{ maxInstances: 1, platformName: nativePlatformName(process.platform),
+    'tauri:options': { application: process.env.SURTITLE_E2E_BINARY || '' } }],
+  logLevel: 'warn', reporters: ['spec', ['junit', {
+    outputDir: resolve('test-results/native'),
+    outputFileFormat: ({ cid }) => `${process.env.SURTITLE_E2E_RUN_ID || 'run'}/${artifactIdentity(cid)}/junit.xml`,
+  }]], framework: 'mocha',
   waitforTimeout: 15000, connectionRetryTimeout: 180000, connectionRetryCount: 0,
-  // Debug Rust verifies large external executable hashes before every process.
-  // A subtitle switch sequence performs several real probes and extractions.
-  mochaOpts: { ui: 'bdd', timeout: 300000 },
-  onPrepare() {
-    if (!binary || !isAbsolute(binary) || !existsSync(binary)) throw new Error('Set SURTITLE_E2E_BINARY to an existing absolute native binary path');
-    if (!dataDir || !isAbsolute(dataDir) || !existsSync(resolve(dataDir, 'fixture.json'))) throw new Error('Set SURTITLE_E2E_DATA_DIR to a disposable directory populated by seed_fixture');
-    mkdirSync('test-results/native', { recursive: true });
+  mochaOpts: { ui: 'bdd', timeout: 300000, failZero: true, forbidOnly: true,
+    rootHooks: { async beforeAll() {
+      if (startupFailure) throw startupFailure;
+      try { await prepareNativeSession(); }
+      catch (error) {
+        recordNativeRunFailure('readiness', error, { directory: worker?.directory });
+        await failure('startup', { title: 'native application readiness' }, { error });
+        throw error;
+      }
+    } },
   },
-  async before() {
-    // Native IPC can hash/probe large local tools. A timed-out WebDriver request
-    // must never silently replay a non-idempotent mutation such as save_card.
-    await browser.setTimeout({ script: 180000 });
+  onPrepare() { initializeNativeRun(); },
+  async beforeSession(_config, _capabilities, specs, cid) {
+    const reporter = _config.reporters.find(item => Array.isArray(item) && item[0] === 'junit');
+    // Configure the reporter before seeding can fail. The reporter creates its
+    // outputDir, but does not create parent directories in outputFileFormat.
+    reporter[1].outputDir = resolve(process.env.SURTITLE_E2E_RUN_ARTIFACT_DIR, artifactIdentity(`${cid}-${basename(specs[0], '.e2e.js')}`));
+    reporter[1].outputFileFormat = () => 'junit.xml';
+    worker = new NativeWorker();
+    try { await worker.start(specs, cid); }
+    catch (error) {
+      startupFailure = error;
+      recordNativeRunFailure('startup', error, { cid, specs, directory: worker.directory });
+      throw error;
+    }
+    reporter[1].outputDir = worker.directory;
   },
-  async beforeSession() {
-    const args = ['--port', String(port)];
-    if (process.env.SURTITLE_NATIVE_DRIVER) args.push('--native-driver', process.env.SURTITLE_NATIVE_DRIVER);
-    driver = spawnWebDriver(process.env.SURTITLE_TAURI_DRIVER || 'tauri-driver', args, { stdio: 'inherit', windowsHide: true, env: process.env });
-    process.once('exit', stopDriver);
-    try { await waitForWebDriver(driver, { port, timeoutMs: 15000 }); }
-    catch (error) { stopDriver(); throw error; }
+  beforeTest(test) {
+    process.env.SURTITLE_E2E_TEST_ID = `${++testSequence}-${artifactIdentity(fullTitle(test))}`;
   },
-  afterSession: stopDriver,
-  onComplete: stopDriver,
-  async afterTest(test, _context, result) {
-    if (result.passed) return;
-    const artifact = resolve('test-results/native', test.title.replace(/[^a-z0-9]+/gi, '-'));
-    const diagnostics = { capturedAt: new Date().toISOString() };
-    const reportError = (stage, error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`[native failure diagnostics] ${stage}: ${message}`);
-      return message;
-    };
-    try { await browser.saveScreenshot(`${artifact}.png`); }
-    catch (error) { diagnostics.screenshotError = reportError('screenshot capture failed', error); }
-    try {
-      diagnostics.page = await browser.execute(() => {
-        const rectangle = element => {
-          if (!element) return null;
-          const { x, y, top, right, bottom, left, width, height } = element.getBoundingClientRect();
-          return { x, y, top, right, bottom, left, width, height };
-        };
-        const content = document.querySelector('.page-content');
-        return {
-          pathname: location.pathname,
-          innerWidth: window.innerWidth,
-          innerHeight: window.innerHeight,
-          hidden: document.hidden,
-          pageContent: content ? { scrollTop: content.scrollTop, rect: rectangle(content) } : null,
-          nativePlayerViewport: rectangle(document.querySelector('[data-testid="native-player-viewport"]')),
-          dialogPresent: !!document.querySelector('[role="dialog"], dialog[open], [aria-modal="true"]'),
-          documentHasFocus: document.hasFocus(),
-          activeElement: document.activeElement ? {
-            tag: document.activeElement.tagName,
-            role: document.activeElement.getAttribute('role'),
-            label: document.activeElement.getAttribute('aria-label'),
-            key: document.activeElement.getAttribute('data-key'),
-          } : null,
-          playbackRatePopup: (() => {
-            const popup = document.querySelector('.playback-rate-popover');
-            return popup ? {
-              rect: rectangle(popup), state: popup.getAttribute('data-state'),
-              nativeOcclusion: popup.getAttribute('data-native-occlusion'),
-              sliderValue: popup.querySelector('.playback-rate-slider')?.value,
-              selectedPreset: popup.querySelector('.playback-rate-preset[aria-pressed="true"]')?.textContent,
-              sliderHasFocus: popup.querySelector('.playback-rate-slider') === document.activeElement,
-              widgetHasFocus: popup.contains(document.activeElement),
-            } : null;
-          })(),
-        };
-      });
-    } catch (error) { diagnostics.pageError = reportError('page capture failed', error); }
-    try {
-      diagnostics.playerState = await browser.execute(async () => {
-        let timer;
-        try {
-          const state = await Promise.race([
-            window.__TAURI_INTERNALS__.invoke('get_player_state'),
-            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('get_player_state exceeded the 5-second diagnostic limit')), 5000); }),
-          ]);
-          return { state };
-        } catch (error) {
-          return { error: error instanceof Error ? error.message : String(error) };
-        } finally { clearTimeout(timer); }
-      });
-      if (diagnostics.playerState.error) reportError('player state capture failed', diagnostics.playerState.error);
-    } catch (error) { diagnostics.playerState = { error: reportError('player state capture failed', error) }; }
-    try { writeFileSync(`${artifact}.json`, `${JSON.stringify(diagnostics, null, 2)}\n`, 'utf8'); }
-    catch (error) { reportError('JSON evidence write failed', error); }
+  async afterTest(test, _context, result) { await failure('test', test, result); },
+  async afterHook(test, _context, result) { await failure('hook', test, result); },
+  async afterSession() {
+    try { await worker?.stop(); }
+    catch (error) { recordNativeRunFailure('cleanup', error, { directory: worker?.directory }); throw error; }
   },
+  onComplete() { assertNativeRunSucceeded(); },
 };

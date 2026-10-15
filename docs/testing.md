@@ -2,6 +2,10 @@
 
 Tests cover application behavior, native dependencies and release packaging. Ordinary CI uses authored fixtures and makes no Vertex generation requests.
 
+Every maintained test runs automatically on pull requests and pushes on at least one applicable OS. Windows-only checks run on Windows; native input has its own sequential step. There are no manual-only test suites. Local commands select the same maintained tests.
+
+Vitest owns unit and script tests, Playwright owns browser behavior, WebdriverIO owns the real Tauri application, and cargo-nextest owns Rust execution. The native suite retains the [external tauri-driver route](https://v2.tauri.app/develop/tests/webdriver/) shared with production package verification. WebdriverIO's newer embedded Tauri service is an available alternative, but requires an additional application plugin; this suite already owns profile isolation, driver matching and process cleanup, and does not need macOS support.
+
 ## Routine checks
 
 ```powershell
@@ -12,6 +16,7 @@ pnpm check:ipc
 pnpm fmt:rust:check
 pnpm test:rust
 pnpm test:rust:no-default-features
+pnpm test:rust:doc
 pnpm lint:rust
 pnpm audit:rust
 node scripts/check-version.mjs
@@ -19,6 +24,8 @@ node scripts/check-production-features.mjs
 ```
 
 `pnpm test` runs React/jsdom and Node script tests. `pnpm test:ui` and `pnpm test:scripts` select one project; `pnpm test:watch` watches both.
+
+Install cargo-nextest 0.9.148 with `pnpm setup:nextest` for Rust tests. Workspace and no-default-feature runs use separate nextest profiles; doctests remain a separate Cargo invocation. The audio-preparation example's four unit tests are also selected by the workspace suite. Test retries are disabled for Rust and native E2E; browser CI allows one retry and reports it separately.
 
 The required `browser` CI job runs behavior, UI structure, state and layout checks in a pinned Linux container. `pnpm test:structure` runs the focused UI contracts, which are also included in `pnpm test:browser`. They assert accessible roles, names and states, form values, viewport bounds and element placement instead of comparing screenshot pixels. The aggregate `ci` check requires this job as well as version validation, native dependencies, Linux, Windows and package verification. See the [E2E guide](../e2e/README.md) for local commands and failure evidence. The same browser checks can also run directly on Windows.
 
@@ -46,45 +53,41 @@ The [E2E guide](../e2e/README.md) covers browser and native application setup. [
 
 ## Explicit Rust integration suites
 
-Some Rust tests need real FFmpeg, Windows DLLs or optional speech data and therefore remain ignored in an ordinary unit run. `pnpm test:rust:required <suite>` invokes each selected test through Cargo with `--ignored --exact --test-threads=1`. It fails on a nonzero process result, zero matched tests or an ignored result. Cargo manages compilation reuse; the application code validates the selected tools and assets.
+Some Rust tests need real FFmpeg or Windows DLLs and remain ignored in the unit run. `pnpm test:rust:required <suite>` selects them through nextest in automatic CI. Before execution, it compares nextest's JSON inventory with the exact registered package/test names. Missing, extra or unexpectedly non-ignored cases fail discovery. Package feature modes remain separate, and native tests run serially with per-test time limits. Nextest owns test execution and cancellation; the CI job bounds compilation time.
 
 | Suite | Environment and behavior |
 | --- | --- |
 | `linux-ffmpeg` | Linux; card PCM tail/source-clock extraction and selected audio-stream extraction |
-| `windows-ffmpeg` | The same extraction cases on Windows x64 |
-| `windows-native` | Windows extraction, real mpv load/restore, Silero preparation and cancellation/source-change cleanup |
-| `windows-six-hour` | Optional Windows six-hour streaming/performance acceptance |
-| `windows-spoken` | Local Windows speech/pause review with existing explicit speech fixtures |
+| `windows-native` | Windows extraction, real mpv load/restore, Silero preparation, real speech/pause detection and cancellation/source-change cleanup |
 
 Set `SURTITLE_TEST_FFMPEG` to an existing absolute FFmpeg executable with its matching ffprobe. Windows native suites also need [prepared native DLLs](native-runtime.md) and `native-prepare.ps1 -WithDevModel` for Silero. Missing inputs fail the actual test rather than becoming skips.
 
 ```powershell
 $env:SURTITLE_TEST_FFMPEG = 'C:\Tools\ffmpeg\ffmpeg.exe'
+python e2e/support/acquire-spoken-fixtures.py
+$env:SURTITLE_SPOKEN_FIXTURES = "$PWD/work/spoken-fixtures"
 pnpm test:rust:required windows-native
 ```
 
-Logs are written under `artifacts/required-rust-tests/<suite>/`; rerunning replaces those logs. Use `--evidence-dir <directory>` to retain another run. The runner bounds each Cargo build/test invocation and terminates only its owned process tree on timeout/interruption.
+Each invocation creates `artifacts/required-rust-tests/<suite>/run-*/` with discovery/execution logs, per-package JUnit and a summary recording failed or unexecuted groups. A rerun cannot overwrite or reuse a previous success report. `--evidence-dir <directory>` changes the parent directory.
 
 The Windows native suite includes `prepare::tests::real_preparation_failures_remove_receipts_and_temporary_files`, which exercises real cancellation and source replacement and checks that failed preparation leaves neither a receipt nor temporary output.
 
+The speech fixture script downloads two small WAV files from a pinned upstream commit and verifies their SHA-256 and PCM format. The required speech case checks positive Silero detection, a warning for an inserted interior pause, unchanged PCM and authored subtitle boundaries. It makes no cloud generation request.
+
 The runner selects full Rust test names. When moving an integration test between application modules, update the registry in `e2e/support/run-required-rust-tests.mjs` in the same change, then run the required suite. A normal workspace test run does not execute these ignored native tests.
 
-The six-hour suite verifies complete sample coverage, bounded preparation time, storage use, temporary PCM cleanup and Windows process memory. It measures local silent-audio preparation, not speech quality. After preparing the native DLLs and development Silero model:
+The required Silero case also completes a generated six-minute input through multiple chunks and verifies sample continuity, the exact endpoint and temporary PCM removal. Unit tests cover six-hour sample boundaries, while native E2E covers six-hour seeking. These are functional checks, not runtime or memory benchmarks. The two ignored crash helpers are invoked by ordinary parent tests and must not be selected as standalone integrations.
 
-```powershell
-$env:FFMPEG_PATH = $env:SURTITLE_TEST_FFMPEG
-pnpm test:fixtures
-$env:SURTITLE_LONG_AUDIO_FILE = Join-Path $PWD 'test-results/fixtures/six-hour-silence.flac'
-pnpm test:rust:required windows-six-hour
-```
+## Results and failure evidence
 
-The runner applies test-only optimization. The test writes its report under `work/ai-six-hour-acceptance/`; the manual native-acceptance workflow runs it separately.
+CI publishes a short console report, JUnit and an Actions step summary. Successful unit tests keep their console output quiet in CI; failed tests retain their logs. JavaScript reports are under `test-results/vitest`, browser JSON/JUnit/traces under `test-results/browser`, Rust reports under `test-results/nextest`, and native worker evidence under `test-results/native/<run>/<spec>`. Required Rust JUnit files are copied into their unique run directory; the temporary staging report is not counted twice.
 
-The spoken suite requires `SURTITLE_SPOKEN_FIXTURES` containing the pinned WAV/TextGrid/text files for LibriSpeech `1089-134686-0001` and `1089-134686-0003`. Run `python e2e/support/acquire-spoken-fixtures.py --ffmpeg PATH_TO_FFMPEG` to acquire the six small files from the exact upstream commit into `work/spoken-fixture-acquisition`, retaining source URLs and hashes. It rewraps the original PCM16 audio, verifies byte-identical samples and the existing test hashes, and records the upstream automatic MFA alignment provenance. Set `SURTITLE_SPOKEN_FIXTURES` to that absolute directory before selecting this suite. The test itself never downloads inputs or calls a provider.
+`node scripts/summarize-tests.mjs` aggregates retained local reports, including separate reruns. CI also supplies step outcomes so failed setup and unexecuted steps are visible even when a runner produced no report. Native startup, readiness and cleanup failures have separate structured records and fail the run even when no test body ran. Expected IPC rejection is checked as an application result; transport failures remain failures. Successful tests do not produce screenshot sequences or videos. Failure diagnostics retain the original cause and have a bounded collection time. Package summaries read only approved status fields from existing smoke reports.
 
 ## Live verification and fixtures
 
-Parser/worker tests use authored [fixed responses](../crates/ai/tests/fixtures/README.md). [Saved-response application checks](../e2e/README.md#saved-response-local-checks) require an explicitly prepared local profile. [CLI tool verification](tools.md#verification) includes opt-in tests of installed executables and managed downloads.
+Parser/worker tests use authored [fixed responses](../crates/ai/tests/fixtures/README.md). [Native application checks](../e2e/README.md) use fresh offline profiles. [CLI tool verification](tools.md#verification) includes the required generated-media extraction tests.
 
 [Credential-based verification](vertex-verification.md) describes the development CLI and application workflow for explicitly approved Vertex requests. Inspect generated text and timing against the source; a valid API response, passing mock or automated player event does not establish model quality.
 

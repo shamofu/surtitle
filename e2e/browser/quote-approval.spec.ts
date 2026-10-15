@@ -38,7 +38,7 @@ async function installExpiredQuoteFixture(page: Page, locale: 'ja' | 'en', entry
 
 for (const locale of ['ja', 'en'] as const) {
   for (const entry of ['new', 'retry'] as const) {
-    test(`expired unpriced ${entry} quote requires refresh and a fresh explicit approval ${locale}`, async ({ page }, testInfo) => {
+    test(`expired unpriced ${entry} quote requires refresh and a fresh explicit approval ${locale}`, async ({ page }) => {
       const text = (ja: string, en: string) => locale === 'ja' ? ja : en;
       await page.setViewportSize({ width: 1024, height: 700 });
       await installExpiredQuoteFixture(page, locale, entry);
@@ -62,12 +62,10 @@ for (const locale of ['ja', 'en'] as const) {
       const sends = () => page.evaluate(() => (window as any).__learningFixture.calls.filter((call: any) => ['approve_quote', 'reapprove_quote'].includes(call.command)));
       expect(await sends()).toHaveLength(0);
       await approve.scrollIntoViewIfNeeded();
-      await page.screenshot({ path: testInfo.outputPath(`expired-${entry}-${locale}.png`), animations: 'disabled' });
       await refresh.click();
       await expect(approve).toBeEnabled();
       await expect(dialog.getByText(warning, { exact: true })).toHaveCount(0);
       expect(await sends()).toHaveLength(0);
-      await page.screenshot({ path: testInfo.outputPath(`refreshed-${entry}-${locale}.png`), animations: 'disabled' });
       await approve.click();
       await expect(dialog).toHaveCount(0);
       expect(await sends()).toHaveLength(1);

@@ -69,7 +69,7 @@ for (const locale of ['ja', 'en'] as const) {
       expect(sends).toHaveLength(0);
     });
     for (const width of [1024, 760]) {
-    test(`readable ${kind} stream in processing views, drafts, and activity ${locale} ${width}`, async ({ page }, testInfo) => {
+    test(`readable ${kind} stream in processing views, drafts, and activity ${locale} ${width}`, async ({ page }) => {
       const text = (ja: string, en: string) => locale === 'ja' ? ja : en;
       await page.setViewportSize({ width, height: 700 });
       await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -101,7 +101,6 @@ for (const locale of ['ja', 'en'] as const) {
       const processingBounds = await playerBounds();
       await expect(runtime.locator('.ai-runtime-recent li')).toHaveCount(3);
       await expect(runtime.locator('.ai-runtime-preview')).not.toBeVisible();
-      await page.screenshot({ path: testInfo.outputPath(`runtime-${kind}-${locale}.png`), fullPage: true, animations: 'disabled' });
       await runtime.getByText(text('生成内容・処理履歴', 'Generated content and history'), { exact: true }).click();
       const preview = runtime.getByRole('region', { name: text('生成中のプレビュー', 'Generation preview') });
       await expect(preview).toContainText(text('生成中・未確定', 'Generating · provisional'));
@@ -113,7 +112,6 @@ for (const locale of ['ja', 'en'] as const) {
       await expect.poll(playerBounds).toEqual(processingBounds);
       expect(await preview.evaluate(element => element.clientHeight)).toBeLessThanOrEqual(140);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      await page.screenshot({ path: testInfo.outputPath(`runtime-expanded-${kind}-${locale}.png`), fullPage: true, animations: 'disabled' });
       await runtime.getByText(text('処理の履歴', 'Progress history'), { exact: true }).click();
       await expect(runtime.locator('.ai-runtime-history li')).toHaveCount(16);
       await expect(runtime.locator('.ai-runtime-history time')).toHaveCount(16);
@@ -145,7 +143,6 @@ for (const locale of ['ja', 'en'] as const) {
       const activityRuntime = dialog.locator('.ai-runtime');
       await expect(activityRuntime.locator('.ai-runtime-recent li')).toHaveCount(3);
       await expect(activityRuntime.getByRole('region', { name: text('生成中のプレビュー', 'Generation preview') })).toBeVisible();
-      await page.screenshot({ path: testInfo.outputPath(`runtime-activity-${kind}-${locale}.png`), animations: 'disabled' });
       const sends = await page.evaluate(() => (window as any).__learningFixture.calls.filter((call: any) => ['approve_quote', 'reapprove_quote'].includes(call.command)));
       expect(sends).toHaveLength(0);
     });
@@ -216,4 +213,35 @@ test('completed AI history loads runtime details only when its history is opened
   await expect(page.locator('.transcript-row').first()).toBeVisible();
   await expect(history.locator('.ai-runtime')).toHaveCount(0);
   expect((await reads()).sort()).toEqual([...jobIds].sort());
+});
+
+test('idle recovery and event bursts avoid redundant native snapshot reads', async ({ page }) => {
+  await page.clock.install();
+  await installLearningFixture(page, 'en', 'light');
+  await page.goto('/study/visual-fixture');
+  await expect(page.locator('.current-caption-text')).toBeVisible();
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const calls = () => page.evaluate(() => {
+    const result: Record<string, number> = {};
+    for (const { command } of (window as any).__learningFixture.calls.splice(0)) result[command] = (result[command] ?? 0) + 1;
+    return result;
+  });
+  await calls();
+  await page.clock.runFor(65_000);
+  const idle = await calls();
+  await page.evaluate(() => { const fixture = (window as any).__learningFixture; for (let i = 0; i < 100; i++) fixture.publish('player-state', { ...fixture.state, positionMs: 76000 + i }); });
+  await page.clock.runFor(200);
+  const playback = await calls();
+  await page.evaluate(() => { const fixture = (window as any).__learningFixture; for (let revision = 1; revision <= 50; revision++) fixture.publish('data-changed', { version: 1, epoch: 'fixture', revision, domain: 'operations' }); });
+  await page.clock.runFor(200);
+  const operations = await calls();
+  await page.evaluate(() => { const fixture = (window as any).__learningFixture; for (let revision = 51; revision <= 70; revision++) fixture.publish('data-changed', { version: 1, epoch: 'fixture', revision, domain: 'jobs' }); });
+  await page.clock.runFor(200);
+  const jobs = await calls();
+  expect(idle.get_app_snapshot ?? 0).toBe(0);
+  expect(idle.get_change_checkpoint).toBe(1);
+  expect(playback.get_app_snapshot ?? 0).toBe(0);
+  expect(operations.get_app_snapshot ?? 0).toBe(0);
+  expect(operations.list_operation_progress).toBe(1);
+  expect(jobs.get_snapshot_patch).toBe(1);
 });

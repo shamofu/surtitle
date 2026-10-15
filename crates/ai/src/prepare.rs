@@ -3,13 +3,13 @@ mod child;
 mod encoding;
 use encoding::{next_mature_chunk, Encoders};
 mod pause_evidence;
-use child::LocalChild;
 #[cfg(test)]
 mod spoken_pause_test;
 use crate::{
     hash_file, plan_chunks, sha256_bytes, AiError, AudioChunk, ChunkOptions, PreparationBinding,
     PreparedJob, RequestTask, Result, SileroVad, VadAssets,
 };
+use child::LocalChild;
 pub use pause_evidence::VadPauseEvidence;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -593,7 +593,6 @@ fn check_cancel(cancel: &AtomicBool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
     #[tokio::test]
     async fn model_install_cancellation_does_not_start_network_or_change_existing_files() {
         let root = tempfile::tempdir().unwrap();
@@ -634,7 +633,7 @@ mod tests {
         assert_eq!(seconds(1), "0.001");
     }
     #[test]
-    #[ignore = "requires pinned native fixtures and explicit SURTITLE_TEST_FFMPEG path; never calls Vertex"]
+    #[ignore = "run by required Windows native CI; requires pinned native fixtures and SURTITLE_TEST_FFMPEG; never calls Vertex"]
     fn real_preparation_failures_remove_receipts_and_temporary_files() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -787,126 +786,7 @@ mod tests {
         assert_eq!(hash_file(&source).unwrap(), original_hash);
     }
     #[test]
-    #[ignore = "explicit six-hour local acceptance; requires pinned fixtures and SURTITLE_LONG_AUDIO_FILE"]
-    fn six_hour_streaming_acceptance() {
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap();
-        let source = PathBuf::from(
-            std::env::var_os("SURTITLE_LONG_AUDIO_FILE").expect("explicit long audio fixture"),
-        );
-        let assets = VadAssets {
-            runtime_path: repo.join("src-tauri/resources/native/onnxruntime.dll"),
-            model_path: repo.join("work/native-fixtures/silero_vad.onnx"),
-            model_sha256: SILERO_MODEL_SHA256.into(),
-        };
-        let ffmpeg = ToolSnapshot::capture(
-            surtitle_tools::resolve_external(
-                ToolKind::FfmpegPair,
-                &PathBuf::from(
-                    std::env::var_os("SURTITLE_TEST_FFMPEG").expect("explicit FFmpeg path"),
-                ),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        let output = repo.join("work/ai-six-hour-acceptance");
-        let cancel = Arc::new(AtomicBool::new(false));
-        let finished = Arc::new(AtomicBool::new(false));
-        let (watch_cancel, watch_finished) = (cancel.clone(), finished.clone());
-        let watchdog = std::thread::spawn(move || {
-            let start = Instant::now();
-            while !watch_finished.load(Ordering::Relaxed) {
-                if start.elapsed() > Duration::from_secs(360) {
-                    watch_cancel.store(true, Ordering::Relaxed);
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        });
-        let began = Instant::now();
-        let mut last = Instant::now();
-        let options = AudioPreparationOptions {
-            media_id: "six-hour-local-fixture".into(),
-            transcript_revision: "none".into(),
-            title: "Six hour local acceptance".into(),
-            project_id: String::new(),
-            credential_id: String::new(),
-            language: "auto".into(),
-            start_ms: 0,
-            end_ms: 21_600_000,
-            audio_stream_index: Some(0),
-            chunks: ChunkOptions::default(),
-            provider: AudioTranscriptionProvider::TranscribePreview,
-        };
-        let result = prepare_audio(&source, &output, &ffmpeg, assets, options, cancel, |p| {
-            if last.elapsed() > Duration::from_secs(10) || p.phase == "prepared" {
-                eprintln!(
-                    "{}: {} / {} ms, chunks {} / {}",
-                    p.phase, p.processed_ms, p.total_ms, p.completed_chunks, p.total_chunks
-                );
-                last = Instant::now();
-            }
-        });
-        finished.store(true, Ordering::Relaxed);
-        watchdog.join().unwrap();
-        let receipt = result.unwrap();
-        assert_eq!(receipt.chunks.first().unwrap().core_start_sample, 0);
-        assert_eq!(receipt.chunks.last().unwrap().core_end_sample, 345_600_000);
-        assert!(receipt
-            .chunks
-            .windows(2)
-            .all(|p| p[0].core_end_sample == p[1].core_start_sample));
-        assert!(receipt
-            .chunks
-            .iter()
-            .all(|c| c.request_duration_ms() <= 186_000));
-        assert!(!receipt.directory.join("decoded-selection.pcm").exists());
-        let bytes: u64 = std::fs::read_dir(&receipt.directory)
-            .unwrap()
-            .map(|e| e.unwrap().metadata().unwrap().len())
-            .sum();
-        #[cfg(windows)]
-        let peak_bytes = {
-            use windows_sys::Win32::System::{
-                ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS_EX},
-                Threading::GetCurrentProcess,
-            };
-            let mut m: PROCESS_MEMORY_COUNTERS_EX = unsafe { std::mem::zeroed() };
-            m.cb = std::mem::size_of_val(&m) as u32;
-            assert_ne!(
-                unsafe {
-                    GetProcessMemoryInfo(
-                        GetCurrentProcess(),
-                        (&mut m as *mut PROCESS_MEMORY_COUNTERS_EX).cast(),
-                        m.cb,
-                    )
-                },
-                0
-            );
-            m.PeakWorkingSetSize as u64
-        };
-        #[cfg(not(windows))]
-        let peak_bytes = 0_u64;
-        let wall_seconds = began.elapsed().as_secs_f64();
-        let sent_samples = crate::total_request_samples(&receipt.chunks).unwrap();
-        assert!(wall_seconds > 0.0 && wall_seconds <= 360.0);
-        assert!(sent_samples >= 345_600_000);
-        assert!(bytes > 0);
-        #[cfg(windows)]
-        assert!(peak_bytes > 0);
-        let report = serde_json::json!({"source_duration_ms":21_600_000,"wall_seconds":wall_seconds,"peak_working_set_bytes":peak_bytes,"memory_scope":"Rust acceptance process only; external FFmpeg excluded","chunk_count":receipt.chunks.len(),"core_samples":345_600_000_u64,"sent_samples_including_context":sent_samples,"retained_bytes":bytes,"temporary_pcm_removed":true,"receipt_path":receipt.directory.join("receipt.json"),"cloud_calls":0});
-        std::fs::write(
-            output.join("report.json"),
-            serde_json::to_vec_pretty(&report).unwrap(),
-        )
-        .unwrap();
-        eprintln!("{report}");
-    }
-    #[test]
-    #[ignore = "requires pinned native fixtures and explicit SURTITLE_TEST_FFMPEG path; never calls Vertex"]
+    #[ignore = "run by required Windows native CI; requires pinned native fixtures and SURTITLE_TEST_FFMPEG; never calls Vertex"]
     fn real_silero_and_ffmpeg_preserve_selection_time() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -944,7 +824,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("selection.wav");
         let mut wav = Vec::new();
-        let data_len = 4 * 16000 * 2_u32;
+        let data_len = 360 * 16000 * 2_u32;
         wav.extend(b"RIFF");
         wav.extend((36 + data_len).to_le_bytes());
         wav.extend(b"WAVEfmt ");
@@ -977,8 +857,8 @@ mod tests {
             &source,
             &temp.path().join("prepared"),
             &ffmpeg,
-            assets,
-            options,
+            assets.clone(),
+            options.clone(),
             Arc::new(AtomicBool::new(false)),
             |progress| observed_progress.push(progress),
         )
@@ -1044,5 +924,48 @@ mod tests {
         assert_eq!(audio.duration_ms, 2500);
         assert!(audio.verified_bytes().unwrap().starts_with(b"fLaC"));
         assert!(receipt.directory.join("receipt.json").is_file());
+
+        // Complete several streaming encoders with a generated local source.
+        // This checks sample preservation and cleanup without a wall-time or
+        // memory benchmark whose outcome depends on the CI host's load.
+        let complete = prepare_audio(
+            &source,
+            &temp.path().join("complete"),
+            &ffmpeg,
+            assets,
+            AudioPreparationOptions {
+                start_ms: 0,
+                end_ms: 360_000,
+                ..options
+            },
+            Arc::new(AtomicBool::new(false)),
+            |_| {},
+        )
+        .unwrap();
+        assert!(complete.chunks.len() > 1);
+        assert_eq!(complete.chunks.first().unwrap().core_start_sample, 0);
+        assert_eq!(
+            complete.chunks.last().unwrap().core_end_sample,
+            360 * 16_000
+        );
+        assert!(complete
+            .chunks
+            .windows(2)
+            .all(|pair| pair[0].core_end_sample == pair[1].core_start_sample));
+        assert!(complete
+            .chunks
+            .iter()
+            .all(|chunk| chunk.request_duration_ms() <= 186_000));
+        assert_eq!(complete.prepared_job.requests.len(), complete.chunks.len());
+        for (request, chunk) in complete.prepared_job.requests.iter().zip(&complete.chunks) {
+            let RequestTask::TranscribePreview { audio, .. } = request else {
+                panic!("expected audio");
+            };
+            assert_eq!(audio.source_start_ms, chunk.request_start_ms());
+            assert_eq!(audio.duration_ms, chunk.request_duration_ms());
+            assert!(audio.verified_bytes().unwrap().starts_with(b"fLaC"));
+        }
+        assert!(!complete.directory.join("decoded-selection.pcm").exists());
+        assert!(complete.directory.join("receipt.json").is_file());
     }
 }

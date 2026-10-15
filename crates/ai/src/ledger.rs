@@ -119,7 +119,7 @@ pub struct AiStore {
     path: PathBuf,
     #[cfg(feature = "development-validation")]
     development: Option<std::sync::Arc<development::DevelopmentScope>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     clock: std::sync::Arc<std::sync::atomic::AtomicI64>,
 }
 
@@ -127,20 +127,23 @@ pub struct AiStore {
 pub(crate) const TEST_NOW_MS: i64 = 1_788_825_600_000; // 2026-09-08 00:00:00 UTC
 
 impl AiStore {
-    fn now_ms(&self) -> i64 {
-        #[cfg(test)]
+    /// The clock used by ledger deadlines and the native worker waiting on them.
+    pub fn now_ms(&self) -> i64 {
+        #[cfg(any(test, feature = "test-support"))]
         {
-            self.clock.load(std::sync::atomic::Ordering::SeqCst)
+            let at = self.clock.load(std::sync::atomic::Ordering::SeqCst);
+            if at != i64::MIN {
+                return at;
+            }
         }
-        #[cfg(not(test))]
-        {
-            crate::now_ms()
-        }
+        crate::now_ms()
     }
 
     /// Per-store deterministic clock shared by clones, absent from production builds.
-    #[cfg(test)]
-    pub(crate) fn set_test_time(&self, at: i64) {
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn set_test_time(&self, at: i64) {
+        assert_ne!(at, i64::MIN, "reserved for the system clock");
         self.clock.store(at, std::sync::atomic::Ordering::SeqCst);
     }
 }

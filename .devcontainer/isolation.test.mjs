@@ -1,11 +1,11 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertContainer, assertDefinition, readDefinition, maskTargets, runtimeUserForHost, workspace } from './isolation.mjs';
+import { assertContainer, assertDefinition, readDefinition, maskTargets, runtimeUserForHost, verificationCommand, workspace } from './isolation.mjs';
 
 const definition = JSON.parse(readFileSync(new URL('./devcontainer.json', import.meta.url), 'utf8'));
 const dockerfiles = [readFileSync(new URL('./Dockerfile', import.meta.url), 'utf8')];
@@ -51,11 +51,6 @@ test('native Linux uses host IDs while Windows and WSL retain the image account'
 
 test('live verification output is retained and producer or tee failures stay nonzero', t => {
   const childTimeoutMs = 10_000;
-  const launcher = readFileSync(new URL('./container.mjs', import.meta.url), 'utf8');
-  const invocation = launcher.match(/'bash', '-o', '(pipefail)', '(-lc)', '([^']+)'/);
-  assert.ok(invocation, 'Verification must explicitly preserve the status of the tee pipeline');
-  assert.match(invocation[3], /^bash \.devcontainer\/verify\.sh 2>&1 \| tee \/opt\/surtitle-build\/verification\.log$/);
-  assert.doesNotMatch(launcher, /'tail', '-n', '80'/);
   let bash = 'bash';
   if (process.platform === 'win32') {
     const git = spawnSync('git', ['--exec-path'], { encoding: 'utf8', timeout: childTimeoutMs, windowsHide: true });
@@ -68,22 +63,23 @@ test('live verification output is retained and producer or tee failures stay non
   }
   const directory = mkdtempSync(join(tmpdir(), 'surtitle verification stream 日本語 & '));
   t.onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
+  const script = join(directory, 'verification script.sh');
+  const output = Array.from({ length: 100 }, (_, index) => `stdout marker ${index + 1}`).join('\n') + '\nstderr marker\n';
+  const execute = log => {
+    const [, ...args] = verificationCommand(script.replaceAll('\\', '/'), log.replaceAll('\\', '/'));
+    return spawnSync(bash, ['--noprofile', '--norc', ...args], { encoding: 'utf8', timeout: childTimeoutMs, windowsHide: true });
+  };
   for (const exitCode of [0, 23]) {
     const log = join(directory, `verification-${exitCode}.log`);
-    const pipeline = invocation[3]
-      .replace('bash .devcontainer/verify.sh', `(printf 'stdout marker\\n'; printf 'stderr marker\\n' >&2; exit ${exitCode})`)
-      .replace('/opt/surtitle-build/verification.log', '"$1"');
-    const result = spawnSync(bash, ['--noprofile', '--norc', '-o', invocation[1], invocation[2], pipeline, 'verification-stream-test', log.replaceAll('\\', '/')], {
-      encoding: 'utf8', timeout: childTimeoutMs, windowsHide: true,
-    });
+    writeFileSync(script, `for index in {1..100}; do printf 'stdout marker %s\\n' "$index"; done\nprintf 'stderr marker\\n' >&2\nexit ${exitCode}\n`);
+    const result = execute(log);
     assert.equal(result.error, undefined);
     assert.equal(result.status, exitCode, result.stderr);
-    assert.equal(result.stdout, 'stdout marker\nstderr marker\n');
+    assert.equal(result.stdout, output);
     assert.equal(readFileSync(log, 'utf8'), result.stdout);
   }
-  const failingLog = join(directory, 'missing-directory', 'verification.log').replaceAll('\\', '/');
-  const pipeline = invocation[3].replace('bash .devcontainer/verify.sh', "printf 'stdout marker\\n'").replace('/opt/surtitle-build/verification.log', '"$1"');
-  const result = spawnSync(bash, ['--noprofile', '--norc', '-o', invocation[1], invocation[2], pipeline, 'verification-stream-test', failingLog], { encoding: 'utf8', timeout: childTimeoutMs, windowsHide: true });
+  writeFileSync(script, "printf 'stdout marker\\n'\n");
+  const result = execute(join(directory, 'missing-directory', 'verification.log'));
   assert.equal(result.error, undefined);
   assert.notEqual(result.status, 0, 'An unwritable log must not silently lose verification evidence');
 }, 45_000); // Up to four sequential children, each bounded at ten seconds.

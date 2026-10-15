@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
+import { nativeArtifact } from '../support/native-artifacts.mjs';
+import { invokeNative as invoke, clickNative } from '../support/native-app.mjs';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
@@ -7,7 +9,6 @@ import { assertNativeVideoBounds, resizeNativeWindow, saveNativeScreenshot } fro
 import { activateNativeApplication, clickNativeVideo } from '../support/native-video-click.mjs';
 
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
-const invoke = (command, args = {}) => browser.execute(async (name, value) => window.__TAURI_INTERNALS__.invoke(name, value), command, args);
 const control = request => invoke('player_control', { request });
 const state = () => invoke('get_player_state');
 const triggerSelector = 'button[aria-label="Playback speed"]';
@@ -16,7 +17,7 @@ const sliderSelector = '.playback-rate-slider';
 const presets = [[.5, '0.5'], [.75, '0.75'], [1, '1.0'], [1.25, '1.25'], [1.5, '1.5'], [2, '2.0'], [3, '3.0']];
 const contains = (rect, x, y) => x >= rect.Left && y >= rect.Top && x < rect.Right && y < rect.Bottom;
 async function openSpeed() {
-  await $(triggerSelector).click();
+  await clickNative($(triggerSelector));
   await $(popupSelector).waitForDisplayed();
   await browser.waitUntil(async () => browser.execute(() => {
     const popup = document.querySelector('.playback-rate-popover');
@@ -70,7 +71,7 @@ describe('real native playback speed popup', () => {
   it('closes from the same trigger and reopens without changing playback', async () => {
     const before = await state();
     await openSpeed();
-    await $(triggerSelector).click();
+    await clickNative($(triggerSelector));
     await expectClosed();
     await openSpeed();
     await browser.keys(Key.Escape);
@@ -96,15 +97,15 @@ describe('real native playback speed popup', () => {
       assert(await browser.execute(() => document.querySelector('.playback-rate-slider') === document.activeElement));
     }
     assert.equal(await $('button[aria-label="Increase playback speed"]').getAttribute('aria-disabled'), 'true');
-    await $('button[aria-label="Decrease playback speed"]').click();
+    await clickNative($('button[aria-label="Decrease playback speed"]'));
     await expectRate(2.95);
-    await $('button[aria-label="Increase playback speed"]').click();
+    await clickNative($('button[aria-label="Increase playback speed"]'));
     await expectRate(3);
     assert(await browser.execute(() => document.activeElement?.getAttribute('aria-label') === 'Increase playback speed'),
       'Reaching the speed boundary lost keyboard focus');
     for (const [rate, text] of presets) {
       const preset = await $(`//*[@data-native-popup="playback-rate"]//button[contains(@class,"playback-rate-preset") and normalize-space(.)="${text}"]`);
-      await preset.click();
+      await clickNative(preset);
       await expectRate(rate);
       assert.equal(await preset.getAttribute('aria-pressed'), 'true');
       assert(await $(popupSelector).isDisplayed(), 'Selecting a preset closed the adjustment widget');
@@ -139,14 +140,13 @@ describe('real native playback speed popup', () => {
       }));
       assert.equal(ratios.length, 8);
       assert(ratios.every(ratio => ratio >= 4.5), `${theme} speed choice contrast: ${ratios}`);
-      if (process.platform === 'win32') await saveNativeScreenshot(resolve(`test-results/native/playback-speed-${theme}.png`));
+      if (process.platform === 'win32') await saveNativeScreenshot(nativeArtifact(`playback-speed-${theme}.png`));
       await browser.keys(Key.Escape);
       await expectClosed();
     }
   });
 
-  it('excludes actual HWND pixels behind the popup and restores them after Escape', async function () {
-    if (process.platform !== 'win32') { this.skip(); return; }
+  (process.platform === 'win32' ? it : it.skip)('excludes actual HWND pixels behind the popup and restores them after Escape', async () => {
     await control({ action: 'pause' });
     const before = await assertNativeVideoBounds();
     await openSpeed();
@@ -188,7 +188,7 @@ describe('real native playback speed popup', () => {
     await expectClosed();
     assert.equal((await state()).paused, beforeDismiss.paused, 'Clicking video to dismiss speed choices also toggled playback');
     await openSpeed();
-    await $('button=Playback settings').click();
+    await clickNative($('button=Playback settings'));
     await $('.modal[role="dialog"]').waitForDisplayed();
     await $(popupSelector).waitForExist({ reverse: true });
     await browser.keys(Key.Escape);

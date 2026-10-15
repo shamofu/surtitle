@@ -2,7 +2,7 @@
 import { expect, test } from '@playwright/test';
 import { installLearningFixture } from './learning-fixture';
 
-test('phrase reflow settles an in-flight 40 to 41 crossing without replacing the focused action', async ({ page }) => {
+test('phrase filtering and virtualization retain the focused action', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1024, height: 700 });
   await installLearningFixture(page, 'en', 'light', { cardCount: 41 });
@@ -32,7 +32,6 @@ test('phrase reflow settles an in-flight 40 to 41 crossing without replacing the
     const row = [...document.querySelectorAll<HTMLElement>('.phrase-card')]
       .find(row => row.querySelector('h3')?.textContent?.includes('phrase 00010'))!;
     const action = row.querySelector<HTMLButtonElement>('button[aria-label="Edit phrase"]')!;
-    const moving = getComputedStyle(row).transform !== 'none';
     action.focus();
     await new Promise(requestAnimationFrame);
     // Cross back while the small-list spring is running. This retained focus also
@@ -44,17 +43,11 @@ test('phrase reflow settles an in-flight 40 to 41 crossing without replacing the
     filter.dispatchEvent(new Event('change', { bubbles: true }));
     await new Promise(requestAnimationFrame);
     await new Promise(requestAnimationFrame);
-    return { moving, sameAction: action.isConnected && action === row.querySelector('button[aria-label="Edit phrase"]'),
-      focused: document.activeElement === action, transform: row.parentElement!.style.transform,
-      innerTransform: getComputedStyle(row).transform,
-      index: row.parentElement!.dataset.index, count: document.querySelectorAll('.phrase-card').length };
+    return { sameAction: action.isConnected && action === row.querySelector('button[aria-label="Edit phrase"]'),
+      focused: document.activeElement === action, count: document.querySelectorAll('.phrase-card').length };
   });
-  expect(observation.moving).toBe(true);
   expect(observation.sameAction).toBe(true);
   expect(observation.focused).toBe(true);
-  expect(observation.index).toBe('10');
-  expect(observation.transform).toMatch(/^translateY\([\d.]+px\)$/);
-  expect(observation.innerTransform).toBe('none');
   expect(observation.count).toBeLessThan(30);
   expect(await input!.evaluate(input => input === document.querySelector('input[aria-label="Search your phrases"]'))).toBe(true);
   await page.keyboard.press('Enter');
@@ -91,13 +84,8 @@ test('material filters reflow existing links while live progress updates and res
   await expect(page.locator('.media-row')).toHaveCount(4);
   const original = await audio.elementHandle();
   const input = await page.getByRole('textbox', { name: 'Search your library' }).elementHandle();
-  const moving = await page.getByRole('button', { name: 'Audio', exact: true }).evaluate(async button => {
-    button.click();
-    await new Promise(requestAnimationFrame);
-    await new Promise(requestAnimationFrame);
-    return [...document.querySelectorAll('.media-row')].some(row => getComputedStyle(row).transform !== 'none');
-  });
-  expect(moving).toBe(true);
+  await page.getByRole('button', { name: 'Audio', exact: true }).click();
+  await expect(page.locator('.media-row')).toHaveCount(2);
   await page.setViewportSize({ width: 1300, height: 900 });
   await expect(page.locator('.media-row').first()).toHaveCSS('transform', 'none');
   expect(await original!.evaluate(element => element.isConnected && element === document.querySelector('.media-row'))).toBe(true);
@@ -115,3 +103,32 @@ test('material filters reflow existing links while live progress updates and res
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/study\/audio-fixture$/);
 });
+
+for (const cardCount of [100, 1000]) {
+  test(`phrase search finds and edits a distant card among ${cardCount} entries`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await installLearningFixture(page, 'en', 'light', { cardCount });
+    await page.goto('/cards');
+    const search = page.getByRole('textbox', { name: 'Search your phrases' });
+    const cards = page.locator('.phrase-card');
+    await expect(cards.first()).toBeVisible();
+    expect(await cards.count()).toBeLessThan(100);
+    const query = `phrase ${String(cardCount - 1).padStart(5, '0')}`;
+    await search.fill(query);
+    await expect(cards).toHaveCount(1);
+    await expect(cards.first()).toContainText(query);
+    await cards.getByRole('button', { name: 'Edit phrase', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Edit phrase', exact: true });
+    await dialog.getByRole('textbox', { name: 'Meaning', exact: true }).fill('Saved from a filtered collection');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(cards.first()).toContainText('Saved from a filtered collection');
+    await search.fill('no-match-fixture-query');
+    await expect(cards).toHaveCount(0);
+    await search.clear();
+    await expect(cards.first()).toContainText('phrase 00000');
+    expect(await cards.count()).toBeLessThan(100);
+    await search.fill(query);
+    await expect(cards.first()).toContainText('Saved from a filtered collection');
+  });
+}

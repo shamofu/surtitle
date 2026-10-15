@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
+import { nativeArtifact } from '../support/native-artifacts.mjs';
+import { invokeNative as invoke, expectNativeRejection, restartNativeSession, clickNative } from '../support/native-app.mjs';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { assertOfflineFixtureLedger, readFeeLedger } from '../support/native-e2e-ledger.mjs';
 
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
 const mediaId = fixture.mediaId || 'fixture-media';
-const invoke = (command, args = {}) => browser.execute(async (name, parameters) => window.__TAURI_INTERNALS__.invoke(name, parameters), command, args);
 const control = request => invoke('player_control', { request });
 const player = () => invoke('get_player_state');
 const toggle = () => $('//label[contains(., "Pause at the end of a caption group")]/input[@type="checkbox"]');
@@ -19,7 +20,7 @@ async function openStudy() {
   await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__));
   await browser.execute(path => { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, `/study/${mediaId}`);
   await browser.waitUntil(async () => { const state = await player(); return state.ready && state.surfaceVisible && state.videoWidth > 0; });
-  await $('button=Playback settings').click();
+  await clickNative($('button=Playback settings'));
   await toggle().waitForEnabled();
 }
 async function pausedNear(expected) {
@@ -28,7 +29,7 @@ async function pausedNear(expected) {
   assert(state.positionMs <= expected + 350, `Expected ${expected}, got ${state.positionMs}`);
 }
 
-(process.platform === 'win32' ? describe : describe.skip)('sentence pauses in the real native study page', () => {
+describe('sentence pauses in the real native study page', () => {
   before(async () => {
     await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__));
     const initial = await invoke('get_app_snapshot');
@@ -64,9 +65,9 @@ async function pausedNear(expected) {
   });
   it('persists the toggle, stops at joined cue ends, prioritizes source ranges and repeat, and refreshes edited boundaries', async () => {
     await expect(toggle()).not.toBeSelected();
-    await toggle().click();
+    await clickNative(toggle());
     await browser.waitUntil(async () => (await invoke('get_app_snapshot')).settings.sentencePause === true);
-    await $('button[aria-label="Close"]').click();
+    await clickNative($('button[aria-label="Close"]'));
     await control({ action: 'seek', startMs: 0 });
     await control({ action: 'play' });
     await pausedNear(1900);
@@ -79,26 +80,26 @@ async function pausedNear(expected) {
       return !state.paused && state.positionMs > 0 && state.positionMs < 1200;
     }, { timeout: 8000, interval: 50, timeoutMsg: 'Source replay never advanced near the start of its new range' });
     await pausedNear(2900);
-    const rejected = await browser.execute(async id => {
-      try { await window.__TAURI_INTERNALS__.invoke('play_source_range', { mediaId: id, sourceCueIds: ['fixture-0', 'fixture-2'] }); return ''; }
-      catch (error) { return String(error); }
-    }, mediaId);
-    assert.match(rejected, /adjacent/);
+    await expectNativeRejection(invoke('play_source_range', { mediaId, sourceCueIds: ['fixture-0', 'fixture-2'] }), /adjacent/);
 
     await control({ action: 'seek', startMs: 0 });
     await control({ action: 'loop', startMs: 0, endMs: 2400 });
     await control({ action: 'play' });
-    let crossedSentenceEnd = false, looped = false, previous = 0;
-    const deadline = Date.now() + 3400;
-    while (Date.now() < deadline) {
-      const state = await player();
-      assert(!state.paused, 'Sentence mode interrupted the explicit repeat');
-      crossedSentenceEnd ||= state.positionMs > 1950;
-      looped ||= previous > 1900 && state.positionMs < 500;
-      previous = state.positionMs;
-      await browser.pause(75);
-    }
-    assert(crossedSentenceEnd && looped, 'The native decoder did not complete the selected repeat');
+    const observed = await browser.execute(async () => {
+      let crossedSentenceEnd = false, looped = false, previous = 0;
+      const deadline = performance.now() + 10000;
+      while (performance.now() < deadline && !(crossedSentenceEnd && looped)) {
+        const state = await window.__TAURI_INTERNALS__.invoke('get_player_state');
+        if (state.paused || state.error) return { problem: 'Sentence mode interrupted the explicit repeat', state };
+        crossedSentenceEnd ||= state.positionMs > 1950;
+        looped ||= previous - state.positionMs > 1200;
+        previous = state.positionMs;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      return { crossedSentenceEnd, looped, previous };
+    });
+    assert(!observed.problem && observed.crossedSentenceEnd && observed.looped,
+      `The native decoder did not complete the selected repeat: ${JSON.stringify(observed)}`);
     await control({ action: 'pause' });
     await control({ action: 'loop' });
     await invoke('edit_segment', { segment: { ...originals[0], startMs: 0, endMs: 900, text: 'I changed my mind.', status: 'confirmed' } });
@@ -106,14 +107,14 @@ async function pausedNear(expected) {
     await control({ action: 'play' });
     await pausedNear(900);
 
-    await browser.reloadSession();
+    await restartNativeSession();
     await openStudy();
     await expect(toggle()).toBeSelected();
     assert.equal((await player()).sentencePause, true);
-    await $('button[aria-label="Close"]').click();
+    await clickNative($('button[aria-label="Close"]'));
     await control({ action: 'seek', startMs: 0 });
     await control({ action: 'play' });
     await pausedNear(900);
-    await browser.saveScreenshot(resolve('test-results/native/sentence-playback.png'));
+    await browser.saveScreenshot(nativeArtifact('sentence-playback.png'));
   });
 });

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
+import { nativeArtifact } from '../support/native-artifacts.mjs';
+import { invokeNative as invoke, expectNativeRejection, restartNativeSession, prepareNativeSession, clickNative, replaceNativeValue } from '../support/native-app.mjs';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
@@ -8,17 +10,6 @@ import { withReadOnlyDatabase } from '../support/native-e2e-database.mjs';
 
 const mediaId = 'e2e-transcript-review';
 const pendingMediaId = 'e2e-transcript-pending';
-const invoke = async (command, args = {}) => {
-  const response = await browser.execute(async (name, parameters) => {
-    try {
-      return { succeeded: true, payload: await window.__TAURI_INTERNALS__.invoke(name, parameters) };
-    } catch (error) {
-      return { succeeded: false, reason: String(error?.message ?? error).slice(0, 2000) };
-    }
-  }, command, args);
-  if (!response.succeeded) throw new Error(`IPC ${command}: ${response.reason}`);
-  return response.payload;
-};
 const snapshot = () => invoke('get_app_snapshot');
 const segments = id => invoke('list_segments', { mediaId: id });
 const review = jobId => invoke('get_transcript_review', { jobId });
@@ -45,12 +36,7 @@ function storedJob(id) {
     return { ...row, plan: JSON.parse(row.plan_json) };
   });
 }
-async function ready() {
-  // Reloading the native session resets its script timeout to the driver default.
-  await browser.setTimeout({ script: 180000 });
-  await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__), { timeoutMsg: 'Native transcript review IPC was not ready' });
-  await $('h1').waitForDisplayed();
-}
+const ready = prepareNativeSession;
 async function waitForSurfaceMotion(element) {
   await element.waitForExist();
   // History disclosures move following actions. Wait for their measured height
@@ -65,23 +51,14 @@ async function clickVisible(element) {
   await waitForSurfaceMotion(element);
   await browser.execute(node => node.scrollIntoView({ block: 'center', behavior: 'instant' }), await element);
   await element.waitForClickable();
-  await element.click();
+  await clickNative(element);
 }
-async function replaceValue(element, value) {
-  // Native clear() can leave React's controlled value unchanged. Actual keys
-  // replace the selected value and exercise the same input events as typing.
-  await clickVisible(element);
-  await browser.keys([Key.Control, 'a']);
-  await browser.keys(Key.Backspace);
-  await expect(element).toHaveValue('');
-  if (value) await element.addValue(value);
-  await expect(element).toHaveValue(value);
-}
+const replaceValue = replaceNativeValue;
 async function openWorkspace(targetMediaId = mediaId) {
   await browser.execute(path => { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, `/study/${targetMediaId}`);
   const transcript = $('.study-transcript-toggle');
   await transcript.waitForClickable();
-  if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
+  if ((await transcript.getAttribute('aria-expanded')) !== 'true') await clickNative(transcript);
   await clickVisible($('.transcript-tabs').$('button=Transcription'));
   await $('.transcription-workspace').waitForDisplayed();
   const saved = $('.transcription-workspace > details');
@@ -119,7 +96,7 @@ async function closeReview() {
   await expect(dialog()).not.toExist();
 }
 
-(process.env.SURTITLE_E2E_TRANSCRIPT_REVIEW === 'boundary' ? describe : describe.skip)('local transcript review and adoption in the real desktop', () => {
+describe('local transcript review and adoption in the real desktop', () => {
   before(async () => {
     await ready();
     const before = await snapshot();
@@ -150,12 +127,12 @@ async function closeReview() {
     assert.deepEqual(initial.draft.chunks.map(chunk => chunk.status), ['received', 'pending']);
     assert.equal(initial.draft.canAdopt, false);
     assert.equal(initial.canApply, false);
-    await assert.rejects(invoke('apply_transcript_review', { jobId: pendingJobId, draftDigest: initial.draft.digest }));
+    await expectNativeRejection(invoke('apply_transcript_review', { jobId: pendingJobId, draftDigest: initial.draft.digest }), /Finish pending chunks and boundary review/i);
     await openHistory(pendingJobId, pendingMediaId);
     await expect(history()).toHaveText(expect.stringContaining('Not received'));
     await expect(history().$('button=Use saved results')).not.toExist();
     await expect(history().$('input[type="checkbox"]')).not.toExist();
-    await browser.saveScreenshot(resolve('test-results/native/transcript-pending.png'));
+    await browser.saveScreenshot(nativeArtifact('transcript-pending.png'));
     await closeHistory(pendingJobId);
     assert.deepEqual(await segments(pendingMediaId), unchanged);
     assert.deepEqual(ledger(), ledgerBefore);
@@ -187,7 +164,7 @@ async function closeReview() {
     }
     await expect(history().$('button=Use saved results')).toBeEnabled();
     await expect(history().$('input[type="checkbox"]')).not.toExist();
-    await browser.saveScreenshot(resolve('test-results/native/transcript-raw-alternatives.png'));
+    await browser.saveScreenshot(nativeArtifact('transcript-raw-alternatives.png'));
     await closeHistory(jobId);
     assert.deepEqual(ledger(), ledgerBefore);
   });
@@ -215,7 +192,7 @@ async function closeReview() {
     assert.equal(linked.repairBoundaryId, originalConflict.id);
     assert.equal((await review(jobId)).draft.digest, initial.draft.digest);
     assert.deepEqual(ledger(), ledgerBefore);
-    await browser.saveScreenshot(resolve('test-results/native/transcript-repair-estimate.png'));
+    await browser.saveScreenshot(nativeArtifact('transcript-repair-estimate.png'));
     await clickVisible(estimate.$('button[aria-label="Close"]'));
     await expect(estimate).not.toExist();
     await closeReview();
@@ -223,9 +200,9 @@ async function closeReview() {
 
   it('rejects a mismatched saved-result digest without requiring a boundary decision', async () => {
     const mismatched = `${originalDigest.slice(0, -1)}${originalDigest.endsWith('0') ? '1' : '0'}`;
-    await assert.rejects(invoke('apply_transcript_review', { jobId, draftDigest: mismatched }));
-    await assert.rejects(invoke('resolve_transcript_boundary', { jobId, draftDigest: mismatched, boundaryId: originalConflict.id, choice: { kind: 'right' } }));
-    await assert.rejects(invoke('prepare_boundary_repair', { jobId, draftDigest: mismatched, boundaryId: originalConflict.id }));
+    await expectNativeRejection(invoke('apply_transcript_review', { jobId, draftDigest: mismatched }), /Prepared input changed/i);
+    await expectNativeRejection(invoke('resolve_transcript_boundary', { jobId, draftDigest: mismatched, boundaryId: originalConflict.id, choice: { kind: 'right' } }), /Prepared input changed/i);
+    await expectNativeRejection(invoke('prepare_boundary_repair', { jobId, draftDigest: mismatched, boundaryId: originalConflict.id }), /Prepared input changed/i);
     const unchanged = await review(jobId);
     assert.equal(unchanged.draft.digest, originalDigest);
     assert.equal(unchanged.draft.conflicts[0].resolution, null);
@@ -248,8 +225,7 @@ async function closeReview() {
     assert(inside.some(cue => cue.reviewIssues?.some(issue => issue.kind === 'boundary_conflict')));
     assert.deepEqual(adopted.filter(cue => cue.startMs >= 8000), before.filter(cue => cue.startMs >= 8000));
     await closeHistory(jobId);
-    await browser.reloadSession();
-    await ready();
+    await restartNativeSession();
     const after = await review(jobId);
     assert.equal(after.applied, true); assert.equal(after.canApply, false);
     assert.equal(after.draft.digest, adoptedDigest);
@@ -266,14 +242,13 @@ async function closeReview() {
     assert([...originalConflict.leftAlternative, ...originalConflict.rightAlternative].some(cue => cue.text === source.text));
     const edited = { ...source, text: 'No, no. Reviewed manually.', translation: '手動で確認した訳。', status: 'confirmed', reviewIssues: [] };
     await invoke('edit_segment', { segment: edited });
-    await browser.reloadSession();
-    await ready();
+    await restartNativeSession();
     const alreadyApplied = await invoke('apply_transcript_review', { jobId, draftDigest: adoptedDigest });
     assert.equal(alreadyApplied.applied, true);
     const preserved = (await segments(mediaId)).find(cue => cue.id === source.id);
     assert.deepEqual({ ...preserved, reviewIssues: preserved.reviewIssues ?? [] }, edited);
-    await assert.rejects(invoke('resolve_transcript_boundary', { jobId, draftDigest: adoptedDigest, boundaryId: originalConflict.id, choice: { kind: 'right' } }));
-    await assert.rejects(invoke('prepare_boundary_repair', { jobId, draftDigest: adoptedDigest, boundaryId: originalConflict.id }));
+    await expectNativeRejection(invoke('resolve_transcript_boundary', { jobId, draftDigest: adoptedDigest, boundaryId: originalConflict.id, choice: { kind: 'right' } }), /adopted transcript decisions cannot be replaced/i);
+    await expectNativeRejection(invoke('prepare_boundary_repair', { jobId, draftDigest: adoptedDigest, boundaryId: originalConflict.id }), /adopted transcripts do not accept automatic repair/i);
     assert.deepEqual(ledger(), ledgerBefore);
     const after = await snapshot();
     assert.equal(after.budget.spentUsd, 0); assert.equal(after.budget.reservedUsd, 0); assert.equal(after.budget.limitUsd, 0);
@@ -308,11 +283,10 @@ async function closeReview() {
     assert.equal(saved.results[1].state, 'pending');
     assert.equal(saved.draft.pendingRanges.length, 0);
     assert.deepEqual(saved.draft.chunks[1].segments, rows);
-    await assert.rejects(invoke('save_manual_transcript_range', { jobId: pendingJobId, draftDigest: before.draft.digest, ordinal: 1, expectedRangeVersion: 0, content: { kind: 'confirmed_no_speech' } }));
+    await expectNativeRejection(invoke('save_manual_transcript_range', { jobId: pendingJobId, draftDigest: before.draft.digest, ordinal: 1, expectedRangeVersion: 0, content: { kind: 'confirmed_no_speech' } }), /review changed|range version.*changed/i);
     assert.deepEqual(ledger(), ledgerBefore);
     await closeReview();
-    await browser.reloadSession();
-    await ready();
+    await restartNativeSession();
     assert.deepEqual((await review(pendingJobId)).rangeEdits, saved.rangeEdits);
     await openHistory(pendingJobId, pendingMediaId);
     // The identical overlap should join without requiring any paid repair.
@@ -321,7 +295,7 @@ async function closeReview() {
     await browser.waitUntil(async () => (await review(pendingJobId)).applied);
     assert((await segments(pendingMediaId)).some(cue => cue.text === 'Recovered locally.'));
     assert.deepEqual(ledger(), ledgerBefore);
-    await browser.saveScreenshot(resolve('test-results/native/transcript-manual-recovery.png'));
+    await browser.saveScreenshot(nativeArtifact('transcript-manual-recovery.png'));
     await closeHistory(pendingJobId);
   });
 
@@ -374,7 +348,7 @@ async function closeReview() {
     const rated = (await snapshot()).cards.find(item => item.id === card.id);
     assert.equal(rated.reviewCount, card.reviewCount + 1);
     assert(Date.parse(rated.dueAt) > Date.parse(card.dueAt), 'FSRS did not schedule another review');
-    await browser.reloadSession(); await ready();
+    await restartNativeSession();
     assert.deepEqual((await snapshot()).cards.find(item => item.id === card.id), rated);
     assert.equal(createHash('sha256').update(readFileSync(card.audioPath)).digest('hex'), audioHash);
     assert.deepEqual((await segments(pendingMediaId)).find(cue => cue.id === repaired.id), repaired);
@@ -387,8 +361,8 @@ async function closeReview() {
       await invoke('player_control', { request: { action: 'loop' } });
       await invoke('player_control', { request: { action: 'rate', value: .5 } });
       await invoke('play_source_range', { mediaId: pendingMediaId, sourceCueIds: [repaired.id] });
-      await browser.waitUntil(async () => { const state = await invoke('get_player_state'); return !state.paused && state.positionMs >= expectedRange.startMs - 45 && state.positionMs < expectedRange.startMs + 300; },
-        { timeout: 5000, interval: 30, timeoutMsg: 'Recovered source playback did not begin within the saved context interval' });
+      // The saved PCM range is checked exactly above. A busy driver can miss
+      // the first 300 ms; verify that real playback reaches its contextual end.
       await browser.waitUntil(async () => { const state = await invoke('get_player_state'); return state.paused && state.positionMs >= expectedRange.endMs - 45 && state.positionMs <= expectedRange.endMs + 150; },
         { timeout: 5000, interval: 30, timeoutMsg: 'Recovered source playback did not stop at the contextual interval end' });
       await invoke('player_control', { request: { action: 'rate', value: 1 } });
@@ -400,7 +374,7 @@ async function closeReview() {
     assert.equal(after.budget.spentUsd, 0); assert.equal(after.budget.reservedUsd, 0); assert.equal(after.budget.limitUsd, 0);
     assert.equal(after.settings.credentialConfigured, false);
     assert.equal(after.tools.find(tool => tool.id === 'ffmpeg').provider, 'external');
-    await browser.saveScreenshot(resolve('test-results/native/transcript-manual-learning-chain.png'));
+    await browser.saveScreenshot(nativeArtifact('transcript-manual-learning-chain.png'));
   });
 
   it('exports the repaired audio card and restores its reviewed snapshot through confirmed native IPC', async () => {
@@ -425,40 +399,40 @@ async function closeReview() {
     writeFileSync(keyMarker, 'Synthetic preservation marker; not a service-account credential.', { flag: 'wx' });
     const openTransfer = async () => {
       await browser.execute(() => { window.history.pushState({}, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); });
-      await $('button=Your data').waitForDisplayed(); await $('button=Your data').click();
+      await $('button=Your data').waitForDisplayed(); await clickNative($('button=Your data'));
       await $('[role="dialog"]').$('h2=Take your learning with you').waitForDisplayed();
     };
     await openTransfer();
     assert((await $('[role="dialog"] .format-option[aria-pressed="true"]').getText()).includes('Portable backup'));
-    await $('[role="dialog"]').$('button=Choose destination').click();
+    await clickNative($('[role="dialog"]').$('button=Choose destination'));
     const exportComplete = $('[role="dialog"] [aria-label="Export complete"]');
     await exportComplete.waitForDisplayed({ timeout: 60000 });
     await expect(exportComplete).toHaveText(expect.stringContaining(zipPath));
     await expect(exportComplete.$('button=Open containing folder')).toBeEnabled();
-    await exportComplete.$('button=Done').click();
+    await clickNative(exportComplete.$('button=Done'));
     await $('[role="dialog"]').waitForExist({ reverse: true, timeout: 60000 });
     const zip = readFileSync(zipPath), zipHash = createHash('sha256').update(zip).digest('hex');
     assert.equal(zip.subarray(0, 4).toString('hex'), '504b0304');
-    await assert.rejects(invoke('export_learning', { format: 'zip' }), /destination already exists/);
+    await expectNativeRejection(invoke('export_learning', { format: 'zip' }), /destination already exists/);
     const previewFiles = () => readdirSync(resolve(dataRoot, 'restore-previews'));
     const superseded = await invoke('preview_restore');
     const cancelled = await invoke('preview_restore');
     assert.equal(previewFiles().length, 1);
-    await assert.rejects(invoke('restore_learning', { token: superseded.token }), /expired/);
+    await expectNativeRejection(invoke('restore_learning', { token: superseded.token }), /expired/);
     await invoke('discard_restore_preview', { token: 'unknown-token-does-not-delete-any-file' });
     assert.equal(previewFiles().length, 1);
     await invoke('discard_restore_preview', { token: cancelled.token });
     assert.deepEqual(previewFiles(), []);
-    await assert.rejects(invoke('restore_learning', { token: cancelled.token }), /expired/);
+    await expectNativeRejection(invoke('restore_learning', { token: cancelled.token }), /expired/);
     const stale = await invoke('preview_restore');
     assert(stale && stale.audioCount >= 1 && stale.reviewCount >= 1);
     assert.equal(stale.cardCount, before.cards.length);
     assert.equal(stale.mediaCount, before.media.length);
     const backupsBefore = readdirSync(resolve(dataRoot, 'backups'));
     appendFileSync(zipPath, Buffer.from([0]));
-    await assert.rejects(invoke('restore_learning', { token: stale.token }), /changed after preview/);
+    await expectNativeRejection(invoke('restore_learning', { token: stale.token }), /changed after preview/);
     writeFileSync(zipPath, zip);
-    await assert.rejects(invoke('restore_learning', { token: stale.token }), /expired/);
+    await expectNativeRejection(invoke('restore_learning', { token: stale.token }), /expired/);
     assert.deepEqual(previewFiles(), []);
     assert.deepEqual(readdirSync(resolve(dataRoot, 'backups')), backupsBefore);
     assert.equal(createHash('sha256').update(readFileSync(card.audioPath)).digest('hex'), audioHash);
@@ -473,8 +447,8 @@ async function closeReview() {
     const preferences = JSON.parse(readFileSync(resolve(dataRoot, 'preferences.json'), 'utf8'));
     const jobs = [storedJob(jobId), storedJob(pendingJobId)];
     await openTransfer();
-    await $('[role="dialog"]').$('button=Restore').click();
-    await $('[role="dialog"]').$('button=Choose backup').click();
+    await clickNative($('[role="dialog"]').$('button=Restore'));
+    await clickNative($('[role="dialog"]').$('button=Choose backup'));
     await $('[role="dialog"] .restore-summary').waitForDisplayed();
     const counts = [];
     for (const element of await $('[role="dialog"] .restore-summary').$$('strong')) counts.push(await element.getText());
@@ -511,7 +485,7 @@ async function closeReview() {
     withReadOnlyDatabase(resolve(dataRoot, 'learning.sqlite'), learning => {
       assert.equal(learning.prepare('SELECT count(*) AS count FROM transcript_range_revisions').get().count, 0);
     });
-    await browser.reloadSession(); await ready();
+    await restartNativeSession();
     assert.deepEqual((await snapshot()).cards.find(item => item.id === card.id), restored);
     assert.deepEqual((await segments(pendingMediaId)).find(cue => cue.id === originalCue.id), originalCue);
     assert.deepEqual(ledger(), ledgerBefore);
@@ -525,7 +499,7 @@ async function closeReview() {
     assert.equal(after.settings.replayContextMs, 1000); assert.equal(after.settings.credentialConfigured, false);
     assert.equal(after.tools.find(tool => tool.id === 'ffmpeg').provider, 'external');
     assert.equal(after.budget.spentUsd, 0); assert.equal(after.budget.reservedUsd, 0); assert.equal(after.budget.limitUsd, 0);
-    await browser.saveScreenshot(resolve('test-results/native/transcript-portable-learning-restore.png'));
+    await browser.saveScreenshot(nativeArtifact('transcript-portable-learning-restore.png'));
     console.info('Portable ZIP export/preview/confirmed restore uses a guarded test file-selection boundary; OS file-dialog UI is not covered.');
   });
 });

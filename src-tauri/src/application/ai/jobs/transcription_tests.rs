@@ -331,11 +331,12 @@ fn attempts(root: &Path, job: &str) -> Vec<(String, u32, String, Option<i64>)> {
         .collect::<rusqlite::Result<Vec<_>>>().unwrap()
 }
 
-async fn waiting(fixture: &Fixture) -> RetryStatus {
+async fn waiting(fixture: &Fixture, retry_number: u32) -> RetryStatus {
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             if let Some(retry) = fixture.state.ai.retry_status(&fixture.quote.id).unwrap()
                 && retry.state == "waiting"
+                && retry.retry_number == retry_number
             {
                 return retry;
             }
@@ -344,6 +345,35 @@ async fn waiting(fixture: &Fixture) -> RetryStatus {
     })
     .await
     .expect("worker should enter HTTP429 wait")
+}
+
+fn advance_to_retry(fixture: &Fixture, retry: &RetryStatus) {
+    let next = chrono::DateTime::parse_from_rfc3339(retry.next_retry_at.as_ref().unwrap())
+        .unwrap()
+        .timestamp_millis();
+    assert!(next > fixture.state.ai.now_ms());
+    fixture.state.ai.set_test_time(next);
+}
+
+async fn advance_to_pacing(state: &AppState, job_id: &str, ordinal: u32) {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            if let Some(pacing) = state.ai.pacing_status(job_id).unwrap()
+                && pacing.ordinal == ordinal
+            {
+                let next =
+                    chrono::DateTime::parse_from_rfc3339(pacing.next_send_at.as_ref().unwrap())
+                        .unwrap()
+                        .timestamp_millis();
+                assert!(next > state.ai.now_ms());
+                state.ai.set_test_time(next);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("resumed request should retain its dispatch deadline");
 }
 
 async fn observed_cooldown(fixture: &Fixture, mut checkpoint: Checkpoint) {
@@ -574,6 +604,7 @@ async fn pacing_rechecks_budget_and_source_before_the_next_reservation() {
 #[tokio::test]
 async fn http429_retries_only_failed_section_and_preserves_progressive_manual_edits() {
     let fixture = Fixture::new().await;
+    fixture.state.ai.set_test_time(fixture.state.ai.now_ms());
     assert_eq!(fixture.quote.retry_policy.as_ref().unwrap().version, 1);
     assert_eq!(
         fixture.quote.maximum_request_count,
@@ -593,7 +624,7 @@ async fn http429_retries_only_failed_section_and_preserves_progressive_manual_ed
     );
     let service = fixture.service(Scenario::TranscriptionSecond429ThenSuccess);
     let worker = fixture.start(fixture.approve_retries(false), service.clone());
-    let retry = waiting(&fixture).await;
+    let retry = waiting(&fixture, 1).await;
     assert_eq!(
         (retry.ordinal, retry.retry_number, retry.max_retries),
         (1, 1, 2)
@@ -626,6 +657,14 @@ async fn http429_retries_only_failed_section_and_preserves_progressive_manual_ed
     corrected.text = "Kept while waiting for HTTP 429.".into();
     corrected.status = "confirmed".into();
     crate::application::subtitles::edit_segment(fixture.state.clone(), corrected.clone()).unwrap();
+    assert!(fixture.state.ai.summary().unwrap().daily_held_microusd > 0);
+    let retained_spend = fixture
+        .state
+        .ai
+        .quote(&fixture.quote.id)
+        .unwrap()
+        .already_charged_or_held_microusd;
+    advance_to_retry(&fixture, &retry);
     tokio::time::timeout(Duration::from_secs(40), worker)
         .await
         .unwrap()
@@ -647,7 +686,17 @@ async fn http429_retries_only_failed_section_and_preserves_progressive_manual_ed
         .unwrap(),
         serde_json::to_value(&corrected).unwrap()
     );
-    assert!(fixture.state.ai.summary().unwrap().daily_held_microusd > 0);
+    // The retained hold plus the new successful charge belongs to this job,
+    // even if its retry deadline crosses a UTC day boundary.
+    assert!(
+        fixture
+            .state
+            .ai
+            .quote(&fixture.quote.id)
+            .unwrap()
+            .already_charged_or_held_microusd
+            > retained_spend
+    );
     assert!(
         fixture
             .state
@@ -662,8 +711,16 @@ async fn http429_retries_only_failed_section_and_preserves_progressive_manual_ed
 #[tokio::test]
 async fn http429_exhaustion_stops_after_three_sends_and_retains_accounting() {
     let fixture = Fixture::new().await;
+    fixture.state.ai.set_test_time(fixture.state.ai.now_ms());
     let service = fixture.service(Scenario::Transcription429Exhausted);
     let worker = fixture.start(fixture.approve_retries(false), service.clone());
+    // Exercise both persisted retry deadlines without waiting for the real
+    // 20/40-second backoffs. The same dispatch gate and worker still run.
+    for retry_number in 1..=2 {
+        let retry = waiting(&fixture, retry_number).await;
+        assert_eq!(service.sent_ordinals(), vec![0; retry_number as usize]);
+        advance_to_retry(&fixture, &retry);
+    }
     let error = tokio::time::timeout(Duration::from_secs(90), worker)
         .await
         .unwrap()
@@ -723,6 +780,7 @@ async fn http429_retry_after_over_five_minutes_stops_and_reports_resume_time() {
 async fn http429_pause_cancel_and_reapproval_stop_the_waiting_worker_without_resend() {
     for cancel in [false, true] {
         let fixture = Fixture::new().await;
+        fixture.state.ai.set_test_time(fixture.state.ai.now_ms());
         // Reapproval includes a fresh worst-case scope plus the retained 429
         // hold. Give this lifecycle test room for both independent approvals.
         fixture
@@ -736,20 +794,30 @@ async fn http429_pause_cancel_and_reapproval_stop_the_waiting_worker_without_res
             .unwrap();
         let service = fixture.service(Scenario::Transcription429ThenSuccess);
         let worker = fixture.start(fixture.approve_retries(false), service.clone());
-        waiting(&fixture).await;
-        if cancel {
+        waiting(&fixture, 1).await;
+        let reapproved = if cancel {
             cancel_ai_job(fixture.state.clone(), fixture.quote.id.clone()).unwrap();
+            None
         } else {
             pause_ai_job(fixture.state.clone(), fixture.quote.id.clone()).unwrap();
-            let approved = fixture.approve_retries(true);
-            let resumed = fixture.service(Scenario::Transcription);
-            finished(fixture.start(approved, resumed.clone()))
-                .await
-                .unwrap();
-            assert_eq!(resumed.sent_ordinals(), [0, 1]);
-        }
+            Some(fixture.approve_retries(true))
+        };
+        let resumed = reapproved.map(|approved| {
+            let service = fixture.service(Scenario::Transcription);
+            let worker = fixture.start(approved, service.clone());
+            (service, worker)
+        });
+        // The old approval must stop while its deadline is still in the future.
         finished(worker).await.unwrap();
         assert_eq!(service.sent_ordinals(), [0]);
+        if let Some((resumed, worker)) = resumed {
+            assert!(resumed.sent_ordinals().is_empty());
+            for ordinal in 0..=1 {
+                advance_to_pacing(&fixture.state, &fixture.quote.id, ordinal).await;
+            }
+            finished(worker).await.unwrap();
+            assert_eq!(resumed.sent_ordinals(), [0, 1]);
+        }
         assert!(
             fixture
                 .state
@@ -879,9 +947,11 @@ async fn legacy_approval_keeps_http429_unknown_without_automatic_retry() {
 #[tokio::test]
 async fn restart_during_http429_wait_requires_reapproval_and_resumes_only_remaining_section() {
     let fixture = Fixture::new().await;
+    let at = fixture.state.ai.now_ms();
+    fixture.state.ai.set_test_time(at);
     let service = fixture.service(Scenario::TranscriptionSecond429ThenSuccess);
     let worker = fixture.start(fixture.approve_retries(false), service.clone());
-    waiting(&fixture).await;
+    waiting(&fixture, 1).await;
     let before = attempts(fixture.directory.path(), &fixture.quote.id);
     assert_eq!(service.sent_ordinals(), [0, 1]);
     // Simulate process shutdown, including releasing the data-directory lock.
@@ -896,6 +966,7 @@ async fn restart_during_http429_wait_requires_reapproval_and_resumes_only_remain
     } = fixture;
     drop(state);
     let reopened = Services::open(directory.path().to_path_buf()).unwrap();
+    reopened.ai.set_test_time(at);
     assert_eq!(reopened.ai.quote(&quote.id).unwrap().state, "needs_review");
     assert_eq!(attempts(directory.path(), &quote.id), before);
     let quote = super::super::quotes::review_ai_job(reopened.clone(), quote.id).unwrap();
@@ -915,11 +986,13 @@ async fn restart_during_http429_wait_requires_reapproval_and_resumes_only_remain
         OfflineVertexService::new(reopened.ai.clone(), &quote.id, Scenario::Transcription).unwrap(),
     );
     let executor = service.clone();
-    run_approved_with(reopened.clone(), quote.id.clone(), approved, move |_| {
-        Ok(executor)
-    })
-    .await
-    .unwrap();
+    let state = reopened.clone();
+    let job_id = quote.id.clone();
+    let worker = tokio::spawn(async move {
+        run_approved_with(state, job_id, approved, move |_| Ok(executor)).await
+    });
+    advance_to_pacing(&reopened, &quote.id, 1).await;
+    finished(worker).await.unwrap();
     assert_eq!(service.sent_ordinals(), [1]);
     assert_eq!(reopened.ai.quote(&quote.id).unwrap().state, "completed");
 }

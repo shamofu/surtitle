@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Explicit local integration fixture, independent of saved provider outputs.
+//! Required native CI checks real Silero speech and an authored interior pause.
 //! No speech recordings are embedded or downloaded by this test.
 use super::*;
 use crate::{
@@ -8,35 +8,19 @@ use crate::{
 };
 use std::ffi::OsString;
 
-const INPUTS: [(&str, &str); 6] = [
+const INPUTS: [(&str, &str); 2] = [
     (
-        "1089-134686-0001-pcm16.wav",
-        "c65ee5ee7bd8acab3ac6b97a29100187f397cccc4d1b00ae4ec31f39f3f7d3ab",
+        "1089-134686-0001.wav",
+        "6b0b24796a1017a65007d392b9f8d6e64e030cdafbf82d8ffa4235fe4b371443",
     ),
     (
-        "1089-134686-0003-pcm16.wav",
-        "6786f692cd28a02b4c26d5bb5683b778fb2c6ae09bb6243355f1bc30e66eb5e3",
-    ),
-    (
-        "1089-134686-0001.TextGrid",
-        "7af2a45d42e7ca8fcad6310fd2e2089adf883cf346873c138c1a0815ea1aa0e6",
-    ),
-    (
-        "1089-134686-0003.TextGrid",
-        "7b10f440fa9b2d662e0b3bf3bd330a4181eea3c57ef3a93d03041cb18cced9f3",
-    ),
-    (
-        "1089-134686-0001.txt",
-        "0a82f678afe953b8ac316479bbe3548169e249817dfc236153c5aad966da92b3",
-    ),
-    (
-        "1089-134686-0003.txt",
-        "47ad56a9f71a9af9df360a3825070def4355bc4bf65defe6a180237f1d90677e",
+        "1089-134686-0003.wav",
+        "2db232f2d626af81adb8b224bdcc72d71ed94e9f7180194a6279e532a08c9115",
     ),
 ];
 
 #[test]
-#[ignore = "requires explicit SURTITLE_SPOKEN_FIXTURES, SURTITLE_TEST_FFMPEG and existing pinned native assets; no network"]
+#[ignore = "run by required Windows native CI; requires SURTITLE_SPOKEN_FIXTURES, SURTITLE_TEST_FFMPEG and pinned native assets; no network"]
 fn real_spoken_audio_and_interior_pause_require_only_local_warning_review() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -78,12 +62,7 @@ fn real_spoken_audio_and_interior_pause_require_only_local_warning_review() {
     assert_eq!((pause_start_sample, pause_end_sample), (68_400, 132_400));
     assert_eq!(selected_end_sample, 175_280);
 
-    let root = repo.join("work/vad-spoken-pause-acceptance");
-    std::fs::create_dir_all(&root).unwrap();
-    let directory = tempfile::Builder::new()
-        .prefix("spoken-pause-")
-        .tempdir_in(root)
-        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("constructed-spoken-pause.wav");
     std::fs::write(&source, wav16(&source_pcm)).unwrap();
     let assets = VadAssets {
@@ -139,16 +118,13 @@ fn real_spoken_audio_and_interior_pause_require_only_local_warning_review() {
     assert_eq!(evidence.model_sha256, assets.model_sha256);
     assert!(evidence.runtime_sha256.is_empty());
 
-    // Independently saved upstream MFA word spans: 0.330–2.800 s and
-    // 0.430–2.460 s, rebased only by the exact composition sample offsets.
-    // They are automatic reference anchors, not human timing ground truth.
-    let first_text = std::str::from_utf8(&fixtures[4]).unwrap().trim();
-    let second_text = std::str::from_utf8(&fixtures[5]).unwrap().trim();
+    // Authored cues occupy the two speech spans and the constructed silence.
+    // Their text/times test warning plumbing, not recognition or alignment quality.
     let raw = vec![
         GeneratedCue {
             start_ms: 1330,
             end_ms: 3800,
-            text: first_text.into(),
+            text: "First authored speech cue.".into(),
             ..Default::default()
         },
         GeneratedCue {
@@ -160,7 +136,7 @@ fn real_spoken_audio_and_interior_pause_require_only_local_warning_review() {
         GeneratedCue {
             start_ms: 8705,
             end_ms: 10735,
-            text: second_text.into(),
+            text: "Second authored speech cue.".into(),
             ..Default::default()
         },
     ];
@@ -172,10 +148,6 @@ fn real_spoken_audio_and_interior_pause_require_only_local_warning_review() {
         }],
     )
     .unwrap();
-    eprintln!(
-        "Strict VAD evidence: {}",
-        serde_json::to_string(evidence).unwrap()
-    );
     assert_eq!(draft.warnings.len(), 1);
     assert_eq!(draft.warnings[0].kind, "speech_in_vad_pause_range");
     assert!(draft.warnings[0].start_ms <= 5500 && draft.warnings[0].end_ms >= 6500);
@@ -244,7 +216,8 @@ fn real_spoken_audio_and_interior_pause_require_only_local_warning_review() {
     child.finish().unwrap();
     let selected_pcm = &source_pcm[32_000..selected_end_sample as usize * 2];
     assert_eq!(
-        decoded, selected_pcm,
+        sha256_bytes(&decoded),
+        sha256_bytes(selected_pcm),
         "Preparation must retain every selected PCM sample"
     );
     for ((file, expected), bytes) in INPUTS.iter().zip(&fixtures) {
@@ -258,33 +231,6 @@ fn real_spoken_audio_and_interior_pause_require_only_local_warning_review() {
     let saved: AudioPreparationReceipt = serde_json::from_slice(&receipt_bytes).unwrap();
     assert_eq!(saved.vad_pause_evidence, receipt.vad_pause_evidence);
     assert_eq!(saved.source_sha256, hash_file(&source).unwrap());
-    let report = serde_json::json!({
-        "schemaVersion": 1, "reportKind": "local-spoken-interior-pause-integration", "passed": true,
-        "sourceProvenance": {"dataset":"LibriSpeech via MontrealCorpusTools/aligned-librispeech", "commit":"5143690d1a6ebcd37b7f4d1b0f9fa8c83944aba5", "license":"CC-BY-4.0", "privateEvaluationCopy":true,
-            "inputs": INPUTS.iter().map(|(file, sha256)| serde_json::json!({"file":file,"sha256":sha256})).collect::<Vec<_>>()},
-        "referenceProvenance": {"timing":"independent upstream automatic MFA word intervals; not human ground truth", "responseKind":"authored local fixture; no provider response", "inventedCueIndex":1},
-        "composition": {"leadingSamples":16000,"firstSpeechSamples":52400,"insertedPauseSamples":64000,"secondSpeechSamples":42880,"trailingSamples":16000,
-            "pauseStartSample":pause_start_sample,"pauseEndSample":pause_end_sample,"selectedStartSample":16000,"selectedEndSample":selected_end_sample},
-        "sourceSha256":receipt.source_sha256, "selectedPcmSha256":sha256_bytes(selected_pcm), "preparedPcmSha256":sha256_bytes(&decoded),
-        "receiptSha256":sha256_bytes(&receipt_bytes), "receiptPath":receipt.directory.join("receipt.json"),
-        "vadPauseEvidence":evidence,"warnings":draft.warnings,"rawResponse":raw,"draft":draft,"reviewedDigest":reviewed.digest,
-        "ffmpeg":ffmpeg,"localPreparationCalls":1,"additionalInferenceCalls":0,"pcmPreserved":true,"sourceInputsUnchanged":true,
-        "networkRequests":0,"ledgerChanges":0,"adoptions":0,"modelQualified":false,
-        "limitations":["Two clean English utterances and constructed digital silence, not representative noisy/conversational audio.","This checks local warning plumbing and sample preservation; it does not evaluate cloud recognition or improve retained corpus scores."]
-    });
-    let report_path = directory.path().join("report.json");
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&report_path)
-        .unwrap()
-        .write_all(&serde_json::to_vec_pretty(&report).unwrap())
-        .unwrap();
-    let retained = directory.keep();
-    eprintln!(
-        "Retained spoken-pause evidence: {}",
-        retained.join("report.json").display()
-    );
 }
 
 fn pcm16(wav: &[u8]) -> &[u8] {

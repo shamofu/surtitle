@@ -957,7 +957,7 @@ mod subtitle_tests {
     }
     #[cfg(all(windows, feature = "e2e-test"))]
     #[test]
-    #[ignore = "explicit Windows libmpv regression; set SURTITLE_TEST_FFMPEG; requires prepared native DLLs"]
+    #[ignore = "run by required Windows native CI; requires SURTITLE_TEST_FFMPEG and prepared native DLLs"]
     fn real_mpv_load_restores_position_and_maps_audio_stream() {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
         fn pump_messages() {

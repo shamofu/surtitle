@@ -4,18 +4,17 @@ import { installLearningFixture } from './learning-fixture';
 
 for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'] as const) {
   for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 700 }, { width: 800, height: 900 }]) {
-    test(`learning layout ${locale} ${theme} ${size.width}x${size.height}`, async ({ page }, testInfo) => {
+    test(`learning layout ${locale} ${theme} ${size.width}x${size.height}`, async ({ page }) => {
       await page.setViewportSize(size);
       await installLearningFixture(page, locale, theme);
-      const capture = async (name: string) => {
+      const assertLayout = async () => {
         await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
         await expect(page.getByText('Unimplemented visual-test command:', { exact: false })).toHaveCount(0);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-        await page.screenshot({ path: testInfo.outputPath(`${name}.png`), animations: 'disabled', fullPage: true });
       };
       await page.goto('/');
       await expect(page.getByRole('heading', { name: locale === 'ja' ? 'ライブラリ' : 'Library', exact: true })).toBeVisible();
-      await capture('library');
+      await assertLayout();
       await page.goto('/study/visual-fixture');
       await expect(page.getByRole('heading', { name: 'A walk along the coast' })).toBeVisible();
       await expect(page.locator('.current-caption-text')).toHaveText('Sometimes the best way to find your way is to take a little detour.');
@@ -38,7 +37,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       const viewport = await page.getByTestId('native-player-viewport').boundingBox();
       expect(viewport).not.toBeNull();
       expect(viewport!.y + viewport!.height).toBeLessThan(size.height);
-      await capture('study');
+      await assertLayout();
       const settingsTrigger = page.getByRole('button', { name: locale === 'ja' ? '再生設定' : 'Playback settings', exact: true });
       await settingsTrigger.click();
       await expect(page.getByRole('dialog')).toBeVisible();
@@ -55,19 +54,19 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       const rows = page.locator('.transcript-row');
       expect(await rows.count()).toBeGreaterThan(0);
       expect(await rows.count()).toBeLessThan(50);
-      await capture('transcript');
+      await assertLayout();
       await page.getByRole('button', { name: locale === 'ja' ? '意味を調べる' : 'Explore meaning', exact: true }).click();
       await expect(page.getByRole('button', { name: locale === 'ja' ? '元の位置から再生を再開' : 'Resume from original position', exact: true })).toBeVisible();
       if (size.width < 1000) {
         await page.getByRole('button', { name: locale === 'ja' ? '元の位置から再生を再開' : 'Resume from original position', exact: true }).scrollIntoViewIfNeeded();
         await expect(page.getByRole('button', { name: locale === 'ja' ? '元の位置から再生を再開' : 'Resume from original position', exact: true })).toBeInViewport();
       }
-      await capture('phrase');
+      await assertLayout();
       await expect(page.locator('.context-meaning')).toBeVisible();
       await page.locator('.phrase-save-toggle').click();
       await expect(page.getByLabel(locale === 'ja' ? '語彙・フレーズ' : 'Word or phrase', { exact: true })).toBeVisible();
       await page.locator('.save-phrase-form').scrollIntoViewIfNeeded();
-      await capture('phrase-save');
+      await assertLayout();
       await page.locator('.save-phrase-form').getByRole('button', { name: locale === 'ja' ? 'あとで続ける' : 'Continue later', exact: true }).click();
       await page.getByRole('button', { name: locale === 'ja' ? '元の位置から再生を再開' : 'Resume from original position', exact: true }).click();
       await expect(page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript')).toBeVisible();
@@ -77,14 +76,14 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await expect(transcript).toHaveAttribute('aria-expanded', 'false');
       await expect(transcript).toBeFocused();
       await expectTabBesideVideo();
-      for (const [path, heading, name] of [
-        ['/cards', locale === 'ja' ? 'フレーズ帳' : 'Phrases', 'phrases'],
-        ['/review', locale === 'ja' ? '復習' : 'Review', 'review'],
-        ['/settings', locale === 'ja' ? '設定' : 'Settings', 'settings'],
+      for (const [path, heading] of [
+        ['/cards', locale === 'ja' ? 'フレーズ帳' : 'Phrases'],
+        ['/review', locale === 'ja' ? '復習' : 'Review'],
+        ['/settings', locale === 'ja' ? '設定' : 'Settings'],
       ]) {
         await page.goto(path);
         await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
-        await capture(name);
+        await assertLayout();
       }
     });
   }

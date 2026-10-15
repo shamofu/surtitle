@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertContainer, readDefinition, maskedDirectories, runtimeUserForHost, workspace } from './isolation.mjs';
+import { assertContainer, readDefinition, maskedDirectories, runtimeUserForHost, verificationCommand, workspace } from './isolation.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const config = readDefinition(root);
@@ -18,7 +18,7 @@ function log(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
 }
 function docker(arguments_, { capture = false, allowFailure = false } = {}) {
-  const result = spawnSync(viaWsl ? 'wsl' : 'docker', viaWsl ? ['-d', 'Ubuntu', '-u', 'root', '--', 'docker', ...arguments_] : arguments_, {
+  const result = spawnSync(viaWsl ? 'wsl' : 'docker', viaWsl ? ['-d', 'Ubuntu', '-u', 'root', '--exec', 'docker', ...arguments_] : arguments_, {
     cwd: root, encoding: 'utf8', stdio: capture ? 'pipe' : 'inherit', maxBuffer: 8 * 1024 * 1024,
   });
   if (result.error) throw result.error;
@@ -90,7 +90,7 @@ switch (command) {
   case 'verify': {
     resume(); probe();
     log('Running Linux checks and native E2E; streaming output to /opt/surtitle-build/verification.log');
-    const result = docker(['exec', '--user', config.remoteUser, '--workdir', workspace, name, 'bash', '-o', 'pipefail', '-lc', 'bash .devcontainer/verify.sh 2>&1 | tee /opt/surtitle-build/verification.log'], { allowFailure: true });
+    const result = docker(['exec', '--user', config.remoteUser, '--workdir', workspace, name, ...verificationCommand()], { allowFailure: true });
     if (result.status !== 0) throw new Error('Container verification failed (exit ' + result.status + '); full log stays at /opt/surtitle-build/verification.log');
     probe();
     log('Full container verification passed');

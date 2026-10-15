@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { nativeArtifact } from './native-artifacts.mjs';
 
 const execute = promisify(execFile);
 const script = fileURLToPath(new URL('./native-window.ps1', import.meta.url));
@@ -49,9 +50,10 @@ export async function resizeNativeWindow(width, height) {
         else observation.diagnosticErrors[key] = String(result.reason?.message ?? result.reason);
       }
     }
-    const path = resolve(`test-results/native/native-window-resize-${width}x${height}.json`);
+    let path;
     let artifact;
     try {
+      path = nativeArtifact(`native-window-resize-${width}x${height}.json`);
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, JSON.stringify(observation, null, 2));
       artifact = `See ${path}`;
@@ -106,6 +108,7 @@ export function verifyNativeGeometry(native, dom, video = true) {
   close(renderer.origin.Y, root.origin.Y, 'WebView is vertically displaced inside Tauri');
   const ratio = dom.devicePixelRatio;
   assert(Number.isFinite(ratio) && ratio >= 0.5 && ratio <= 8, 'Invalid WebView device scale');
+  assert(Number.isFinite(root.dpi) && Math.abs(root.dpi / 96 - ratio) < 0.001, 'WebView scale disagrees with actual HWND DPI');
   close(renderer.client.Right - renderer.client.Left, dom.innerWidth * ratio, 'WebView width disagrees with DOM');
   close(renderer.client.Bottom - renderer.client.Top, dom.innerHeight * ratio, 'WebView height disagrees with DOM');
   close(root.client.Right - root.client.Left, dom.innerWidth * ratio, 'Tauri width disagrees with DOM');
@@ -141,64 +144,11 @@ export async function assertNativeVideoBounds(video = true) {
     observation = { native, dom };
     try { verifyNativeGeometry(native, dom, video); return true; } catch (error) { observation.error = error.message; return false; }
   }, { timeout: 15000, interval: 100, timeoutMsg: 'Native HWND bounds do not match the WebView/DOM; see native-window-bounds.json' }).catch(error => {
-    writeFileSync(resolve('test-results/native/native-window-bounds.json'), JSON.stringify(observation, null, 2));
+    writeFileSync(nativeArtifact('native-window-bounds.json'), JSON.stringify(observation, null, 2));
     throw error;
   });
-  writeFileSync(resolve('test-results/native/native-window-bounds-passed.json'), JSON.stringify(observation, null, 2));
+  writeFileSync(nativeArtifact('native-window-bounds-passed.json'), JSON.stringify(observation, null, 2));
   return observation;
-}
-
-/** Sample the actual owned HWND across a short operation, after interop startup. */
-export async function sampleNativeVideoBounds(action, artifactName) {
-  assert(process.platform === 'win32', 'Native video sampling requires Windows');
-  assert(/^[a-z0-9-]+\.json$/i.test(artifactName), 'Native sample artifact must be a plain JSON filename');
-  const application = process.env.SURTITLE_E2E_BINARY;
-  assert(application && isAbsolute(application), 'Set an absolute SURTITLE_E2E_BINARY for native window operations');
-  const child = spawn('pwsh.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', script,
-    '-Action', 'sample', '-Application', application], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  let stdout = '';
-  let stderr = '';
-  let ready = false;
-  let resolveReady;
-  let rejectReady;
-  const started = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
-  const stop = () => { if (child.exitCode === null) child.kill(); };
-  process.once('exit', stop);
-  const timer = setTimeout(stop, 15000);
-  const completed = new Promise((resolve, reject) => {
-    child.stdout.on('data', chunk => {
-      stdout += chunk.toString();
-      if (!ready && stdout.includes('SURTITLE_NATIVE_SAMPLE_READY')) { ready = true; resolveReady(); }
-    });
-    child.stderr.on('data', chunk => { stderr += chunk.toString(); });
-    child.once('error', error => { rejectReady(error); reject(error); });
-    child.once('close', code => {
-      clearTimeout(timer);
-      process.removeListener('exit', stop);
-      if (code !== 0 || !ready) {
-        const error = new Error(`Native sampling failed (${code}): ${stderr}`);
-        rejectReady(error); reject(error); return;
-      }
-      try { resolve(JSON.parse(stdout.slice(stdout.indexOf('\n') + 1))); }
-      catch (error) { reject(error); }
-    });
-  });
-  // Attach a rejection handler before waiting for startup or the browser action.
-  const observation = completed.then(value => ({ value }), error => ({ error }));
-  try {
-    await started;
-    let result;
-    let actionError;
-    try { result = await action(); } catch (error) { actionError = error; }
-    const sampled = await observation;
-    if (sampled.error) throw sampled.error;
-    writeFileSync(resolve('test-results/native', artifactName), JSON.stringify({ ...sampled.value, result }, null, 2));
-    if (actionError) throw actionError;
-    return { result, ...sampled.value };
-  } finally {
-    stop();
-    await observation;
-  }
 }
 
 /** Captures the owned app window including native child surfaces, not just HTML. */

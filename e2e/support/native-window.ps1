@@ -1,15 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('inspect', 'resize', 'resize-maximize', 'capture', 'sample', 'monitor', 'move-monitor', 'snap-edge', 'close', 'maximize', 'restore')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('inspect', 'resize', 'resize-maximize', 'capture', 'monitor', 'move-monitor', 'snap-edge', 'close', 'maximize', 'restore')][string]$Action,
     [Parameter(Mandatory)][string]$Application,
     [int]$Width,
     [int]$Height,
     [string]$Screenshot,
     [long]$Monitor,
-    [ValidateSet('left', 'right', 'top', 'bottom', 'top-left', 'bottom-right')][string]$Edge,
-    [ValidateRange(100, 5000)][int]$DurationMs = 1500,
-    [ValidateRange(5, 100)][int]$IntervalMs = 10
+    [ValidateSet('left', 'right', 'top', 'bottom', 'top-left', 'bottom-right')][string]$Edge
 )
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows) { throw 'Native window inspection requires Windows.' }
@@ -34,21 +32,6 @@ if ($Action -eq 'move-monitor') {
 }
 if ($Action -eq 'snap-edge') {
     [SurtitleNativeWindow]::SnapToEdge($window, $Edge)
-}
-if ($Action -eq 'sample') {
-    # Warm the interop process before the test triggers its short animation.
-    # Only the configured test application's HWND tree is inspected.
-    $samples = [Collections.Generic.List[object]]::new()
-    $samples.Add(@{ elapsedMs = 0; windows = [SurtitleNativeWindow]::Inspect($window) })
-    [Console]::Out.WriteLine('SURTITLE_NATIVE_SAMPLE_READY')
-    [Console]::Out.Flush()
-    $clock = [Diagnostics.Stopwatch]::StartNew()
-    while ($clock.ElapsedMilliseconds -lt $DurationMs) {
-        Start-Sleep -Milliseconds $IntervalMs
-        $samples.Add(@{ elapsedMs = $clock.Elapsed.TotalMilliseconds; windows = [SurtitleNativeWindow]::Inspect($window) })
-    }
-    @{ durationMs = $clock.Elapsed.TotalMilliseconds; samples = $samples } | ConvertTo-Json -Depth 8 -Compress
-    exit 0
 }
 if ($Action -in @('resize', 'resize-maximize')) {
     if ($Width -lt 1024 -or $Width -gt 8192 -or $Height -lt 700 -or $Height -gt 8192) { throw 'Client size must be within 1024..8192 by 700..8192 logical pixels.' }

@@ -1,113 +1,130 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { test } from 'vitest';
+import { test, vi } from 'vitest';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { assertPassedTest, execute, runRequiredSuite, selectSuite } from './run-required-rust-tests.mjs';
+import { dirname, join } from 'node:path';
+import { assertInventory, execute, runRequiredSuite, selectSuite, suiteGroups } from './run-required-rust-tests.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'surtitle-required-rust 日本語 & '));
   t.onTestFinished(() => rmSync(root, { recursive: true, force: true }));
-  return { root };
+  const report = join(root, 'test-results/nextest/required/junit.xml');
+  mkdirSync(dirname(report), { recursive: true });
+  return { root, report };
 }
-const pass = 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.01s\n';
+function inventory(tests) {
+  const suites = {};
+  for (const { packageName, name } of tests) {
+    const suite = suites[packageName] ??= { 'package-name': packageName, kind: 'lib', testcases: {} };
+    suite.testcases[name] = { ignored: true, 'filter-match': { status: 'matches' } };
+  }
+  return { 'rust-suites': suites };
+}
+function fakeNextest(f, suite, intercept = () => undefined) {
+  const groups = suiteGroups(suite);
+  return async (command, args, options) => {
+    assert.equal(command, 'cargo');
+    assert.equal(args[0], 'nextest');
+    const group = groups.find(item => item.packageName === args[args.indexOf('-p') + 1]);
+    const result = intercept(args[1], group, args, options);
+    if (result) return result;
+    if (args[1] === 'list') return { code: 0, stdout: JSON.stringify(inventory(group.tests)), durationMs: 10 };
+    writeFileSync(f.report, `<testsuites name="${group.packageName}" tests="${group.tests.length}"/>`);
+    return { code: 0, durationMs: 20 };
+  };
+}
 
-test('requires an available suite and exactly one passed test', () => {
+test('rejects unavailable platforms and incomplete, duplicate or non-ignored inventories', () => {
   assert.throws(() => selectSuite('unknown', 'linux'), /Unknown/);
   assert.throws(() => selectSuite('windows-native', 'linux'), /requires win32/);
   assert.throws(() => selectSuite('windows-native', 'win32', 'arm64'), /x64/);
-  assertPassedTest(pass, 'required');
-  for (const output of ['', pass.replace('1 passed', '0 passed'), pass.replace('0 ignored', '1 ignored'), pass + pass]) {
-    assert.throws(() => assertPassedTest(output, 'required'), /exactly one pass/);
+  const expected = selectSuite('linux-ffmpeg', 'linux').tests;
+  assertInventory(inventory(expected), expected);
+  assert.throws(() => assertInventory(inventory(expected.slice(1)), expected), /inventory differs/);
+  const duplicate = inventory(expected);
+  duplicate['rust-suites'].extra = duplicate['rust-suites'].surtitle;
+  assert.throws(() => assertInventory(duplicate, expected), /inventory differs/);
+  for (const change of [suite => { suite.kind = 'test'; }, suite => { Object.values(suite.testcases)[0].ignored = false; }]) {
+    const changed = inventory(expected);
+    change(changed['rust-suites'].surtitle);
+    assert.throws(() => assertInventory(changed, expected), /ignored library test/);
   }
 });
 
-test('runs exact ignored Cargo tests and stops on failed or empty runs', async t => {
-  const f = fixture(t), calls = [];
-  const run = async (command, args, options) => {
-    calls.push({ command, args, options });
-    return { code: 0, stdout: pass };
-  };
-  await runRequiredSuite('linux-ffmpeg', { root: f.root, platform: 'linux', run });
-  assert(calls.length > 0);
-  for (const call of calls) {
-    assert.equal(call.command, 'cargo');
-    assert.equal(call.args[0], 'test');
-    assert.deepEqual(call.args.slice(call.args.indexOf('--')), ['--', '--ignored', '--exact', '--test-threads=1', '--nocapture', '--color=never']);
-    assert(call.args[call.args.indexOf('--') - 1].includes('::'));
-    assert(call.options.logPrefix.startsWith(f.root));
+test('keeps package feature modes separate and archives fresh reports in unique run directories', async t => {
+  const f = fixture(t), suite = selectSuite('windows-native', 'win32', 'x64'), calls = [];
+  const run = fakeNextest(f, suite, (phase, group, args) => { calls.push({ phase, group, args }); });
+  const first = await runRequiredSuite('windows-native', { root: f.root, platform: 'win32', architecture: 'x64', run });
+  const second = await runRequiredSuite('windows-native', { root: f.root, platform: 'win32', architecture: 'x64', run });
+  assert.notEqual(first.directory, second.directory);
+  assert.equal(first.summary.expectedTests, 8);
+  assert.equal(first.summary.groups.length, 3);
+  for (const record of first.summary.groups) {
+    assert.equal(record.status, 'passed');
+    assert.match(readFileSync(join(first.directory, record.junit), 'utf8'), new RegExp(record.packageName));
   }
-  for (const result of [{ code: 7, stdout: pass }, { code: 0, stdout: pass.replace('1 passed', '0 passed') }]) {
-    let count = 0;
-    await assert.rejects(runRequiredSuite('linux-ffmpeg', { root: f.root, platform: 'linux', run: async () => { count++; return result; } }));
-    assert.equal(count, 1);
+  const executions = calls.filter(call => call.phase === 'run');
+  assert.equal(executions.length, 6);
+  const ai = executions.find(call => call.group.packageName === 'surtitle-ai');
+  assert(ai.args.includes('--no-default-features'));
+  assert(!ai.args.includes('--all-features'));
+  const app = executions.find(call => call.group.packageName === 'surtitle');
+  assert.equal(app.args[app.args.indexOf('--features') + 1], 'e2e-test');
+  assert.equal(app.args[app.args.indexOf('--run-ignored') + 1], 'only');
+  assert.equal(app.args[app.args.indexOf('--no-tests') + 1], 'fail');
+});
+
+test('records discovery failures without executing the incomplete group', async t => {
+  const f = fixture(t), suite = selectSuite('linux-ffmpeg', 'linux'), phases = [];
+  const run = fakeNextest(f, suite, (phase, group) => {
+    phases.push(`${group.packageName}:${phase}`);
+    if (group.packageName === 'surtitle' && phase === 'list') return { code: 0, stdout: JSON.stringify(inventory(group.tests.slice(1))) };
+  });
+  await assert.rejects(runRequiredSuite('linux-ffmpeg', { root: f.root, platform: 'linux', run }), /inventory differs/);
+  assert(!phases.includes('surtitle:run'));
+  assert(phases.includes('surtitle-tools:run'));
+  const base = join(f.root, 'artifacts/required-rust-tests/linux-ffmpeg');
+  const summary = JSON.parse(readFileSync(join(base, readdirSync(base)[0], 'summary.json'), 'utf8'));
+  assert.equal(summary.groups[0].failurePhase, 'discovery');
+  assert.equal(summary.groups[1].status, 'passed');
+});
+
+test('never reports stale JUnit as a successful run and preserves nonzero exits', async t => {
+  const f = fixture(t), suite = selectSuite('linux-ffmpeg', 'linux');
+  for (const code of [0, 7]) {
+    writeFileSync(f.report, '<testsuites name="stale"/>');
+    const run = fakeNextest(f, suite, phase => phase === 'run' ? { code } : undefined);
+    await assert.rejects(runRequiredSuite('linux-ffmpeg', { root: f.root, platform: 'linux', run }),
+      code === 0 ? /no JUnit report/ : /exited 7/);
   }
 });
 
-test('real process evidence preserves stdout, stderr and a nonzero status', async t => {
+test('an interrupted nextest run leaves later groups explicitly not run', async t => {
+  const f = fixture(t), suite = selectSuite('linux-ffmpeg', 'linux');
+  let calls = 0;
+  const run = fakeNextest(f, suite, phase => {
+    calls++;
+    if (phase === 'run') return { code: 130, interrupted: true };
+  });
+  await assert.rejects(runRequiredSuite('linux-ffmpeg', { root: f.root, platform: 'linux', run }), /exited 130/);
+  assert.equal(calls, 2);
+  const base = join(f.root, 'artifacts/required-rust-tests/linux-ffmpeg');
+  const summary = JSON.parse(readFileSync(join(base, readdirSync(base)[0], 'summary.json'), 'utf8'));
+  assert.equal(summary.groups[0].interrupted, true);
+  assert.equal(summary.groups[1].status, 'not_run');
+});
+
+test('real process evidence retains both streams and the actual exit status', async t => {
   const f = fixture(t), logPrefix = join(f.root, 'child');
+  const forwarded = [];
+  const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(bytes => { forwarded.push(String(bytes)); return true; });
+  t.onTestFinished(() => stderr.mockRestore());
   const result = await execute(process.execPath, ['-e', 'console.log("child stdout"); console.error("child stderr"); process.exitCode=7'],
-    { cwd: f.root, env: process.env, timeoutMs: 5000, logPrefix, showStdout: false });
+    { cwd: f.root, env: process.env, logPrefix, captureStdout: true });
   assert.equal(result.code, 7);
-  assert.match(readFileSync(logPrefix + '.stdout.log', 'utf8'), /child stdout/);
-  assert.match(readFileSync(logPrefix + '.stderr.log', 'utf8'), /child stderr/);
+  assert.match(result.stdout, /child stdout/);
+  assert.match(readFileSync(`${logPrefix}.stdout.log`, 'utf8'), /child stdout/);
+  assert.match(readFileSync(`${logPrefix}.stderr.log`, 'utf8'), /child stderr/);
+  assert.match(forwarded.join(''), /child stderr/);
 });
-
-test('watchdog terminates its own child tree while an unrelated process continues', async t => {
-  const f = fixture(t), ownedBeat = join(f.root, 'owned-beat'), unrelatedBeat = join(f.root, 'unrelated-beat');
-  const until = async (condition, message) => {
-    const deadline = Date.now() + 5000;
-    while (!condition()) {
-      assert.ok(Date.now() < deadline, message);
-      await new Promise(resolve => setTimeout(resolve, 25));
-    }
-  };
-  const running = pid => {
-    try {
-      process.kill(pid, 0);
-      // A container's PID 1 may not reap an orphan immediately. Zombies have
-      // exited and cannot write heartbeats, even though kill(pid, 0) succeeds.
-      return process.platform !== 'linux' || !/\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8'));
-    } catch (error) {
-      if (error.code === 'ESRCH' || error.code === 'ENOENT') return false;
-      throw error;
-    }
-  };
-  // Overwriting briefly truncates a heartbeat to zero bytes. Append sequences
-  // so a concurrent reader can only see the same length or forward progress.
-  const heartbeat = path => `const fs=require('node:fs');let sequence=0;const beat=()=>fs.appendFileSync(${JSON.stringify(path)},String(sequence++)+'\\n');beat();setInterval(beat,25)`;
-  const unrelated = spawn(process.execPath, ['-e', heartbeat(unrelatedBeat)], { windowsHide: true, stdio: 'ignore' });
-  const unrelatedClosed = new Promise(resolve => unrelated.once('close', resolve));
-  const ownedPids = [];
-  t.onTestFinished(async () => {
-    if (unrelated.exitCode === null && unrelated.signalCode === null) unrelated.kill();
-    for (const pid of ownedPids) if (running(pid)) process.kill(pid, 'SIGKILL');
-    await unrelatedClosed;
-    await until(() => ownedPids.every(pid => !running(pid)), 'Test cleanup must finish before removing heartbeat files');
-  });
-  const source = `const{spawn}=require('node:child_process');const child=spawn(process.execPath,['-e',${JSON.stringify(heartbeat(ownedBeat))}],{windowsHide:true,stdio:'ignore'});console.log(JSON.stringify([process.pid,child.pid]));setInterval(()=>{},1000)`;
-  await assert.rejects(execute(process.execPath, ['-e', source], { cwd: f.root, env: process.env, timeoutMs: 1500, logPrefix: join(f.root, 'timeout'), showStdout: false }), error => {
-    assert.match(error.message, /timed out/);
-    const pids = JSON.parse(error.result.stdout);
-    assert.equal(pids.length, 2);
-    assert.ok(pids.every(pid => Number.isSafeInteger(pid) && pid > 0));
-    ownedPids.push(...pids);
-    return true;
-  });
-  assert.ok(readFileSync(ownedBeat).length > 0, 'The owned grandchild must run before the watchdog fires');
-  assert.ok(readFileSync(unrelatedBeat).length > 0, 'The unrelated process must run before the watchdog fires');
-  await until(() => ownedPids.every(pid => !running(pid)), 'The watchdog must terminate both its child and grandchild');
-  const lastOwned = readFileSync(ownedBeat, 'utf8');
-  let lastUnrelated = readFileSync(unrelatedBeat).length;
-  for (let observation = 0; observation < 3; observation++) {
-    await until(() => {
-      assert.equal(readFileSync(ownedBeat, 'utf8'), lastOwned);
-      assert.ok(running(unrelated.pid), 'The watchdog must leave the unrelated process alive');
-      return readFileSync(unrelatedBeat).length > lastUnrelated;
-    }, 'The unrelated process must keep appending heartbeats after the owned tree exits');
-    lastUnrelated = readFileSync(unrelatedBeat).length;
-  }
-  assert.equal(readFileSync(ownedBeat, 'utf8'), lastOwned);
-}, 20_000);

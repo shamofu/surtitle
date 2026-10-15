@@ -35,7 +35,7 @@ docker run --rm --init --ipc=host `
 
 Rebuild the image after source or test changes to verify the default CI command against the complete current checkout. Windows runs of `pnpm test:browser` exercise the same contracts without a platform-specific baseline.
 
-If Docker runs inside the existing WSL Ubuntu distribution, invoke these Docker commands through `wsl -d Ubuntu -u root -- docker` and use absolute WSL paths for the build context and bind sources (for example `/mnt/c/path/to/surtitle`). The host's Windows `node_modules` must not be mounted into the container.
+If Docker runs inside the existing WSL Ubuntu distribution, invoke these Docker commands through `wsl -d Ubuntu -u root --exec docker` and use absolute WSL paths for the build context and bind sources (for example `/mnt/c/path/to/surtitle`). The host's Windows `node_modules` must not be mounted into the container.
 
 CI retains `test-results/browser` and `playwright-report/browser`, including assertion differences, failure screenshots and traces. Screenshots are diagnostic evidence, not a pixel-equality gate. For a local run, use the output mounts shown above to retain these reports after the container exits. Update the pinned Docker image and its version assertion together when changing Playwright.
 
@@ -44,12 +44,12 @@ CI retains `test-results/browser` and `playwright-report/browser`, including ass
 1. Run `pnpm install --frozen-lockfile`, `pnpm build`, `pnpm build:native:e2e` and `pnpm build:fixtures`. Windows also needs the [native DLLs](../docs/native-runtime.md).
 2. Install `tauri-driver` with `pnpm setup:driver`; set `SURTITLE_TAURI_DRIVER` to its absolute path. On Windows run `pwsh -File e2e/support/prepare-webdriver.ps1` for the matching EdgeDriver; on Linux use WebKitWebDriver.
 3. Run `pnpm test:fixtures` using an existing FFmpeg. It generates the Japanese/space/ampersand video, multitrack media, subtitles and six-hour silence locally.
-4. Use `pnpm seed:fixtures <fresh-data-directory> <absolute-media-path>` to create a disposable SQLite profile. Set `SURTITLE_E2E_DATA_DIR` to that profile, `SURTITLE_E2E_BINARY` to the absolute E2E executable, and `SURTITLE_NATIVE_DRIVER` to the native WebDriver when needed.
-5. Set `SURTITLE_E2E_AI_RECOVERY=translation` and `SURTITLE_E2E_TRANSCRIPT_REVIEW=boundary` for the authored recovery presets. Run `pnpm test:e2e`; Linux uses `dbus-run-session -- xvfb-run -a pnpm test:e2e`.
+4. Use `pnpm seed:fixtures <fresh-data-directory> <absolute-media-path>` to create a disposable template. Set `SURTITLE_E2E_DATA_DIR` to that directory and `SURTITLE_E2E_BINARY` to the absolute E2E executable. Set `SURTITLE_E2E_SEED_BINARY` if `seed_fixture` is not alongside the executable in `examples/`; set `SURTITLE_NATIVE_DRIVER` when needed.
+5. Run `pnpm test:e2e`; Linux uses `dbus-run-session -- xvfb-run -a pnpm test:e2e`. Each worker seeds a new profile with the authored translation and transcript-review presets. Only restarts within the same spec reuse that worker's profile.
 
 Use a separate Cargo target directory or retain a separate E2E executable for local development. Fixture-enabled binaries must use disposable profiles. Release builds exclude `e2e-test`/`e2e-fixtures`, `test-support` and development validation.
 
-The media-management spec covers track persistence, subtitle replacement/restoration, card retention, HTTP download recovery, and optional AV1 playback. To investigate one scenario, prepare a fresh profile using the steps above, then select it with `--spec ./e2e/native/media-management.e2e.js --mochaOpts.grep 'edited subtitle versions across source replacement'` (or another scenario title). Do not reseed an existing running profile: the seed tool populates learning data and does not reset operational state.
+The media-management spec covers track persistence, subtitle replacement/restoration, card retention, HTTP download recovery and AV1 playback. Windows CI generates the AV1 input and sets `SURTITLE_E2E_AV1_FIXTURE`; supply that path for a local run too. Select a spec with `--spec ./e2e/native/media-management.e2e.js`. Do not reseed an existing running profile.
 
 ## Coverage and diagnostics
 
@@ -57,7 +57,7 @@ Native tests exercise local imports, 20,000 subtitle rows with bounded rendering
 
 The subtitle workflow retains one owned media record across its import, replacement and restoration phases, then cleans it up even on failure. Each phase has its own test budget; real tool inspection waits up to the native IPC limit before asserting the requested track exists. Independent scenarios set up their own inputs. Transcript search checks both expected text and exclusion of nonmatching rows, so an empty result cannot satisfy the search assertion.
 
-The AI recovery/transcript presets are authored saved results with explicit offline accounting. They protect SQLite/IPC behavior and unchanged charges; they do not test cloud recognition. Windows E2E defaults to software rendering and null audio. Set `SURTITLE_E2E_HARDWARE_RENDERING=1` for a separate hardware-decoding check that forbids WARP; audio output remains disabled. Optional AV1 decoding is enabled only by an explicit `SURTITLE_E2E_AV1_FIXTURE`.
+The AI recovery/transcript presets are authored saved results with explicit offline accounting. They protect SQLite/IPC behavior and unchanged charges; they do not test cloud recognition. Windows CI uses software rendering and null audio. Tests check actual window DPI, work-area fitting and native clipping in that environment; they do not claim coverage of manual monitor changes or hardware-decoding performance.
 
 Windows test processes run at restricted medium integrity to support WebView2's driver environment and keep SQLite/WAL readers at the same integrity as the app. Normal DOM/IPC specs do not require OS foreground ownership. Windows CI runs them with `--exclude ./e2e/native/playback-rate.e2e.js`, then runs that spec separately with a fresh profile and `SURTITLE_E2E_NATIVE_INPUT=1`, even if a normal spec failed. This keeps all native specs covered without making ordinary tests depend on foreground permission.
 
@@ -73,8 +73,4 @@ Resize Windows test windows with `resizeNativeWindow` from `support/native-windo
 
 Focus a run with `pnpm test:e2e --spec ./e2e/native/draft-study.e2e.js` using the same prepared environment. Real FFmpeg/libmpv Rust integrations are selected through the [required suites](../docs/testing.md#explicit-rust-integration-suites).
 
-## Saved-response local checks
-
-`e2e/saved/` is excluded from the ordinary native glob. It exercises an explicitly prepared local profile from saved provider responses and the [frozen ten-task set](../docs/draft-study-task-set.json), including bookmark/replay persistence and a layout diagnostic.
-
-These checks cover transport and persistence; they do not measure human listening, semantic correctness or editing effort. The separately opt-in public-download check is described in [upstream tests](upstream/README.md).
+Every maintained spec runs in automatic CI on its applicable OS. The native suite selects Windows and Linux specs explicitly, with native input kept sequential. WebDriver capabilities identify the OS; reports distinguish expected application rejection from driver failure. JUnit, session/startup logs and bounded failure diagnostics have unique run/spec/test paths. See the [result guide](../docs/testing.md#results-and-failure-evidence) for the shared summary.

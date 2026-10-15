@@ -11,10 +11,10 @@ if (-not $IsWindows -or [Runtime.InteropServices.RuntimeInformation]::OSArchitec
     throw 'The pinned test FFmpeg package requires Windows x64.'
 }
 function Invoke-TestFfmpegDownload([string]$Uri, [string]$Partial) {
-    # The accepted archive took 209 seconds on a slow link. Limit the
-    # whole transfer, including one retry, while allowing that observed duration.
+    # Cold downloads can exceed five minutes. Keep a bounded ten-minute attempt
+    # and one transport retry; cached archives are still hash-checked below.
     $curl = Join-Path $env:SystemRoot 'System32/curl.exe'
-    & $curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 30 --max-time 300 --retry 1 --retry-all-errors --retry-delay 2 --retry-max-time 602 --output $Partial $Uri
+    & $curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 30 --max-time 600 --retry 1 --retry-all-errors --retry-delay 2 --retry-max-time 1202 --output $Partial $Uri
     if ($LASTEXITCODE -ne 0) { throw "Pinned test FFmpeg download failed: $LASTEXITCODE" }
 }
 # This is the existing 9.0.2 CLI verified in the native acceptance evidence.

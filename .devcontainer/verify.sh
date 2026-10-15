@@ -22,9 +22,14 @@ pnpm build
 step 'Checking Rust formatting'
 pnpm fmt:rust:check
 step 'Running Rust workspace tests with all features'
+if ! cargo nextest --version | grep -q 'cargo-nextest 0.9.148 '; then
+  pnpm setup:nextest
+fi
 pnpm test:rust
 step 'Testing AI accounting without default features'
 pnpm test:rust:no-default-features
+step 'Running Rust documentation tests'
+pnpm test:rust:doc
 step 'Running the three required FFmpeg waveform and stream regressions'
 SURTITLE_TEST_FFMPEG="$(command -v ffmpeg)" pnpm test:rust:required linux-ffmpeg
 step 'Running Rust Clippy checks'
@@ -46,8 +51,6 @@ e2e_data_dir="$(mktemp -d "$PWD/work/e2e-linux.XXXXXXXX")"
 pnpm seed:fixtures "$e2e_data_dir" "$PWD/test-results/fixtures/日本語 & sample.mp4"
 export SURTITLE_E2E_BINARY="$CARGO_TARGET_DIR/debug/surtitle"
 export SURTITLE_E2E_DATA_DIR="$e2e_data_dir"
-export SURTITLE_E2E_AI_RECOVERY=translation
-export SURTITLE_E2E_TRANSCRIPT_REVIEW=boundary
 step 'Running WebKitGTK and native Tauri E2E tests'
 dbus-run-session -- xvfb-run -a pnpm test:e2e
 step 'All Linux verification steps passed'

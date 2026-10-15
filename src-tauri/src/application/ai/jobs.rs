@@ -349,13 +349,8 @@ async fn run_approved_with<E: JobExecutor>(
                     continue;
                 }
                 Err(AiError::InFlight) => {
-                    if !wait_for_dispatch(
-                        &state,
-                        &quote_id,
-                        &approval_id,
-                        chrono::Utc::now().timestamp_millis() + 250,
-                    )
-                    .await?
+                    if !wait_for_dispatch(&state, &quote_id, &approval_id, state.ai.now_ms() + 250)
+                        .await?
                     {
                         return Ok(());
                     }
@@ -470,7 +465,7 @@ async fn wait_for_dispatch(
         {
             return Ok(false);
         }
-        let remaining = at.saturating_sub(chrono::Utc::now().timestamp_millis());
+        let remaining = at.saturating_sub(state.ai.now_ms());
         if remaining <= 0 {
             return Ok(true);
         }

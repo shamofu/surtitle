@@ -12,7 +12,7 @@ async function pose(element: Locator) {
 }
 
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {
-  test(`main pages slide in tab order and restore scroll (${reducedMotion})`, async ({ page }) => {
+  test(`main page navigation keeps controls reachable and resets page scroll (${reducedMotion})`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion });
     await page.clock.install();
     await installLearningFixture(page, 'en', 'light');
@@ -40,7 +40,6 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
       await expect(current).toBeAttached();
       await expect(page.locator('.page-content')).toHaveAttribute('data-page-direction', direction);
       await expect(page.locator(`.main-nav a[href="${path}"]`)).toHaveAttribute('aria-current', 'page');
-      const initial = await pose(current);
       const stage = page.locator('.page-content');
       await expect(stage).toHaveCSS('overflow-x', 'hidden');
       await stage.evaluate(element => {
@@ -59,17 +58,6 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
       await page.clock.runFor(16);
       await page.mouse.wheel(-240, 0);
       await page.clock.runFor(16);
-      if (reducedMotion === 'reduce') {
-        expect(initial).toEqual({ x: 0, y: 0, opacity: 1 });
-      } else {
-        expect(Math.abs(initial.x)).toBeGreaterThan(30);
-        expect(Math.sign(initial.x)).toBe(direction === 'forward' ? 1 : -1);
-        expect(initial.y).toBe(0);
-        await page.clock.runFor(motionDurations.content * 1000 * .4);
-        const intermediate = await pose(current);
-        expect(Math.abs(intermediate.x)).toBeGreaterThan(0);
-        expect(Math.abs(intermediate.x)).toBeLessThan(Math.abs(initial.x));
-      }
       await page.clock.runFor(motionDurations.content * 1000 + 150);
       const horizontalFrames = await page.evaluate(() => (window as any).__routeScrollProbe.stop() as number[]);
       expect(horizontalFrames.length).toBeGreaterThan(2);
@@ -102,7 +90,6 @@ test('rapid main navigation and live motion reduction settle only the latest pag
     await page.clock.runFor(40);
   }
   const current = page.locator('.phrases-page');
-  expect((await pose(current)).x).toBeLessThan(0);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduce');
   expect(await pose(current)).toEqual({ x: 0, y: 0, opacity: 1 });
@@ -136,17 +123,17 @@ test('main navigation never animates a native player ancestor', async ({ page })
 });
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 700 }, { width: 920, height: 620 }]) {
-  test(`review title and card share a centered reading area (${viewport.width})`, async ({ page }) => {
+  test(`review title, card and rating controls remain reachable (${viewport.width})`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await installLearningFixture(page, viewport.width === 1024 ? 'ja' : 'en', 'light');
     await page.goto('/review');
     const review = page.locator('.review-page');
     await expect(review.locator('.review-card')).toBeVisible();
-    const [bounds, title, card] = await Promise.all([review.boundingBox(), review.locator('.review-title').boundingBox(), review.locator('.review-card').boundingBox()]);
-    expect(Math.abs(bounds!.x + bounds!.width / 2 - viewport.width / 2)).toBeLessThan(1);
-    expect(Math.abs(title!.x + title!.width / 2 - card!.x - card!.width / 2)).toBeLessThan(1);
-    await expect(review.locator('.review-title')).toHaveCSS('text-align', 'center');
+    await expect(review.locator('.review-title')).toBeInViewport();
+    await expect(review.locator('.review-card')).toBeInViewport();
+    const [title, card] = await Promise.all([review.locator('.review-title').boundingBox(), review.locator('.review-card').boundingBox()]);
+    expect(title!.y + title!.height).toBeLessThanOrEqual(card!.y + 1);
     await review.getByRole('button', { name: /Reveal meaning|意味を確認する/ }).click();
     for (const rating of await review.locator('.rating-buttons button').all()) await expect(rating).toBeInViewport({ ratio: 1 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

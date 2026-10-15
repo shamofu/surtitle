@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
+import { invokeNative as invoke, expectNativeRejection, restartNativeSession, prepareNativeSession, clickNative } from '../support/native-app.mjs';
 import { resolve } from 'node:path';
 import { withReadOnlyDatabase } from '../support/native-e2e-database.mjs';
 
 const mediaId = 'e2e-ai-recovery';
-const invoke = (command, args = {}) => browser.execute(async (name, parameters) => window.__TAURI_INTERNALS__.invoke(name, parameters), command, args);
 const snapshot = () => invoke('get_app_snapshot');
 const segments = () => invoke('list_segments', { mediaId });
 const dialog = () => $('[role="dialog"].modal');
@@ -15,10 +15,7 @@ function attempts() {
   return withReadOnlyDatabase(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'charges.sqlite'),
     db => db.prepare('SELECT id,job_id,state,reserve_microusd,charged_microusd,usage_json FROM ai_attempts ORDER BY id').all());
 }
-async function ready() {
-  await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__), { timeoutMsg: 'Native IPC not ready' });
-  await $('h1').waitForDisplayed();
-}
+const ready = prepareNativeSession;
 async function settings() {
   await browser.execute(() => { window.history.pushState({}, '', '/settings'); window.dispatchEvent(new PopStateEvent('popstate')); });
   const review = $('button=Review saved translations');
@@ -32,7 +29,7 @@ async function settings() {
   await review.waitForClickable();
 }
 
-(process.env.SURTITLE_E2E_AI_RECOVERY === 'translation' ? describe : describe.skip)('saved AI translation recovery in the actual desktop', () => {
+describe('saved AI translation recovery in the actual desktop', () => {
   before(async () => {
     await ready();
     const state = await snapshot();
@@ -54,30 +51,18 @@ async function settings() {
     assert.equal(pending.length, 1);
     assert.equal(pending[0].canApply, true);
     await settings();
-    await $('button=Review saved translations').click();
+    await clickNative($('button=Review saved translations'));
     await dialog().waitForDisplayed();
     assert.equal(await dialog().$('h2').getText(), 'Review saved translations');
     assert((await dialog().getText()).includes('こんにちは。'));
-    await dialog().$('button[aria-label="Close"]').click();
+    await clickNative(dialog().$('button[aria-label="Close"]'));
     await invoke('edit_segment', { segment: { ...source, text: 'An edited source.' } });
     try {
       const stale = await invoke('list_saved_ai_results', { jobId });
       assert.equal(stale[0].canApply, false);
       assert.deepEqual(stale[0].translations, pending[0].translations, 'Source changes must retain the saved output');
-      // Serialize the application's rejection inside the webview: a WebDriver
-      // transport/serialization failure must fail this test, not satisfy it.
-      const application = JSON.parse(await browser.execute(async id => {
-        try {
-          await window.__TAURI_INTERNALS__.invoke('apply_saved_ai_result', { jobId: id, ordinal: 0 });
-          return JSON.stringify({ succeeded: true });
-        } catch (error) {
-          return JSON.stringify({ succeeded: false, reason: String(error?.message ?? error) });
-        }
-      }, jobId));
-      assert.deepEqual(application, {
-        succeeded: false,
-        reason: 'Prepared input changed; prepare and approve a new job',
-      });
+      await expectNativeRejection(invoke('apply_saved_ai_result', { jobId, ordinal: 0 }),
+        'Prepared input changed; prepare and approve a new job');
       assert.equal((await segments())[0].translation, null);
     } finally {
       await invoke('edit_segment', { segment: source });
@@ -91,16 +76,15 @@ async function settings() {
     assert.equal(state.settings.credentialConfigured, false);
     assert.equal(state.budget.limitUsd, 0);
     await settings();
-    await $('button=Review saved translations').click();
+    await clickNative($('button=Review saved translations'));
     await $('button=Apply this translation').waitForEnabled();
-    await $('button=Apply this translation').click();
+    await clickNative($('button=Apply this translation'));
     await browser.waitUntil(async () => (await segments())[0].translation === 'こんにちは。');
     assert.deepEqual((await segments()).map(cue => cue.translation), ['こんにちは。', 'また明日。']);
     // With no pending results, the settings row and its modal unmount together.
     await expect(dialog()).not.toExist();
     // A new WebDriver session terminates and relaunches Tauri, unlike webview refresh.
-    await browser.reloadSession();
-    await ready();
+    await restartNativeSession();
     const saved = await invoke('list_saved_ai_results', { jobId });
     assert.equal(saved[0].applied, true);
     assert.equal(saved[0].canApply, false);

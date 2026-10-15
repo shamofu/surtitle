@@ -169,12 +169,22 @@ test.runIf(process.platform === 'win32')('detached runner terminal policy reject
   assert.match(result, /Runner terminal ownership policy verified without native input/);
 }, 15000);
 test('both native Windows jobs prepare desktop capacity before Rust or application builds and retain the receipt', () => {
-  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
-  for (const [job, next] of [['windows', 'package'], ['package', 'ci']]) {
-    const section = workflow.split(`  ${job}:`)[1].split(`  ${next}:`)[0];
-    const setup = section.indexOf('node e2e/support/prepare-ci-desktop.mjs');
-    assert(setup > section.indexOf('uses: actions/setup-node@'));
-    assert(setup < section.indexOf('Read the native Rust toolchain pin'));
-    assert.match(section, /test-results\//);
+  const lines = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8').split(/\r?\n/);
+  for (const job of ['windows', 'package']) {
+    const start = lines.findIndex(line => line === `  ${job}:`);
+    assert(start >= 0, `${job} job must exist`);
+    const next = lines.findIndex((line, index) => index > start && /^  [\w-]+:/.test(line));
+    const steps = lines.slice(start, next < 0 ? undefined : next).join('\n').split(/^      - /m).slice(1);
+    // Compare executable steps, independently of their display names and of
+    // which job follows this one in the workflow.
+    const node = steps.findIndex(step => /uses: actions\/setup-node@/.test(step));
+    const setup = steps.findIndex(step => step.includes('node e2e/support/prepare-ci-desktop.mjs'));
+    const rust = steps.findIndex(step => /uses: dtolnay\/rust-toolchain@/.test(step));
+    assert(node >= 0 && setup > node, `${job} must prepare the desktop after installing Node`);
+    assert(rust > setup, `${job} must prepare the desktop before setting up Rust`);
+    const uploads = steps.filter(step => /uses: actions\/upload-artifact@/.test(step));
+    assert(uploads.some(step => step.includes('always()') && step.split('\n').some(line =>
+      ['test-results/', 'test-results/windows-desktop.json'].includes(line.trim()))),
+    `${job} must retain the desktop receipt even after a failed run`);
   }
 });

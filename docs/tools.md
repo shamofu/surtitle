@@ -108,23 +108,14 @@ these are provenance records, not a substitute for distribution license review.
 
 The [default test suite](testing.md#routine-checks) is offline. It covers path/shim
 ambiguity, snapshots, literal arguments, ZIP traversal, signature tampering,
-activation, rollback and job leases. Opt-in tests exercise real operations:
+activation, rollback and job leases. Automatic CI also exercises real extraction:
 
 ```powershell
 $env:SURTITLE_TEST_FFMPEG = 'C:\path\ffmpeg.exe'
-$env:SURTITLE_TEST_YTDLP = 'C:\path\yt-dlp.exe'
-$env:SURTITLE_TEST_DENO = 'C:\path\deno.exe'
-pnpm rust test -p surtitle-tools --locked installed_tools_probe_and_extract '--' --ignored
-
-# Uses only SURTITLE_TEST_FFMPEG; distinguishes two generated audio frequencies.
-pnpm rust test -p surtitle-tools --locked multitrack_extraction_preserves_selected_stream '--' --ignored
-
-$env:SURTITLE_TEST_UPDATE = 'yt-dlp' # or deno / ffmpeg
-pnpm rust test -p surtitle-tools --locked live_rolling_update '--' --ignored
+pnpm test:rust:required windows-native
 ```
 
-The installed-tools test probes selected tools and verifies an actual 16 kHz
-mono extraction using a generated fixture. The stream-selection test verifies
-that each absolute audio index produces its corresponding generated frequency.
-The rolling-update test downloads, verifies, probes, activates and reuses a
-current package from the configured upstream provider inside temporary app-owned storage.
+The stream-selection test verifies that each absolute audio index produces its
+corresponding generated frequency. Linux runs the same extraction cases through
+`pnpm test:rust:required linux-ffmpeg`. These suites use explicit local executables
+and generated inputs; they do not depend on live upstream releases or public media.

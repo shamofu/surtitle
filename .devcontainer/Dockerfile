@@ -16,6 +16,7 @@ COPY --chown=vscode:vscode package.json /tmp/surtitle-bootstrap/package.json
 RUN bash -lc '. "$HOME/.nvm/nvm.sh" && nvm install "$(cat /tmp/surtitle-node-version)" && npm install -g "$(node -p "require(\"/tmp/surtitle-bootstrap/package.json\").packageManager")" && mkdir -p /home/vscode/.local/bin && ln -s "$(which node)" /home/vscode/.local/bin/node && ln -s "$(which pnpm)" /home/vscode/.local/bin/pnpm'
 ENV PATH="/home/vscode/.local/bin:${PATH}"
 RUN PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=never pnpm --dir /tmp/surtitle-bootstrap setup:rust-tools
+RUN PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=never pnpm --dir /tmp/surtitle-bootstrap setup:nextest
 WORKDIR /workspaces/surtitle
 USER root
 RUN mkdir -p /opt/surtitle-build/tmp /opt/surtitle-notices-seed && chown -R vscode:vscode /opt/surtitle-build

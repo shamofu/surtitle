@@ -181,7 +181,7 @@ fn aligned(actual: &[i16], reference: &[i16], label: &str, lossless: bool) {
 }
 
 #[tokio::test]
-#[ignore = "explicit local FFmpeg integration: set SURTITLE_TEST_FFMPEG"]
+#[ignore = "run by required Linux and Windows native CI suites; requires SURTITLE_TEST_FFMPEG"]
 async fn installed_ffmpeg_preserves_native_rate_wav_tail_without_padding() {
     let executable =
         PathBuf::from(std::env::var_os("SURTITLE_TEST_FFMPEG").expect("Set SURTITLE_TEST_FFMPEG"));
@@ -223,7 +223,7 @@ async fn installed_ffmpeg_preserves_native_rate_wav_tail_without_padding() {
 }
 
 #[tokio::test]
-#[ignore = "explicit local FFmpeg integration: set SURTITLE_TEST_FFMPEG"]
+#[ignore = "run by required Linux and Windows native CI suites; requires SURTITLE_TEST_FFMPEG"]
 async fn installed_ffmpeg_preserves_source_clock_and_cleans_failed_outputs() {
     let executable =
         PathBuf::from(std::env::var_os("SURTITLE_TEST_FFMPEG").expect("Set SURTITLE_TEST_FFMPEG"));

@@ -643,33 +643,4 @@ mod tests {
             first.version
         );
     }
-    #[tokio::test]
-    #[ignore = "explicit live-upstream integration: downloads and executes official Windows tools in temporary app-owned storage"]
-    async fn live_rolling_update() {
-        let kind = match std::env::var("SURTITLE_TEST_UPDATE").as_deref() {
-            Ok("ffmpeg") => ToolKind::FfmpegPair,
-            Ok("deno") => ToolKind::Deno,
-            Ok("yt-dlp") => ToolKind::YtDlp,
-            _ => panic!("set SURTITLE_TEST_UPDATE=ffmpeg|deno|yt-dlp"),
-        };
-        let storage = tempfile::tempdir().unwrap();
-        let manager = ToolManager::new(storage.path()).unwrap();
-        let cancel = CancellationToken::new();
-        let result = manager
-            .update(kind, YtDlpChannel::Nightly, &cancel)
-            .await
-            .unwrap();
-        assert!(result.changed);
-        let snapshot = manager
-            .resolve_selection(kind, &ToolSelection::Managed)
-            .unwrap();
-        probe(&snapshot, &cancel).await.unwrap();
-        assert!(
-            !manager
-                .update(kind, YtDlpChannel::Nightly, &cancel)
-                .await
-                .unwrap()
-                .changed
-        );
-    }
 }

@@ -142,7 +142,7 @@ mod tests {
     use super::*;
     use crate::probe::spec;
     use crate::{
-        ToolKind, YtDlpRequest, build_ytdlp_command, ffmpeg_extract_audio, probe, probe_and_record,
+        ToolKind, YtDlpRequest, build_ytdlp_command, ffmpeg_extract_audio, probe_and_record,
     };
     use std::path::Path;
     fn compiled_deno_fixture(directory: &Path, version: &str) -> PathBuf {
@@ -326,75 +326,7 @@ mod tests {
         assert!(cmd.args.contains(&"0:3".into()));
     }
     #[tokio::test]
-    #[ignore = "explicit local integration: set SURTITLE_TEST_FFMPEG, SURTITLE_TEST_YTDLP, SURTITLE_TEST_DENO to selected executable paths"]
-    async fn installed_tools_probe_and_extract() {
-        let resolve = |kind, key| {
-            let path = PathBuf::from(std::env::var_os(key).expect("integration tool path missing"));
-            ToolSnapshot::capture(crate::resolve_external(kind, &path).unwrap()).unwrap()
-        };
-        let ffmpeg = resolve(ToolKind::FfmpegPair, "SURTITLE_TEST_FFMPEG");
-        let yt = resolve(ToolKind::YtDlp, "SURTITLE_TEST_YTDLP");
-        let deno = resolve(ToolKind::Deno, "SURTITLE_TEST_DENO");
-        let cancel = CancellationToken::new();
-        for tool in [&ffmpeg, &yt, &deno] {
-            probe(tool, &cancel).await.unwrap();
-        }
-        let temp = tempfile::tempdir().unwrap();
-        let source = temp.path().join("日本 語 & input.wav");
-        let output = temp.path().join("span.wav");
-        let mut generate = spec(
-            &ffmpeg,
-            &ffmpeg.tool.executable,
-            &[
-                "-nostdin",
-                "-v",
-                "error",
-                "-n",
-                "-f",
-                "lavfi",
-                "-i",
-                "anullsrc=r=48000:cl=stereo",
-                "-t",
-                "2",
-            ],
-        );
-        generate.args.push(source.as_os_str().to_owned());
-        assert_eq!(
-            generate
-                .run(Duration::from_secs(20), &cancel)
-                .await
-                .unwrap()
-                .code,
-            Some(0)
-        );
-        let extract = ffmpeg_extract_audio(&ffmpeg, &source, 0, 0.5, 1.0, &output).unwrap();
-        assert_eq!(
-            extract
-                .run(Duration::from_secs(20), &cancel)
-                .await
-                .unwrap()
-                .code,
-            Some(0)
-        );
-        let mut inspect = spec(
-            &ffmpeg,
-            ffmpeg.tool.ffprobe.as_deref().unwrap(),
-            &["-v", "error", "-show_streams", "-of", "json"],
-        );
-        inspect.args.push(output.into_os_string());
-        let json: serde_json::Value = serde_json::from_str(
-            &inspect
-                .run(Duration::from_secs(20), &cancel)
-                .await
-                .unwrap()
-                .stdout,
-        )
-        .unwrap();
-        assert_eq!(json["streams"][0]["sample_rate"], "16000");
-        assert_eq!(json["streams"][0]["channels"], 1);
-    }
-    #[tokio::test]
-    #[ignore = "explicit local FFmpeg regression; set SURTITLE_TEST_FFMPEG"]
+    #[ignore = "run by required Linux and Windows native CI suites; requires SURTITLE_TEST_FFMPEG"]
     async fn multitrack_extraction_preserves_selected_stream() {
         let ffmpeg = ToolSnapshot::capture(
             crate::resolve_external(

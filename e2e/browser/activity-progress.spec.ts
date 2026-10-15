@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 import { installLearningFixture } from './learning-fixture';
 
 for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
-  test(`activity stays visible across navigation with truthful progress ${locale}`, async ({ page }, testInfo) => {
+  test(`activity stays visible across navigation with truthful progress ${locale}`, async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 700 });
     await installLearningFixture(page, locale, theme);
     await page.goto('/');
@@ -44,7 +44,6 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
     await expect(dialog.getByRole('progressbar', { name: 'YouTube lesson', exact: true })).not.toHaveAttribute('value');
     await expect(dialog.getByText('FFmpeg', { exact: true })).toBeVisible();
     await expect(dialog.locator('.activity-item')).toHaveCount(2);
-    await page.screenshot({ path: testInfo.outputPath(`activity-${locale}-${theme}.png`), animations: 'disabled' });
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(trigger).toBeFocused();

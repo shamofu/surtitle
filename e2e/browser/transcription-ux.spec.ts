@@ -62,7 +62,7 @@ async function installTranscriptionFixture(page: Page, locale: 'ja' | 'en', exis
 }
 
 for (const locale of ['ja', 'en'] as const) {
-  test(`unpriced transcription has one explicit start action ${locale}`, async ({ page }, testInfo) => {
+  test(`unpriced transcription has one explicit start action ${locale}`, async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 700 });
     await installTranscriptionFixture(page, locale, false, true, true);
     await page.goto('/study/visual-fixture');
@@ -79,12 +79,11 @@ for (const locale of ['ja', 'en'] as const) {
     await expect(page.getByTestId('transcription-pacing-policy')).not.toBeVisible();
     const sends = () => page.evaluate(() => (window as any).__learningFixture.calls.filter((call: any) => ['approve_quote', 'reapprove_quote'].includes(call.command)));
     expect(await sends()).toHaveLength(0);
-    await page.screenshot({ path: testInfo.outputPath(`unpriced-${locale}.png`), fullPage: true, animations: 'disabled' });
     await start.click();
     expect(await sends()).toHaveLength(1);
     expect((await sends())[0].args.acknowledgeUnpriced).toBe(true);
   });
-  test(`transcription has its own tab and returns to received subtitles ${locale}`, async ({ page }, testInfo) => {
+  test(`transcription has its own tab and returns to received subtitles ${locale}`, async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 700 });
     await installTranscriptionFixture(page, locale);
     await page.goto('/study/visual-fixture');
@@ -98,7 +97,6 @@ for (const locale of ['ja', 'en'] as const) {
     await expect(page.getByRole('tab', { name: locale === 'ja' ? '文字起こし' : 'Transcription', exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect(start).toBeInViewport();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: testInfo.outputPath('transcription-estimate.png'), fullPage: true, animations: 'disabled' });
     await start.click();
     await expect(page.getByRole('tab', { name: locale === 'ja' ? '字幕' : 'Transcript', exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('.transcription-status')).toHaveCount(0);
@@ -115,7 +113,6 @@ for (const locale of ['ja', 'en'] as const) {
       const panel = element.closest('.study-companion')!.getBoundingClientRect();
       return bounds.bottom <= panel.bottom && bounds.top >= panel.top;
     })).toBe(true);
-    await page.screenshot({ path: testInfo.outputPath('transcription-progress.png'), fullPage: true, animations: 'disabled' });
     await page.getByRole('tab', { name: locale === 'ja' ? '文字起こし' : 'Transcription', exact: true }).click();
     await expect(page.getByRole('tab', { name: locale === 'ja' ? '文字起こし' : 'Transcription', exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('.transcription-job[data-job-id="quote"]').getByRole('progressbar')).toBeVisible();
@@ -167,7 +164,7 @@ test('transcription inputs and quote survive tab switches, inspection, and closi
 });
 
 for (const locale of ['ja', 'en'] as const) {
-  test(`normal and slowed pacing preserve received subtitles ${locale}`, async ({ page }, testInfo) => {
+  test(`normal and slowed pacing preserve received subtitles ${locale}`, async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 700 });
     await installTranscriptionFixture(page, locale, false, true);
     await page.goto('/study/visual-fixture');
@@ -204,7 +201,6 @@ for (const locale of ['ja', 'en'] as const) {
     await expect(job).toContainText(locale === 'ja' ? '混雑を避けるため送信間隔を調整中' : 'Spacing out requests to reduce congestion');
     await expect(job).toContainText(locale === 'ja' ? '40秒以上' : 'At least 40s');
     await expect(job).not.toContainText('HTTP 429');
-    await page.screenshot({ path: testInfo.outputPath('transcription-pacing.png'), fullPage: true, animations: 'disabled' });
     await page.getByRole('tab', { name: locale === 'ja' ? '字幕' : 'Transcript', exact: true }).click();
     await expect(page.locator('.transcription-status')).toHaveCount(0);
     await expect(job).not.toBeVisible();

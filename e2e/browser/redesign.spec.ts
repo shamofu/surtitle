@@ -4,7 +4,7 @@ import { installLearningFixture } from './learning-fixture';
 
 for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'] as const) {
   for (const size of [{ width: 1024, height: 700, minimum: 300 }, { width: 1440, height: 900, minimum: 450 }]) {
-    test(`video remains central ${locale} ${theme} ${size.width}`, async ({ page }, info) => {
+    test(`video remains central ${locale} ${theme} ${size.width}`, async ({ page }) => {
       await page.setViewportSize(size); await installLearningFixture(page, locale, theme);
       await page.goto('/study/visual-fixture');
       const video = page.getByTestId('native-player-viewport');
@@ -20,12 +20,10 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await expect.poll(() => page.evaluate(() => (window as any).__learningFixture.calls.filter((call: any) => call.command === 'get_snapshot_patch' && call.args.domains.includes('jobs')).length)).toBeGreaterThan(0);
       await expect.poll(async () => (await video.boundingBox())?.height).toBe(box.height);
       await expect(page.locator('.study-auxiliary')).toBeHidden();
-      await page.screenshot({ path: info.outputPath('study.png') });
       await page.getByRole('button', { name: locale === 'ja' ? '処理・管理' : 'Activity & tools', exact: true }).click();
       await expect(page.locator('.study-auxiliary')).toBeVisible();
       await expect(page.locator('.study-jobs .job-status')).toHaveCount(20);
       await expect(page.getByRole('button', { name: locale === 'ja' ? 'この字幕をもう一度' : 'Replay this subtitle', exact: true })).toBeInViewport();
-      await page.screenshot({ path: info.outputPath('activity.png') });
     });
   }
 }

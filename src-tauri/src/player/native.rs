@@ -182,21 +182,7 @@ impl Mpv {
                 }
             }
             #[cfg(feature = "e2e-test")]
-            let hardware_evaluation =
-                std::env::var("SURTITLE_E2E_HARDWARE_RENDERING").as_deref() == Ok("1");
-            #[cfg(feature = "e2e-test")]
-            for (key, value) in [
-                (
-                    "hwdec",
-                    if hardware_evaluation {
-                        "auto-safe"
-                    } else {
-                        "no"
-                    },
-                ),
-                ("d3d11-warp", if hardware_evaluation { "no" } else { "yes" }),
-                ("ao", "null"),
-            ] {
+            for (key, value) in [("hwdec", "no"), ("d3d11-warp", "yes"), ("ao", "null")] {
                 let result = option(
                     handle,
                     CString::new(key)?.as_ptr(),

@@ -346,7 +346,7 @@ fn zip_preview_tokens_are_single_use_and_restore_independent_audio_and_reviews()
 
 #[cfg(all(windows, feature = "e2e-test"))]
 #[test]
-#[ignore = "explicit Windows libmpv restore regression; set SURTITLE_TEST_FFMPEG; requires prepared native DLLs"]
+#[ignore = "run by required Windows native CI; requires SURTITLE_TEST_FFMPEG and prepared native DLLs"]
 fn real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks() {
     use std::sync::{
         Arc,

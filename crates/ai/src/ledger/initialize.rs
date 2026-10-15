@@ -31,6 +31,10 @@ impl AiStore {
             development: None,
             #[cfg(test)]
             clock: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(TEST_NOW_MS)),
+            // Dependency builds remain on real time until a test explicitly
+            // freezes this store. Unit tests above retain their fixed epoch.
+            #[cfg(all(not(test), feature = "test-support"))]
+            clock: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(i64::MIN)),
         };
         let conn = store.connect()?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;

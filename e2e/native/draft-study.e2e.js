@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
+import { nativeArtifact } from '../support/native-artifacts.mjs';
+import { nativeSurfaceSettled as draftSurfaceSettled, invokeNative as invoke, expectNativeRejection, restartNativeSession, prepareNativeSession, clickNative, replaceNativeValue } from '../support/native-app.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
@@ -8,18 +10,12 @@ import { withReadOnlyDatabase } from '../support/native-e2e-database.mjs';
 
 // These authored subtitles accompany digital silence. This suite verifies local
 // transport and persistence, not audible speech, transcript quality or listening.
-// It never adopts/resolves the shared source jobs or opens an OS file dialog.
+// It never adopts/resolves its source jobs or opens an OS file dialog.
+export { draftSurfaceSettled };
+
 const mediaId = 'e2e-transcript-review';
 const pendingMediaId = 'e2e-transcript-pending';
 const term = 'Draft study transport fixture';
-const invoke = async (command, args = {}) => {
-  const result = await browser.execute(async (name, parameters) => {
-    try { return { succeeded: true, payload: await window.__TAURI_INTERNALS__.invoke(name, parameters) }; }
-    catch (error) { return { succeeded: false, reason: String(error?.message ?? error).slice(0, 2000) }; }
-  }, command, args);
-  if (!result.succeeded) throw new Error(`IPC ${command}: ${result.reason}`);
-  return result.payload;
-};
 const snapshot = () => invoke('get_app_snapshot');
 const review = jobId => invoke('get_transcript_review', { jobId });
 const list = (id = mediaId) => invoke('list_draft_selections', { mediaId: id });
@@ -59,11 +55,7 @@ function update(selection, changes) {
   return invoke('update_draft_selection', { request: { id: selection.id, version: selection.version,
     text: selection.text, startMs: selection.startMs, endMs: selection.endMs, confirm: false, ...changes } });
 }
-async function ready() {
-  await browser.setTimeout({ script: 180000 });
-  await browser.waitUntil(() => browser.execute(() => !!window.__TAURI_INTERNALS__));
-  await $('h1').waitForDisplayed();
-}
+const ready = prepareNativeSession;
 async function dismissSuccessToasts() {
   // Success messages are dismissible UI buttons. Leave error messages visible
   // so a failed operation cannot be hidden by the navigation helper.
@@ -71,25 +63,10 @@ async function dismissSuccessToasts() {
     const toast = $('button.toast.success');
     if (!(await toast.isExisting())) return;
     await toast.waitForClickable();
-    await toast.click();
+    await clickNative(toast);
     await toast.waitForExist({ reverse: true });
   }
   assert.fail('Unexpected continuous success notifications');
-}
-export function draftSurfaceSettled(node) {
-  const region = node.closest('[role="dialog"], .study-companion') ?? node;
-  if (region.closest('.study-companion-dock')?.dataset.moving === 'true') return false;
-  // Motion values update disclosure height and study-tab transforms without
-  // creating native Web Animations. WebKit can retain the zero translation
-  // after the tab reaches its endpoint; only nonzero transforms block a click.
-  const movingRegions = region.querySelectorAll('details[data-motion-state], .motion-region, .study-motion-region');
-  for (const surface of movingRegions) {
-    const transform = surface.style.transform;
-    if (surface.style.height || surface.style.overflow === 'hidden' ||
-        (surface.classList.contains('study-motion-region') && transform && !['none', 'translateX(0px)'].includes(transform))) return false;
-  }
-  return region.getAnimations({ subtree: true }).every(animation =>
-    (!animation.pending && animation.playState !== 'running') || animation.effect?.getTiming().iterations === Infinity);
 }
 async function scrollVisible(element) {
   await element.waitForExist();
@@ -107,24 +84,17 @@ async function clickVisible(element) {
   await dismissSuccessToasts();
   await scrollVisible(element);
   await element.waitForClickable();
-  await element.click();
+  await clickNative(element);
 }
 async function replaceValue(element, value) {
-  // Native WebDriver clear() can leave React's controlled value unchanged.
-  // Select and delete through keyboard input, then verify the actual value.
-  await element.waitForEnabled();
-  await clickVisible(element);
-  await browser.keys([Key.Control, 'a']);
-  await browser.keys(Key.Backspace);
-  await expect(element).toHaveValue('');
-  if (value) await element.addValue(value);
-  await expect(element).toHaveValue(value);
+  await dismissSuccessToasts();
+  await replaceNativeValue(element, value);
 }
 async function openDraft(id = mediaId) {
   await browser.execute(path => { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, `/study/${id}`);
   const transcript = $('.study-transcript-toggle');
   await transcript.waitForClickable();
-  if ((await transcript.getAttribute('aria-expanded')) !== 'true') await transcript.click();
+  if ((await transcript.getAttribute('aria-expanded')) !== 'true') await clickNative(transcript);
   const transcriptionTab = $('.transcript-tabs').$('button=Transcription');
   await clickVisible(transcriptionTab);
   await expect(transcriptionTab).toHaveAttribute('aria-selected', 'true');
@@ -190,7 +160,7 @@ function assertPcm(path, expectedMilliseconds) {
   return hash(bytes);
 }
 
-(process.env.SURTITLE_E2E_TRANSCRIPT_REVIEW === 'boundary' ? describe : describe.skip)('open earlier draft excerpts as an optional compatibility workflow', () => {
+describe('open earlier draft excerpts as an optional compatibility workflow', () => {
   before(async () => {
     await ready();
     const state = await snapshot();
@@ -252,10 +222,10 @@ function assertPcm(path, expectedMilliseconds) {
 
   it('03 rejects unconfirmed cards and edits outside the original source interval', async () => {
     const before = storedSelection(selected.id);
-    await assert.rejects(invoke('save_draft_selection_card', { request: { selectionId: selected.id, version: selected.version, term, meaning: 'Must not be saved.' } }), /confirmed|Confirm/i);
-    await assert.rejects(update(selected, { startMs: selected.sourceStartMs - 1 }));
-    await assert.rejects(update(selected, { endMs: selected.sourceEndMs + 1 }));
-    await assert.rejects(update(selected, { text: '', confirm: true }));
+    await expectNativeRejection(invoke('save_draft_selection_card', { request: { selectionId: selected.id, version: selected.version, term, meaning: 'Must not be saved.' } }), /confirmed|Confirm/i);
+    await expectNativeRejection(update(selected, { startMs: selected.sourceStartMs - 1 }), /range is outside its original source/i);
+    await expectNativeRejection(update(selected, { endMs: selected.sourceEndMs + 1 }), /range is outside its original source/i);
+    await expectNativeRejection(update(selected, { text: '', confirm: true }), /confirmed draft study selection requires text/i);
     assert.deepEqual(storedSelection(selected.id), before);
     assert(!(await snapshot()).cards.some(item => item.term === term));
     await assertOriginals();
@@ -266,9 +236,9 @@ function assertPcm(path, expectedMilliseconds) {
     selected = await update(selected, { text: 'Hello, local learner.' });
     assert.equal(selected.version, old.version + 1);
     assert.equal(selected.confirmed, false); assert.equal(selected.origin, 'manual'); assert.equal(selected.timing, 'manual');
-    await assert.rejects(update(old, { text: 'Stale overwrite.' }), /changed|version|reopen/i);
+    await expectNativeRejection(update(old, { text: 'Stale overwrite.' }), /changed|version|reopen/i);
     assert.deepEqual(storedSelection(selected.id).sourceSnapshot, originalBinding);
-    await browser.reloadSession(); await ready();
+    await restartNativeSession();
     assert.deepEqual((await list()).find(item => item.id === selected.id), selected);
     await openBookmark(selected);
     assert.equal(await editor().$('textarea').getValue(), selected.text);
@@ -294,7 +264,7 @@ function assertPcm(path, expectedMilliseconds) {
     await expect(dialog.$('button=Save card and audio')).toBeDisabled();
     await clickVisible(dialog.$('button=Close'));
     await dialog.waitForExist({ reverse: true });
-    await browser.reloadSession(); await ready(); await openBookmark(selected);
+    await restartNativeSession(); await openBookmark(selected);
     await expect(editor().$('button=Create an audio card')).toBeEnabled();
     await expect(editor().$('.badge')).toHaveText('Checked for learning');
     await assertOriginals();
@@ -331,7 +301,7 @@ function assertPcm(path, expectedMilliseconds) {
   it('07 keeps the saved card immutable when its bookmark changes and refuses stale card requests', async () => {
     selected = await update(selected, { text: 'A later local edit.', startMs: 600, endMs: 900 });
     assert.equal(selected.confirmed, false);
-    await assert.rejects(invoke('save_draft_selection_card', { request: { selectionId: selected.id, version: confirmedVersion, term: `${term} stale`, meaning: 'Must not be saved.' } }), /changed|version|reopen/i);
+    await expectNativeRejection(invoke('save_draft_selection_card', { request: { selectionId: selected.id, version: confirmedVersion, term: `${term} stale`, meaning: 'Must not be saved.' } }), /changed|version|reopen/i);
     assert.deepEqual((await snapshot()).cards.find(item => item.id === card.id), card);
     assert.equal(hash(readFileSync(card.audioPath)), audioHash);
     assert.deepEqual(storedSelection(selected.id).sourceSnapshot, originalBinding);
@@ -345,7 +315,7 @@ function assertPcm(path, expectedMilliseconds) {
     assert(Date.parse(ratedCard.dueAt) > Date.parse(card.dueAt));
     const reviews = readDatabase('learning.sqlite', db => db.prepare('SELECT data FROM reviews WHERE card_id=? ORDER BY id').all(card.id));
     assert.equal(reviews.length, 1);
-    await browser.reloadSession(); await ready();
+    await restartNativeSession();
     assert.deepEqual((await snapshot()).cards.find(item => item.id === card.id), ratedCard);
     assert.deepEqual((await list()).find(item => item.id === selected.id), selected);
     assert.deepEqual(readDatabase('learning.sqlite', db => db.prepare('SELECT data FROM reviews WHERE card_id=? ORDER BY id').all(card.id)), reviews);
@@ -363,13 +333,13 @@ function assertPcm(path, expectedMilliseconds) {
     assert.equal(chunk.status, 'pending');
     pendingSelection = await update(pendingSelection, { text: 'An unchecked source-block note.', startMs: 7200, endMs: 7600 });
     assert.equal(pendingSelection.confirmed, false); assert.equal(pendingSelection.timing, 'manual');
-    await browser.reloadSession(); await ready();
+    await restartNativeSession();
     assert.deepEqual((await list(pendingMediaId)).find(item => item.id === pendingSelection.id), pendingSelection);
     await assertOriginals();
   });
 
   it('10 keeps card audio usable after removing its source bookmark and preserves the original responses', async () => {
-    await assert.rejects(invoke('remove_draft_selection', { request: { id: selected.id, version: confirmedVersion } }), /changed|version|reopen/i);
+    await expectNativeRejection(invoke('remove_draft_selection', { request: { id: selected.id, version: confirmedVersion } }), /changed|version|reopen/i);
     await invoke('remove_draft_selection', { request: { id: selected.id, version: selected.version } });
     ownedSelections.delete(selected.id);
     assert(!(await list()).some(item => item.id === selected.id));
@@ -383,7 +353,7 @@ function assertPcm(path, expectedMilliseconds) {
     }
     await assertOriginals();
     await openDraft();
-    await browser.saveScreenshot(resolve('test-results/native/draft-study-local-chain.png'));
+    await browser.saveScreenshot(nativeArtifact('draft-study-local-chain.png'));
     console.info('Draft study: 10 fixed transport tasks; no human listening or cloud quality assessment. Portable bookmark detachment is covered by core archive tests; native ZIP/restore remains in the separate transcript suite.');
   });
 
