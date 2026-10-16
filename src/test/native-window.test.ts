@@ -30,7 +30,7 @@ it('prevents disposed close callbacks from overriding a newer unsaved-input guar
   let complete!: (stop: () => void) => void;
   fixture.register.mockReturnValue(new Promise(resolve => { complete = resolve; }));
   const shouldPrevent = vi.fn(() => true);
-  const dispose = subscribeWindowClose(shouldPrevent, vi.fn());
+  const dispose = subscribeWindowClose(shouldPrevent, { onError: vi.fn() });
   const callback = fixture.register.mock.calls[0][0];
   dispose();
   const event = { preventDefault: vi.fn() };
@@ -47,7 +47,10 @@ it('allows clean closure and prevents protected closure', async () => {
   const stop = vi.fn();
   fixture.register.mockResolvedValue(stop);
   const predicate = vi.fn(() => false);
-  const dispose = subscribeWindowClose(predicate, vi.fn());
+  let finish!: () => void;
+  let pending = true;
+  const unregister = registerCloseTask(() => new Promise<void>(resolve => { finish = () => { pending = false; resolve(); }; }), () => pending);
+  const dispose = subscribeWindowClose(predicate, { onError: vi.fn() });
   await Promise.resolve();
   const event = { preventDefault: vi.fn() };
   fixture.register.mock.calls[0][0](event);
@@ -55,6 +58,9 @@ it('allows clean closure and prevents protected closure', async () => {
   predicate.mockReturnValue(true);
   fixture.register.mock.calls[0][0](event);
   expect(event.preventDefault).toHaveBeenCalledOnce();
+  expect(fixture.destroy).not.toHaveBeenCalled();
+  finish(); await closeWindow();
+  unregister();
   dispose();
   expect(stop).toHaveBeenCalledOnce();
 });
@@ -62,16 +68,86 @@ it('allows clean closure and prevents protected closure', async () => {
 it('aggregates clean and pending editors through one native listener', async () => {
   const stop = vi.fn(); fixture.register.mockResolvedValue(stop);
   const clean = vi.fn(() => false), pending = vi.fn(() => true);
-  const disposeClean = subscribeWindowClose(clean, vi.fn());
-  const disposePending = subscribeWindowClose(pending, vi.fn());
+  const disposeClean = subscribeWindowClose(clean, { onError: vi.fn() });
+  const disposePending = subscribeWindowClose(pending, { onError: vi.fn() });
   await Promise.resolve();
   expect(fixture.register).toHaveBeenCalledOnce();
   const event = { preventDefault: vi.fn() };
   fixture.register.mock.calls[0][0](event);
   expect(clean).toHaveBeenCalledOnce(); expect(pending).toHaveBeenCalledOnce();
   expect(event.preventDefault).toHaveBeenCalledOnce();
+  await closeWindow();
   disposeClean(); expect(stop).not.toHaveBeenCalled();
   disposePending(); expect(stop).toHaveBeenCalledOnce();
+});
+
+it('runs native and direct close requests through one task drain without another native close event', async () => {
+  fixture.register.mockResolvedValue(vi.fn());
+  let finish!: () => void;
+  let pending = true;
+  const run = vi.fn(() => new Promise<void>(resolve => { finish = () => { pending = false; resolve(); }; }));
+  const remove = registerCloseTask(run, () => pending);
+  const observer = { onStart: vi.fn(), onError: vi.fn(), onSettled: vi.fn() };
+  const dispose = subscribeWindowClose(hasPendingCloseTasks, observer);
+  try {
+    const event = { preventDefault: vi.fn() };
+    fixture.register.mock.calls[0][0](event);
+    fixture.register.mock.calls[0][0](event);
+    const direct = closeWindow();
+    expect(run).toHaveBeenCalledOnce(); expect(observer.onStart).toHaveBeenCalledOnce();
+    expect(event.preventDefault).toHaveBeenCalledTimes(2);
+    finish(); await direct; await Promise.resolve();
+    expect(fixture.destroy).toHaveBeenCalledOnce(); expect(fixture.close).not.toHaveBeenCalled();
+    expect(observer.onError).not.toHaveBeenCalled(); expect(observer.onSettled).toHaveBeenCalledOnce();
+  } finally { remove(); dispose(); }
+});
+
+it('keeps native closure retryable after persistence fails', async () => {
+  fixture.register.mockResolvedValue(vi.fn());
+  let pending = true;
+  const run = vi.fn().mockRejectedValueOnce(new Error('disk full')).mockImplementation(async () => { pending = false; });
+  const remove = registerCloseTask(run, () => pending);
+  const observer = { onError: vi.fn(), onSettled: vi.fn() };
+  const dispose = subscribeWindowClose(hasPendingCloseTasks, observer);
+  try {
+    const request = fixture.register.mock.calls[0][0];
+    request({ preventDefault: vi.fn() });
+    await expect(closeWindow()).rejects.toThrow('disk full'); await Promise.resolve();
+    expect(fixture.destroy).not.toHaveBeenCalled(); expect(observer.onError).toHaveBeenCalledOnce();
+    request({ preventDefault: vi.fn() });
+    await closeWindow();
+    expect(run).toHaveBeenCalledTimes(2); expect(fixture.destroy).toHaveBeenCalledOnce();
+  } finally { remove(); dispose(); }
+});
+
+it('does not execute close tasks when a native guard fails', async () => {
+  fixture.register.mockResolvedValue(vi.fn());
+  const run = vi.fn(async () => {}), error = new Error('guard failed');
+  const remove = registerCloseTask(run);
+  const observer = { onError: vi.fn() };
+  const dispose = subscribeWindowClose(() => { throw error; }, observer);
+  try {
+    const event = { preventDefault: vi.fn() };
+    fixture.register.mock.calls[0][0](event);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(observer.onError).toHaveBeenCalledWith(error);
+    expect(run).not.toHaveBeenCalled(); expect(fixture.destroy).not.toHaveBeenCalled();
+  } finally { remove(); dispose(); }
+});
+
+it('reports a failed native listener registration and reconnects for a later subscriber', async () => {
+  const failure = new Error('listener unavailable');
+  fixture.register.mockRejectedValueOnce(failure).mockResolvedValue(vi.fn());
+  const observer = { onError: vi.fn() };
+  const removeFirst = subscribeWindowClose(() => false, observer);
+  await Promise.resolve(); await Promise.resolve();
+  expect(observer.onError).toHaveBeenCalledWith(failure);
+  const removeSecond = subscribeWindowClose(() => false, { onError: vi.fn() });
+  expect(fixture.register).toHaveBeenCalledTimes(2);
+  const event = { preventDefault: vi.fn() };
+  fixture.register.mock.calls[1][0](event);
+  expect(event.preventDefault).not.toHaveBeenCalled();
+  removeFirst(); removeSecond();
 });
 
 it('tracks detached pending work and coalesces simultaneous close requests', async () => {

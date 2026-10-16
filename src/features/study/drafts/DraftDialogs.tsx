@@ -3,8 +3,7 @@ import { useMounted } from './lifecycle';
 import { draftCardEditor } from './card-draft';
 import { uiDraftApi } from '../../../shared/editing/drafts';
 import { useEditingSession } from '../../../shared/editing/useEditingSession';
-import { nativeAvailable } from '../../../shared/native/transport';
-import { closeWindow, registerCloseTask, subscribeWindowClose } from '../../../shared/native/window';
+import { registerCloseTask } from '../../../shared/native/window';
 import { useEffect, useRef, useState } from 'react';
 import { AnimatedDetails } from '../../../shared/ui/AnimatedDetails';
 
@@ -91,16 +90,7 @@ export function DraftCardDialog({
     });
     // The operation and close task outlive the mounted dialog, including route changes.
     const unregister = registerCloseTask(async () => { await task; if (!await session.flush()) throw new Error('Could not preserve phrase input'); }, () => true);
-    let nativeClosePending = false;
-    const unsubscribe = nativeAvailable() ? subscribeWindowClose(() => {
-      if (!nativeClosePending) {
-        nativeClosePending = true;
-        void task.then(() => closeWindow()).catch(cause => { nativeClosePending = false; void report(() => Promise.reject(cause)); });
-      }
-      return true;
-    }, cause => { void report(() => Promise.reject(cause)); }) : () => {};
-    const result = await task;
-    unregister(); unsubscribe();
+    const result = await task.finally(unregister);
     locked.current = false;
     if (!mounted.current) return;
     setBusy(false);

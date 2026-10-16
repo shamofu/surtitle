@@ -5,9 +5,9 @@ import { DraftCardDialog } from '../features/study/drafts/DraftDialogs';
 import { draftStudyApi, type DraftSelection } from '../features/study/drafts/api';
 import { uiDraftApi } from '../shared/editing/drafts';
 import type { UiDraft } from '../shared/contracts/editing';
-import { closeWindow } from '../shared/native/window';
+import { hasPendingCloseTasks, subscribeWindowClose } from '../shared/native/window';
 
-const fixture = vi.hoisted(() => ({ records: new Map<string, UiDraft>(), serial: 0, close: undefined as (() => boolean) | undefined }));
+const fixture = vi.hoisted(() => ({ records: new Map<string, UiDraft>(), serial: 0, destroy: vi.fn(), close: undefined as (() => boolean) | undefined }));
 vi.mock('../app/providers/Activities', () => import('./activity-fixture'));
 vi.mock('../app/runtime', () => ({
   useDataActions: () => ({ mutate: (action: () => Promise<unknown>) => action() }),
@@ -16,10 +16,17 @@ vi.mock('../app/runtime', () => ({
   useSnapshot: () => ({}), useSurface: () => ({ registerModal: () => () => {} }),
 }));
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => true }));
-vi.mock('../shared/native/window', () => ({
-  closeWindow: vi.fn().mockResolvedValue(undefined), registerCloseTask: () => () => {},
-  subscribeWindowClose: (handler: () => boolean) => { fixture.close = handler; return () => { fixture.close = undefined; }; },
-}));
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({
+  destroy: fixture.destroy,
+  onCloseRequested: async (callback: (event: { preventDefault: () => void }) => void) => {
+    fixture.close = () => {
+      let prevented = false;
+      callback({ preventDefault: () => { prevented = true; } });
+      return prevented;
+    };
+    return () => { fixture.close = undefined; };
+  },
+}) }));
 vi.mock('../shared/editing/drafts', () => ({ uiDraftApi: {
   get: vi.fn(async (_kind: string, id: string) => fixture.records.get(id) ?? null),
   save: vi.fn(async (kind: UiDraft['kind'], entityId: string, revision: number, fields: Record<string,string>) => {
@@ -87,16 +94,18 @@ it('waits for explicit card save before closing and consumes only its durable in
 });
 
 it('retains failed card input while a pending native close waits even after unmount', async () => {
+  const stop = subscribeWindowClose(hasPendingCloseTasks, { onError: vi.fn() });
   const source = selection(); let fail!: (cause: Error) => void;
   vi.mocked(draftStudyApi.saveCard).mockImplementationOnce(() => new Promise((_resolve,reject) => { fail = reject; }));
   const view = render(<DraftCardDialog selection={source} onClose={vi.fn()} />); await ready(); fill();
   fireEvent.click(screen.getByRole('button', { name: 'Save card and audio' }));
   await waitFor(() => expect(draftStudyApi.saveCard).toHaveBeenCalledOnce());
   expect(fixture.close?.()).toBe(true); expect(fixture.close?.()).toBe(true);
-  view.unmount(); expect(closeWindow).not.toHaveBeenCalled();
+  view.unmount(); expect(fixture.destroy).not.toHaveBeenCalled();
   await act(async () => fail(Error('audio unavailable')));
-  await waitFor(() => expect(closeWindow).toHaveBeenCalledOnce());
+  await waitFor(() => expect(fixture.destroy).toHaveBeenCalledOnce());
   expect(fixture.records.get(source.id)?.fields.meaning).toBe('meaning');
+  stop();
 });
 
 it('keeps the editor open when durable storage fails', async () => {

@@ -15,7 +15,7 @@ import { SettingsPage } from '../features/settings/SettingsPage';
 import type { AppSnapshot } from '../shared/contracts/snapshot';
 
 vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn(), useBlocker: () => ({ status: 'idle' }) }));
-vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, registerCloseTask: () => () => {}, closeWindow: vi.fn() }));
+vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, registerCloseTask: () => () => {}, hasPendingCloseTasks: () => false, closeWindow: vi.fn() }));
 
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,

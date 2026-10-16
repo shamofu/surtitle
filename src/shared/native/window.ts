@@ -6,32 +6,62 @@ import type { AppSettings } from '../contracts/settings';
 export const setWindowTheme = (theme: AppSettings['theme']) =>
   getCurrentWindow().setTheme(theme === 'system' ? null : theme);
 
-type CloseGuard = { prevent: () => boolean; error: (error: unknown) => void };
+type NativeCloseObserver = {
+  onStart?: () => void;
+  onError: (error: unknown) => void;
+  onSettled?: () => void;
+};
+type CloseGuard = { shouldWait: () => boolean; observer: NativeCloseObserver };
 const guards = new Set<CloseGuard>();
 let connection: { active: boolean; stop?: () => void } | undefined;
+let nativeClosing: Promise<void> | undefined;
+
+function reportCloseError(guard: CloseGuard, error: unknown) {
+  if (!guards.has(guard)) return;
+  try { guard.observer.onError(error); } catch { /* Reporting must not resume or interrupt a close attempt. */ }
+}
+
+function observeClose(guard: CloseGuard, event: 'onStart' | 'onSettled') {
+  if (!guards.has(guard)) return;
+  try { guard.observer[event]?.(); } catch (error) { reportCloseError(guard, error); }
+}
 
 /** One physical Tauri listener aggregates every guard before allowing destruction. */
-export function subscribeWindowClose(shouldPrevent: () => boolean, onError: (error: unknown) => void): () => void {
-  const guard = { prevent: shouldPrevent, error: onError }; guards.add(guard);
+export function subscribeWindowClose(shouldWait: () => boolean, observer: NativeCloseObserver): () => void {
+  const guard = { shouldWait, observer }; guards.add(guard);
   if (!connection) {
     const own = { active: true, stop: undefined as (() => void) | undefined }; connection = own;
     const fail = (error: unknown) => {
       if (!own.active) return;
       own.active = false; if (connection === own) connection = undefined;
-      guards.forEach(item => item.error(error));
+      guards.forEach(item => reportCloseError(item, error));
     };
     try {
       void getCurrentWindow().onCloseRequested(event => {
         // A late callback from a disposed subscription must never override a
         // newer guard. Tauri otherwise destroys after EACH listener returns.
         if (!own.active || !guards.size) { event.preventDefault(); return; }
-        let blocked = false;
+        if (nativeClosing) { event.preventDefault(); return; }
+        let blocked = !!closing;
+        let failed = false;
         for (const item of [...guards]) {
           if (!guards.has(item)) continue;
-          try { blocked = item.prevent() || blocked; }
-          catch (error) { blocked = true; item.error(error); }
+          try { blocked = item.shouldWait() || blocked; }
+          catch (error) { blocked = true; failed = true; reportCloseError(item, error); }
         }
-        if (blocked) event.preventDefault();
+        if (!blocked) return;
+        event.preventDefault();
+        if (failed) return;
+        const observers = [...guards];
+        observers.forEach(item => observeClose(item, 'onStart'));
+        // Native requests and direct closes share the same task drain and destroy.
+        // Participants only observe the attempt; none starts another close loop.
+        const attempt = closeWindow();
+        nativeClosing = attempt;
+        void attempt.catch(error => observers.forEach(item => reportCloseError(item, error))).finally(() => {
+          if (nativeClosing === attempt) nativeClosing = undefined;
+          observers.forEach(item => observeClose(item, 'onSettled'));
+        });
       }).then(stop => { if (!own.active) stop(); else own.stop = stop; }).catch(fail);
     } catch (error) { fail(error); }
   }
@@ -59,7 +89,6 @@ async function flushUntilStable() {
     if (revision === closeTaskRevision && !hasPendingCloseTasks()) return revision;
   }
 }
-export async function flushCloseTasks() { await flushUntilStable(); }
 export const requestWindowClose = () => getCurrentWindow().close();
 let closing: Promise<void> | undefined;
 export function closeWindow() {

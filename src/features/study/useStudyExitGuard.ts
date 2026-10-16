@@ -16,8 +16,8 @@ export function useStudyExitGuard(dirty: boolean, saving: boolean, onDiscard: ()
   useEffect(() => { if (!saving) saveWaiters.current.splice(0).forEach(resolve => resolve()); }, [saving]);
   const waitForSave = useCallback(() => latestSaving.current
     ? new Promise<void>(resolve => saveWaiters.current.push(resolve)) : Promise.resolve(), []);
-  // Direct closeWindow calls (including detached card creation) must honor this
-  // save too; a separate preventDefault guard alone cannot delay destruction.
+  // Direct closeWindow calls must honor this save too; a separate preventDefault
+  // guard alone cannot delay destruction.
   useEffect(() => registerCloseTask(async () => {
     await waitForSave();
     if (latestDirty.current && !latestBeforeLeave.current) throw new Error('Save unfinished input before closing.');
@@ -50,18 +50,26 @@ export function useStudyExitGuard(dirty: boolean, saving: boolean, onDiscard: ()
 
   useEffect(() => {
     if (!nativeAvailable()) return;
-    return subscribeWindowClose(() => {
-      if (!latest.current && !latestBeforeLeave.current) return false;
-      if (closePending.current) return true;
-      if (!latestSaving.current && !latestBeforeLeave.current) { setNativeClose(true); return true; }
-      closePending.current = true;
-      setClosing(true);
-      void waitForSave().then(() => latestBeforeLeave.current?.()).then(closeWindow).catch(cause => {
-        setError(cause instanceof Error ? cause.message : String(cause)); setNativeClose(true);
-      }).finally(() => { closePending.current = false; setClosing(false); });
-      return true;
-    }, cause => notify(String(cause), 'error'));
-  }, [notify, waitForSave]);
+    let participating = false;
+    const shouldWait = () => latest.current || !!latestBeforeLeave.current;
+    return subscribeWindowClose(shouldWait, {
+      onStart: () => {
+        participating = shouldWait();
+        if (participating) { closePending.current = true; setClosing(true); }
+      },
+      onError: cause => {
+        if (!participating) { notify(String(cause), 'error'); return; }
+        // Without a persistence handler the dialog can only keep editing; an
+        // error would misleadingly offer a retry that cannot save anything.
+        setError(latestBeforeLeave.current ? cause instanceof Error ? cause.message : String(cause) : '');
+        setNativeClose(true);
+      },
+      onSettled: () => {
+        if (participating) { closePending.current = false; setClosing(false); }
+        participating = false;
+      },
+    });
+  }, [notify]);
 
   function keepEditing() {
     if (closePending.current) return;
@@ -84,9 +92,8 @@ export function useStudyExitGuard(dirty: boolean, saving: boolean, onDiscard: ()
     if (saving || closePending.current || !beforeLeave) return false;
     setClosing(true); setError(''); closePending.current = true;
     try {
-      await beforeLeave();
       if (nativeClose) await closeWindow();
-      else if (blocker.status === 'blocked') blocker.proceed();
+      else { await beforeLeave(); if (blocker.status === 'blocked') blocker.proceed(); }
       return true;
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); return false; }
     finally { closePending.current = false; setClosing(false); }
