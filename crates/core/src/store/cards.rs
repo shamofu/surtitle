@@ -1,4 +1,74 @@
 use super::*;
+use rusqlite::{Transaction, TransactionBehavior};
+
+/// Immutable input for local audio extraction, not authority to save a card.
+/// Saving rechecks the current source in the same transaction as the card write.
+pub struct CardSourceSnapshot {
+    media: Media,
+    cues: Vec<SubtitleSegment>,
+    range: AudioClipRange,
+}
+
+impl CardSourceSnapshot {
+    pub fn media(&self) -> &Media {
+        &self.media
+    }
+
+    pub fn cues(&self) -> &[SubtitleSegment] {
+        &self.cues
+    }
+
+    pub fn range(&self) -> AudioClipRange {
+        self.range
+    }
+}
+
+fn selected_source_range(request: &SaveCard, cues: &[SubtitleSegment]) -> Result<AudioClipRange> {
+    let start_ms = cues[0].start_ms;
+    let end_ms = cues
+        .iter()
+        .map(|cue| cue.end_ms)
+        .max()
+        .context("missing card source")?;
+    let range = request
+        .source_range
+        .unwrap_or(AudioClipRange { start_ms, end_ms });
+    ensure!(
+        range.start_ms < range.end_ms && range.end_ms - range.start_ms <= 180_000,
+        "Source range must be at most 180 seconds"
+    );
+    if request.source_range.is_some() {
+        ensure!(
+            cues.len() == 1
+                && cues[0].timing_precision == "source_block"
+                && range.start_ms >= start_ms
+                && range.end_ms <= end_ms,
+            "Only an audio source block can use a selected card range"
+        );
+    }
+    Ok(range)
+}
+
+pub(super) fn validate_card_fields(request: &SaveCard) -> Result<()> {
+    ensure!(
+        !request.term.trim().is_empty() && request.term.len() < 4096,
+        "enter a term"
+    );
+    ensure!(
+        request.meaning.len() < 64 * 1024
+            && request.example.len() < 64 * 1024
+            && request
+                .translation
+                .as_ref()
+                .is_none_or(|s| s.len() < 64 * 1024)
+            && request
+                .explanation
+                .as_ref()
+                .is_none_or(|s| s.len() < 64 * 1024),
+        "card is too large"
+    );
+    Ok(())
+}
 
 impl Store {
     /// Resolve the complete source from the DB. IPC timestamps and cue ordering
@@ -13,8 +83,24 @@ impl Store {
             ids.len() <= 64 && ids.first() == Some(&request.segment_id),
             "invalid card source cues"
         );
-        let all = self.list_segments(&request.media_id)?;
-        Ok(confirmed_cue_range(&all, &request.media_id, &ids)?
+        // Read consecutive rows, not just the requested IDs: a newly inserted
+        // subtitle between two selected cues must invalidate their adjacency.
+        let mut query = self.conn.prepare(
+            "SELECT data FROM segments WHERE media_id=?1 AND (start_ms,id) >= \
+             (SELECT start_ms,id FROM segments WHERE media_id=?1 AND id=?2) \
+             ORDER BY start_ms,id LIMIT ?3",
+        )?;
+        let rows = query
+            .query_map(
+                params![request.media_id, request.segment_id, ids.len() as i64],
+                |row| row.get::<_, String>(0),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let cues = rows
+            .iter()
+            .map(|json| Ok(serde_json::from_str(json)?))
+            .collect::<Result<Vec<SubtitleSegment>>>()?;
+        Ok(confirmed_cue_range(&cues, &request.media_id, &ids)?
             .cues
             .to_vec())
     }
@@ -22,29 +108,21 @@ impl Store {
     /// The immutable cue snapshot keeps the provider's original block bounds.
     pub fn card_source_range(&self, request: &SaveCard) -> Result<AudioClipRange> {
         let cues = self.card_source_cues(request)?;
-        let start_ms = cues[0].start_ms;
-        let end_ms = cues
-            .iter()
-            .map(|cue| cue.end_ms)
-            .max()
-            .context("missing card source")?;
-        let range = request
-            .source_range
-            .unwrap_or(AudioClipRange { start_ms, end_ms });
-        ensure!(
-            range.start_ms < range.end_ms && range.end_ms - range.start_ms <= 180_000,
-            "Source range must be at most 180 seconds"
-        );
-        if request.source_range.is_some() {
-            ensure!(
-                cues.len() == 1
-                    && cues[0].timing_precision == "source_block"
-                    && range.start_ms >= start_ms
-                    && range.end_ms <= end_ms,
-                "Only an audio source block can use a selected card range"
-            );
-        }
-        Ok(range)
+        selected_source_range(request, &cues)
+    }
+    /// Capture a consistent source, then release the database before extracting audio.
+    pub fn card_source_snapshot(&self, request: &SaveCard) -> Result<CardSourceSnapshot> {
+        let tx = self.conn.unchecked_transaction()?;
+        let source = self.resolve_card_source(request)?;
+        tx.commit()?;
+        Ok(source)
+    }
+
+    fn resolve_card_source(&self, request: &SaveCard) -> Result<CardSourceSnapshot> {
+        let media = self.media(&request.media_id)?;
+        let cues = self.card_source_cues(request)?;
+        let range = selected_source_range(request, &cues)?;
+        Ok(CardSourceSnapshot { media, cues, range })
     }
     pub fn save_card(&self, request: &SaveCard, audio_path: Option<String>) -> Result<StudyCard> {
         self.save_card_with_audio_range(request, audio_path, None)
@@ -55,27 +133,83 @@ impl Store {
         audio_path: Option<String>,
         audio_clip_range: Option<AudioClipRange>,
     ) -> Result<StudyCard> {
+        validate_card_fields(request)?;
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let card = self.insert_card_with_audio_range(request, audio_path, audio_clip_range)?;
+        tx.commit()?;
+        Ok(card)
+    }
+
+    // Callers validate fields and own the transaction, including draft consumption.
+    pub(super) fn insert_card_with_audio_range(
+        &self,
+        request: &SaveCard,
+        audio_path: Option<String>,
+        audio_clip_range: Option<AudioClipRange>,
+    ) -> Result<StudyCard> {
+        let source = self.resolve_card_source(request)?;
+        self.insert_card_from_source(request, source, audio_path, audio_clip_range)
+    }
+
+    /// Revalidate extracted audio against the current source and save atomically.
+    /// A snapshot can never bypass the current subtitle or editor-draft checks.
+    pub fn save_card_with_source_snapshot(
+        &self,
+        request: &SaveCard,
+        expected: &CardSourceSnapshot,
+        audio_path: Option<String>,
+        audio_clip_range: Option<AudioClipRange>,
+        draft: Option<&EditorDraftVersion>,
+    ) -> Result<StudyCard> {
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let current = self.card_source_cues(request);
+        // Keep media lookup errors ahead of the general changed-source error.
+        let media = self.media(&expected.media.id)?;
         ensure!(
-            !request.term.trim().is_empty() && request.term.len() < 4096,
-            "enter a term"
+            request.media_id == expected.media.id
+                && current.as_ref().is_ok_and(|cues| {
+                    serde_json::to_value(cues).ok() == serde_json::to_value(&expected.cues).ok()
+                })
+                && media.path == expected.media.path
+                && media.audio_stream_index == expected.media.audio_stream_index,
+            "The subtitle or media changed while preparing card audio. Save it again."
         );
+        let cues = current?;
+        if let Some(reference) = draft {
+            self.check_phrase_editor_draft(reference, request)?;
+        }
+        validate_card_fields(request)?;
+        let range = selected_source_range(request, &cues)?;
         ensure!(
-            request.meaning.len() < 64 * 1024
-                && request.example.len() < 64 * 1024
-                && request
-                    .translation
-                    .as_ref()
-                    .is_none_or(|s| s.len() < 64 * 1024)
-                && request
-                    .explanation
-                    .as_ref()
-                    .is_none_or(|s| s.len() < 64 * 1024),
-            "card is too large"
+            range == expected.range,
+            "The subtitle or media changed while preparing card audio. Save it again."
         );
-        let media = self.media(&request.media_id)?;
-        let source_cues = self.card_source_cues(request)?;
+        let card = self.insert_card_from_source(
+            request,
+            CardSourceSnapshot { media, cues, range },
+            audio_path,
+            audio_clip_range,
+        )?;
+        if let Some(reference) = draft {
+            self.delete_editor_draft(reference)?;
+        }
+        tx.commit()?;
+        Ok(card)
+    }
+
+    fn insert_card_from_source(
+        &self,
+        request: &SaveCard,
+        source: CardSourceSnapshot,
+        audio_path: Option<String>,
+        audio_clip_range: Option<AudioClipRange>,
+    ) -> Result<StudyCard> {
+        let CardSourceSnapshot {
+            media,
+            cues: source_cues,
+            range: source_range,
+        } = source;
         let segment = &source_cues[0];
-        let source_range = self.card_source_range(request)?;
         let end_ms = source_range.end_ms;
         if let Some(range) = audio_clip_range {
             ensure!(audio_path.is_some(), "Clip range requires saved audio");
@@ -189,6 +323,10 @@ impl Store {
         Ok(card)
     }
 }
+
+#[cfg(test)]
+#[path = "card_source_tests.rs"]
+mod source_tests;
 
 #[cfg(test)]
 mod tests {

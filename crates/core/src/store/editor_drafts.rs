@@ -337,6 +337,19 @@ impl Store {
         range: Option<AudioClipRange>,
     ) -> Result<StudyCard> {
         let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        self.check_phrase_editor_draft(reference, request)?;
+        super::cards::validate_card_fields(request)?;
+        let card = self.insert_card_with_audio_range(request, audio_path, range)?;
+        self.delete_editor_draft(reference)?;
+        tx.commit()?;
+        Ok(card)
+    }
+
+    pub(super) fn check_phrase_editor_draft(
+        &self,
+        reference: &EditorDraftVersion,
+        request: &SaveCard,
+    ) -> Result<()> {
         let draft = self.checked_editor_draft(reference, "phrase")?;
         let ids = if request.source_cue_ids.is_empty() {
             vec![request.segment_id.clone()]
@@ -358,10 +371,7 @@ impl Store {
                 "Card audio range changed; save the current draft before creating the card"
             );
         }
-        let card = self.save_card_with_audio_range(request, audio_path, range)?;
-        self.delete_editor_draft(reference)?;
-        tx.commit()?;
-        Ok(card)
+        Ok(())
     }
 }
 

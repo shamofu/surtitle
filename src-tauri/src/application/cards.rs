@@ -1,5 +1,4 @@
 use super::*;
-use anyhow::bail;
 use surtitle_core::SaveCard;
 type IpcResult<T> = std::result::Result<T, String>;
 pub async fn save_card(
@@ -24,15 +23,10 @@ pub async fn save_card_with_editor_draft(
             operation_id.as_deref(),
         )
         .await?;
-        let (media, source_cues, selected_range) = {
-            let db = lock(&state.db)?;
-            (
-                db.media(&request.media_id)?,
-                db.card_source_cues(&request)?,
-                db.card_source_range(&request)?,
-            )
-        };
-        let mut segment = source_cues[0].clone();
+        let source = lock(&state.db)?.card_source_snapshot(&request)?;
+        let media = source.media();
+        let selected_range = source.range();
+        let mut segment = source.cues()[0].clone();
         segment.start_ms = selected_range.start_ms;
         segment.end_ms = selected_range.end_ms;
         let clip_range = surtitle_core::replay_range(
@@ -44,29 +38,21 @@ pub async fn save_card_with_editor_draft(
         // FFmpeg is a first-use dependency. Failure leaves no partially saved card.
         let audio = crate::application::media_tools::extract_card_audio(
             &state,
-            &media,
+            media,
             &segment,
             clip_range,
             operation_id.as_deref(),
         )
         .await?;
         let db = lock(&state.db)?;
-        let current = db.card_source_cues(&request);
-        let current_media = db.media(&media.id)?;
-        let unchanged = current.is_ok_and(|cues| {
-            serde_json::to_value(&cues).ok() == serde_json::to_value(&source_cues).ok()
-        }) && current_media.path == media.path
-            && current_media.audio_stream_index == media.audio_stream_index;
-        if !unchanged {
-            let _ = std::fs::remove_file(audio);
-            bail!("The subtitle or media changed while preparing card audio. Save it again.");
-        }
         let audio_path = Some(audio.to_string_lossy().into_owned());
-        let saved = if let Some(reference) = &draft {
-            db.save_card_from_editor_draft(reference, &request, audio_path, Some(clip_range))
-        } else {
-            db.save_card_with_audio_range(&request, audio_path, Some(clip_range))
-        };
+        let saved = db.save_card_with_source_snapshot(
+            &request,
+            &source,
+            audio_path,
+            Some(clip_range),
+            draft.as_ref(),
+        );
         if saved.is_err() {
             let _ = std::fs::remove_file(&audio);
         }
