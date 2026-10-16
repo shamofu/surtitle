@@ -59,6 +59,12 @@ struct PreparationCancellation {
     local: Arc<std::sync::atomic::AtomicBool>,
     network: surtitle_tools::CancellationToken,
 }
+impl PreparationCancellation {
+    fn cancel(&self) {
+        self.local.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.network.cancel();
+    }
+}
 pub struct RestorePlan {
     pub snapshot: crate::restore_snapshot::RestoreSnapshot,
     pub archive: surtitle_core::LearningArchive,

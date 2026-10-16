@@ -105,10 +105,7 @@ struct PreparationReservation {
 }
 impl Drop for PreparationReservation {
     fn drop(&mut self) {
-        self.cancel
-            .local
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        self.cancel.network.cancel();
+        self.cancel.cancel();
         if let Ok(mut current) = lock(&self.state.ai_session.preparation)
             && current
                 .as_ref()
@@ -274,10 +271,7 @@ pub fn cancel_preparation_with_operation(
         if let Some(cancel) = lock(&state.ai_session.preparation)?.as_ref()
             && operation_id.as_ref().is_none_or(|id| id == &cancel.id)
         {
-            cancel
-                .local
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            cancel.network.cancel();
+            cancel.cancel();
         }
         Ok(())
     })()
