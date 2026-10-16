@@ -6,6 +6,7 @@ import { call } from '../native/transport';
 import { subscribeNative } from '../native/events';
 import { subscribeRecovery } from '../native/recovery';
 import { queryKeys } from './keys';
+import { matchesQueryTarget } from './targets';
 
 const snapshotDomains: readonly SnapshotDomain[] = ['media', 'cards', 'settings', 'tools', 'jobs', 'budget'];
 interface Source {
@@ -30,11 +31,9 @@ export const synchronizationApi = {
 /** Domain/entity matching is independent of playback and unrelated active queries. */
 export function changedDomainKey(domain: ChangeDomain, entity: string | undefined, key: QueryKey) {
   if (domain === 'restore') return true;
-  if (domain === 'downloads' || domain === 'operations') return key[0] === domain;
-  if (domain === 'review' || domain === 'jobs') return key[0] === 'review' && (!entity || key[1] === entity);
-  if (domain === 'subtitles') return key[0] === 'media' && (!entity || key[1] === entity) && ['segments', 'candidates', 'transcript-issues', 'versions', 'drafts'].includes(String(key[2]));
-  if (domain === 'drafts') return key[0] === 'media' && (!entity || key[1] === entity) && key[2] === 'drafts';
-  if (domain === 'media') return key[0] === 'media' && (!entity || key[1] === entity) && key[2] === 'streams';
+  if (domain === 'downloads' || domain === 'operations' || domain === 'subtitles' || domain === 'drafts') return matchesQueryTarget(domain, entity, key);
+  if (domain === 'review' || domain === 'jobs') return matchesQueryTarget('review', entity, key);
+  if (domain === 'media') return matchesQueryTarget('streams', entity, key);
   return false;
 }
 

@@ -188,6 +188,22 @@ describe('data mutation boundaries', () => {
         .every((query) => query.state.isInvalidated),
     ).toBe(true);
   });
+  it('keeps broad media mutation refresh separate from stream-only native events', async () => {
+    const cache = client();
+    const keys = [queryKeys.snapshot, queryKeys.segments('a'), queryKeys.drafts('a'), queryKeys.streams('a'), queryKeys.streams('b')];
+    keys.forEach(key => cache.setQueryData(key, []));
+    await cache.invalidateQueries({ predicate: query => changedDomainKey('media', 'a', query.queryKey) });
+    expect(keys.map(key => cache.getQueryState(key)?.isInvalidated)).toEqual([false, false, false, true, false]);
+    await mutateData(cache, async () => undefined, { kind: 'media', mediaId: 'a' });
+    expect(keys.map(key => cache.getQueryState(key)?.isInvalidated)).toEqual([true, true, true, true, false]);
+  });
+  it('recovers all subtitle resources without invalidating stream inspection', async () => {
+    const cache = client();
+    const keys = [queryKeys.transcriptIssues('a'), queryKeys.drafts('b'), queryKeys.streams('a'), queryKeys.review('job')];
+    keys.forEach(key => cache.setQueryData(key, []));
+    await cache.invalidateQueries({ predicate: query => changedDomainKey('subtitles', undefined, query.queryKey) });
+    expect(keys.map(key => cache.getQueryState(key)?.isInvalidated)).toEqual([true, true, false, false]);
+  });
 });
 
 it('reports read/action failures separately from void success without touching query caches', async () => {

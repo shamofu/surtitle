@@ -2,28 +2,22 @@
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import { queryKeys } from './keys';
 import type { DataChange } from './keys';
+import { queryTargets } from './targets';
 
 export function changedKeys(change: DataChange): readonly QueryKey[] {
   switch (change.kind) {
     case 'snapshot':
       return [queryKeys.snapshot];
     case 'downloads':
-      return [queryKeys.snapshot, queryKeys.downloads];
+      return [queryKeys.snapshot, ...queryTargets.downloads()];
     case 'media':
-      return [queryKeys.snapshot, queryKeys.media(change.mediaId)];
+      return [queryKeys.snapshot, ...queryTargets.media(change.mediaId)];
     case 'subtitles':
-      return [
-        queryKeys.snapshot,
-        queryKeys.segments(change.mediaId),
-        queryKeys.transcriptIssues(change.mediaId),
-        queryKeys.candidates(change.mediaId),
-        queryKeys.versions(change.mediaId),
-        queryKeys.drafts(change.mediaId),
-      ];
+      return [queryKeys.snapshot, ...queryTargets.subtitles(change.mediaId)];
     case 'drafts':
-      return [queryKeys.drafts(change.mediaId)];
+      return queryTargets.drafts(change.mediaId);
     case 'review':
-      return [queryKeys.review(change.jobId)];
+      return queryTargets.review(change.jobId);
     case 'restore':
       return [];
   }
