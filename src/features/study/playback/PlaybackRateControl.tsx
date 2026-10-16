@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { animate, motionValue } from 'motion';
-import { Button, Dialog, DialogTrigger, Heading, Popover } from 'react-aria-components';
+import { Button, DialogTrigger, Popover } from 'react-aria-components';
 import { Gauge, Minus, Plus, X } from 'lucide-react';
 import { useSurface } from '../../../app/runtime';
 import { motionDistances, motionDurations, motionEase, motionExitEase, useAppMotion } from '../../../shared/motion';
@@ -114,6 +114,7 @@ export function PlaybackRateControl({ label, decreaseLabel, increaseLabel, close
 }) {
   const [retained, setRetained] = useState(isOpen);
   const rateValueId = useId();
+  const dialogId = useId();
   const videoPointer = useRef(false);
   const [preview, setPreview] = useState<number | null>(null);
   const current = useRef(ticks(value));
@@ -205,17 +206,19 @@ export function PlaybackRateControl({ label, decreaseLabel, increaseLabel, close
   }, [isOpen, activeModal, onOpenChange, triggerRef]);
   function close() { triggerRef.current?.focus({ preventScroll: true }); onOpenChange(false); }
   return <div className="speed-select" title={`${label}: ${displayed}×`}><DialogTrigger isOpen={isOpen} onOpenChange={changeOpen}>
-    <Button className="playback-rate-trigger" aria-label={label} aria-haspopup="dialog" aria-describedby={rateValueId} isDisabled={disabled} ref={triggerRef}>
+    <Button className="playback-rate-trigger" aria-label={label} aria-haspopup="dialog" aria-controls={isOpen ? dialogId : undefined} aria-describedby={rateValueId} isDisabled={disabled} ref={triggerRef}>
       <Gauge size={18} aria-hidden="true" /><span id={rateValueId}>{displayed}×</span>
     </Button>
     <Popover className="playback-rate-popover" placement="top end" offset={6} isNonModal
       shouldCloseOnInteractOutside={target => !triggerRef.current?.contains(target)}
       isExiting={!isOpen && retained} data-native-popup="playback-rate" data-state={isOpen ? 'open' : 'closing'}>
       <RatePopupContent open={isOpen} triggerRef={triggerRef} onExited={finishExit}>
-        <Dialog className="playback-rate-dialog" aria-label={label}>
+        {/* This nonmodal popup must let keyboard users return to its trigger.
+            React Aria Dialog would enable focus containment on the outer Popover. */}
+        <section className="playback-rate-dialog" id={dialogId} role="dialog" aria-label={label} tabIndex={-1}>
           <div className="playback-rate-header">
             <MotionButton className="playback-rate-close" aria-label={closeLabel} onClick={close}><X size={17} aria-hidden="true" /></MotionButton>
-            <Heading slot="title" className="playback-rate-heading">{label}</Heading>
+            <h2 className="playback-rate-heading">{label}</h2>
           </div>
           <div className="playback-rate-body">
             <output className="playback-rate-value" aria-hidden="true">{displayed.toFixed(2)}×</output>
@@ -236,7 +239,7 @@ export function PlaybackRateControl({ label, decreaseLabel, increaseLabel, close
               </div>)}
             </div>
           </div>
-        </Dialog>
+        </section>
       </RatePopupContent>
     </Popover>
   </DialogTrigger></div>;

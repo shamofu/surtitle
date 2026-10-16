@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installLearningFixture } from './learning-fixture';
 
 async function openSurfaces(page: Page) {
@@ -7,6 +7,114 @@ async function openSurfaces(page: Page) {
     contentType: 'application/javascript', body: 'import "/e2e/browser/surface-fixture.tsx";',
   }));
   await page.goto('/');
+}
+
+async function expectStationaryEdgeHover(page: Page, control: Locator, label: string) {
+  await page.mouse.move(0, 0);
+  // Wait for page/dialog placement, then observe the real hover transition.
+  await control.scrollIntoViewIfNeeded();
+  await expect(control).toBeVisible();
+  const point = await control.evaluate(element => {
+    const box = element.getBoundingClientRect();
+    const x = Math.round(box.x + box.width / 2);
+    // A native summary's padding/marker bounds need not all be hit-testable.
+    // Start at its actual bottom hit edge, then keep that pointer fixed.
+    for (let y = Math.min(Math.ceil(box.bottom) - 1, innerHeight - 1); y >= Math.max(0, Math.ceil(box.top)); y--) {
+      const hit = document.elementFromPoint(x, y);
+      if (hit && element.contains(hit)) return { x, y };
+    }
+    throw new Error('Control has no visible hit target on its vertical centerline');
+  });
+  await control.evaluate((element, pointer) => {
+    (window as any).__edgeHoverObservation = new Promise(resolve => {
+      let start = 0, entered = 0, left = 0, samples = 0, frame = 0, timer = 0, finished = false;
+      const missed: { ms: number; bottom: number; hit: string | null }[] = [];
+      const enter = () => {
+        entered++;
+        if (entered !== 1) return;
+        start = performance.now();
+        window.clearTimeout(timer);
+        timer = window.setTimeout(finish, 1500);
+        frame = requestAnimationFrame(sample);
+      };
+      const leave = () => { left++; };
+      element.addEventListener('pointerenter', enter);
+      element.addEventListener('pointerleave', leave);
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        window.clearTimeout(timer);
+        cancelAnimationFrame(frame);
+        element.removeEventListener('pointerenter', enter);
+        element.removeEventListener('pointerleave', leave);
+        resolve({ entered, left, samples, missed, elapsedMs: start ? performance.now() - start : 0 });
+      };
+      const sample = () => {
+        samples++;
+        const hit = document.elementFromPoint(pointer.x, pointer.y);
+        if ((!hit || !element.contains(hit)) && missed.length < 5) missed.push({
+          ms: Math.round(performance.now() - start), bottom: element.getBoundingClientRect().bottom,
+          hit: hit?.getAttribute('class') ?? null,
+        });
+        if (performance.now() - start >= 600) finish();
+        else frame = requestAnimationFrame(sample);
+      };
+      // Driver delivery time is separate from the actual hover observation.
+      timer = window.setTimeout(finish, 5000);
+    });
+  }, point);
+  await page.mouse.move(point.x, point.y);
+  const observation = await page.evaluate(async () => {
+    const result = await (window as any).__edgeHoverObservation;
+    delete (window as any).__edgeHoverObservation;
+    return result as { entered: number; left: number; samples: number; missed: unknown[]; elapsedMs: number };
+  });
+  expect(observation.entered, `${label}: the real pointer entered`).toBeGreaterThan(0);
+  expect(observation.samples, `${label}: hover frames were observed`).toBeGreaterThan(0);
+  expect(observation.elapsedMs, `${label}: the hover observation completed`).toBeGreaterThanOrEqual(600);
+  expect(observation.missed, `${label}: the stationary edge pointer retained its hit target`).toEqual([]);
+  expect(observation.left, `${label}: hover did not eject the pointer`).toBe(0);
+  return point;
+}
+
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(`stationary bottom-edge pointers retain hover targets (${reducedMotion})`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion });
+    await installLearningFixture(page, 'en', 'light');
+    await page.goto('/');
+    await expect(page.locator('html')).toHaveAttribute('data-motion', reducedMotion === 'reduce' ? 'reduce' : 'full');
+    const locale = page.locator('.locale-button');
+    const localePoint = await expectStationaryEdgeHover(page, locale, 'Motion button');
+    await page.mouse.click(localePoint.x, localePoint.y);
+    await expect(page.locator('html')).toHaveAttribute('lang', 'ja');
+    await locale.press('Enter');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await expectStationaryEdgeHover(page, page.getByRole('link', { name: 'Phrases', exact: true }), 'Navigation link');
+    await page.evaluate(() => {
+      const fixture = (window as any).__learningFixture;
+      const original = fixture.call.bind(fixture);
+      fixture.call = (command: string, args?: Record<string, unknown>) => command === 'list_operation_progress'
+        ? Promise.resolve([{ id: 'hover-lesson', kind: 'export', label: 'Saved lesson', mediaId: 'visual-fixture', status: 'completed', phase: 'completed', updatedAt: new Date().toISOString() }])
+        : original(command, args);
+      fixture.publish('data-changed', { version: 1, epoch: 'fixture', revision: 1, domain: 'operations' });
+    });
+    const activity = page.getByRole('button', { name: 'Open activity', exact: true });
+    const activityPoint = await expectStationaryEdgeHover(page, activity, 'Native button');
+    await page.mouse.click(activityPoint.x, activityPoint.y);
+    const dialog = page.getByRole('dialog', { name: 'Activity', exact: true });
+    const closePoint = await expectStationaryEdgeHover(page, dialog.getByRole('button', { name: 'Close', exact: true }), 'Aria dialog button');
+    await page.mouse.click(closePoint.x, closePoint.y);
+    await expect(dialog).toHaveCount(0);
+    await activity.click();
+    const mediaPoint = await expectStationaryEdgeHover(page, dialog.getByRole('link', { name: 'Open media', exact: true }), 'Motion link');
+    await page.mouse.click(mediaPoint.x, mediaPoint.y);
+    await expect(page).toHaveURL(/\/study\/visual-fixture$/);
+    await page.getByRole('link', { name: 'Settings', exact: true }).click();
+    const summary = page.locator('summary').filter({ hasText: 'Advanced review settings' });
+    const summaryPoint = await expectStationaryEdgeHover(page, summary, 'Disclosure summary');
+    await page.mouse.click(summaryPoint.x, summaryPoint.y);
+    await expect(summary.locator('..')).toHaveAttribute('open', '');
+  });
 }
 
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {

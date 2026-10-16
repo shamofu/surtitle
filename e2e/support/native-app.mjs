@@ -55,8 +55,9 @@ export async function restartNativeSession(session = globalThis.browser) {
   await prepareNativeSession(session);
 }
 
-// Shared by value replacement and navigation. Finite Motion transitions must
-// finish before native clear/click; perpetual spinners do not block input.
+// Disclosures and panel transitions can move following actions even when they
+// have no Web Animation. Other controls' hover/color animations are not input
+// barriers; waitForNativeInput checks the target's own geometry and clickability.
 export function nativeSurfaceSettled(node) {
   const region = node.closest('[role="dialog"], .study-companion') ?? node;
   if (region.closest('.study-companion-dock')?.dataset.moving === 'true') return false;
@@ -65,8 +66,7 @@ export function nativeSurfaceSettled(node) {
     if (surface.style.height || surface.style.overflow === 'hidden' ||
       (surface.classList.contains('study-motion-region') && transform && !['none', 'translateX(0px)'].includes(transform))) return false;
   }
-  return region.getAnimations({ subtree: true }).every(animation =>
-    (!animation.pending && animation.playState !== 'running') || animation.effect?.getTiming().iterations === Infinity);
+  return true;
 }
 
 export async function waitForNativeInput(element, session = globalThis.browser) {

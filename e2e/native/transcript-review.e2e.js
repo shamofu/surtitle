@@ -16,7 +16,7 @@ const review = jobId => invoke('get_transcript_review', { jobId });
 const preparations = id => invoke('list_transcription_preparations', { mediaId: id });
 const dialog = () => $('[role="dialog"].modal.wide');
 const history = () => $('.transcription-history-result');
-let jobId, pendingJobId, originalDigest, originalConflict, adoptedDigest;
+let jobId, pendingJobId, originalDigest, originalConflict;
 let ledgerBefore;
 
 function withLedger(read) {
@@ -37,22 +37,7 @@ function storedJob(id) {
   });
 }
 const ready = prepareNativeSession;
-async function waitForSurfaceMotion(element) {
-  await element.waitForExist();
-  // History disclosures move following actions. Wait for their measured height
-  // and the enclosing surface entry before choosing a WebDriver click position.
-  await browser.waitUntil(async () => browser.execute(node => {
-    const region = node.closest('[role="dialog"], .study-companion') ?? node;
-    return region.getAnimations({ subtree: true }).every(animation =>
-      (!animation.pending && animation.playState !== 'running') || animation.effect?.getTiming().iterations === Infinity);
-  }, await element), { timeoutMsg: 'The transcript surface did not finish its finite animations before scrolling' });
-}
-async function clickVisible(element) {
-  await waitForSurfaceMotion(element);
-  await browser.execute(node => node.scrollIntoView({ block: 'center', behavior: 'instant' }), await element);
-  await element.waitForClickable();
-  await clickNative(element);
-}
+const clickVisible = clickNative;
 const replaceValue = replaceNativeValue;
 async function openWorkspace(targetMediaId = mediaId) {
   await browser.execute(path => { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, `/study/${targetMediaId}`);
@@ -71,7 +56,6 @@ async function openHistory(id, targetMediaId = mediaId) {
   if (!(await job.$('.transcription-history-result').isExisting())) await clickVisible(button);
   await history().waitForDisplayed();
   await browser.waitUntil(async () => (await history().getText()).includes('This is the original transcription record.'), { timeoutMsg: 'Saved transcript history did not load' });
-  await waitForSurfaceMotion(history());
   await expect($('[role="dialog"]')).not.toExist();
 }
 async function closeHistory(id) {
@@ -88,7 +72,6 @@ async function openReview(id, targetMediaId = mediaId) {
   await clickVisible(panel.$('button=Review or adopt the full result'));
   await dialog().waitForDisplayed();
   await dialog().$('button=Refresh saved results').waitForDisplayed();
-  await waitForSurfaceMotion(dialog());
   assert.equal(await dialog().$('h2').getText(), 'Review transcription');
 }
 async function closeReview() {
@@ -210,10 +193,10 @@ describe('local transcript review and adoption in the real desktop', () => {
     assert.deepEqual(ledger(), ledgerBefore);
   });
 
-  it('uses complete saved results with one local action and preserves optional alternatives across restart', async () => {
+  it('adopts saved results, retains alternatives across restart, and preserves manual edits on repeated adoption without charges', async () => {
     const before = await segments(mediaId);
     const original = await review(jobId);
-    adoptedDigest = original.draft.digest;
+    const adoptedDigest = original.draft.digest;
     await openHistory(jobId);
     await clickVisible(history().$('button=Use saved results'));
     await browser.waitUntil(async () => (await review(jobId)).applied);
@@ -234,9 +217,8 @@ describe('local transcript review and adoption in the real desktop', () => {
     assert.deepEqual(after.draft.conflicts[0].rightAlternative, originalConflict.rightAlternative);
     assert.deepEqual(await segments(mediaId), adopted);
     assert.deepEqual(ledger(), ledgerBefore);
-  });
-
-  it('keeps subsequent manual edits and the zero-charge ledger when adoption is repeated', async () => {
+    // Re-adoption depends on this successful adoption; keep the lifecycle in
+    // one test so an earlier failure cannot produce a misleading second one.
     const source = (await segments(mediaId)).find(cue => cue.reviewIssues?.some(issue => issue.id === originalConflict.id));
     assert(source, 'The published boundary row must retain its optional alternatives');
     assert([...originalConflict.leftAlternative, ...originalConflict.rightAlternative].some(cue => cue.text === source.text));
@@ -250,9 +232,9 @@ describe('local transcript review and adoption in the real desktop', () => {
     await expectNativeRejection(invoke('resolve_transcript_boundary', { jobId, draftDigest: adoptedDigest, boundaryId: originalConflict.id, choice: { kind: 'right' } }), /adopted transcript decisions cannot be replaced/i);
     await expectNativeRejection(invoke('prepare_boundary_repair', { jobId, draftDigest: adoptedDigest, boundaryId: originalConflict.id }), /adopted transcripts do not accept automatic repair/i);
     assert.deepEqual(ledger(), ledgerBefore);
-    const after = await snapshot();
-    assert.equal(after.budget.spentUsd, 0); assert.equal(after.budget.reservedUsd, 0); assert.equal(after.budget.limitUsd, 0);
-    assert.equal(after.settings.credentialConfigured, false);
+    const afterReapply = await snapshot();
+    assert.equal(afterReapply.budget.spentUsd, 0); assert.equal(afterReapply.budget.reservedUsd, 0); assert.equal(afterReapply.budget.limitUsd, 0);
+    assert.equal(afterReapply.settings.credentialConfigured, false);
   });
 
   it('recovers a missing range locally, preserves the selection across restart, and adopts without sending', async () => {

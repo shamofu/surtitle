@@ -11,7 +11,6 @@ import { withReadOnlyDatabase } from '../support/native-e2e-database.mjs';
 // These authored subtitles accompany digital silence. This suite verifies local
 // transport and persistence, not audible speech, transcript quality or listening.
 // It never adopts/resolves its source jobs or opens an OS file dialog.
-export { draftSurfaceSettled };
 
 const mediaId = 'e2e-transcript-review';
 const pendingMediaId = 'e2e-transcript-pending';
@@ -74,7 +73,7 @@ async function scrollVisible(element) {
   // WebDriver clickability alone does not wait for that geometry to settle; a
   // coordinate click can otherwise land on a different history action in WebKit.
   await browser.waitUntil(async () => browser.execute(draftSurfaceSettled, await element), {
-    timeoutMsg: 'The target surface did not finish its finite animations and layout before scrolling',
+    timeoutMsg: 'The target surface did not finish its layout transition before scrolling',
   });
   // WDIO 9 uses a wheel event at viewport (0,0), which cannot scroll this nested
   // panel in WebKit. Use the DOM scroll API; clicks still go through WebDriver.

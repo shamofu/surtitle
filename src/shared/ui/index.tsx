@@ -13,9 +13,10 @@ export { useModalExit } from './useModalExit';
 export function MotionButton({ hoverMotion = true, ...props }: ComponentPropsWithRef<'button'> & { hoverMotion?: boolean }) {
   const active = useMotionActive();
   const enabled = active && !props.disabled && props['aria-disabled'] !== true && props['aria-disabled'] !== 'true';
-  return <m.button {...props as HTMLMotionProps<'button'>} data-motion-control initial={false} animate={{ scale: 1, y: 0 }}
-    whileHover={enabled && hoverMotion ? { scale: motionScales.hover, y: -2 } : undefined}
-    whileTap={enabled ? { scale: motionScales.press, y: 0, transition: { duration: motionDurations.press, ease: motionEase } } : undefined}
+  // Expansion keeps the original hit area under a stationary edge pointer.
+  return <m.button {...props as HTMLMotionProps<'button'>} data-motion-control initial={false} animate={{ scale: 1 }}
+    whileHover={enabled && hoverMotion ? { scale: motionScales.hover } : undefined}
+    whileTap={enabled ? { scale: motionScales.press, transition: { duration: motionDurations.press, ease: motionEase } } : undefined}
     transition={{ duration: active ? motionDurations.release : 0, ease: motionEase }} />;
 }
 
@@ -214,9 +215,9 @@ function ModalContent({
             <h2 id={titleId}>{title}</h2>
           </div>
           <MotionAriaButton className="icon-button" data-motion-control aria-label={t('閉じる', 'Close')} isDisabled={closeDisabled || !open} onPress={requestClose}
-            initial={false} animate={{ scale: 1, y: 0 }}
-            whileHover={motionActive && open && !closeDisabled ? { scale: motionScales.hover, y: -2 } : undefined}
-            whileTap={motionActive && open && !closeDisabled ? { scale: motionScales.press, y: 0, transition: { duration: motionDurations.press } } : undefined}
+            initial={false} animate={{ scale: 1 }}
+            whileHover={motionActive && open && !closeDisabled ? { scale: motionScales.hover } : undefined}
+            whileTap={motionActive && open && !closeDisabled ? { scale: motionScales.press, transition: { duration: motionDurations.press } } : undefined}
             transition={{ duration: motionActive ? motionDurations.release : 0, ease: motionEase }}>
             <X size={20} />
           </MotionAriaButton>

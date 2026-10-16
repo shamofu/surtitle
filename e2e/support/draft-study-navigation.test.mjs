@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { JSDOM } from 'jsdom';
-import { beforeAll, expect, test, vi } from 'vitest';
+import { expect, test, vi } from 'vitest';
+import { nativeSurfaceSettled as draftSurfaceSettled } from './native-app.mjs';
 
 vi.mock('webdriverio', () => ({ Key: {} }));
-
-let draftSurfaceSettled;
-beforeAll(async () => {
-  // Import the real native navigation predicate without registering the native
-  // scenarios or starting a WebDriver session in the scripts test project.
-  vi.stubGlobal('describe', Object.assign(() => {}, { skip: () => {} }));
-  try { ({ draftSurfaceSettled } = await import('../native/draft-study.e2e.js')); }
-  finally { vi.unstubAllGlobals(); }
-});
 
 function fixture() {
   const dom = new JSDOM(`<div class="study-companion-dock" data-moving="false"><aside class="study-companion">
@@ -48,16 +40,14 @@ test('waits for moving native layout and Motion disclosures even when no Web Ani
   } finally { view.dom.window.close(); }
 });
 
-test('waits for finite animations while leaving perpetual loaders alone', () => {
+test('unrelated hover and loader animations do not block a stable input surface', () => {
   const view = fixture();
   try {
     const loader = { pending: false, playState: 'running', effect: { getTiming: () => ({ iterations: Infinity }) } };
-    const reveal = { pending: false, playState: 'running', effect: { getTiming: () => ({ iterations: 1 }) } };
-    view.region.getAnimations = () => [loader, reveal];
-    expect(draftSurfaceSettled(view.target)).toBe(false);
-    reveal.playState = 'finished';
+    const hover = { pending: false, playState: 'running', effect: { getTiming: () => ({ iterations: 1 }) } };
+    view.region.getAnimations = () => [loader, hover];
     expect(draftSurfaceSettled(view.target)).toBe(true);
-    reveal.pending = true;
-    expect(draftSurfaceSettled(view.target)).toBe(false);
+    hover.pending = true;
+    expect(draftSurfaceSettled(view.target)).toBe(true);
   } finally { view.dom.window.close(); }
 });

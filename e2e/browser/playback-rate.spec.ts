@@ -183,14 +183,26 @@ test('pending native preparation blocks body shortcuts and resumes slider after 
   await page.keyboard.press('Escape'); await expect(popup(page)).toHaveCount(0); await expect(trigger).toBeFocused();
 });
 
-test('the same trigger closes and reopens the widget with pointer or keyboard activation', async ({ page }) => {
+test('the speed trigger toggles with a pointer and keyboard users can leave the widget', async ({ page }) => {
   const trigger = await openStudy(page);
   await trigger.click(); await expect(slider(page)).toBeFocused();
   await trigger.click(); await expect(popup(page)).toHaveCount(0); await expect(trigger).toBeFocused();
   for (const key of ['Enter', 'Space']) {
     await trigger.press(key); await expect(slider(page)).toBeFocused();
-    await trigger.focus(); await expect(popup(page)).toHaveAttribute('data-state', 'open');
-    await trigger.press(key); await expect(popup(page)).toHaveCount(0); await expect(trigger).toBeFocused();
+    const dialog = page.getByRole('dialog', { name: 'Playback speed', exact: true });
+    const dialogId = await dialog.getAttribute('id');
+    expect(dialogId).toBeTruthy();
+    await expect(trigger).toHaveAttribute('aria-controls', dialogId!);
+    const tabStops = await popup(page).locator('button, input, [tabindex="0"]').count();
+    for (let step = 0; step <= tabStops; step++) {
+      if (!await popup(page).evaluateAll(elements => elements.some(element => element.getAttribute('data-state') === 'open'))) break;
+      await page.keyboard.press('Shift+Tab');
+    }
+    await expect(popup(page)).toHaveCount(0);
+    const focusedControl = page.locator('button:focus, input:focus, select:focus, textarea:focus, a[href]:focus');
+    await expect(focusedControl).toHaveCount(1);
+    await expect(focusedControl).toBeVisible();
+    await expect(focusedControl).toBeEnabled();
   }
   expect((await actions(page)).filter((action: any) => ['rate', 'seek', 'toggle-pause', 'play'].includes(action.action))).toEqual([]);
 });
