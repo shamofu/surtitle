@@ -165,6 +165,31 @@ it('reuses completed preparation after reopening without approving or preparing 
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
 });
 
+it('requests a fresh dialog estimate when reopening with reusable prepared audio and a completed quote', async () => {
+  const view = render(<AiDialog media={media} onClose={() => {}} />);
+  await screen.findByRole('button', { name: 'Start transcription' });
+  view.rerender(<p>Another page</p>);
+  view.rerender(<AiDialog media={media} onClose={() => {}} />);
+  await screen.findByRole('button', { name: 'Start transcription' });
+  expect(aiApi.prepareTranscription).toHaveBeenCalledOnce();
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledTimes(2);
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+});
+
+it.each(['before preparation', 'after estimating'])('reports a continuation failure %s without withholding the dialog quote', async stage => {
+  const error = new Error('Cannot save continuation');
+  vi.mocked(continuationApi.save).mockImplementation(async request => {
+    if ((stage === 'after estimating') === !!request.quoteId) throw error;
+    return request;
+  });
+  render(<AiDialog media={media} onClose={() => {}} />);
+  expect(await screen.findByRole('button', { name: 'Start transcription' })).toBeEnabled();
+  expect(aiApi.prepareTranscription).toHaveBeenCalledOnce();
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
+  expect(fixture.errors).toEqual([error]);
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+});
+
 it('ignores a preparation completed after its audio source changed', async () => {
   let finish!: (value: TranscriptionPreparation) => void;
   vi.mocked(aiApi.prepareTranscription).mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockResolvedValue(preparation);

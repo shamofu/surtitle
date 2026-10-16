@@ -29,7 +29,7 @@ import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
 import { ModelEditor, emptyModel } from './ModelEditor';
 import { useActivities } from '../../app/providers/Activities';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
-import { preparedSourceMatches, usePreparationSession } from './PreparationSessions';
+import { useTranscriptionRequest } from './useTranscriptionRequest';
 import { PreparationProgress } from './PreparationProgress';
 import { AnimatedValue, MotionRegion } from '../../shared/motion';
 import { SelectionIndicator } from '../../shared/motion/SelectionIndicator';
@@ -108,7 +108,6 @@ export function AiDialog({
   const [quoteKey, setQuoteKey] = useState('');
   const lastAttempt = useRef('');
   const [busy, setBusy] = useState(false);
-  const [preparePending, setPreparing] = useState(false);
   const [busyPhase, setBusyPhase] = useState('estimating');
   const [restored, setRestored] = useState(false);
   const [preparation, setPreparation] =
@@ -121,8 +120,8 @@ export function AiDialog({
   }, [mediaSignature, mediaChanged]);
   const startMs = kind === 'transcribe' && wholeMedia ? 0 : parseTimestamp(start),
     endMs = kind === 'transcribe' && wholeMedia ? media.durationMs : parseTimestamp(end);
-  const preparationSession = usePreparationSession({ mediaId: media.id, sourceSignature: mediaSignature, startMs: startMs ?? 0, endMs: endMs ?? 0, wholeMedia });
-  const revision = preparationSession.revision;
+  const transcriptionRequest = useTranscriptionRequest({ mediaId: media.id, sourceSignature: mediaSignature, startMs: startMs ?? 0, endMs: endMs ?? 0, wholeMedia }, selectedModel, media.title);
+  const revision = transcriptionRequest.revision;
   const currentRevision = useRef(revision);
   currentRevision.current = revision;
   const initialRevision = useRef(revision);
@@ -130,7 +129,7 @@ export function AiDialog({
   useEffect(() => {
     if (revision === boundRevision) return;
     setBoundRevision(revision); setQuote(null); setPreparation(undefined); setPreparations([]);
-    setPreparing(false); setBusy(false); pending.current = false; setRestored(true);
+    setBusy(false); pending.current = false; setRestored(true);
   }, [revision, boundRevision]);
   useEffect(() => {
     if (kind !== 'transcribe' || mediaChanged || !nativeAvailable()) return;
@@ -143,7 +142,7 @@ export function AiDialog({
     });
     return () => { active = false; };
   }, [kind, media.id, mediaSignature, mediaChanged, continuationMediaChanged, report, revision]);
-  const preparing = preparePending || (kind === 'transcribe' && preparationSession.session?.status === 'running');
+  const preparing = kind === 'transcribe' && (transcriptionRequest.phase === 'preparing' || transcriptionRequest.session?.status === 'running');
   const valid =
     startMs !== null &&
     endMs !== null &&
@@ -151,8 +150,8 @@ export function AiDialog({
     (kind !== 'transcribe' || media.durationMs > 0) &&
     (!media.durationMs || endMs <= media.durationMs);
   useEffect(() => {
-    if (preparationSession.session?.result && kind === 'transcribe') setPreparation(preparationSession.session.result);
-  }, [preparationSession.session?.result, kind]);
+    if (transcriptionRequest.session?.result && kind === 'transcribe') setPreparation(transcriptionRequest.session.result);
+  }, [transcriptionRequest.session?.result, kind]);
   const requestKey = JSON.stringify([revision, kind, startMs, endMs, wholeMedia, focusTerm.trim(), selectedModel, data?.settings.vertexLocation]);
   const inputKey = JSON.stringify([mediaSignature, requestKey]);
   const currentRequestKey = useRef(requestKey); currentRequestKey.current = requestKey;
@@ -166,50 +165,44 @@ export function AiDialog({
     const timer = window.setTimeout(() => { lastAttempt.current = inputKey; estimateAction.current(); }, 350);
     return () => window.clearTimeout(timer);
   }, [inputKey, quoteKey, valid, modelValid, invalidSource, configured, busy, preparing]);
-  async function prepare() {
-    if (!valid || exit.exiting) return;
-    setPreparing(true);
-    setPreparation(undefined);
-    const result = await report(() => preparationSession.prepare(operationId =>
-      mutate(() => aiApi.prepareTranscription(media.id, startMs, endMs, wholeMedia, operationId), {
-        kind: 'snapshot',
-      })),
-    );
-    if (result && mounted.current && preparedSourceMatches(mediaSignature, currentSignature.current, result) && currentRevision.current === revision) {
-      setBoundMediaSignature(currentSignature.current);
-      setPreparation(result);
-      setPreparations((items) => [
-        result,
-        ...items.filter((item) => item.id !== result.id),
-      ]);
-    }
-    if (mounted.current && currentRevision.current === revision) setPreparing(false);
-    return result;
-  }
   async function estimate() {
     if (!valid || !modelValid || invalidSource || pending.current || busy || preparing || exit.exiting || !data?.settings.credentialConfigured)
       return;
     pending.current = true; setBusy(true); setBusyPhase('estimating'); setRestored(false); setQuote(null);
     try {
-      if (kind === 'transcribe') setBoundMediaSignature(mediaSignature);
+      if (kind === 'transcribe') {
+        setBoundMediaSignature(mediaSignature);
+        const reusePreparation = !mediaChanged && preparation && preparation.startMs === startMs && preparation.endMs === endMs && !!preparation.wholeMedia === wholeMedia ? preparation : undefined;
+        const result = await report(() => transcriptionRequest.estimate({
+          fresh: true,
+          reusePreparation,
+          beforePrepare: async () => {
+            await report(() => saveContinuation());
+            if (!reusePreparation && currentRevision.current === revision) setPreparation(undefined);
+          },
+          onPrepared: ({ preparation: prepared, sourceSignature }) => {
+            if (reusePreparation) return;
+            setBoundMediaSignature(sourceSignature);
+            setPreparation(prepared);
+            setPreparations(items => [prepared, ...items.filter(item => item.id !== prepared.id)]);
+          },
+          persistQuote: ({ quote: result, preparation: prepared, sourceSignature }) => report(() => saveContinuation(result.id, prepared.id, sourceSignature)),
+        }));
+        if (result && mounted.current && currentRevision.current === revision && currentRequestKey.current === requestKey) {
+          const acceptedKey = JSON.stringify([result.sourceSignature, requestKey]);
+          lastAttempt.current = acceptedKey; setQuote(result.quote); setQuoteKey(acceptedKey);
+        }
+        return;
+      }
       await report(() => saveContinuation());
       if (currentRevision.current !== revision) return;
-      const prepared = kind === 'transcribe'
-        ? (!mediaChanged && preparation && preparation.startMs === startMs && preparation.endMs === endMs && !!preparation.wholeMedia === wholeMedia ? preparation : await prepare())
-        : undefined;
       const preparedSignature = currentSignature.current;
-      const sourceMatches = prepared ? preparedSourceMatches(mediaSignature, preparedSignature, prepared) : preparedSignature === mediaSignature;
-      if (!mounted.current || !sourceMatches || currentRevision.current !== revision || (kind === 'transcribe' && !prepared)) return;
-      const result = await report(() => {
-        const action = () => runTracked({ kind: 'estimate', label: media.title, phase: 'estimating', mediaId: media.id },
-          () => kind === 'transcribe' && prepared
-            ? mutate(() => aiApi.createTranscriptionQuote(prepared.id, selectedModel), { kind: 'snapshot' })
-            : mutate(() => aiApi.createQuote({ mediaId: media.id, kind, startMs, endMs,
-              focusTerm: kind === 'vocabulary' ? focusTerm.trim() || undefined : undefined, model: selectedModel }), { kind: 'snapshot' }));
-        return kind === 'transcribe' ? preparationSession.estimate(selectedModel, action, true) : action();
-      });
+      if (!mounted.current || preparedSignature !== mediaSignature || currentRevision.current !== revision) return;
+      const result = await report(() => runTracked({ kind: 'estimate', label: media.title, phase: 'estimating', mediaId: media.id },
+        () => mutate(() => aiApi.createQuote({ mediaId: media.id, kind, startMs, endMs,
+          focusTerm: kind === 'vocabulary' ? focusTerm.trim() || undefined : undefined, model: selectedModel }), { kind: 'snapshot' })));
       if (result && currentSignature.current === preparedSignature && currentRevision.current === revision) {
-        await report(() => saveContinuation(result.id, prepared?.id, preparedSignature));
+        await report(() => saveContinuation(result.id, undefined, preparedSignature));
         if (mounted.current && currentRevision.current === revision && currentRequestKey.current === requestKey) { const acceptedKey = JSON.stringify([preparedSignature, requestKey]); lastAttempt.current = acceptedKey; setQuote(result); setQuoteKey(acceptedKey); }
       }
     } finally {
@@ -227,7 +220,7 @@ export function AiDialog({
       },
       t('処理を開始しました。', 'Job started.'),
     );
-    if (result) { preparationSession.forgetEstimate(); onApproved?.(kind, focusTerm.trim()); await report(() => continuationApi.discard(continuationId)); await exit.close(onClose); }
+    if (result) { transcriptionRequest.forgetEstimate(); onApproved?.(kind, focusTerm.trim()); await report(() => continuationApi.discard(continuationId)); await exit.close(onClose); }
     setBusy(false);
   }
   function saveContinuation(quoteId = quote?.id, preparationId = preparation?.id, sourceSignature = mediaSignature) {
@@ -459,12 +452,12 @@ export function AiDialog({
               )}</MotionRegion>
               <MotionRegion mode="status" open={preparing}>
                 <div className="job-status">
-                  <PreparationProgress operationId={preparationSession.session?.operationId} label={media.title} />
+                  <PreparationProgress operationId={transcriptionRequest.session?.operationId} label={media.title} />
                   <Button
-                    disabled={!preparationSession.session?.operationId}
+                    disabled={!transcriptionRequest.session?.operationId}
                     onClick={() =>
                       void report(() =>
-                        mutate(() => aiApi.cancelPreparation(preparationSession.session?.operationId), { kind: 'snapshot' }),
+                        mutate(() => aiApi.cancelPreparation(transcriptionRequest.session?.operationId), { kind: 'snapshot' }),
                       )
                     }
                   >

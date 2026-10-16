@@ -126,6 +126,32 @@ it('keeps a preparation failure local and offers retry without creating or appro
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
 });
 
+it('continues preparing when saving the initial workspace continuation fails', async () => {
+  vi.mocked(continuationApi.save).mockRejectedValueOnce(new Error('Cannot save initial request'));
+  render(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  expect(await screen.findByRole('button', { name: 'Start transcription' })).toBeEnabled();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(aiApi.prepareTranscription).toHaveBeenCalledOnce();
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+});
+
+it('withholds a workspace quote after continuation save fails and retries using the cached estimate', async () => {
+  vi.mocked(continuationApi.save).mockImplementation(async request => {
+    if (request.quoteId) throw new Error('Cannot save estimate');
+    return request;
+  });
+  render(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Cannot save estimate');
+  expect(screen.queryByRole('button', { name: 'Start transcription' })).not.toBeInTheDocument();
+  vi.mocked(continuationApi.save).mockImplementation(async request => request);
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare estimate' }));
+  expect(await screen.findByRole('button', { name: 'Start transcription' })).toBeEnabled();
+  expect(aiApi.prepareTranscription).toHaveBeenCalledOnce();
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+});
+
 it('keeps the exact range in a continuation when setup is needed', async () => {
   fixture.configured = false;
   render(<TranscriptionWorkspace media={media} request={{ id: 'new', range: { startMs: 1234, endMs: 5678 } }} onRequest={vi.fn()} onDone={vi.fn()} />);
@@ -203,6 +229,27 @@ it('reattaches an estimate already running on navigation without another quote o
   await screen.findByRole('button', { name: 'Start transcription' });
   expect(aiApi.prepareTranscription).toHaveBeenCalledOnce();
   expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+});
+
+it('reuses a completed workspace quote after navigation without preparing or estimating again', async () => {
+  const view = render(<TranscriptionWorkspace media={media} request={{ id: 'original' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  await screen.findByRole('button', { name: 'Start transcription' });
+  view.rerender(<p>Another page</p>);
+  view.rerender(<TranscriptionWorkspace media={media} request={{ id: 'returned' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  expect(await screen.findByRole('button', { name: 'Start transcription' })).toBeEnabled();
+  expect(aiApi.prepareTranscription).toHaveBeenCalledOnce();
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce();
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+});
+
+it('refreshes an expired workspace quote without preparing audio again or approving it', async () => {
+  vi.mocked(aiApi.createTranscriptionQuote).mockResolvedValueOnce({ ...quote, expiresAt: '2000-01-01T00:00:00Z' });
+  render(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Refresh estimate' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Start transcription' })).toBeEnabled());
+  expect(aiApi.prepareTranscription).toHaveBeenCalledOnce();
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledTimes(2);
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
 });
 
