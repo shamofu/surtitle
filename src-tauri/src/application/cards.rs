@@ -44,20 +44,17 @@ pub async fn save_card_with_editor_draft(
             operation_id.as_deref(),
         )
         .await?;
-        let db = lock(&state.db)?;
-        let audio_path = Some(audio.to_string_lossy().into_owned());
-        let saved = db.save_card_with_source_snapshot(
-            &request,
-            &source,
-            audio_path,
-            Some(clip_range),
-            draft.as_ref(),
-        );
-        if saved.is_err() {
-            let _ = std::fs::remove_file(&audio);
-        }
-        saved?;
-        Ok(())
+        audio.commit_with(|path| {
+            let db = lock(&state.db)?;
+            db.save_card_with_source_snapshot(
+                &request,
+                &source,
+                Some(path.to_string_lossy().into_owned()),
+                Some(clip_range),
+                draft.as_ref(),
+            )?;
+            Ok(())
+        })
     }
     .await
     .map_err(err)

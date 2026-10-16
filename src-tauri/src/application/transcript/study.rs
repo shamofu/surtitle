@@ -426,7 +426,7 @@ pub async fn save_draft_selection_card(
             operation_id.as_deref(),
         )
         .await?;
-        let saved = (|| {
+        audio.commit_with(|path| {
             let _guard = lock(&state.ai_session.transcript_review)?;
             let (current, _) =
                 confirmed_selection(&state, &request.selection_id, request.version, true)?;
@@ -449,15 +449,11 @@ pub async fn save_draft_selection_card(
                     explanation: request.explanation,
                     translation: request.translation,
                 },
-                Some(audio.to_string_lossy().into_owned()),
+                Some(path.to_string_lossy().into_owned()),
                 Some(clip),
             )?;
             Ok(())
-        })();
-        if saved.is_err() {
-            let _ = std::fs::remove_file(audio);
-        }
-        saved
+        })
     }
     .await
     .map_err(err)

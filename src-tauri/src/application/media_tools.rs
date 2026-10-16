@@ -9,6 +9,8 @@ use std::{
 };
 use surtitle_tools::*;
 mod card_audio;
+mod pending_card_audio;
+pub(crate) use pending_card_audio::PendingCardAudio;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -478,7 +480,7 @@ pub async fn extract_card_audio(
     segment: &surtitle_core::SubtitleSegment,
     range: surtitle_core::AudioClipRange,
     parent_id: Option<&str>,
-) -> Result<PathBuf> {
+) -> Result<PendingCardAudio> {
     ensure!(
         surtitle_core::is_usable_subtitle_status(&segment.status) && segment.media_id == media.id,
         "subtitle is not usable"
@@ -512,4 +514,5 @@ pub async fn extract_card_audio(
         &state.root.join("card-audio"),
     )
     .await
+    .map(PendingCardAudio::new)
 }
