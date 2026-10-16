@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { installLearningFixture } from './learning-fixture';
+import { installLearningFixture, setTranscriptOpen } from './learning-fixture';
 
 async function installTranscriptionFixture(page: Page, locale: 'ja' | 'en', existingSubtitles = false, automaticRetry = false, unpriced = false) {
     await installLearningFixture(page, locale, 'light');
@@ -67,7 +67,7 @@ for (const locale of ['ja', 'en'] as const) {
     await installTranscriptionFixture(page, locale, false, true, true);
     await page.goto('/study/visual-fixture');
     const text = (ja: string, en: string) => locale === 'ja' ? ja : en;
-    await page.getByRole('button', { name: text('音声から字幕を作成', 'Create subtitles from audio'), exact: true }).click();
+    await page.locator('.current-caption').getByRole('button', { name: text('音声から字幕を作成', 'Create subtitles from audio'), exact: true }).click();
     const start = page.getByRole('button', { name: text('文字起こしを開始', 'Start transcription'), exact: true });
     await expect(start).toBeEnabled();
     await expect(start).toBeInViewport();
@@ -87,7 +87,7 @@ for (const locale of ['ja', 'en'] as const) {
     await page.setViewportSize({ width: 1024, height: 700 });
     await installTranscriptionFixture(page, locale);
     await page.goto('/study/visual-fixture');
-    await page.getByRole('button', { name: locale === 'ja' ? '音声から字幕を作成' : 'Create subtitles from audio', exact: true }).click();
+    await page.locator('.current-caption').getByRole('button', { name: locale === 'ja' ? '音声から字幕を作成' : 'Create subtitles from audio', exact: true }).click();
     const start = page.getByRole('button', { name: locale === 'ja' ? '文字起こしを開始' : 'Start transcription', exact: true });
     await expect(start).toBeEnabled();
     await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -124,7 +124,7 @@ test('transcription inputs and quote survive tab switches, inspection, and closi
   await page.setViewportSize({ width: 1024, height: 700 });
   await installTranscriptionFixture(page, 'en', true);
   await page.goto('/study/visual-fixture');
-  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await setTranscriptOpen(page);
   await page.getByRole('tab', { name: 'Transcription', exact: true }).click();
   const calls = () => page.evaluate(() => (window as unknown as { __learningFixture: { calls: { command: string }[] } }).__learningFixture.calls.map(item => item.command));
   expect(await calls()).not.toContain('prepare_transcription');
@@ -168,7 +168,7 @@ for (const locale of ['ja', 'en'] as const) {
     await page.setViewportSize({ width: 1024, height: 700 });
     await installTranscriptionFixture(page, locale, false, true);
     await page.goto('/study/visual-fixture');
-    await page.getByRole('button', { name: locale === 'ja' ? '音声から字幕を作成' : 'Create subtitles from audio', exact: true }).click();
+    await page.locator('.current-caption').getByRole('button', { name: locale === 'ja' ? '音声から字幕を作成' : 'Create subtitles from audio', exact: true }).click();
     await expect(page.getByTestId('transcription-pacing-policy')).not.toBeVisible();
     await page.getByText(locale === 'ja' ? '料金・送信の詳細' : 'Cost and request details', { exact: true }).click();
     await expect(page.getByTestId('transcription-pacing-policy')).toBeVisible();
@@ -214,7 +214,7 @@ for (const locale of ['ja', 'en'] as const) {
     await page.setViewportSize({ width: 1024, height: 700 });
     await installTranscriptionFixture(page, locale, false, true);
     await page.goto('/study/visual-fixture');
-    await page.getByRole('button', { name: locale === 'ja' ? '音声から字幕を作成' : 'Create subtitles from audio', exact: true }).click();
+    await page.locator('.current-caption').getByRole('button', { name: locale === 'ja' ? '音声から字幕を作成' : 'Create subtitles from audio', exact: true }).click();
     await expect(page.getByTestId('automatic-retry-policy')).not.toBeVisible();
     await page.getByText(locale === 'ja' ? '料金・送信の詳細' : 'Cost and request details', { exact: true }).click();
     await expect(page.getByTestId('automatic-retry-policy')).toBeVisible();

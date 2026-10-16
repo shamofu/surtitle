@@ -7,8 +7,6 @@ import {
   ArrowLeft,
   BookmarkPlus,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Edit3,
   FolderOpen,
   Play,
@@ -192,8 +190,10 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const [inspection, setInspection] = useState<Inspection>();
   const [invalidated, setInvalidated] = useState(false);
   const [selectionRevision, setSelectionRevision] = useState(0);
-  const [panel, setPanel] = useState<'transcript' | 'phrase' | 'activity' | null>(null);
-  const companion = useStudyPresence(panel !== null);
+  const [panel, setPanel] = useState<'transcript' | 'phrase' | 'activity' | null>(() =>
+    window.innerWidth >= 1000 && window.innerHeight >= 681 ? 'transcript' : null);
+  const initialTranscript = useRef(panel === 'transcript');
+  const companion = useStudyPresence(panel !== null, !!media);
   const companionContents = useRef<HTMLDivElement>(null);
   const previousPanel = useRef(panel);
   useLayoutEffect(() => { if (panel) previousPanel.current = panel; }, [panel]);
@@ -281,6 +281,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
   const aiSourceInvalid = !!aiContinuation && aiContinuation.kind !== 'transcribe' && !continuationSource(aiContinuation);
   function resumeAi(item: AiContinuation) {
     if (!segmentsQuery.isSuccess) return;
+    rememberTrigger();
     if (item.kind === 'transcribe') {
       setAiKind(undefined); setPanel('transcript'); setTab('transcription');
       setTranscriptionRequest({ id: item.id, continuation: item });
@@ -351,6 +352,9 @@ function StudySession({ mediaId }: { mediaId: string }) {
   useLayoutEffect(
     () => {
       if (panel && companion.ready) {
+        // A wide-screen companion is part of the initial layout, not a focus
+        // navigation request. Resizing must not turn it into one either.
+        if (initialTranscript.current) return;
         // A disclosure toggle keeps its place and keyboard focus on narrow
         // screens. Inspecting a phrase or starting setup is explicit navigation.
         if (window.innerWidth < 1000 && panel === 'transcript' && trigger.current === transcriptToggle.current) {
@@ -404,6 +408,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
   }
 
   function rememberTrigger() {
+    initialTranscript.current = false;
     if (document.activeElement instanceof HTMLElement &&
       !document.activeElement.closest('.study-companion')) trigger.current = document.activeElement;
   }
@@ -595,6 +600,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
   }
 
   async function closePanel(resume = false, destination: 'transcript' | 'activity' | null = null, destinationTab?: TranscriptTab) {
+    initialTranscript.current = false;
     await run(async () => {
       if (playerReady && (inspection || draftPlayback || returnPosition.current !== undefined)) {
         const state = await playerApi.playerState();
@@ -706,10 +712,30 @@ function StudySession({ mediaId }: { mediaId: string }) {
           <span>{languageName(media.learningLanguage, locale)} / <AnimatedValue value={timestamp(media.durationMs)} /></span>
         </div>
         <div className="study-top-actions">
+          <MotionButton
+            ref={transcriptToggle}
+            type="button"
+            className="button secondary study-transcript-toggle"
+            hoverMotion={false}
+            aria-expanded={panel === 'transcript'}
+            aria-controls="study-companion"
+            title={panel === 'transcript' ? t('字幕パネルを閉じる', 'Close transcript panel') : t('字幕パネルを開く', 'Open transcript panel')}
+            disabled={busy || saveBusy}
+            onClick={() => {
+              initialTranscript.current = false;
+              trigger.current = transcriptToggle.current;
+              if (panel === 'transcript') void closePanel();
+              else if (panel === 'phrase') void closePanel(false, 'transcript', 'transcript');
+              else setPanel('transcript');
+            }}
+          >
+            <Subtitles size={17} aria-hidden="true" />
+            <span>{t('字幕一覧', 'Transcript')}</span>
+          </MotionButton>
           <MotionRegion mode="status" open={dirtyDrafts.length > 0}>{dirtyDrafts.length > 0 && <Button
             aria-expanded={panel === 'activity'}
             disabled={busy || saveBusy}
-            onClick={() => setPanel('activity')}
+            onClick={() => { rememberTrigger(); setPanel('activity'); }}
           >
             <BookmarkPlus size={17} />
             <AnimatedValue value={t(`入力途中のフレーズ (${dirtyDrafts.length})`, `Unfinished phrases (${dirtyDrafts.length})`)} />
@@ -762,7 +788,8 @@ function StudySession({ mediaId }: { mediaId: string }) {
             inspectButton={inspectButton}
             onInspect={(source, term) => void inspect(source, term)}
             onSave={source => void inspect(source, '', undefined, true)}
-            onImport={() => openTranscription()}
+            onImport={() => setSubtitleSource('choose')}
+            onTranscribe={() => openTranscription()}
             onOpenTranscript={() => { rememberTrigger(); setPanel('transcript'); setTab('transcript'); }}
             hasPrevious={!!previousCaption}
             hasNext={!!nextCaption}
@@ -772,27 +799,6 @@ function StudySession({ mediaId }: { mediaId: string }) {
           />
         </div>
         <div className="study-companion-dock" {...companion.dockProps}>
-          <div className="study-transcript-rail">
-            <MotionButton
-              ref={transcriptToggle}
-              type="button"
-              className="study-transcript-toggle"
-              hoverMotion={false}
-              aria-expanded={panel === 'transcript'}
-              aria-controls="study-companion"
-              title={panel === 'transcript' ? t('字幕パネルを閉じる', 'Close transcript panel') : t('字幕パネルを開く', 'Open transcript panel')}
-              disabled={busy || saveBusy}
-              onClick={() => {
-                trigger.current = transcriptToggle.current;
-                if (panel === 'transcript') void closePanel();
-                else if (panel === 'phrase') void closePanel(false, 'transcript', 'transcript');
-                else setPanel('transcript');
-              }}
-            >
-              {panel === 'transcript' ? <ChevronRight size={18} aria-hidden="true" /> : <ChevronLeft size={18} aria-hidden="true" />}
-              <span>{t('字幕一覧', 'Transcript')}</span>
-            </MotionButton>
-          </div>
           {/* Keep setup and estimates alive while inspecting a phrase or closing the panel. */}
           <aside
             ref={companion.panelRef}
@@ -1147,6 +1153,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
           sourceContext={inspection ? { sourceCueIds: ids, sourceRevision: inspection.fingerprint } : undefined}
           sourceInvalid={aiSourceInvalid}
           onReselectSource={item => {
+            rememberTrigger();
             setAiRebind(item); setAiKind(undefined); setInspection(undefined); setInvalidated(false);
             setMeaningRequest(undefined); setShowMeaning(false); setShowSave(false);
             setPanel('transcript'); setTab('transcript');

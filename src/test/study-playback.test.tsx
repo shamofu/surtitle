@@ -216,6 +216,7 @@ const cues: SubtitleSegment[] = [
 ];
 let state: PlayerState;
 const clients: QueryClient[] = [];
+const initialViewport = { width: window.innerWidth, height: window.innerHeight };
 function mount() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -246,6 +247,10 @@ beforeAll(() => {
   );
 });
 beforeEach(() => {
+  // These interaction cases explicitly open their panel in a compact workarea.
+  // Wide-screen automatic disclosure is covered separately below.
+  window.innerWidth = 1024;
+  window.innerHeight = 680;
   fixture.editingSessions.clear();
   fixture.settingsRevision = 0;
   fixture.settings = { theme: 'dark', locale: 'en', learningLanguage: 'en', explanationLanguage: 'ja', dailyBudgetUsd: 0,
@@ -326,6 +331,8 @@ afterEach(async () => {
   fixture.hasMedia = true;
   fixture.blockerStatus = 'idle';
   vi.resetAllMocks();
+  window.innerWidth = initialViewport.width;
+  window.innerHeight = initialViewport.height;
 });
 
 const inspectButton = () => screen.getByRole('button', { name: 'Explore meaning' });
@@ -347,6 +354,43 @@ async function inspectCurrent() {
   fireEvent.click(inspectButton());
   await screen.findByRole('button', { name: 'Resume from original position' });
 }
+
+it.each([
+  [1440, 900, true], [1000, 681, true], [1000, 680, false], [999, 900, false],
+])('chooses the initial transcript layout at %i × %i without stealing focus', async (width, height, open) => {
+  window.innerWidth = width;
+  window.innerHeight = height;
+  const before = document.createElement('button');
+  document.body.append(before);
+  before.focus();
+  try {
+    mount();
+    await ready();
+    expect(screen.getByRole('button', { name: 'Transcript' })).toHaveAttribute('aria-expanded', String(open));
+    expect(before).toHaveFocus();
+    const toggle = screen.getByRole('button', { name: 'Transcript' });
+    expect(toggle.closest('.study-top')).not.toBeNull();
+  } finally { before.remove(); }
+});
+
+it('keeps a chosen transcript state when the workarea changes', async () => {
+  window.innerWidth = 1440;
+  window.innerHeight = 900;
+  mount();
+  await ready();
+  const toggle = screen.getByRole('button', { name: 'Transcript' });
+  fireEvent.click(toggle);
+  await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+  window.innerWidth = 1024;
+  window.innerHeight = 700;
+  fireEvent.resize(window);
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(toggle);
+  await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'true'));
+  window.innerHeight = 600;
+  fireEvent.resize(window);
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
+});
 
 it('marks a visible opening panel disabled until native placement accepts input, then retains search and focus', async () => {
   mount();
@@ -749,7 +793,7 @@ describe('watching and inspecting phrases', () => {
     await screen.findByRole('button', { name: 'Create subtitles from audio' });
     expect(screen.queryByRole('button', { name: 'Explore meaning' })).not.toBeInTheDocument();
     await openTranscript();
-    expect(screen.getByRole('button', { name: 'Add or switch subtitles' })).toBeEnabled();
+    expect(within(document.querySelector('.study-transcript') as HTMLElement).getByRole('button', { name: 'Add or switch subtitles' })).toBeEnabled();
     expect(within(document.querySelector('.study-transcript') as HTMLElement).getByRole('button', { name: 'Create subtitles from audio' })).toBeEnabled();
     expect(aiApi.createQuote).not.toHaveBeenCalled();
   });

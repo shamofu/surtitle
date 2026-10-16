@@ -23,6 +23,12 @@ async function openStudy(page: Page, locale: 'en' | 'ja' = 'en', theme: 'light' 
   await expect(page.getByRole('button', { name: locale === 'ja' ? '意味を調べる' : 'Explore meaning', exact: true })).toBeEnabled();
 }
 
+async function openTranscript(page: Page, locale: 'en' | 'ja' = 'en') {
+  const toggle = page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true });
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+}
+
 async function createDraft(page: Page, locale: 'en' | 'ja' = 'en') {
   await page.getByRole('button', { name: locale === 'ja' ? '意味を調べる' : 'Explore meaning', exact: true }).click();
   await page.locator('.phrase-save-toggle').click();
@@ -46,7 +52,8 @@ async function blockDraftSaves(page: Page) {
 }
 
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {
-  test(`subtitle side tab supports keyboard opening and focus return (${reducedMotion})`, async ({ page }) => {
+  test(`subtitle header button supports keyboard opening and focus return (${reducedMotion})`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 680 });
     await page.emulateMedia({ reducedMotion });
     await openStudy(page);
     const toggle = page.getByRole('button', { name: 'Transcript', exact: true });
@@ -77,6 +84,9 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
 
 test('opening the panel keeps search focus and input through subsequent frames', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' }); await openStudy(page);
+  // Exercise a new opening, since this viewport starts with the transcript open.
+  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await expect(page.getByLabel('Search transcript')).toBeHidden();
   await page.getByRole('button', { name: 'Transcript', exact: true }).click();
   const search = page.getByLabel('Search transcript');
   await search.fill('c');
@@ -135,7 +145,7 @@ test('a native close request waits for the latest draft save to finish', async (
 
 test('real virtualized transcript restores its search, translations and scroll after inspection', async ({ page }) => {
   await openStudy(page);
-  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await openTranscript(page);
   await page.getByLabel('Search transcript').fill('coast');
   await page.getByRole('button', { name: 'Show translations' }).click();
   const list = page.getByLabel('Subtitle list', { exact: true });
@@ -166,7 +176,7 @@ test('real virtualized transcript restores its search, translations and scroll a
 for (const locale of ['en', 'ja'] as const) {
   test(`transcript play resumes from the cue while detail playback stays bounded ${locale}`, async ({ page }) => {
     await openStudy(page, locale);
-    await page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true }).click();
+    await openTranscript(page, locale);
     const search = page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript');
     const translations = page.locator('.study-transcript').getByRole('button', { name: locale === 'ja' ? /訳を表示|訳を隠す/ : /Show translations|Hide translations/ });
     const list = page.getByLabel(locale === 'ja' ? '字幕一覧' : 'Subtitle list', { exact: true });
@@ -382,7 +392,7 @@ for (const segmentCount of [120, 10000]) {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await installLearningFixture(page, 'en', 'light', { segmentCount });
     await page.goto('/study/visual-fixture');
-    await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+    await openTranscript(page);
     const search = page.getByLabel('Search transcript');
     const rows = page.locator('.transcript-row');
     await search.fill('coast');

@@ -11,20 +11,20 @@
 .modal[data-native-occlusion='pending'] { visibility: hidden; pointer-events: none; }
 .modal {
   border: 1px solid var(--border);
-  border-radius: 0;
+  border-radius: 12px;
   padding: 0;
   width: min(640px, calc(100vw - 48px));
   max-height: calc(100dvh - 60px);
   overflow: hidden;
   background: var(--surface);
   color: var(--text);
-  box-shadow: none;
+  box-shadow: var(--shadow);
 }
 .modal.wide {
   width: min(840px, calc(100vw - 48px));
 }
 .modal-inner {
-  padding: 28px;
+  padding: 24px;
   max-height: calc(100dvh - 62px);
   display: flex;
   flex-direction: column;
@@ -34,8 +34,8 @@
   flex-shrink: 0;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 15px;
-  margin-bottom: 25px;
+  gap: 16px;
+  margin-bottom: 24px;
 }
 .modal-header > div { min-width: 0; overflow-wrap: anywhere; }
 .modal-body {
@@ -47,8 +47,8 @@
   padding: 4px;
 }
 .modal-header h2 {
-  font-size: 23px;
-  font-weight: 550;
+  font-size: 24px;
+  font-weight: 600;
   letter-spacing: -0.3px;
   line-height: 1.5;
   margin-top: 0;
@@ -71,9 +71,9 @@
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 9px;
-  padding-top: 23px;
-  margin-top: 21px;
+  gap: 8px;
+  padding-top: 24px;
+  margin-top: 24px;
   border-top: 1px solid var(--border);
 }
 .segmented-control {
@@ -156,7 +156,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 18px;
+  margin-bottom: 24px;
   flex: 1;
   min-width: 0;
 }
@@ -165,7 +165,7 @@
   font-weight: 500;
 }
 .field small {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.8;
   color: var(--faint);
   font-weight: 400;

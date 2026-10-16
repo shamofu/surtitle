@@ -4,15 +4,15 @@
 .topbar {
   height: 56px;
   min-height: 56px;
-  padding: 0 20px;
+  padding: 0 24px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   display: flex;
   align-items: center;
-  gap: 28px;
+  gap: 32px;
   flex-shrink: 0;
 }
-.brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; font-size: 22px; font-weight: 650; letter-spacing: -.7px; line-height: 1; padding: 8px 0; }
+.brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; font-size: 22px; font-weight: 650; letter-spacing: -.5px; line-height: 1; padding: 8px 0; }
 .main-nav { display: flex; align-items: stretch; align-self: stretch; gap: 8px; }
 .main-nav a {
   display: flex;
@@ -26,14 +26,14 @@
   white-space: nowrap;
 }
 .main-nav a:hover { color: var(--text); background: var(--bg); }
-.main-nav a.active { border-bottom-color: var(--accent); color: var(--accent); }
+.main-nav a.active { border-bottom-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .nav-count { width: 5ch; flex: 0 0 5ch; padding: 1px 4px; border-radius: 5px; color: var(--accent); background: var(--accent-soft); font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
 .nav-count[data-empty="true"] { visibility: hidden; }
 .topbar-actions { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .locale-button { min-width: 40px; min-height: 40px; border-radius: 6px; color: var(--muted); font-size: 12px; font-weight: 600; padding: 8px; white-space: nowrap; }
 .locale-button:hover { color: var(--text); background: var(--surface-hover); }
 .running-label { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); white-space: nowrap; margin-right: 12px; }
-.page-content { flex: 1; overflow: auto; padding: 24px 32px 32px; scroll-behavior: auto; min-height: 0; }
+.page-content { flex: 1; overflow: auto; padding: 32px; scroll-behavior: auto; min-height: 0; }
 /* Page slides may cross the stage edge without opening a horizontal scroll lane.
    Keep this more specific than feature overflow rules; vertical scrolling stays local. */
 main.page-content[data-page-direction] { overflow-x: hidden; }
@@ -53,10 +53,10 @@ main.page-content[data-page-direction] { overflow-x: hidden; }
 .page-title { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .page-title > div:first-child { min-width: 0; }
 .page-title h1 { font-size: 28px; font-weight: 650; letter-spacing: -0.5px; line-height: 1.4; }
-.page-title p { font-size: 14px; color: var(--muted); margin-top: 8px; line-height: 1.8; max-width: 68ch; }
+.page-title p { font-size: 15px; color: var(--muted); margin-top: 8px; line-height: 1.7; max-width: 68ch; }
 .page-actions { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
 .eyebrow { display: none; }
-.button { display: inline-flex; justify-content: center; align-items: center; gap: 8px; padding: 9px 15px; border-radius: 6px; border: 1px solid var(--border); font-size: 14px; font-weight: 550; line-height: 1.5; white-space: nowrap; min-height: 40px; background: var(--surface); }
+.button { display: inline-flex; justify-content: center; align-items: center; gap: 8px; padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border); font-size: 14px; font-weight: 550; line-height: 1.5; white-space: nowrap; min-height: 40px; background: var(--surface); }
 .button:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--faint); }
 .button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); border-color: var(--accent); }

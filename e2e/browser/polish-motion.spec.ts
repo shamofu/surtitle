@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test, type Page } from '@playwright/test';
-import { installLearningFixture } from './learning-fixture';
+import { installLearningFixture, setTranscriptOpen } from './learning-fixture';
 
 async function expectNativeSafe(page: Page) {
   expect(await page.getByTestId('native-player-viewport').evaluate(video => {
@@ -36,7 +36,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 920, height: 900
     await page.goto('/study/visual-fixture');
     const toggle = page.getByRole('button', { name: 'Transcript', exact: true });
     const panel = page.locator('.study-companion');
-    await toggle.click();
+    await setTranscriptOpen(page);
     const search = page.getByLabel('Search transcript');
     await search.fill('coast');
     const original = await search.elementHandle();
@@ -71,6 +71,7 @@ test('closing an opening drawer leaves no interactive panel or stale native plac
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await installLearningFixture(page, 'en', 'light');
   await page.goto('/study/visual-fixture');
+  await setTranscriptOpen(page, false);
   await expect(page.locator('.native-player-viewport')).toHaveAttribute('data-native-placement', 'ready');
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
   const toggle = page.getByRole('button', { name: 'Transcript', exact: true });
@@ -91,7 +92,7 @@ test('tab reversal keeps outgoing controls inert and retains composing input', a
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await installLearningFixture(page, 'en', 'dark');
   await page.goto('/study/visual-fixture');
-  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await setTranscriptOpen(page);
   const search = page.getByLabel('Search transcript');
   await search.fill('unfinished 日本語');
   const original = await search.elementHandle();
@@ -155,6 +156,7 @@ test('live reduced motion settles an opening drawer at its latest endpoint', asy
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await installLearningFixture(page, 'en', 'light');
   await page.goto('/study/visual-fixture');
+  await setTranscriptOpen(page, false);
   await expect(page.locator('.native-player-viewport')).toHaveAttribute('data-native-placement', 'ready');
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
   const toggle = page.getByRole('button', { name: 'Transcript', exact: true });
@@ -186,6 +188,7 @@ test('resize clips a drawer against unacknowledged native bounds and delays its 
       };`,
   }));
   await page.goto('/study/visual-fixture');
+  await setTranscriptOpen(page, false);
   await expect(page.locator('.native-player-viewport')).toHaveAttribute('data-native-placement', 'ready');
   const nativeRight = await page.locator('.native-player-viewport').evaluate(element => element.getBoundingClientRect().right);
   await page.evaluate(() => { (window as any).__holdPlacement = true; document.querySelector<HTMLButtonElement>('.study-transcript-toggle')!.click(); });

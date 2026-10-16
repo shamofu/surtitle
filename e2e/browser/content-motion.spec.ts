@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from '@playwright/test';
-import { installLearningFixture } from './learning-fixture';
+import { installLearningFixture, setTranscriptOpen } from './learning-fixture';
 
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {
   test(`playback numbers update immediately without snapshots and retain the latest state (${reducedMotion})`, async ({ page }) => {
@@ -95,7 +95,7 @@ test('rapid cues, translations and search rows commit live text immediately at f
     expect(item.stable).toBe(true);
   }
   await expect(page.locator('.current-caption-text')).toHaveCSS('opacity', '1');
-  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await setTranscriptOpen(page);
   await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
   const input = page.getByLabel('Search transcript');
   const original = await input.elementHandle();
@@ -136,7 +136,7 @@ test('language and theme changes preserve the transcript input and leave native 
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await installLearningFixture(page, 'en', 'light');
   await page.goto('/study/visual-fixture');
-  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await setTranscriptOpen(page);
   const search = page.getByLabel('Search transcript');
   await search.fill('coast');
   const original = await search.elementHandle();

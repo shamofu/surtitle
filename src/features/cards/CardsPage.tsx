@@ -8,6 +8,7 @@ import {
   ArrowDownToLine,
   ArrowRight,
   BookOpen,
+  ChevronDown,
   ChevronRight,
   Layers3,
   MoreHorizontal,
@@ -44,6 +45,16 @@ function closePhraseMenu(element: HTMLElement, restoreFocus = true) {
   if (restoreFocus) menu.querySelector('summary')?.focus({ preventScroll: true });
 }
 
+function matchesPhraseText(value: string | undefined, query: string) {
+  return (value ?? '').toLocaleLowerCase().includes(query);
+}
+
+function matchingExcerpt(value: string, query: string) {
+  const start = Math.max(0, value.toLocaleLowerCase().indexOf(query) - 48);
+  const end = Math.min(value.length, start + Math.max(160, query.length + 48));
+  return `${start ? '…' : ''}${value.slice(start, end)}${end < value.length ? '…' : ''}`;
+}
+
 export function CardsPage() {
   const page = useRef<HTMLDivElement>(null);
   useMotionEntrance(page);
@@ -58,6 +69,7 @@ export function CardsPage() {
   const [deleting, setDeleting] = useState<StudyCard>();
   const [busyCard, setBusyCard] = useState<string>();
   const [openMenu, setOpenMenu] = useState<string>();
+  const [expandedCard, setExpandedCard] = useState<string>();
   const activeMenu = useRef<HTMLDetailsElement | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -88,19 +100,22 @@ export function CardsPage() {
   }
   const cards = data?.cards || [];
   const languages = [...new Set(cards.map((card) => card.language))];
+  const query = search.trim().toLocaleLowerCase();
   const filtered = cards.filter(
     (card) =>
       (language === 'all' || card.language === language) &&
-      `${card.term} ${card.meaning} ${card.example}`
-        .toLocaleLowerCase()
-        .includes(search.trim().toLocaleLowerCase()),
+      [card.term, card.meaning, card.example, card.translation, card.explanation]
+        .some(value => matchesPhraseText(value, query)),
   );
+  useEffect(() => {
+    if (expandedCard && !filtered.some(card => card.id === expandedCard)) setExpandedCard(undefined);
+  }, [expandedCard, filtered]);
   const due = dueCards(cards);
   const dueIds = new Set(due.map(card => card.id));
   const mediaById = useMemo(() => new Map(data?.media.map(media => [media.id, media])), [data?.media]);
   const virtualized = filtered.length > 40;
   const reflow = useListMotion(!virtualized);
-  const listDependency = `${language}:${search}`;
+  const listDependency = `${language}:${search}:${expandedCard ?? ''}`;
   const scroller = list.current?.closest<HTMLElement>('.page-content');
   const virtual = useVirtualizer({
     useFlushSync: false,
@@ -128,6 +143,10 @@ export function CardsPage() {
     return () => observer.disconnect();
   }, [virtualized]);
   useLayoutEffect(() => { list.current?.closest<HTMLElement>('.page-content')?.scrollTo({ top: 0 }); }, [search, language]);
+  useLayoutEffect(() => {
+    if (!virtualized) return;
+    list.current?.querySelectorAll<HTMLElement>('[data-index]').forEach(element => virtual.measureElement(element));
+  }, [expandedCard, virtualized, virtual]);
   const visible = virtualized ? virtual.getVirtualItems().map(item => ({ card: filtered[item.index], item })) : filtered.map(card => ({ card, item: undefined }));
   return (
     <div className="phrases-page" ref={page}>
@@ -173,7 +192,7 @@ export function CardsPage() {
               ref={searchInput}
               value={search}
               onChange={(event) => { setSearch(event.target.value); setOpenMenu(undefined); }}
-              placeholder={t('フレーズを検索', 'Search your phrases')}
+              placeholder={t('表現・訳・解説を検索', 'Search phrases, translations, notes')}
               aria-label={t('フレーズを検索', 'Search your phrases')}
             />
             <MotionRegion mode="status" open={!!search} as="span"><IconButton label={t('検索をクリア', 'Clear search')} onClick={() => {
@@ -220,11 +239,18 @@ export function CardsPage() {
           {visible.map(({ card, item }) => {
             const media = mediaById.get(card.mediaId);
             const isDue = dueIds.has(card.id);
+            const isExpanded = expandedCard === card.id;
+            const detailsId = `phrase-details-${card.id}`;
+            const hiddenMatch = query && ![card.term, card.meaning, card.example].some(value => matchesPhraseText(value, query));
+            const matchingDetails = hiddenMatch ? [
+              { label: t('翻訳', 'Translation'), text: card.translation },
+              { label: t('解説・メモ', 'Explanation or notes'), text: card.explanation },
+            ].filter(field => field.text && matchesPhraseText(field.text, query)) : [];
             return (
               <div key={card.id} data-index={item?.index}
                 ref={item ? virtual.measureElement : undefined}
                 style={item ? { position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${item.start - scrollMargin}px)` } : undefined}>
-              <m.article className="phrase-card"
+              <m.article className={`phrase-card${isExpanded ? ' is-expanded' : ''}`}
                 layout={reflow ? 'position' : false} layoutDependency={listDependency}
                 transition={{ layout: motionLayoutTransition }} data-motion-reference={motionReferences.list}
                 onFocusCapture={() => setFocusedCard(card.id)}
@@ -287,6 +313,36 @@ export function CardsPage() {
                 </header>
                 <p className="phrase-meaning"><MotionSwap disabled as="span" stateKey={card.meaning}>{card.meaning}</MotionSwap></p>
                 <blockquote><MotionSwap disabled as="span" stateKey={card.example}>{card.example}</MotionSwap></blockquote>
+                {!isExpanded && matchingDetails.length > 0 && <div className="phrase-search-matches">
+                  {matchingDetails.map(field => <p key={field.label}>
+                    <span>{field.label}{t('に一致：', ' match: ')}</span>
+                    {matchingExcerpt(field.text!, query)}
+                  </p>)}
+                </div>}
+                <Button
+                  variant="ghost"
+                  className="phrase-details-toggle"
+                  aria-expanded={isExpanded}
+                  aria-controls={detailsId}
+                  aria-label={t(`${card.term}の訳・解説`, `Translation and notes for ${card.term}`)}
+                  onClick={() => setExpandedCard(current => current === card.id ? undefined : card.id)}
+                >
+                  <ChevronDown size={16} aria-hidden="true" />
+                  {t('訳・解説', 'Translation and notes')}
+                </Button>
+                <div id={detailsId} className="phrase-details" hidden={!isExpanded}>
+                  {card.translation?.trim() && <section>
+                    <h4>{t('翻訳', 'Translation')}</h4>
+                    <p>{card.translation}</p>
+                  </section>}
+                  {card.explanation?.trim() && <section>
+                    <h4>{t('解説・メモ', 'Explanation or notes')}</h4>
+                    <p>{card.explanation}</p>
+                  </section>}
+                  {!card.translation?.trim() && !card.explanation?.trim() && <p className="phrase-details-empty">
+                    {t('訳・解説はまだありません。「編集」から追加できます。', 'No translation or notes yet. Add them with Edit.')}
+                  </p>}
+                </div>
                 <footer>
                   {media ? (
                     <Link
@@ -303,13 +359,16 @@ export function CardsPage() {
                         t('除外した教材の文脈', 'Context from removed media')}
                     </span>
                   )}
-                  <MotionSwap disabled as="span" stateKey={`${card.suspended}:${isDue}:${card.language}`}><Badge tone={isDue ? 'accent' : 'neutral'}>
+                  <div className="phrase-metadata">
+                    <span className="phrase-language">{languageName(card.language, locale)}</span>
+                    <MotionSwap disabled as="span" stateKey={`${card.suspended}:${isDue}`}><Badge tone={isDue ? 'accent' : 'neutral'}>
                     {card.suspended
                       ? t('復習を停止中', 'Reviews suspended')
                       : isDue
                         ? t('復習の時間', 'Ready to review')
-                        : languageName(card.language, locale)}
-                  </Badge></MotionSwap>
+                        : t('次回の復習待ち', 'Review scheduled')}
+                    </Badge></MotionSwap>
+                  </div>
                 </footer>
               </m.article>
               </div>

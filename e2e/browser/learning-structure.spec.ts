@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { installLearningFixture } from './learning-fixture';
+import { installLearningFixture, setTranscriptOpen } from './learning-fixture';
 import { drop, importFixture, importPaths } from './import-fixture';
 
 const sentence = 'Sometimes the best way to find your way is to take a little detour.';
@@ -71,18 +71,21 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
       - region "${captionName}":
         - region "${t('字幕の原文', 'Subtitle source')}":
           - paragraph: ${sentence}
-        - button "${t('訳を表示', 'Show translation')}"
-        - button "${inspect}"
-        - button "${t('保存', 'Save phrase')}"
+        - group "${t('字幕を学ぶ', 'Study this subtitle')}":
+          - button "${t('訳を表示', 'Show translation')}"
+          - button "${inspect}"
+          - button "${t('保存', 'Save phrase')}"
         - group "${t('字幕の再生操作', 'Subtitle playback')}":
+          - text: ${t('前の字幕', 'Previous subtitle')} 1:03
           - button "${t('前の字幕', 'Previous subtitle')}"
           - button "${t('この字幕をもう一度', 'Replay this subtitle')}"
+          - text: ${t('次の字幕', 'Next subtitle')} 1:17
           - button "${t('次の字幕', 'Next subtitle')}"
     `);
     await expect(caption.locator('.current-caption-text')).toHaveAttribute('lang', 'en');
     await expect(caption.getByRole('button', { name: t('訳を表示', 'Show translation'), exact: true })).toHaveAttribute('aria-pressed', 'false');
-    await expect(page.getByRole('button', { name: t('字幕一覧', 'Transcript'), exact: true })).toHaveAttribute('aria-expanded', 'false');
-    await expect(page.getByLabel(t('字幕を検索', 'Search transcript'))).toBeHidden();
+    await expect(page.getByRole('button', { name: t('字幕一覧', 'Transcript'), exact: true })).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByLabel(t('字幕を検索', 'Search transcript'))).toBeVisible();
     await expectReachable(caption.getByRole('button', { name: inspect, exact: true }));
     await expectReachable(page.getByRole('button', { name: t('再生', 'Play'), exact: true }));
     const video = page.getByTestId('native-player-viewport');
@@ -160,7 +163,7 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
 
   test(`transcription tab structure ${label}`, async ({ page }) => {
     await openStudy(page);
-    await page.getByRole('button', { name: t('字幕一覧', 'Transcript'), exact: true }).click();
+    await setTranscriptOpen(page);
     const tabs = page.getByRole('tablist', { name: t('字幕の表示内容', 'Transcript content'), exact: true });
     const tab = tabs.getByRole('tab', { name: t('文字起こし', 'Transcription'), exact: true });
     await tab.click();

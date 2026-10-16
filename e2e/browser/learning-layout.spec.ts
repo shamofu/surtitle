@@ -18,11 +18,13 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await page.goto('/study/visual-fixture');
       await expect(page.getByRole('heading', { name: 'A walk along the coast' })).toBeVisible();
       await expect(page.locator('.current-caption-text')).toHaveText('Sometimes the best way to find your way is to take a little detour.');
-      await expect(page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript')).toBeHidden();
       const transcript = page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true });
-      await expect(transcript).toHaveAttribute('aria-expanded', 'false');
+      const initiallyOpen = size.width >= 1000 && size.height >= 681;
+      await expect(transcript).toHaveAttribute('aria-expanded', String(initiallyOpen));
+      if (initiallyOpen) await expect(page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript')).toBeVisible();
+      else await expect(page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript')).toBeHidden();
       await expect(transcript).toBeInViewport({ ratio: 1 });
-      const expectTabBesideVideo = async () => {
+      const expectToggleAboveVideo = async () => {
         // The player and dock resize together, so compare geometry from one frame.
         const [video, tab] = await page.evaluate(elements => elements.map(element => {
           if (!element || ['hidden', 'collapse'].includes(getComputedStyle(element).visibility)) return null;
@@ -30,10 +32,11 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
           return rect.width > 0 && rect.height > 0 ? rect.toJSON() : null;
         }), [await page.getByTestId('native-player-viewport').elementHandle(), await transcript.elementHandle()]);
         expect(video).not.toBeNull(); expect(tab).not.toBeNull();
-        expect(video!.x + video!.width <= tab!.x + 1 || video!.y + video!.height <= tab!.y + 1).toBe(true);
+        expect(tab!.y + tab!.height).toBeLessThanOrEqual(video!.y + 1);
+        expect(await transcript.evaluate(element => !!element.closest('.study-top'))).toBe(true);
         expect(await transcript.evaluate(element => !element.closest('[inert], [hidden], [aria-hidden="true"]'))).toBe(true);
       };
-      await expectTabBesideVideo();
+      await expectToggleAboveVideo();
       const viewport = await page.getByTestId('native-player-viewport').boundingBox();
       expect(viewport).not.toBeNull();
       expect(viewport!.y + viewport!.height).toBeLessThan(size.height);
@@ -43,10 +46,10 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await expect(page.getByRole('dialog')).toBeVisible();
       await page.getByRole('dialog').getByRole('button', { name: locale === 'ja' ? '閉じる' : 'Close', exact: true }).click();
       await expect(settingsTrigger).toBeFocused();
-      await transcript.click();
+      if (!initiallyOpen) await transcript.click();
       await expect(page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript')).toBeVisible();
       await expect(transcript).toHaveAttribute('aria-expanded', 'true');
-      await expectTabBesideVideo();
+      await expectToggleAboveVideo();
       if (size.width < 1000) {
         await page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript').scrollIntoViewIfNeeded();
         await expect(page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript')).toBeInViewport();
@@ -75,7 +78,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await expect(page.locator('.study-companion')).toBeHidden();
       await expect(transcript).toHaveAttribute('aria-expanded', 'false');
       await expect(transcript).toBeFocused();
-      await expectTabBesideVideo();
+      await expectToggleAboveVideo();
       for (const [path, heading] of [
         ['/cards', locale === 'ja' ? 'フレーズ帳' : 'Phrases'],
         ['/review', locale === 'ja' ? '復習' : 'Review'],

@@ -5,7 +5,7 @@ import { installLearningFixture } from './learning-fixture';
 for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'] as const) {
   const text = (ja: string, en: string) => locale === 'ja' ? ja : en;
   test(`settings retain valid and incomplete input through navigation ${locale} ${theme}`, async ({ page }) => {
-    await page.setViewportSize({ width: 1024, height: 700 }); await installLearningFixture(page, locale, theme); await page.goto('/settings');
+    await page.setViewportSize({ width: 1024, height: 700 }); await installLearningFixture(page, locale, theme); await page.goto('/settings#budget');
     const monthly = page.getByRole('textbox', { name: text('1か月のAI予算（USD）', 'Monthly AI budget (USD)'), exact: true });
     const daily = page.getByLabel(text('1日の上限（USD）', 'Daily limit (USD)'), { exact: true });
     const advanced = page.getByText(text('1日・1処理の上限を調整', 'Adjust daily and per-job limits'), { exact: true });
@@ -16,6 +16,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
     await page.getByRole('link', { name: text('フレーズ帳', 'Phrases'), exact: true }).click();
     await expect(page).toHaveURL(/\/cards$/); await expect(page.getByRole('dialog')).toHaveCount(0);
     await page.getByRole('link', { name: text('設定', 'Settings'), exact: true }).click();
+    await page.locator('.settings-nav').getByRole('button', { name: 'AI', exact: true }).click();
     await expect(monthly).toHaveValue('4'); await expect(daily).toHaveValue('-1');
     await page.reload(); await expect(monthly).toHaveValue('4');
     await advanced.click(); await expect(daily).toHaveValue('-1');

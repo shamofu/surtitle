@@ -31,13 +31,14 @@ const previous = vi.fn();
 const next = vi.fn();
 const openTranscript = vi.fn();
 const importSubtitles = vi.fn();
+const transcribe = vi.fn();
 const animateDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'animate');
 
 function caption(active?: SubtitleSegment, options: Partial<ComponentProps<typeof CurrentCaption>> & { reduced?: boolean } = {}) {
   const { reduced, ...props } = options;
   return <MotionProvider preference={reduced ? 'reduce' : 'system'}>
     <CurrentCaption active={active} language="en" loading={false} hasSubtitles hasTimedSubtitles gapMode="review" draftMode={false} enabled
-      inspectButton={createRef()} onInspect={inspect} onSave={save} onImport={importSubtitles} onOpenTranscript={openTranscript}
+      inspectButton={createRef()} onInspect={inspect} onSave={save} onImport={importSubtitles} onTranscribe={transcribe} onOpenTranscript={openTranscript}
       onPrevious={previous} onNext={next} onReplay={replay} hasPrevious hasNext {...props} />
   </MotionProvider>;
 }
@@ -326,8 +327,12 @@ describe('caption gap learning', () => {
     expect(screen.getByText('Loading subtitles…')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Create subtitles from audio' })).not.toBeInTheDocument();
     view.rerender(caption(undefined, { hasSubtitles: false, hasTimedSubtitles: false }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add or switch subtitles' }));
+    expect(importSubtitles).toHaveBeenCalledOnce();
+    expect(transcribe).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Create subtitles from audio' }));
     expect(importSubtitles).toHaveBeenCalledOnce();
+    expect(transcribe).toHaveBeenCalledOnce();
     view.rerender(caption(first, { draftMode: true, previous: second, next: third }));
     expect(screen.getByText('Checking a draft passage. Its source text is shown in the transcript panel.')).toBeVisible();
     expect(screen.queryByText(first.text)).not.toBeInTheDocument();

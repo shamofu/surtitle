@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { installLearningFixture } from './learning-fixture';
+import { installLearningFixture, setTranscriptOpen } from './learning-fixture';
 
 async function reachable(control: Locator) {
   await expect(control).toBeEnabled();
@@ -94,7 +94,7 @@ for (const size of [{ width: 640, height: 360 }, { width: 800, height: 600 }, { 
       if (size.width === 640) await speedAdjustmentKeepsReadingVisible(page, t('再生速度', 'Playback speed'), caption);
       await noOverflow(page);
       const toggle = page.getByRole('button', { name: t('字幕一覧', 'Transcript'), exact: true });
-      await toggle.click();
+      await setTranscriptOpen(page);
       await expect(toggle).toHaveAttribute('aria-expanded', 'true');
       const search = page.getByRole('textbox', { name: t('字幕を検索', 'Search transcript') });
       await reachable(search);
@@ -156,7 +156,7 @@ for (const deviceScaleFactor of [1, 1.5, 2]) {
           native: { scaleFactor: deviceScaleFactor } });
         expect(geometry.native.width).toBeCloseTo(geometry.cssWidth, 1);
         expect(geometry.native.height).toBeCloseTo(geometry.cssHeight, 1);
-        await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+        await setTranscriptOpen(page);
         await reachable(page.getByRole('textbox', { name: 'Search transcript', exact: true }));
         await expect(page.locator('.companion-heading')).toBeInViewport({ ratio: 1 });
         await noOverflow(page);

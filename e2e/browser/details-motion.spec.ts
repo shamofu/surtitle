@@ -10,7 +10,7 @@ test('disclosure reversal retains its draft and ignores an obsolete close comple
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.clock.install();
   await installLearningFixture(page, 'en', 'light');
-  await page.goto('/settings');
+  await page.goto('/settings#ai');
   const details = page.locator('.budget-details');
   await details.locator('summary').click();
   const daily = page.getByRole('textbox', { name: 'Daily limit (USD)', exact: true });
@@ -41,7 +41,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     await page.emulateMedia({ reducedMotion });
     await page.clock.install();
     await installLearningFixture(page, 'en', 'light');
-    await page.goto('/settings');
+    await page.goto('/settings#ai');
     const details = page.locator('.budget-details');
     await details.locator('summary').click();
     const daily = page.getByRole('textbox', { name: 'Daily limit (USD)', exact: true });
@@ -73,7 +73,7 @@ test('choosing custom model output cancels a disclosure exit', async ({ page }) 
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.clock.install();
   await installLearningFixture(page, 'en', 'light');
-  await page.goto('/settings');
+  await page.goto('/settings#ai');
   const purposes = page.locator('#ai-models > details');
   await purposes.locator(':scope > summary').click();
   const model = purposes.locator('.model-preference').filter({ has: page.getByRole('heading', { name: 'Transcription', exact: true }) });

@@ -44,7 +44,6 @@ const latest = () => fixture.animations.filter(animation => animation.duration >
 function Panel({ open, children }: { open: boolean; children: ReactNode }) {
   const presence = useStudyPresence(open);
   return <div data-testid="dock" className="study-companion-dock" data-ready={presence.ready} {...presence.dockProps}>
-    <div className="study-transcript-rail"><button>Transcript toggle</button></div>
     <aside ref={presence.panelRef} hidden={!presence.visible} inert={!open || !presence.ready}>
       <StudyRegion open={open} retain={presence.visible} animate={!presence.moving}>{children}</StudyRegion>
     </aside>
@@ -71,7 +70,7 @@ it('deactivates a closing drawer immediately but retains its draft until the sli
   expect(screen.getByTestId('dock')).toHaveAttribute('data-moving', 'true');
   expect(latest().duration).toBe(.24);
   act(() => latest().complete());
-  expect(screen.getByTestId('dock')).toHaveStyle({ width: '44px' });
+  expect(screen.getByTestId('dock')).toHaveStyle({ width: '0px' });
   expect(region).toHaveAttribute('hidden');
   expect(field).not.toBeInTheDocument();
   expect(screen.getByTestId('dock')).toHaveAttribute('data-moving', 'false');
@@ -112,25 +111,22 @@ it('keeps the closing endpoint invisible before React commits its hidden state',
   expect(screen.getByTestId('dock')).toHaveAttribute('data-moving', 'false');
 });
 
-it('reveals the desktop panel and moves its rail while resizing the dock in one phase', () => {
+it('reveals the desktop panel while resizing the dock from zero in one phase', () => {
   const view = render(<Panel open={false}><input aria-label="Draft" /></Panel>);
   const dock = screen.getByTestId('dock');
   const panel = document.querySelector('aside')!;
-  const rail = document.querySelector<HTMLElement>('.study-transcript-rail')!;
   view.rerender(<Panel open><input aria-label="Draft" /></Panel>);
-  expect(dock).toHaveStyle({ width: '44px' });
+  expect(dock).toHaveStyle({ width: '0px' });
   expect(panel).toHaveStyle({ visibility: 'visible' });
   expect(latest().duration).toBe(.30);
   act(() => latest().set(.5));
-  expect(dock).toHaveStyle({ width: '204px' });
-  expect(rail.style.transform).toBe('');
+  expect(dock).toHaveStyle({ width: '160px' });
   expect(panel.style.transform).toBe('');
   expect(panel).toHaveStyle({ visibility: 'visible' });
   expect(panel).toHaveAttribute('inert');
   act(() => latest().complete());
-  expect(dock).toHaveStyle({ width: '364px' });
+  expect(dock).toHaveStyle({ width: '320px' });
   expect(panel).toHaveStyle({ visibility: 'visible' });
-  expect(rail.style.transform).toBe('');
   expect(panel).not.toHaveAttribute('inert');
   expect(dock).toHaveAttribute('data-moving', 'false');
 });
@@ -142,12 +138,12 @@ it('reverses a partially revealed dock from its current width', () => {
   act(() => opening.set(.4));
   view.rerender(<Panel open={false}><input aria-label="Draft" /></Panel>);
   expect(opening.stopped).toBe(true);
-  expect(screen.getByTestId('dock')).toHaveStyle({ width: '172px' });
+  expect(screen.getByTestId('dock')).toHaveStyle({ width: '128px' });
   expect(latest().duration).toBeCloseTo(.24 * .4);
   expect(document.querySelector('aside')).toHaveStyle({ visibility: 'visible' });
   act(() => opening.obsoleteComplete());
   act(() => latest().complete());
-  expect(screen.getByTestId('dock')).toHaveStyle({ width: '44px' });
+  expect(screen.getByTestId('dock')).toHaveStyle({ width: '0px' });
   expect(document.querySelector('aside')).toHaveAttribute('hidden');
 });
 
@@ -161,11 +157,11 @@ it('reveals only the drawer area cleared by native placement while its width kee
   act(() => publishSurfaceFootprint([{ x: 0, y: 0, width: 848, height: 200 }]));
   view.rerender(<Panel open><input aria-label="Draft" /></Panel>);
   act(() => latest().set(.5));
-  expect(dock).toHaveStyle({ width: '204px', clipPath: 'inset(0px 0px 0px 152px)' });
+  expect(dock).toHaveStyle({ width: '160px', clipPath: 'inset(0px 0px 0px 108px)' });
   expect(document.querySelector('aside')).toHaveStyle({ visibility: 'visible' });
   act(() => publishSurfaceFootprint([{ x: 0, y: 0, width: 688, height: 200 }]));
   expect(dock.style.clipPath).toBe('');
-  expect(dock).toHaveStyle({ width: '204px' });
+  expect(dock).toHaveStyle({ width: '160px' });
   view.unmount();
   expect(dock.style.clipPath).toBe('');
 });
@@ -206,12 +202,12 @@ it('reopens during closing from the current width without a second reveal phase'
   act(() => shrinking.set(.6));
   view.rerender(<Panel open><input aria-label="Draft" /></Panel>);
   expect(shrinking.stopped).toBe(true);
-  expect(screen.getByTestId('dock')).toHaveStyle({ width: '236px' });
+  expect(screen.getByTestId('dock')).toHaveStyle({ width: '192px' });
   expect(latest().duration).toBeCloseTo(.30 * .4);
   expect(document.querySelector('aside')).toHaveStyle({ visibility: 'visible' });
   act(() => shrinking.obsoleteComplete());
   act(() => latest().complete());
-  expect(screen.getByTestId('dock')).toHaveStyle({ width: '364px' });
+  expect(screen.getByTestId('dock')).toHaveStyle({ width: '320px' });
   expect(document.querySelector('aside')).not.toHaveAttribute('hidden');
 });
 

@@ -16,7 +16,7 @@ type CaptionSource = {
 
 export function CurrentCaption({
   active, previous, next, gapMode, language, loading, hasSubtitles, hasTimedSubtitles, draftMode, enabled, error,
-  inspectButton, onInspect, onSave, onImport, onOpenTranscript, onPrevious, onNext, onReplay,
+  inspectButton, onInspect, onSave, onImport, onTranscribe, onOpenTranscript, onPrevious, onNext, onReplay,
   hasPrevious, hasNext,
 }: {
   active?: SubtitleSegment;
@@ -34,6 +34,7 @@ export function CurrentCaption({
   onInspect: (source: SubtitleSegment, term?: string) => void;
   onSave?: (source: SubtitleSegment) => void;
   onImport: () => void;
+  onTranscribe: () => void;
   onOpenTranscript: () => void;
   onPrevious: () => void;
   onNext: () => void;
@@ -157,7 +158,10 @@ export function CurrentCaption({
                     : next ? t(`最初の字幕は ${timestamp(next.startMs)} から`, `The first subtitle starts at ${timestamp(next.startMs)}`)
                       : t('この先の字幕はまだありません', 'No further subtitles yet')}</p>
                 {!loading && (!hasSubtitles
-                  ? <Button variant="ghost" onClick={onImport}>{t('音声から字幕を作成', 'Create subtitles from audio')}</Button>
+                  ? <div className="caption-empty-actions">
+                    <Button onClick={onImport}>{t('字幕を追加・切り替え', 'Add or switch subtitles')}</Button>
+                    <Button variant="ghost" onClick={onTranscribe}>{t('音声から字幕を作成', 'Create subtitles from audio')}</Button>
+                  </div>
                   : !hasTimedSubtitles ? <Button variant="ghost" onClick={onOpenTranscript}>{t('字幕一覧を開く', 'Open transcript')}</Button>
                     : next ? <Button variant="ghost" disabled={!enabled} onClick={onNext}>{t('最初の字幕へ', 'Go to first subtitle')}</Button>
                       : previous && <Button variant="ghost" disabled={!enabled} onClick={onPrevious}>{t('前の字幕へ', 'Go to previous subtitle')}</Button>)}
@@ -173,7 +177,7 @@ export function CurrentCaption({
         </div>
       </div>
       <div className="caption-controls">
-        <div className="caption-actions">
+        <div className="caption-actions" role="group" aria-label={t('字幕を学ぶ', 'Study this subtitle')}>
           {source && !draftMode && <>
             <Button variant="ghost" aria-pressed={showTranslation} aria-label={showTranslation ? t('訳を隠す', 'Hide translation') : t('訳を表示', 'Show translation')} onClick={() => setShowTranslation(value => !value)}>
               <Languages size={17} />

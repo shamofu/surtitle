@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test, type Page } from '@playwright/test';
-import { installLearningFixture } from './learning-fixture';
+import { installLearningFixture, setTranscriptOpen } from './learning-fixture';
 
 const shortSource = 'A short subtitle.';
 const longSource = 'Follow the winding path along the coast and listen to the waves. '.repeat(40);
@@ -46,7 +46,7 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 700 }, 
     await page.waitForLoadState('networkidle');
     await expect(page.locator('.current-caption-text')).toHaveText(shortSource);
     if (size.width >= 1000) {
-      await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+      await setTranscriptOpen(page);
       await expect(page.locator('.transcript-scroll')).toBeVisible();
       await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
     }
@@ -106,7 +106,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       } });
       await page.goto('/study/visual-fixture');
       await page.waitForLoadState('networkidle');
-      await page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true }).click();
+      await setTranscriptOpen(page);
       const filter = page.getByRole('checkbox', { name: locale === 'ja' ? '注意のある箇所だけ表示' : 'Show marked passages only' });
       await expect(filter).toBeVisible();
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);

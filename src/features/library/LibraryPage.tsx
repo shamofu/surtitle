@@ -132,20 +132,22 @@ export function LibraryPage() {
       if (!nativeAvailable()) notify(t('この操作には Surtitle デスクトップアプリが必要です。', 'Open Surtitle desktop to use this feature.'), 'error');
     }}>
       <PageTitle title={t('ライブラリ', 'Library')} description={t('好きな作品を観ながら、気になる言葉を確かめる。', 'Watch something you enjoy. Take a closer look at the words that catch your attention.')}>
-        <Button variant="ghost" onClick={() => setDownloadsOpen(true)} aria-haspopup="dialog">
-          <Download size={17} />
-          {t('ダウンロード', 'Downloads')}
-        </Button>
-        <Button variant="ghost" onClick={() => setTransferOpen(true)}>
-          <ArrowDownToLine size={17} />
-          {t('データ管理', 'Your data')}
-        </Button>
         <Button variant="primary" onClick={() => setImportOpen(true)}>
           <Plus size={18} />
           {t('動画・音声を追加する', 'Add video or audio')}
         </Button>
       </PageTitle>
-      <p className="library-drop-hint"><Upload size={15} aria-hidden="true" />{t('動画・音声ファイルをここへドロップして追加できます。', 'Drop video or audio files here to add them.')}</p>
+      <div className="library-utilities">
+        <p className="library-drop-hint"><Upload size={15} aria-hidden="true" />{t('動画・音声ファイルをここへドロップして追加できます。', 'Drop video or audio files here to add them.')}</p>
+        <div className="library-secondary-actions">
+          <Button variant="ghost" onClick={() => setDownloadsOpen(true)} aria-haspopup="dialog">
+            <Download size={16} />{t('ダウンロード', 'Downloads')}
+          </Button>
+          <Button variant="ghost" onClick={() => setTransferOpen(true)} aria-haspopup="dialog">
+            <ArrowDownToLine size={16} />{t('データ管理', 'Your data')}
+          </Button>
+        </div>
+      </div>
       <MotionRegion mode="status" open={dragging && !importOpen}><div className="library-drop-overlay" role="status"><div><Upload size={34} aria-hidden="true" /><strong>{t('ドロップして教材を追加', 'Drop to add your materials')}</strong><p>{t('設定した言語で、すぐに取り込みを開始します。', 'Import immediately with your selected languages.')}</p></div></div></MotionRegion>
       <MotionRegion mode="status" open={continuing.length > 0}>
         <section className="continue-section" aria-labelledby="continue-title">

@@ -1,10 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import type { AppSnapshot } from '../../src/shared/contracts/snapshot';
 import type { SubtitleSegment } from '../../src/shared/contracts/media';
 import type { AiContinuation } from '../../src/features/ai/continuations';
 import type { UiDraft } from '../../src/shared/contracts/editing';
 import type { EditorDraft, EditorDraftInput, EditorDraftReference } from '../../src/features/study/editor-drafts/api';
+
+/** Establish a test's panel state independently of the responsive default. */
+export async function setTranscriptOpen(page: Page, open = true) {
+  const toggle = page.locator('.study-transcript-toggle');
+  await expect(toggle).toBeVisible();
+  if ((await toggle.getAttribute('aria-expanded')) !== String(open)) await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', String(open));
+  await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
+  if (open) await expect(page.locator('.study-companion')).not.toHaveAttribute('inert');
+  else await expect(page.locator('.study-companion')).toBeHidden();
+}
 
 // This fixture is installed only by Playwright through request interception.
 // The ordinary browser preview continues to have no fabricated native state.
@@ -325,14 +336,22 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
   await page.route(/\/src\/shared\/native\/events\.ts(?:\?|$)/, route => route.fulfill({
     contentType: 'application/javascript', body: 'export const subscribeNative = (event, callback, error, ready) => { const stop = window.__learningFixture.subscribe(event, callback); queueMicrotask(() => ready?.()); return stop; };',
   }));
-  await page.route(/\/src\/shared\/native\/window\.ts(?:\?|$)/, route => route.fulfill({
-    contentType: 'application/javascript', body: `const tasks = new Set();
-      export const setWindowTheme = async theme => { window.__learningFixture.windowTheme = theme === 'system' ? null : theme; };
-      export const registerCloseTask = (task, pending = () => false) => { const entry = {task,pending}; tasks.add(entry); return () => tasks.delete(entry); };
-      export const hasPendingCloseTasks = () => [...tasks].some(entry => entry.pending());
-      export const flushCloseTasks = () => Promise.all([...tasks].map(entry => entry.task()));
-      export const subscribeWindowClose = callback => window.__learningFixture.subscribeClose(callback);
-      export const closeWindow = async () => { await flushCloseTasks(); return window.__learningFixture.close(); };
-      export const requestWindowClose = () => window.__learningFixture.requestClose();`,
-  }));
+  await page.route(/\/src\/shared\/native\/window\.ts(?:\?|$)/, async route => {
+    // Exercise the real close-task drain and observers. Only replace the native
+    // window boundary; a second implementation silently drifts from the app.
+    const response = await route.fetch();
+    const source = await response.text();
+    const nativeImport = /import\s*\{\s*getCurrentWindow\s*\}\s*from\s*['"][^'"]+['"];?/;
+    if (!nativeImport.test(source)) throw new Error('Could not bind the native window fixture');
+    await route.fulfill({ response, body: source.replace(nativeImport, `const getCurrentWindow = () => ({
+      setTheme: async theme => { window.__learningFixture.windowTheme = theme; },
+      onCloseRequested: async callback => window.__learningFixture.subscribeClose(() => {
+        let prevented = false;
+        callback({ preventDefault() { prevented = true; } });
+        return prevented;
+      }),
+      close: async () => window.__learningFixture.requestClose(),
+      destroy: () => window.__learningFixture.close(),
+    });`) });
+  });
 }

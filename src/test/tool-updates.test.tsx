@@ -14,7 +14,7 @@ import { AppProviders } from '../app/providers';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import type { AppSnapshot } from '../shared/contracts/snapshot';
 
-vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn(), useBlocker: () => ({ status: 'idle' }) }));
+vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useLocation: ({ select }: { select: (location: { hash: string }) => unknown }) => select({ hash: '' }), useNavigate: () => vi.fn(), useBlocker: () => ({ status: 'idle' }) }));
 vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, registerCloseTask: () => () => {}, hasPendingCloseTasks: () => false, closeWindow: vi.fn() }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -32,6 +32,7 @@ afterEach(() => {
 });
 
 function mount(locale: 'ja' | 'en', check: () => Promise<void>) {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
   const data: AppSnapshot = {
     settings: {
       theme: 'dark',
@@ -119,7 +120,6 @@ describe('manual managed-tool update discovery', () => {
         finish = resolve;
       });
       mount(locale, () => pending);
-      const checkButton = await screen.findByRole('button', { name: button });
       await waitFor(() =>
         expect(
           screen.getByRole('combobox', { name: new RegExp(language) }),
@@ -130,6 +130,8 @@ describe('manual managed-tool update discovery', () => {
         screen.getByRole('combobox', { name: new RegExp(language) }),
         { target: { value: 'fr' } },
       );
+      fireEvent.click(screen.getByRole('button', { name: locale === 'ja' ? 'ツール' : 'Tools' }));
+      const checkButton = await screen.findByRole('button', { name: button });
       fireEvent.click(checkButton);
       expect(checkButton).toBeDisabled();
       expect(checkButton).toHaveAttribute('aria-busy', 'true');
@@ -155,6 +157,7 @@ describe('manual managed-tool update discovery', () => {
       });
       expect(await screen.findByText(success)).toBeVisible();
       await waitFor(() => expect(checkButton).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: locale === 'ja' ? '学習' : 'Learning' }));
       expect(
         screen.getByRole('combobox', { name: new RegExp(language) }),
       ).toHaveValue('fr');
@@ -172,6 +175,7 @@ describe('manual managed-tool update discovery', () => {
     mount('en', () =>
       Promise.reject(new Error('Upstream metadata unavailable')),
     );
+    fireEvent.click(await screen.findByRole('button', { name: 'Tools' }));
     const button = await screen.findByRole('button', { name: 'Check updates' });
     fireEvent.click(button);
     expect(

@@ -55,7 +55,11 @@ describe('watch, inspect, and return with the Windows native surface', () => {
         const state = await player();
         return state.surfaceVisible && state.videoWidth === 640 && state.videoHeight === 360;
       }, { timeoutMsg: 'Native video is clipped or has not decoded the fixture dimensions' });
-      await clickNative($('button=Transcript'));
+      // Wide layouts now show the transcript initially; exercise the same
+      // opened layout after either initial entry or the preceding close.
+      if ((await $('.study-transcript-toggle').getAttribute('aria-expanded')) !== 'true') {
+        await clickNative($('.study-transcript-toggle'));
+      }
       await $('[aria-label="Subtitle list"]').waitForDisplayed();
       await browser.waitUntil(async () => (await player()).surfaceVisible);
       const geometry = await browser.execute(() => {

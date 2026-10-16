@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { installLearningFixture } from './learning-fixture';
+import { installLearningFixture, setTranscriptOpen } from './learning-fixture';
 
 async function openSurfaces(page: Page) {
   await page.route(/\/src\/main\.tsx(?:\?|$)/, route => route.fulfill({
@@ -197,7 +197,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
 test('animation preference autosaves, survives reload, and follows live OS changes', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await installLearningFixture(page, 'en', 'dark');
-  await page.goto('/settings');
+  await page.goto('/settings#appearance');
   const preference = page.getByRole('combobox', { name: 'Animations', exact: true });
   await expect(preference).toHaveValue('system');
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
@@ -223,7 +223,7 @@ test('live OS reduction keeps the shown study region opaque and layout changes i
   const transcript = page.getByRole('button', { name: 'Transcript', exact: true });
   const panel = page.locator('.study-companion');
   const region = page.locator('.study-transcript');
-  await transcript.click();
+  await setTranscriptOpen(page);
   await expect(region).toBeVisible();
   await expect(region).toHaveCSS('opacity', '1');
   await page.emulateMedia({ reducedMotion: 'reduce' });

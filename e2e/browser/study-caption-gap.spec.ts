@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test, type Page } from '@playwright/test';
-import { installLearningFixture } from './learning-fixture';
+import { installLearningFixture, setTranscriptOpen } from './learning-fixture';
 
 const reviewText = 'Review this passage while the audio continues.';
 const previewText = 'The next passage is ready to preview.';
@@ -82,7 +82,7 @@ for (const locale of ['en', 'ja'] as const) {
     });
     await page.goto('/study/visual-fixture');
     if (viewport.width >= 1000) {
-      await page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true }).click();
+      await setTranscriptOpen(page);
       await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
     }
     await setGapMode(page, 'preview', locale);
@@ -199,7 +199,7 @@ for (const locale of ['en', 'ja'] as const) {
         await page.setViewportSize(viewport);
         await installGaps(page, locale, true, reducedMotion);
         if (viewport.width >= 1000) {
-          await page.getByRole('button', { name: locale === 'ja' ? '字幕一覧' : 'Transcript', exact: true }).click();
+          await setTranscriptOpen(page);
           await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
         }
         const caption = page.locator('.current-caption');

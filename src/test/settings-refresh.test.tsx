@@ -14,12 +14,12 @@ import { settingsEditor } from '../features/settings/editing';
 import { aiApi } from '../features/ai/api';
 import type { AppSettings } from '../shared/contracts/settings';
 import type { AppSnapshot } from '../shared/contracts/snapshot';
-const context = vi.hoisted(() => ({ data: undefined as AppSnapshot | undefined, error: null as Error | null, loading: false, native: true, refresh: vi.fn(async () => {}), notify: vi.fn(), revision: 0 }));
+const context = vi.hoisted(() => ({ data: undefined as AppSnapshot | undefined, error: null as Error | null, loading: false, native: true, refresh: vi.fn(async () => {}), notify: vi.fn(), navigate: vi.fn(), hash: '', resume: undefined as string | undefined, revision: 0 }));
 vi.mock('../features/settings/api', () => ({ settingsApi: { state: vi.fn(), patch: vi.fn(), scanExternalTools: vi.fn(), setToolProvider: vi.fn(), importCredential: vi.fn(), setWindowSizePreset: vi.fn() } }));
 vi.mock('../features/ai/api', () => ({ aiApi: { vertexModels: vi.fn(), vertexPrice: vi.fn() } }));
 vi.mock('../features/ai/continuations', () => ({ continuationApi: { list: vi.fn().mockResolvedValue([]) } }));
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => context.native }));
-vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useNavigate: () => vi.fn() }));
+vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({ resume: context.resume }), useLocation: ({ select }: { select: (location: { hash: string }) => unknown }) => select({ hash: context.hash }), useNavigate: () => context.navigate }));
 vi.mock('../app/runtime', () => {
   const useFixture = () => ({ data: context.data, error: context.error, loading: context.loading, refresh: context.refresh, t: (_ja: string, en: string) => en, locale: 'en',
     mutate: (action: () => Promise<unknown>) => action(), report: (action: () => Promise<unknown>) => action().catch(() => undefined),
@@ -34,13 +34,18 @@ function renderSettings() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); clients.push(client);
   return render(<QueryClientProvider client={client}><SettingsPage /></QueryClientProvider>);
 }
-async function mount() {
+function selectCategory(name: 'Learning' | 'Appearance' | 'AI' | 'Tools' | 'Data') {
+  fireEvent.click(screen.getByRole('button', { name }));
+}
+async function mount(category: 'Learning' | 'Appearance' | 'AI' | 'Tools' | 'Data' = 'Learning') {
   const view = renderSettings();
   await waitFor(() => expect(screen.getByRole('combobox', { name: 'Learning language' })).toBeEnabled());
+  if (category !== 'Learning') selectCategory(category);
   return view;
 }
 beforeEach(() => {
   context.data = snapshot(settings()); context.revision = 0; context.error = null; context.loading = false; context.native = true;
+  context.hash = ''; context.resume = undefined;
   context.refresh.mockImplementation(async () => {});
   HTMLElement.prototype.scrollIntoView = vi.fn();
   vi.mocked(settingsApi.state).mockImplementation(async () => ({ settings: context.data!.settings, revision: String(context.revision) }));
@@ -64,8 +69,10 @@ it('keeps disabled settings readable in the browser preview without inventing pe
   renderSettings();
   await screen.findByText(/Open Surtitle desktop to use this feature/);
   expect(screen.getByRole('combobox', { name: 'Learning language' })).toBeDisabled();
+  selectCategory('AI');
   expect(screen.getByRole('textbox', { name: /Monthly AI budget/ })).toBeDisabled();
   expect(screen.getByRole('textbox', { name: /Monthly AI budget/ })).toHaveValue('');
+  selectCategory('Appearance');
   expect(screen.getByRole('button', { name: '1600 × 900 (Default)' })).toBeDisabled();
   expect(screen.queryByText(/Could not load settings/)).not.toBeInTheDocument();
   expect(settingsApi.patch).not.toHaveBeenCalled();
@@ -75,6 +82,7 @@ it('applies each window preset independently of unfinished settings and prevents
   await mount();
   const input = screen.getByRole('textbox', { name: /Playback context on each side/ });
   fireEvent.change(input, { target: { value: '-' } });
+  selectCategory('Appearance');
   let finish!: () => void;
   vi.mocked(settingsApi.setWindowSizePreset).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   const standard = screen.getByRole('button', { name: '1600 × 900 (Default)' });
@@ -93,7 +101,7 @@ it('applies each window preset independently of unfinished settings and prevents
 });
 
 it('reports a failed window resize and allows retry', async () => {
-  await mount();
+  await mount('Appearance');
   vi.mocked(settingsApi.setWindowSizePreset).mockRejectedValueOnce(new Error('Window resize failed'));
   const button = screen.getByRole('button', { name: '1600 × 900 (Default)' });
   await act(async () => { fireEvent.click(button); });
@@ -174,7 +182,7 @@ it('retains an invalid caption gap mode without sending it to settings', async (
 });
 
 it('autosaves a valid field without a save button and leaves typing enabled', async () => {
-  await mount();
+  await mount('Appearance');
   fireEvent.change(screen.getByRole('combobox', { name: 'Animations' }), { target: { value: 'reduce' } });
   expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
   await waitFor(() => expect(settingsApi.patch).toHaveBeenCalledWith('0', { motionPreference: 'reduce' }));
@@ -212,13 +220,75 @@ it('keeps failed input editable and retries from inline status', async () => {
   await waitFor(() => expect(context.data!.settings.learningLanguage).toBe('fr'));
 });
 it('saves budget caps only through the budget patch', async () => {
-  await mount(); const input = screen.getByRole('textbox', { name: /Monthly AI budget/ });
+  await mount('AI'); const input = screen.getByRole('textbox', { name: /Monthly AI budget/ });
   fireEvent.change(input, { target: { value: '5' } }); fireEvent.blur(input);
   await waitFor(() => expect(settingsApi.patch).toHaveBeenCalledWith('0', { budgets: { dailyBudgetUsd: 5, monthlyBudgetUsd: 5, perJobBudgetUsd: 5 } }));
 });
+it('keeps an unfinished input mounted across categories and reveals it from the persistent error action', async () => {
+  await mount();
+  const input = screen.getByRole('textbox', { name: /Playback context on each side/ });
+  fireEvent.change(input, { target: { value: '-' } });
+  selectCategory('Appearance');
+  expect(input).toBeInTheDocument();
+  expect(input).not.toBeVisible();
+  expect(screen.queryByRole('textbox', { name: /Playback context on each side/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Appearance' })).toHaveAttribute('aria-pressed', 'true');
+  expect(context.navigate).toHaveBeenCalledWith(expect.objectContaining({ hash: 'appearance', resetScroll: false }));
+  fireEvent.click(screen.getByRole('button', { name: 'Review errors' }));
+  expect(screen.getByRole('button', { name: 'Learning' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('textbox', { name: /Playback context on each side/ })).toBe(input);
+  expect(input).toHaveValue('-');
+  expect(input).toHaveFocus();
+  expect(settingsApi.state).toHaveBeenCalledOnce();
+  expect(settingsApi.patch).not.toHaveBeenCalled();
+});
+it('reveals a hidden AI category and closed budget disclosure before focusing an invalid field', async () => {
+  await mount('AI');
+  fireEvent.click(screen.getByText('Adjust daily and per-job limits'));
+  const input = screen.getByRole('textbox', { name: 'Daily limit (USD)' });
+  fireEvent.change(input, { target: { value: '-' } });
+  fireEvent.click(screen.getByText('Adjust daily and per-job limits'));
+  selectCategory('Data');
+  fireEvent.click(screen.getByRole('button', { name: 'Review errors' }));
+  expect(screen.getByRole('button', { name: 'AI' })).toHaveAttribute('aria-pressed', 'true');
+  expect(input.closest('details')).toHaveAttribute('open');
+  expect(input).toBeVisible();
+  expect(input).toHaveFocus();
+  expect(input).toHaveValue('-');
+});
+it.each(['vertex', 'ai-models', 'budget'])('opens the AI category for the existing #%s anchor', async hash => {
+  context.hash = hash;
+  const view = renderSettings();
+  await waitFor(() => expect(screen.getByRole('textbox', { name: /Monthly AI budget/ })).toBeEnabled());
+  expect(screen.getByRole('button', { name: 'AI' })).toHaveAttribute('aria-pressed', 'true');
+  expect(view.container.querySelector('#learning')).not.toBeVisible();
+});
+it('follows hash changes without replacing the shared editing session', async () => {
+  const view = await mount();
+  const input = screen.getByRole('textbox', { name: /Playback context on each side/ });
+  fireEvent.change(input, { target: { value: '-' } });
+  context.hash = 'budget';
+  view.rerender(<QueryClientProvider client={clients.at(-1)!}><SettingsPage /></QueryClientProvider>);
+  expect(screen.getByRole('button', { name: 'AI' })).toHaveAttribute('aria-pressed', 'true');
+  context.hash = '';
+  view.rerender(<QueryClientProvider client={clients.at(-1)!}><SettingsPage /></QueryClientProvider>);
+  expect(screen.getByRole('textbox', { name: /Playback context on each side/ })).toBe(input);
+  expect(input).toHaveValue('-');
+  expect(settingsApi.state).toHaveBeenCalledOnce();
+});
+it('uses a continuation for initial AI selection without taking over a later category choice', async () => {
+  context.resume = 'request-one';
+  const view = renderSettings();
+  await waitFor(() => expect(screen.getByRole('textbox', { name: /Monthly AI budget/ })).toBeEnabled());
+  selectCategory('Tools');
+  context.resume = 'request-two';
+  view.rerender(<QueryClientProvider client={clients.at(-1)!}><SettingsPage /></QueryClientProvider>);
+  expect(screen.getByRole('button', { name: 'Tools' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.queryByRole('textbox', { name: /Monthly AI budget/ })).not.toBeInTheDocument();
+});
 it('preserves external-tool input, focus and composition through unrelated refreshes', async () => {
   context.data!.tools = [{ id: 'deno', name: 'Deno', provider: 'managed', status: 'ready', version: '2.0', canRollback: false }];
-  const view = await mount(); fireEvent.click(screen.getByRole('button', { name: 'External' }));
+  const view = await mount('Tools'); fireEvent.click(screen.getByRole('button', { name: 'External' }));
   const input = screen.getByRole('textbox', { name: 'Absolute executable path' }) as HTMLInputElement;
   input.focus(); fireEvent.compositionStart(input); fireEvent.change(input, { target: { value: 'C:/作業中/deno.exe' } }); input.setSelectionRange(3, 6);
   context.data = { ...context.data!, tools: [{ ...context.data!.tools[0], version: '2.1' }] };
@@ -230,7 +300,7 @@ describe('shared model catalogue', () => {
   it('fetches once for all four purposes without changing selected model IDs', async () => {
     context.data = snapshot({ ...settings(), credentialConfigured: true });
     vi.mocked(aiApi.vertexModels).mockResolvedValue([{ id: 'gemini-shared', displayName: 'Shared model' }]);
-    const { container } = await mount();
+    const { container } = await mount('AI');
     fireEvent.click(screen.getByText('Detailed settings by purpose'));
     const buttons = screen.getAllByRole('button', { name: /Fetch Vertex/ });
     expect(buttons).toHaveLength(1);
@@ -248,7 +318,7 @@ describe('shared model catalogue', () => {
     let complete!: (models: Awaited<ReturnType<typeof aiApi.vertexModels>>) => void;
     vi.mocked(aiApi.vertexModels).mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }));
     context.data = snapshot({ ...settings(), credentialConfigured: true });
-    const { container } = await mount();
+    const { container } = await mount('AI');
     fireEvent.click(screen.getByRole('button', { name: /Fetch Vertex model/ }));
     const location = screen.getByRole('textbox', { name: 'Location' });
     fireEvent.change(location, { target: { value: 'us-central1' } });
@@ -261,7 +331,7 @@ describe('shared model catalogue', () => {
   it('invalidates the catalogue after importing another key for the same project', async () => {
     context.data = snapshot({ ...settings(), credentialConfigured: true });
     vi.mocked(aiApi.vertexModels).mockResolvedValue([{ id: 'gemini-shared', displayName: 'Shared' }]);
-    const { container } = await mount();
+    const { container } = await mount('AI');
     fireEvent.click(screen.getByRole('button', { name: /Fetch Vertex model/ }));
     await screen.findByText(/1 candidate is available/);
     fireEvent.click(screen.getByRole('button', { name: 'Import JSON' }));
@@ -274,7 +344,7 @@ describe('shared model catalogue', () => {
     context.data = snapshot({ ...settings(), credentialConfigured: true });
     vi.mocked(aiApi.vertexModels).mockResolvedValue([{ id: 'gemini-shared', displayName: 'Shared' }]);
     vi.mocked(settingsApi.importCredential).mockResolvedValueOnce(false);
-    const { container } = await mount();
+    const { container } = await mount('AI');
     fireEvent.click(screen.getByRole('button', { name: /Fetch Vertex model/ }));
     await screen.findByText(/1 candidate is available/);
     fireEvent.click(screen.getByRole('button', { name: 'Import JSON' }));
@@ -286,7 +356,7 @@ describe('shared model catalogue', () => {
   it('keeps direct model entry available after candidate discovery fails', async () => {
     context.data = snapshot({ ...settings(), credentialConfigured: true });
     vi.mocked(aiApi.vertexModels).mockRejectedValueOnce(new Error('denied'));
-    await mount();
+    await mount('AI');
     fireEvent.click(screen.getByText('Detailed settings by purpose'));
     fireEvent.click(screen.getByRole('button', { name: /Fetch Vertex model/ }));
     await screen.findByText(/Could not fetch candidates/);

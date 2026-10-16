@@ -140,6 +140,66 @@ it('clears just the query and resets both filters from the empty results state',
   expect(screen.getByRole('heading', { name: 'look into' })).toBeInTheDocument();
 });
 
+it('reads stored translations and notes one phrase at a time without creating an edit session or writing', async () => {
+  fixture.data!.cards = [
+    { ...card, translation: 'この件を調べて。', explanation: 'A request to investigate a topic.' },
+    { ...card, id: 'second', term: 'follow up', translation: '続けて確認する。' },
+  ];
+  const user = userEvent.setup();
+  render(<CardsPage />);
+  const first = screen.getByRole('button', { name: 'Translation and notes for look into' });
+  const second = screen.getByRole('button', { name: 'Translation and notes for follow up' });
+  const firstRow = first.closest('article');
+  expect(first).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByText('この件を調べて。')).not.toBeVisible();
+  await user.click(first);
+  expect(first).toHaveFocus();
+  expect(first).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByText('この件を調べて。')).toBeVisible();
+  expect(screen.getByText('A request to investigate a topic.')).toBeVisible();
+  await user.click(second);
+  expect(first).toHaveAttribute('aria-expanded', 'false');
+  expect(second).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByText('この件を調べて。')).not.toBeVisible();
+  expect(screen.getByText('続けて確認する。')).toBeVisible();
+  expect(first.closest('article')).toBe(firstRow);
+  await user.keyboard('{Enter}');
+  expect(second).toHaveAttribute('aria-expanded', 'false');
+  expect(cardsApi.editState).not.toHaveBeenCalled();
+  expect(cardsApi.saveEdit).not.toHaveBeenCalled();
+  expect(cardsApi.suspendCard).not.toHaveBeenCalled();
+  expect(uiDraftApi.save).not.toHaveBeenCalled();
+});
+
+it('finds translation and explanation matches, reveals why they matched, and clears expansion after exclusion or deletion', () => {
+  fixture.data!.cards = [
+    { ...card, translation: 'この件を調べて。', explanation: 'Used when investigating an unresolved issue.' },
+    { ...card, id: 'second', term: 'follow up', translation: undefined, explanation: undefined },
+  ];
+  const view = render(<CardsPage />);
+  const search = screen.getByRole('textbox', { name: 'Search your phrases' });
+  fireEvent.change(search, { target: { value: 'UNRESOLVED' } });
+  expect(screen.getAllByRole('article')).toHaveLength(1);
+  expect(screen.getByText('Explanation or notes match:')).toBeVisible();
+  expect(document.querySelector('.phrase-search-matches')).toHaveTextContent('unresolved issue');
+  const details = screen.getByRole('button', { name: 'Translation and notes for look into' });
+  fireEvent.click(details);
+  expect(screen.getByText('Used when investigating an unresolved issue.')).toBeVisible();
+  fireEvent.change(search, { target: { value: 'follow up' } });
+  expect(screen.queryByRole('heading', { name: 'look into' })).not.toBeInTheDocument();
+  fireEvent.change(search, { target: { value: '調べて' } });
+  expect(screen.getByText('Translation match:')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Translation and notes for look into' })).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(screen.getByRole('button', { name: 'Translation and notes for look into' }));
+  const removed = fixture.data!.cards.shift()!;
+  view.rerender(<CardsPage />);
+  fixture.data!.cards.push(removed);
+  view.rerender(<CardsPage />);
+  expect(screen.getByRole('button', { name: 'Translation and notes for look into' })).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.change(search, { target: { value: 'undefined' } });
+  expect(screen.getByText('No matching phrases')).toBeInTheDocument();
+});
+
 it('keeps IME input and retained rows in place while filters remove stale actions immediately', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }));
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);

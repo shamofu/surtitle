@@ -8,7 +8,7 @@ const StudyRegionActivity = createContext(true);
 export const useStudyRegionActive = () => useContext(StudyRegionActivity);
 
 /** One desktop extent reveals the companion while resizing its native player. */
-export function useStudyPresence(open: boolean) {
+export function useStudyPresence(open: boolean, mounted = true) {
   const { reducedMotion } = useAppMotion();
   const panelRef = useRef<HTMLElement>(null);
   const [retained, setRetained] = useState(open);
@@ -23,9 +23,8 @@ export function useStudyPresence(open: boolean) {
   const moving = !reducedMotion && (animating || open !== settled);
   useLayoutEffect(() => {
     const panel = panelRef.current;
-    if (!panel) return;
+    if (!mounted || !panel) return;
     const dock = panel.parentElement;
-    const rail = dock?.querySelector<HTMLElement>('.study-transcript-rail');
     const resized = previousLayout.current !== layoutRevision;
     previousLayout.current = layoutRevision;
     const resize = () => setLayoutRevision(value => value + 1);
@@ -44,11 +43,10 @@ export function useStudyPresence(open: boolean) {
         dock.dataset.nativeClipLeft = String(inset);
       };
       const render = () => {
-        dock.style.width = `${44 + width * extent.get()}px`;
+        dock.style.width = `${width * extent.get()}px`;
         // The fixed-width contents move with the dock. Its overflow reveals
         // them without a second transform or a second animation phase.
         panel.style.transform = '';
-        if (rail) rail.style.transform = '';
         clip();
       };
       const unsubscribeExtent = extent.on('change', () => {
@@ -132,7 +130,6 @@ export function useStudyPresence(open: boolean) {
     }
     // Stacked layouts retain their existing stationary player and sliding panel.
     if (dock) { dock.style.width = ''; dock.style.clipPath = ''; delete dock.dataset.nativeClipLeft; }
-    if (rail) rail.style.transform = '';
     extent.jump(open ? 1 : 0);
     let disposed = false;
     let stop: (() => void) | undefined;
@@ -210,7 +207,7 @@ export function useStudyPresence(open: boolean) {
       window.removeEventListener('resize', resize);
       document.removeEventListener('visibilitychange', visibility);
     };
-  }, [open, reducedMotion, position, extent, layoutRevision]);
+  }, [open, reducedMotion, position, extent, layoutRevision, mounted]);
   return { visible, moving, ready, panelRef, dockProps: { 'data-open': visible, 'data-moving': moving } };
 }
 /** Retain real outgoing views, inert, while the next view takes over the same space. */

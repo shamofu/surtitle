@@ -7,8 +7,8 @@ import { settingsEditor, settingsFields, settingsFromFields } from './editing';
 import { useEditingSession } from '../../shared/editing/useEditingSession';
 import { useQueryClient } from '@tanstack/react-query';
 
-import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearch } from '@tanstack/react-router';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { continuationApi, type AiContinuation } from '../ai/continuations';
 import { ModelSetup } from '../ai/ModelSetup';
 import {
@@ -62,9 +62,27 @@ const learningLevels = [
   ['C2', '細かなニュアンスまで理解し表現できる', 'Understand and express subtle nuances'],
 ] as const;
 
+type SettingsCategory = 'learning' | 'appearance' | 'ai' | 'tools' | 'data';
+const settingsCategories = [
+  { id: 'learning', ja: '学習', en: 'Learning', icon: Globe2 },
+  { id: 'appearance', ja: '表示', en: 'Appearance', icon: SlidersHorizontal },
+  { id: 'ai', ja: 'AI', en: 'AI', icon: KeyRound },
+  { id: 'tools', ja: 'ツール', en: 'Tools', icon: Wrench },
+  { id: 'data', ja: 'データ', en: 'Data', icon: Archive },
+] satisfies Array<{ id: SettingsCategory; ja: string; en: string; icon: typeof Globe2 }>;
+
+function categoryForAnchor(anchor: string): SettingsCategory | undefined {
+  if (['ai', 'vertex', 'ai-models', 'budget'].includes(anchor)) return 'ai';
+  return settingsCategories.find(category => category.id === anchor)?.id;
+}
+
 export function SettingsPage() {
   const navigate = useNavigate();
   const { resume } = useSearch({ from: '/settings' });
+  const hash = useLocation({ select: location => location.hash });
+  const [initialCategory] = useState<SettingsCategory>(() => resume ? 'ai' : 'learning');
+  const [category, setCategory] = useState<SettingsCategory>(() => categoryForAnchor(hash) ?? initialCategory);
+  const [revealTarget, setRevealTarget] = useState<{ id?: string; element?: HTMLElement; focus?: boolean }>();
   const [continuations, setContinuations] = useState<AiContinuation[]>([]);
   const { mutate, refresh } = useDataActions();
   const { data, loading, error: snapshotError } = useSnapshot();
@@ -96,6 +114,53 @@ export function SettingsPage() {
   const [pricing, setPricing] = useState(false);
   const page = useRef<HTMLDivElement>(null);
   useMotionEntrance(page);
+  useEffect(() => {
+    // A continuation chooses the initial category only. Hash navigation still
+    // follows browser history, without a later AI refresh taking over selection.
+    const next = categoryForAnchor(hash) ?? initialCategory;
+    setCategory(next);
+    if (hash) setRevealTarget({ id: hash });
+  }, [hash, initialCategory]);
+  useLayoutEffect(() => {
+    if (!revealTarget || !page.current) return;
+    const target = revealTarget.element ?? (revealTarget.id ? document.getElementById(revealTarget.id) : null);
+    if (!target || !page.current.contains(target) || target.closest('[hidden]')) return;
+    let openedDetails = false;
+    for (let ancestor = target.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      if (ancestor instanceof HTMLDetailsElement && (!ancestor.open || ancestor.dataset.motionState === 'exiting')) {
+        openAnimatedDetails(ancestor);
+        openedDetails = true;
+      }
+    }
+    // Revealing a disclosure clears its inert descendants in the next commit.
+    // Move focus only after that commit, including when reversing a close.
+    if (openedDetails) { setRevealTarget({ ...revealTarget }); return; }
+    target.scrollIntoView({ block: revealTarget.focus ? 'center' : 'start', behavior: reducedMotion ? 'instant' : 'smooth' });
+    if (revealTarget.focus) target.focus({ preventScroll: true });
+    else if (document.activeElement?.closest('[hidden]')) page.current.querySelector<HTMLButtonElement>(`#settings-nav-${category}`)?.focus({ preventScroll: true });
+    setRevealTarget(undefined);
+  }, [category, revealTarget, editing.ready, reducedMotion]);
+  function selectCategory(next: SettingsCategory) {
+    setCategory(next);
+    setRevealTarget({ id: next });
+    void navigate({ to: '/settings', search: previous => previous, hash: next, resetScroll: false, hashScrollIntoView: false });
+  }
+  function keepFieldVisible(target: EventTarget) {
+    if (!(target instanceof HTMLElement)) return;
+    const field = target.closest<HTMLElement>('.field');
+    const viewport = page.current?.closest('.page-content');
+    const footer = page.current?.querySelector('.settings-save');
+    if (!field || !viewport || !footer) return;
+    const bounds = viewport.getBoundingClientRect();
+    const visibleBottom = Math.min(bounds.bottom, footer.getBoundingClientRect().top);
+    const fieldBounds = field.getBoundingClientRect();
+    // Focusing just the input can leave its label or help under the fixed
+    // footer in a short window. Keep the whole field readable when it fits.
+    if (fieldBounds.top < bounds.top || fieldBounds.bottom > visibleBottom) {
+      const visibleTarget = fieldBounds.height <= visibleBottom - bounds.top ? field : target;
+      visibleTarget.scrollIntoView({ block: 'center', behavior: 'instant' });
+    }
+  }
   const [scanning, setScanning] = useState(false);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [candidates, setCandidates] = useState<ExternalToolCandidate[]>([]);
@@ -235,11 +300,9 @@ export function SettingsPage() {
   function reviewErrors() {
     const invalid = page.current?.querySelector<HTMLElement>('input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"]');
     if (!invalid) return;
-    for (let ancestor = invalid.parentElement; ancestor; ancestor = ancestor.parentElement) {
-      if (ancestor instanceof HTMLDetailsElement) openAnimatedDetails(ancestor);
-    }
-    invalid.scrollIntoView({ block: 'center', behavior: reducedMotion ? 'instant' : 'smooth' });
-    invalid.focus({ preventScroll: true });
+    const next = invalid.closest<HTMLElement>('[data-settings-category]')?.dataset.settingsCategory as SettingsCategory | undefined;
+    if (next) setCategory(next);
+    setRevealTarget({ element: invalid, focus: true });
   }
   const customBudget = !!draft && (draft.dailyBudgetUsd !== monthlyBudget || perJobBudget !== monthlyBudget);
   const retentionPreset = [0.85, 0.9, 0.95].find((value) => Math.abs(value - (draft?.retention ?? 0.9)) < 0.000001);
@@ -258,7 +321,7 @@ export function SettingsPage() {
     </div>
   </div>;
   return (
-    <div ref={page} className="settings-page" onBlur={() => void save()}>
+    <div ref={page} className="settings-page" onBlur={() => void save()} onFocusCapture={event => keepFieldVisible(event.target)}>
       <MotionRegion mode="status" open={!!continuation}>{continuation && <div className="notice"><span>{t('途中のAI依頼に戻れます。', 'You can return to your unfinished AI request.')}</span><Button disabled={credentialBusy} busy={busy} onClick={async () => { if (await save()) { void navigate({ to: '/study/$mediaId', params: { mediaId: continuation.mediaId }, search: { resume: continuation.id } }); } }}>{t('元の操作に戻る', 'Return to your request')}</Button></div>}</MotionRegion>
       <PageTitle
         title={t('設定', 'Settings')}
@@ -272,31 +335,14 @@ export function SettingsPage() {
           className="settings-nav"
           aria-label={t('設定セクション', 'Settings sections')}
         >
-          <a href="#learning">
-            <SlidersHorizontal size={16} />
-            {t('学習', 'Learning')}
-          </a>
-          <a href="#appearance">
-            <SlidersHorizontal size={16} />{t('表示', 'Appearance')}
-          </a>
-          <a href="#ai">
-            <KeyRound size={16} />
-            {t('AI', 'AI')}
-          </a>
-          <a href="#budget">
-            <CircleDollarSign size={16} />{t('利用状況', 'Usage')}
-          </a>
-          <a href="#tools">
-            <Wrench size={16} />
-            {t('ツール', 'Tools')}
-          </a>
-          <a href="#data">
-            <Archive size={16} />
-            {t('データ', 'Data')}
-          </a>
+          {settingsCategories.map(({ id, ja, en, icon: Icon }) => (
+            <button key={id} id={`settings-nav-${id}`} type="button" aria-pressed={category === id} aria-controls={id} onClick={() => selectCategory(id)}>
+              <Icon size={18} />{t(ja, en)}
+            </button>
+          ))}
         </nav>
         <div className="settings-sections">
-          <section id="learning" className="settings-card">
+          <section id="learning" className="settings-card settings-category" data-settings-category="learning" hidden={category !== 'learning'}>
             <div className="settings-section-title">
               <Globe2 size={20} />
               <div>
@@ -400,7 +446,7 @@ export function SettingsPage() {
               </Field>
             </fieldset>
           </section>
-          <section id="appearance" className="settings-card">
+          <section id="appearance" className="settings-card settings-category" data-settings-category="appearance" hidden={category !== 'appearance'}>
             <div className="settings-section-title"><SlidersHorizontal size={20} /><h2>{t('表示', 'Appearance')}</h2></div>
             <fieldset disabled={!draft}>
               <div className="field-row">
@@ -450,7 +496,7 @@ export function SettingsPage() {
             </fieldset>
             <WindowSizeSettings />
           </section>
-          <section id="ai" className="settings-group" aria-labelledby="ai-settings-heading">
+          <section id="ai" className="settings-group settings-category" data-settings-category="ai" hidden={category !== 'ai'} aria-labelledby="ai-settings-heading">
             <h2 id="ai-settings-heading">{t('AI', 'AI')}</h2>
           <section id="vertex" className="settings-card">
             <div className="settings-section-title">
@@ -597,7 +643,6 @@ export function SettingsPage() {
             ))}
             </AnimatedDetails>
           </section>
-          </section>
           <section id="budget" className="settings-card">
             <div className="settings-section-title">
               <ShieldCheck size={20} />
@@ -687,7 +732,8 @@ export function SettingsPage() {
             </p>
           </section>
           <PausedJobs />
-          <section id="tools" className="settings-card">
+          </section>
+          <section id="tools" className="settings-card settings-category" data-settings-category="tools" hidden={category !== 'tools'}>
             <div className="settings-section-title">
               <Wrench size={20} />
               <div>
@@ -776,7 +822,7 @@ export function SettingsPage() {
               )}
             </p>
           </section>
-          <section id="data" className="settings-card">
+          <section id="data" className="settings-card settings-category" data-settings-category="data" hidden={category !== 'data'}>
             <div className="settings-section-title">
               <HardDrive size={20} />
               <div>
@@ -806,10 +852,12 @@ export function SettingsPage() {
         </div>
       </div>
       <div className="settings-save autosave-footer" aria-busy={busy || pricing}>
+        <div className="settings-save-status">
         <span role="status">{busy ? t('保存中…', 'Saving…') : !draft ? t('設定を読み込み中…', 'Loading settings…') : dirty ? t('入力途中の内容を保持しています。有効な変更は自動保存します。', 'Unfinished input is kept. Valid changes save automatically.') : t('変更は自動保存されます', 'Changes save automatically')}</span>
+        {editing.error && <div className="notice warning" role="alert"><span>{editing.error}</span><Button onClick={() => void save()}>{t('再試行', 'Retry')}</Button></div>}
+        </div>
         {!valid && draft && <Button onClick={reviewErrors}>{t('入力エラーを確認', 'Review errors')}</Button>}
       </div>
-      {editing.error && <p className="notice warning" role="alert">{editing.error}<Button onClick={() => void save()}>{t('再試行', 'Retry')}</Button></p>}
       {editing.recovery && <div className="notice warning"><p>{t('設定の変更前に保存した入力があります。', 'Input from an earlier version of your settings is available.')}</p><textarea aria-label={t('前の入力', 'Previous input')} readOnly value={JSON.stringify(editing.recovery, null, 2)} /><Button onClick={() => session.recover()}>{t('この入力から編集を続ける', 'Continue editing this input')}</Button></div>}
       {transfer && <TransferDialog onClose={() => setTransfer(false)} />}
     </div>

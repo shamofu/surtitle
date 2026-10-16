@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test, type Page } from '@playwright/test';
-import { installLearningFixture } from './learning-fixture';
+import { installLearningFixture, setTranscriptOpen } from './learning-fixture';
 
 async function installExpiredQuoteFixture(page: Page, locale: 'ja' | 'en', entry: 'new' | 'retry') {
   await installLearningFixture(page, locale, locale === 'ja' ? 'light' : 'dark');
@@ -44,7 +44,7 @@ for (const locale of ['ja', 'en'] as const) {
       await installExpiredQuoteFixture(page, locale, entry);
       await page.goto('/study/visual-fixture');
       if (entry === 'new') {
-        await page.getByRole('button', { name: text('字幕一覧', 'Transcript'), exact: true }).click();
+        await setTranscriptOpen(page);
         await page.getByRole('tab', { name: text('AI の提案', 'Suggestions'), exact: true }).click();
         await page.getByRole('button', { name: text('AIで語彙・表現を調べる', 'Explore words with AI'), exact: true }).click();
       } else {

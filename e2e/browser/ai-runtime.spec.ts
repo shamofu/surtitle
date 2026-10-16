@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test, type Page } from '@playwright/test';
-import { installLearningFixture } from './learning-fixture';
+import { installLearningFixture, setTranscriptOpen } from './learning-fixture';
 
 async function installRuntimeFixture(page: Page, locale: 'ja' | 'en', kind: 'transcribe' | 'vocabulary' | 'translate', completed = false) {
   await installLearningFixture(page, locale, locale === 'ja' ? 'light' : 'dark');
@@ -45,7 +45,7 @@ for (const locale of ['ja', 'en'] as const) {
       await installRuntimeFixture(page, locale, kind, true);
       await page.goto('/study/visual-fixture');
       await page.waitForLoadState('networkidle');
-      await page.getByRole('button', { name: text('字幕一覧', 'Transcript'), exact: true }).click();
+      await setTranscriptOpen(page);
       await page.evaluate(() => (window as any).__runtimeFixture.begin());
       await expect(page.locator('.study-transcript .ai-runtime:visible')).toHaveCount(0);
       await expect(page.locator('.transcription-status')).toHaveCount(0);
@@ -76,7 +76,7 @@ for (const locale of ['ja', 'en'] as const) {
       await installRuntimeFixture(page, locale, kind);
       await page.goto('/study/visual-fixture');
       await page.waitForLoadState('networkidle');
-      await page.getByRole('button', { name: text('字幕一覧', 'Transcript'), exact: true }).click();
+      await setTranscriptOpen(page);
       const playerBounds = () => page.locator('.player-card, .native-player-viewport').evaluateAll(elements => elements.map(element => {
         const rect = element.getBoundingClientRect();
         let x = rect.x, y = rect.y;
@@ -123,7 +123,7 @@ for (const locale of ['ja', 'en'] as const) {
       await expect(runtime.locator('.ai-runtime-history li')).toHaveCount(17);
       expect(await runtime.locator('.ai-runtime-history').evaluate(element => element.scrollTop)).toBe(0);
       await expect.poll(playerBounds).toEqual(processingBounds);
-      if (kind !== 'transcribe') await page.getByRole('button', { name: text('字幕一覧', 'Transcript'), exact: true }).click();
+      if (kind !== 'transcribe') await setTranscriptOpen(page);
       await page.getByRole('tab', { name: text('文字起こし', 'Transcription'), exact: true }).click();
       await page.getByText(text('文字起こしの履歴', 'Transcription history'), { exact: true }).click();
       await page.getByRole('button', { name: text('以前の下書きを開く', 'Open earlier drafts'), exact: true }).click();
@@ -156,6 +156,7 @@ test('a new stream does not open a Study panel or move playback', async ({ page 
   await installRuntimeFixture(page, 'ja', 'transcribe');
   await page.goto('/study/visual-fixture');
   await page.waitForLoadState('networkidle');
+  await setTranscriptOpen(page, false);
   const player = page.locator('.player-card');
   const before = await player.boundingBox();
   await page.evaluate(() => (window as any).__runtimeFixture.begin());
@@ -191,7 +192,7 @@ test('completed AI history loads runtime details only when its history is opened
   await page.goto('/study/visual-fixture');
   await page.waitForLoadState('networkidle');
   expect(await reads()).toEqual([]);
-  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await setTranscriptOpen(page);
   await expect(page.locator('.transcript-row').first()).toBeVisible();
   expect(await reads()).toEqual([]);
   await page.getByRole('button', { name: 'Activity & tools', exact: true }).click();
@@ -209,7 +210,7 @@ test('completed AI history loads runtime details only when its history is opened
   await expect(runtime.locator('.ai-runtime-outcome')).toContainText('1 succeeded · 0 failed');
   await runtime.getByText('Generated content and history', { exact: true }).click();
   await expect(runtime.getByRole('region', { name: 'Generation preview' })).toContainText('Saved response for archived-job-0');
-  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await setTranscriptOpen(page);
   await expect(page.locator('.transcript-row').first()).toBeVisible();
   await expect(history.locator('.ai-runtime')).toHaveCount(0);
   expect((await reads()).sort()).toEqual([...jobIds].sort());

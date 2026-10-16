@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test, type Page } from '@playwright/test';
-import { installLearningFixture } from './learning-fixture';
+import { installLearningFixture, setTranscriptOpen } from './learning-fixture';
 
 type FixtureWindow = Window & {
   __learningFixture: {
@@ -161,7 +161,7 @@ async function openTranscript(page: Page, reducedMotion: 'no-preference' | 'redu
   await page.goto('/study/visual-fixture');
   await page.waitForLoadState('networkidle');
   await expect(page.getByRole('button', { name: 'Explore meaning', exact: true })).toBeEnabled();
-  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await setTranscriptOpen(page);
   await expect(page.getByRole('button', { name: 'Following playback', exact: true })).toBeVisible();
   await expect(page.locator('.study-companion-dock')).toHaveAttribute('data-moving', 'false');
   await expectCentered(page, 10);

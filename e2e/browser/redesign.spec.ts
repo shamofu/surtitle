@@ -3,14 +3,18 @@ import { expect, test } from '@playwright/test';
 import { installLearningFixture } from './learning-fixture';
 
 for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'] as const) {
-  for (const size of [{ width: 1024, height: 700, minimum: 300 }, { width: 1440, height: 900, minimum: 450 }]) {
+  for (const size of [{ width: 1024, height: 700 }, { width: 1440, height: 900 }]) {
     test(`video remains central ${locale} ${theme} ${size.width}`, async ({ page }) => {
       await page.setViewportSize(size); await installLearningFixture(page, locale, theme);
       await page.goto('/study/visual-fixture');
       const video = page.getByTestId('native-player-viewport');
       await expect(page.locator('.current-caption-text')).toContainText('little detour');
       const box = (await video.boundingBox())!;
-      expect(Math.min(box.height, box.width * 9 / 16)).toBeGreaterThanOrEqual(size.minimum);
+      const panel = (await page.locator('.study-companion').boundingBox())!;
+      // The video remains the wider side of the default split workspace.
+      expect(box.width).toBeGreaterThan(panel.width);
+      expect(box.height).toBeGreaterThan(200);
+      expect(box.x + box.width).toBeLessThanOrEqual(panel.x);
       await expect(page.locator('.study-auxiliary')).toBeHidden();
       await page.evaluate(() => {
         const fixture = (window as any).__learningFixture;

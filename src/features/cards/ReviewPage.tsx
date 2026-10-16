@@ -146,10 +146,10 @@ export function ReviewCard({
             <h3 ref={answerHeading} tabIndex={-1} className="review-answer-label">{t('意味', 'Meaning')}</h3>
             <p>{card.meaning}</p>
             {card.translation && (
-              <p className="review-translation">{card.translation}</p>
+              <p className="review-translation"><span className="review-detail-label">{t('例文の訳', 'Example translation')}</span>{card.translation}</p>
             )}
             {card.explanation && (
-              <p className="review-explanation">{card.explanation}</p>
+              <p className="review-explanation"><span className="review-detail-label">{t('解説・メモ', 'Explanation and notes')}</span>{card.explanation}</p>
             )}
           </div>
         </MotionRegion>
@@ -263,8 +263,8 @@ function ReviewTransition({ card, stateKey, children }: { card?: StudyCard; stat
           {transition.card.audioPath && <span className="button ghost"><AudioLines size={17} />{t('文脈を聴く', 'Listen in context')}</span>}
         </div>
         <div className="review-answer-region"><div className="review-answer"><h3 className="review-answer-label">{t('意味', 'Meaning')}</h3><p>{transition.card.meaning}</p>
-          {transition.card.translation && <p className="review-translation">{transition.card.translation}</p>}
-          {transition.card.explanation && <p className="review-explanation">{transition.card.explanation}</p>}
+          {transition.card.translation && <p className="review-translation"><span className="review-detail-label">{t('例文の訳', 'Example translation')}</span>{transition.card.translation}</p>}
+          {transition.card.explanation && <p className="review-explanation"><span className="review-detail-label">{t('解説・メモ', 'Explanation and notes')}</span>{transition.card.explanation}</p>}
         </div></div>
         <footer><BookOpen size={14} /><span>{transition.card.sourceTitle || t('保存した文脈', 'Saved context')}</span><span className="review-card-reps">{t(`${transition.card.reviewCount} 回の復習`, `${transition.card.reviewCount} reviews`)}</span></footer>
       </article>
@@ -329,19 +329,14 @@ export function ReviewPage() {
           <ArrowLeft size={15} />
           {t('作品に戻る', 'Back to watching')}
         </Link>
+        <header className="review-title">
+          <h1>{t('復習', 'Review')}</h1>
+          <p>{t('音声と文脈を手がかりに思い出す', 'Recall with audio and context')}</p>
+        </header>
         <span className="review-counter" aria-live="polite">
           <AnimatedValue value={t(`${reviewed.length} / ${total} 件`, `${reviewed.length} of ${total} reviewed`)} />
         </span>
       </div>
-      <header className="review-title">
-        <h1>{t('復習', 'Review')}</h1>
-        <p>
-          {t(
-            '音声と文脈を手がかりに、保存した表現を思い出す。',
-            'Use the audio and context to recall your saved phrases.',
-          )}
-        </p>
-      </header>
       <div className="session-progress">
         <m.span initial={false} style={{ width: '100%', transformOrigin: 'left' }}
           animate={{ scaleX: total ? reviewed.length / total : 0 }}

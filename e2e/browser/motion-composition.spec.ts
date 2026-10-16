@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from '@playwright/test';
-import { installLearningFixture } from './learning-fixture';
+import { installLearningFixture, setTranscriptOpen } from './learning-fixture';
 import { motionDurations } from '../../src/shared/motion';
 
 test('rapid keyboard tab changes and drawer reversal retain the search and focus owner', async ({ page }) => {
@@ -8,7 +8,7 @@ test('rapid keyboard tab changes and drawer reversal retain the search and focus
   await page.clock.install();
   await installLearningFixture(page, 'en', 'light');
   await page.goto('/study/visual-fixture');
-  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await setTranscriptOpen(page);
   await page.getByLabel('Search transcript').fill('coast');
   const search = await page.getByLabel('Search transcript').elementHandle();
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
@@ -56,7 +56,7 @@ test('subtitle details remain readable and return focus without moving the nativ
       };`,
   }));
   await page.goto('/study/visual-fixture');
-  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await setTranscriptOpen(page);
   const opener = page.getByRole('button', { name: 'Add or switch subtitles', exact: true });
   await opener.click();
   const modal = page.getByRole('dialog', { name: 'Add or switch subtitles', exact: true });
@@ -109,7 +109,7 @@ test('live reduced motion leaves only the latest tab panel interactive', async (
   await page.clock.install();
   await installLearningFixture(page, 'en', 'dark');
   await page.goto('/study/visual-fixture');
-  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await setTranscriptOpen(page);
   await expect(page.getByLabel('Search transcript')).toBeVisible();
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
   const suggestions = page.getByRole('tab', { name: 'Suggestions', exact: true });

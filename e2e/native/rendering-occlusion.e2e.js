@@ -23,6 +23,12 @@ describe('opaque UI above the real native video', () => {
     await browser.execute(path => { history.pushState({}, '', path); dispatchEvent(new PopStateEvent('popstate')); }, `/study/${fixture.mediaId}`);
     await $('.play-button').waitForEnabled();
     await browser.waitUntil(async () => (await state()).ready);
+    // Keep the popup-over-video geometry intentional despite the new wide
+    // layout's initially open transcript.
+    if ((await $('.study-transcript-toggle').getAttribute('aria-expanded')) === 'true') {
+      await clickNative($('.study-transcript-toggle'));
+      await expect($('.study-companion')).not.toBeDisplayed();
+    }
   });
   after(async () => { await control({ action: 'pause' }); await control({ action: 'loop' }); });
 

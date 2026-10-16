@@ -93,10 +93,40 @@ test('settings stay readable at compact width and cannot save fabricated state',
   await page.goto('/settings');
   await expect(page.getByRole('heading', { name: '設定', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '変更を保存' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'AI', exact: true }).click();
   await page.getByLabel('1か月のAI予算（USD）', { exact: false }).scrollIntoViewIfNeeded();
   await expect(page.getByLabel('1か月のAI予算（USD）', { exact: false })).toHaveValue('');
   await expect(page.getByLabel('1か月のAI予算（USD）', { exact: false })).toBeDisabled();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('settings categories keep drafts, skip hidden controls, and follow browser history', async ({ page }) => {
+  await settingsFixture(page, 'en', 'light');
+  const navigation = page.getByRole('navigation', { name: 'Settings sections' });
+  await expect(navigation.getByRole('button')).toHaveCount(5);
+  const context = page.getByRole('textbox', { name: /^Playback context on each side/ });
+  await context.fill('-');
+  const original = await context.elementHandle();
+  await navigation.getByRole('button', { name: 'Appearance', exact: true }).click();
+  await expect(page).toHaveURL(/#appearance$/);
+  await expect(context).toHaveCount(0);
+  expect(await original!.evaluate(input => input.isConnected && !!input.closest('[hidden]'))).toBe(true);
+  await navigation.getByRole('button', { name: 'Data', exact: true }).focus();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('combobox', { name: 'Interface language', exact: true })).toBeFocused();
+  await navigation.getByRole('button', { name: 'AI', exact: true }).click();
+  await expect(page).toHaveURL(/#ai$/);
+  await page.goBack();
+  await expect(navigation.getByRole('button', { name: 'Appearance', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.goBack();
+  await expect(context).toBeVisible();
+  await expect(context).toHaveValue('-');
+  expect(await original!.evaluate(input => input === document.querySelector('#learning input[aria-invalid="true"]'))).toBe(true);
+  await page.goForward();
+  await expect(navigation.getByRole('button', { name: 'Appearance', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Review errors', exact: true }).click();
+  await expect(context).toBeFocused();
+  await expect(context).toHaveValue('-');
 });
 
 for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'] as const) {
@@ -115,6 +145,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       };
       await expect(status).toHaveText(locale === 'ja' ? '変更は自動保存されます' : 'Changes save automatically');
       await assertLayout();
+      await page.getByRole('button', { name: 'AI', exact: true }).click();
       const project = page.getByRole('textbox', { name: locale === 'ja' ? /^プロジェクト ID/ : /^Project ID/ });
       await project.scrollIntoViewIfNeeded();
       await expect(project).toHaveValue('json-imported-project');
@@ -151,6 +182,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await expect.poll(() => page.evaluate(() => (window as any).__learningFixture.snapshot.settings.monthlyBudgetUsd)).toBe(20);
       await assertLayout();
       await expect(status).toHaveText(locale === 'ja' ? '変更は自動保存されます' : 'Changes save automatically');
+      await page.getByRole('button', { name: locale === 'ja' ? 'ツール' : 'Tools', exact: true }).click();
       const ffmpeg = page.locator('.tool-row').filter({ has: page.getByRole('heading', { name: /FFmpeg/ }) });
       await ffmpeg.getByRole('button', { name: locale === 'ja' ? '外部を使う' : 'External', exact: true }).click();
       const select = ffmpeg.getByRole('button', { name: `${locale === 'ja' ? '候補を選択' : 'Select candidate'} ${candidatePath}`, exact: true });

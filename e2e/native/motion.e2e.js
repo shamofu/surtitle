@@ -149,6 +149,12 @@ describe('stable layout with the real Windows video surface', () => {
           return state.ready && state.surfaceVisible && state.videoWidth > 0 && state.videoHeight > 0;
         });
         await control({ action: 'pause' });
+        // Opening-motion cases require a closed baseline. Wide layouts now
+        // start open, so close through the actual control before measuring.
+        if ((await $('.study-transcript-toggle').getAttribute('aria-expanded')) === 'true') {
+          await $('.study-transcript-toggle').click();
+          await expect($('.study-companion')).not.toBeDisplayed();
+        }
         await assertNativeVideoBounds();
       });
 

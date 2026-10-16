@@ -261,6 +261,7 @@ let state: PlayerState;
 let bookmarks: DraftSelection[];
 let rejectSourcePlayback: boolean;
 const clients: QueryClient[] = [];
+const initialHeight = window.innerHeight;
 
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
@@ -274,6 +275,7 @@ beforeAll(() => {
   );
 });
 beforeEach(() => {
+  window.innerHeight = 680;
   fixture.settingsRevision = 0;
   vi.mocked(settingsApi.state).mockImplementation(async () => ({ settings: structuredClone(fixture.data!.settings), revision: String(fixture.settingsRevision) }));
   vi.mocked(settingsApi.patch).mockImplementation(async (revision, patch) => {
@@ -347,6 +349,7 @@ beforeEach(() => {
   vi.mocked(draftStudyApi.candidates).mockResolvedValue([]);
 });
 afterEach(() => {
+  window.innerHeight = initialHeight;
   cleanup();
   clients.splice(0).forEach((client) => client.clear());
   fixture.listener = undefined;

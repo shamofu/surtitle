@@ -37,10 +37,11 @@ for (const locale of ['ja', 'en'] as const) {
     }
     await expect(page.locator('.review-prompt h2')).toBeInViewport({ ratio: 1 });
     await page.getByRole('link', { name: text('設定', 'Settings'), exact: true }).click();
-    await expect(page.locator('.settings-nav a')).toHaveCount(6);
+    await expect(page.locator('.settings-nav button')).toHaveCount(5);
+    await page.locator('.settings-nav').getByRole('button', { name: 'AI', exact: true }).click();
     const monthly = page.getByRole('textbox', { name: text('1か月のAI予算（USD）', 'Monthly AI budget (USD)'), exact: true });
     await monthly.fill('4');
-    await page.locator('.settings-nav a').last().click();
+    await page.locator('.settings-nav').getByRole('button', { name: text('データ', 'Data'), exact: true }).click();
     await page.locator('.settings-layout').evaluate(element => { element.scrollTop = element.scrollHeight; });
     const lastSettingControl = page.locator('.settings-sections button, .settings-sections input, .settings-sections select').last();
     await lastSettingControl.scrollIntoViewIfNeeded();
