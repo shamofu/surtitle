@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { constants } from 'node:os';
+import { finished } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+import { createNativeCliOutput } from './native-cli-output.mjs';
 import { spawnWebDriver } from './webdriver-process.mjs';
 
 // SQLite readers may create WAL sidecars. Keep the runner and its workers at
@@ -18,9 +20,19 @@ if (process.argv[2] === workerFlag) {
   const foregroundApplication = process.env.SURTITLE_E2E_NATIVE_INPUT === '1'
     ? process.env.SURTITLE_E2E_BINARY : undefined;
   const child = spawnWebDriver(process.execPath, [worker, workerFlag, 'run', './wdio.conf.js', ...process.argv.slice(2)],
-    { stdio: 'inherit', env: process.env, foregroundApplication });
+    { stdio: ['inherit', 'pipe', 'inherit'], env: process.env, foregroundApplication });
   let launchFailed = false;
   let requestedSignal;
+  const output = createNativeCliOutput();
+  const outputDone = finished(output, { cleanup: true }).then(() => new Promise(resolve => {
+    // A signal must not terminate the wrapper before the final output drains.
+    process.stdout.write('', resolve);
+  })).catch(error => {
+    launchFailed = true;
+    console.error(`Native E2E runner output failed: ${error.message}`);
+  });
+  child.stdout.once('error', error => output.destroy(error));
+  child.stdout.pipe(output).pipe(process.stdout, { end: false });
   const running = () => child.pid && child.exitCode === null && child.signalCode === null;
   const stop = () => { if (running()) child.kill(); };
   const signalHandlers = new Map(['SIGINT', 'SIGTERM', 'SIGHUP'].map(signal => [signal, () => {
@@ -35,7 +47,8 @@ if (process.argv[2] === workerFlag) {
     console.error(`Native E2E runner could not start: ${error.message}`);
     process.exitCode = 1;
   });
-  child.once('close', (code, signal) => {
+  child.once('close', async (code, signal) => {
+    await outputDone;
     process.removeListener('exit', stop);
     for (const [name, handler] of signalHandlers) process.removeListener(name, handler);
     const termination = requestedSignal || signal;

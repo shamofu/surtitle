@@ -6,6 +6,7 @@ import { artifactIdentity } from './e2e/support/native-artifacts.mjs';
 import { captureNativeFailure } from './e2e/support/native-diagnostics.mjs';
 import { prepareNativeSession } from './e2e/support/native-app.mjs';
 import { assertNativeRunSucceeded, recordNativeRunFailure } from './e2e/support/native-run-status.mjs';
+import NativeProgressReporter from './e2e/support/native-progress-reporter.mjs';
 
 let worker;
 let startupFailure;
@@ -30,7 +31,7 @@ export const config = {
   hostname: '127.0.0.1', port, specs: nativeSpecsForPlatform(), maxInstances: 1,
   capabilities: [{ maxInstances: 1, platformName: nativePlatformName(process.platform),
     'tauri:options': { application: process.env.SURTITLE_E2E_BINARY || '' } }],
-  logLevel: 'warn', reporters: ['spec', ['junit', {
+  logLevel: 'warn', reporters: [NativeProgressReporter, ['junit', {
     outputDir: resolve('test-results/native'),
     outputFileFormat: ({ cid }) => `${process.env.SURTITLE_E2E_RUN_ID || 'run'}/${artifactIdentity(cid)}/junit.xml`,
   }]], framework: 'mocha',
