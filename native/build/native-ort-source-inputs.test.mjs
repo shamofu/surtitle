@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 test('ORT acquisition authenticates only the exact vcpkg API and never forwards credentials across redirects', () => {
   const child = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-B', '-c', String.raw`
-import importlib.util, io, os, sys, urllib.request, urllib.response
+import importlib.util, io, os, socket, ssl, sys, urllib.request, urllib.response
 from email.message import Message
 from unittest.mock import patch
 spec = importlib.util.spec_from_file_location('ort_inputs', sys.argv[1])
@@ -20,8 +20,11 @@ gitlab = 'https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen.tar.gz'
 real_build_opener = urllib.request.build_opener
 seen = []
 redirects = {}
-class NetworkFixture(urllib.request.BaseHandler):
+class NetworkFixture(urllib.request.HTTPSHandler):
     handler_order = 100
+    def __init__(self):
+        # Replace the HTTPS transport without loading the host certificate store.
+        urllib.request.AbstractHTTPHandler.__init__(self)
     def https_open(self, req):
         seen.append((req.full_url, req.get_header('Authorization'), dict(req.unredirected_hdrs)))
         headers = Message()
@@ -33,8 +36,13 @@ class NetworkFixture(urllib.request.BaseHandler):
         response.msg = 'Found' if code == 302 else 'OK'
         return response
 def opener(*handlers):
-    return real_build_opener(*handlers, NetworkFixture())
-with patch.dict(os.environ, {'SURTITLE_NATIVE_GITHUB_TOKEN': token}), patch.object(urllib.request, 'build_opener', side_effect=opener):
+    return real_build_opener(*handlers, urllib.request.ProxyHandler({}), NetworkFixture())
+with (
+    patch.dict(os.environ, {'SURTITLE_NATIVE_GITHUB_TOKEN': token}),
+    patch.object(urllib.request, 'build_opener', side_effect=opener),
+    patch.object(ssl, 'SSLContext', side_effect=AssertionError('In-memory fixture must not create TLS contexts')),
+    patch.object(socket, 'create_connection', side_effect=AssertionError('In-memory fixture must not connect to the network')),
+):
     for url in [api, blob, codeload, gitlab]:
         seen.clear()
         assert inputs.request(url) == b'fixture source'
