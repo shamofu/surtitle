@@ -379,11 +379,14 @@ async fn advance_to_pacing(state: &AppState, job_id: &str, ordinal: u32) {
 async fn observed_cooldown(fixture: &Fixture, mut checkpoint: Checkpoint) {
     reached(&mut checkpoint).await;
     // Retain the final two seconds of an observed server cooldown. The first
-    // response is in flight; subsequent work must wait without reserving.
+    // response is in flight; freeze the ledger clock so slow settlement cannot
+    // consume the wait before the test observes it. Advance it after assertions.
+    let now = fixture.state.ai.now_ms();
+    fixture.state.ai.set_test_time(now);
     let conn = rusqlite::Connection::open(fixture.directory.path().join("charges.sqlite")).unwrap();
     conn.execute(
         "UPDATE ai_transcription_pacing SET cooldown_until_ms=?",
-        [chrono::Utc::now().timestamp_millis() + 2_000],
+        [now + 2_000],
     )
     .unwrap();
     checkpoint.resume();
@@ -474,6 +477,7 @@ async fn observed_cooldown_waits_without_reserving_and_preserves_live_edits() {
     correction.text = "Human correction during observed server cooldown.".into();
     correction.status = "confirmed".into();
     crate::application::subtitles::edit_segment(fixture.state.clone(), correction.clone()).unwrap();
+    advance_to_pacing(&fixture.state, &fixture.quote.id, 1).await;
     finished(worker).await.unwrap();
     assert_eq!(service.sent_ordinals(), [0, 1]);
     let conn = rusqlite::Connection::open(fixture.directory.path().join("charges.sqlite")).unwrap();
@@ -581,6 +585,7 @@ async fn pacing_rechecks_budget_and_source_before_the_next_reservation() {
                 })
                 .unwrap();
         }
+        advance_to_pacing(&fixture.state, &fixture.quote.id, 1).await;
         let error = finished(worker).await.unwrap_err();
         if !change_source {
             assert!(matches!(

@@ -35,6 +35,8 @@ describe('native window continuity', () => {
     }
     await moveNativeWindowToMonitor((await inspectNativeMonitor()).current);
     await browser.execute(() => { history.pushState({}, '', '/settings'); dispatchEvent(new PopStateEvent('popstate')); });
+    await clickNative($('#settings-nav-appearance'));
+    await expect($('#settings-nav-appearance')).toHaveAttribute('aria-pressed', 'true');
     const standard = $('button*=1600 × 900');
     await standard.waitForExist();
     await browser.execute(element => element.scrollIntoView({ block: 'center', behavior: 'instant' }), await standard);

@@ -95,10 +95,10 @@ describe('real native learning workflow (no cloud requests)', () => {
     try {
       await $('.main-nav a[href="/settings"]').waitForClickable();
       await clickNative($('.main-nav a[href="/settings"]'));
+      await clickNative($('#settings-nav-tools'));
+      await expect($('#settings-nav-tools')).toHaveAttribute('aria-pressed', 'true');
       await $('button=Check updates').waitForEnabled();
       await clickInView('button=Check updates');
-      assert((await browser.execute(() => document.querySelector('.settings-layout').scrollTop)) > 0,
-        'The update check must exercise navigation away from a scrolled settings page');
       const success = $('button.toast.success');
       await expect(success).toBeDisplayed();
       await expect(success).toHaveText('Update information checked.');
@@ -108,6 +108,14 @@ describe('real native learning workflow (no cloud requests)', () => {
       assert.deepEqual(after.settings, before.settings, 'Checking metadata must not change saved settings');
       assert.deepEqual(after.budget, before.budget, 'Checking metadata must leave AI usage and reservations unchanged');
       assert.deepEqual(after.jobs, before.jobs, 'Checking metadata must not create, send, or change AI jobs');
+      // The update control is at the category's top. Scroll to its final note
+      // explicitly before exercising navigation away from a scrolled page.
+      const toolsHelp = $('#tools > .helper-text');
+      await toolsHelp.waitForDisplayed();
+      await browser.execute(node => node.scrollIntoView({ block: 'end', behavior: 'instant' }), await toolsHelp);
+      await toolsHelp.waitForDisplayed({ withinViewport: true });
+      await browser.waitUntil(async () => browser.execute(() => document.querySelector('.settings-layout').scrollTop > 0),
+        { timeoutMsg: 'The settings page did not scroll before navigation' });
     } finally {
       await $('.main-nav a[href="/"]').waitForClickable();
       await clickNative($('.main-nav a[href="/"]'));

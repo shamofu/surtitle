@@ -18,6 +18,8 @@ function attempts() {
 const ready = prepareNativeSession;
 async function settings() {
   await browser.execute(() => { window.history.pushState({}, '', '/settings'); window.dispatchEvent(new PopStateEvent('popstate')); });
+  await clickNative($('#settings-nav-ai'));
+  await expect($('#settings-nav-ai')).toHaveAttribute('aria-pressed', 'true');
   const review = $('button=Review saved translations');
   await review.waitForDisplayed();
   // Settings scrolls inside a smooth-scrolling panel. Native click auto-scroll
