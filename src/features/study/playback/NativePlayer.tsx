@@ -29,7 +29,7 @@ import { nativeAvailable } from '../../../shared/native/transport';
 
 import type { Media } from '../../../shared/contracts/media';
 import type { CaptionGapMode } from '../../../shared/contracts/settings';
-import type { PlayerControlRequest, PlayerState, PlayerSurfaceOcclusion, PlayerSurfaceRect } from '../../../shared/contracts/player';
+import type { PlayerControlRequest, PlayerState, PlayerSurfaceRect } from '../../../shared/contracts/player';
 import type { SubtitleSegment } from '../../../shared/contracts/media';
 
 import {
@@ -49,20 +49,7 @@ type SurfacePlacement = {
   signature: string;
   complete?: (error?: unknown) => void;
 };
-const noOccludingElements: readonly HTMLElement[] = [];
 const surfaceRect = (rect: DOMRect): PlayerSurfaceRect => ({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
-function surfaceOcclusion(element: HTMLElement): PlayerSurfaceOcclusion {
-  const rect = surfaceRect(element.getBoundingClientRect());
-  // Native occluding shells use a uniform circular radius and stay stationary
-  // while their contents animate. Keep their transparent corners as video.
-  const radius = getComputedStyle(element).borderTopLeftRadius;
-  const parsed = Number.parseFloat(radius);
-  const borderRadius = Number.isFinite(parsed) ? Math.max(0, Math.min(
-    radius.endsWith('%') ? parsed / 100 * Math.min(rect.width, rect.height) : parsed,
-    rect.width / 2, rect.height / 2,
-  )) : 0;
-  return borderRadius > 0 ? { ...rect, borderRadius } : rect;
-}
 function intersection(a: PlayerSurfaceRect, b: PlayerSurfaceRect): PlayerSurfaceRect {
   const x = Math.max(a.x, b.x), y = Math.max(a.y, b.y);
   return { x, y, width: Math.max(0, Math.min(a.x + a.width, b.x + b.width) - x),
@@ -199,9 +186,7 @@ export function NativePlayer({
   const { t } = useAppearance();
   const motionActive = useMotionActive();
   const { notify } = useNotifications();
-  const { surfaceHidden, activeModal, occludingElements = noOccludingElements } = useSurface();
-  const activeModalRef = useRef(activeModal);
-  activeModalRef.current = activeModal;
+  const { surfaceHidden } = useSurface();
   const { refresh } = useDataActions();
   const settingsExit = useModalExit(settingsOpen);
   const viewport = useRef<HTMLDivElement>(null);
@@ -272,8 +257,8 @@ export function NativePlayer({
   surfaceClick.current = toggleSurface;
   useEffect(() => {
     if (!nativeAvailable()) return;
-    // The native video is a sibling HWND above the WebView, so DOM clicks alone
-    // cannot receive pointer input from the actual decoded image.
+    // Keep the native input path for window messages; the front WebView also
+    // receives clicks on the decoded image through the DOM surface button.
     return subscribeNative('player-surface-click', () => surfaceClick.current(),
       error => notify(String(error), 'error'));
   }, [notify]);
@@ -424,24 +409,17 @@ export function NativePlayer({
     let frame = 0;
     let disposed = false;
     let placementVersion = 0;
-    const marked = new Set<HTMLElement>();
-    const focusBeforeHide = new Map<HTMLElement, HTMLElement>();
-    const measuredCards = new Map<HTMLElement, string>();
-    const revealCards = () => {
-      const top = activeModalRef.current ?? occludingElements.at(-1);
-      const target = top && marked.has(top) ? focusBeforeHide.get(top)
-        ?? top.querySelector<HTMLElement>('.playback-rate-slider') ?? top : undefined;
-      for (const element of marked) delete element.dataset.nativeOcclusion;
-      // visibility:hidden can move focus to BODY while the native exclusion is
-      // pending. Restore only lost focus in the top modal or popup; newer
-      // control focus and input selection must remain untouched.
-      if (target && top?.isConnected && document.hasFocus() && document.activeElement === document.body) {
-        const connectedTarget = target.isConnected && top.contains(target) ? target : top;
-        connectedTarget.focus({ preventScroll: true });
-        if (document.activeElement === document.body) top.focus({ preventScroll: true });
+    const clearAperture = () => {
+      delete document.documentElement.dataset.nativeVideo;
+      for (const edge of ['left', 'top', 'right', 'bottom']) {
+        document.documentElement.style.removeProperty(`--native-video-${edge}`);
       }
-      marked.clear();
-      focusBeforeHide.clear();
+    };
+    const showAperture = (clip: PlayerSurfaceRect) => {
+      const root = document.documentElement;
+      const edges = { left: clip.x, top: clip.y, right: clip.x + clip.width, bottom: clip.y + clip.height };
+      for (const [edge, value] of Object.entries(edges)) root.style.setProperty(`--native-video-${edge}`, `${value}px`);
+      root.dataset.nativeVideo = '';
     };
     setSurfaceError('');
     const measure = () => {
@@ -455,23 +433,6 @@ export function NativePlayer({
         const windowRect = { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
         const pageClip = main ? intersection(surfaceRect(main), windowRect) : windowRect;
         const clip = rect ? intersection(surfaceRect(rect), pageClip) : pageClip;
-        const occlusions: PlayerSurfaceOcclusion[] = [];
-        for (const element of occludingElements) {
-          if (!element.isConnected) continue;
-          const card = surfaceOcclusion(element);
-          const overlap = intersection(card, clip);
-          if (overlap.width <= 0 || overlap.height <= 0) continue;
-          occlusions.push(card);
-          const signature = JSON.stringify(card);
-          if (measuredCards.get(element) !== signature) {
-            if (document.activeElement instanceof HTMLElement && element.contains(document.activeElement)) {
-              focusBeforeHide.set(element, document.activeElement);
-            }
-            element.dataset.nativeOcclusion = 'pending';
-            marked.add(element);
-            measuredCards.set(element, signature);
-          }
-        }
         const version = ++placementVersion;
         const placementNode = viewport.current;
         if (placementNode) placementNode.dataset.nativePlacement = 'pending';
@@ -482,6 +443,8 @@ export function NativePlayer({
           rect.height < 1 ||
           clip.width < 1 || clip.height < 1 ||
           document.hidden;
+        if (!hidden && media.kind === 'video') showAperture(clip);
+        else clearAperture();
         const request = hidden
           ? { action: 'hide' as const }
           : {
@@ -493,7 +456,6 @@ export function NativePlayer({
                 height: rect.height,
                 scaleFactor: window.devicePixelRatio,
                 clip,
-                occlusions,
                 inputBlocked: surfaceHidden || interactionsDisabled,
               },
             };
@@ -501,13 +463,12 @@ export function NativePlayer({
           if (disposed || version !== placementVersion) return;
           const acknowledge = () => {
             if (disposed || version !== placementVersion) return;
-            revealCards();
             if (placementNode?.isConnected) placementNode.dataset.nativePlacement = 'ready';
           };
           if (error) {
             setSurfaceError(String(error));
-            // An explicit display error must never leave the native HWND over
-            // an inaccessible dialog. This is failure recovery, not modal policy.
+            clearAperture();
+            // Recover uncertain geometry before retrying the same placement.
             surfacePlacement(surfaceOwner.current, { action: 'hide' }, acknowledge);
           } else {
             acknowledge();
@@ -528,6 +489,7 @@ export function NativePlayer({
       if (document.hidden) {
         window.cancelAnimationFrame(frame);
         frame = 0;
+        clearAperture();
         surfacePlacement(surfaceOwner.current, { action: 'hide' });
       } else update();
     };
@@ -535,19 +497,16 @@ export function NativePlayer({
     if (viewport.current) observer.observe(viewport.current);
     const scrollContainer = viewport.current?.closest('.page-content');
     if (scrollContainer) observer.observe(scrollContainer);
-    for (const element of occludingElements) observer.observe(element);
     window.addEventListener('resize', update);
     // Animation ticks and ResizeObserver share one frame measurement. Endpoints
     // measure synchronously so the companion can wait for that exact native ack.
     window.addEventListener('surtitle-player-layout', layout);
     window.addEventListener('scroll', update, true);
     document.addEventListener('visibilitychange', visibility);
-    // New opaque cards are withheld until their region has been acknowledged;
-    // the uncovered video keeps rendering with unchanged geometry.
     measure();
     return () => {
       disposed = true;
-      revealCards();
+      clearAperture();
       window.cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener('resize', update);
@@ -555,7 +514,7 @@ export function NativePlayer({
       window.removeEventListener('scroll', update, true);
       document.removeEventListener('visibilitychange', visibility);
     };
-  }, [loaded, surfaceHidden, occludingElements, interactionsDisabled, media.id, surfaceAttempt]);
+  }, [loaded, surfaceHidden, interactionsDisabled, media.id, media.kind, surfaceAttempt]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (

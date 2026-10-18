@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { dirname, isAbsolute, resolve } from 'node:path';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, extname, isAbsolute, resolve, sep } from 'node:path';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
 import { nativeArtifact } from './native-artifacts.mjs';
 
 const execute = promisify(execFile);
@@ -155,4 +156,32 @@ export async function assertNativeVideoBounds(video = true) {
 export async function saveNativeScreenshot(path) {
   if (process.platform !== 'win32') return browser.saveScreenshot(path);
   await nativeWindow('capture', ['-Screenshot', resolve(path)]);
+}
+
+/** Records actual HWND composition while an action runs; no WebView-only fallback. */
+export async function captureNativeScreenshotSequence(path, action) {
+  assert.equal(process.platform, 'win32', 'Motion composition evidence requires Windows HWND capture');
+  const screenshot = resolve(path);
+  const outputRoot = resolve(dirname(script), '../../work/test-results/native');
+  assert(screenshot.toLowerCase().startsWith(`${outputRoot.toLowerCase()}${sep}`) && extname(screenshot).toLowerCase() === '.png',
+    'Native sequence must be a PNG within work/test-results/native');
+  const ready = `${screenshot}.ready`;
+  rmSync(ready, { force: true });
+  let result;
+  const recording = nativeWindow('capture-sequence', ['-Screenshot', screenshot])
+    .then(value => { result = { value }; }, error => { result = { error }; });
+  try {
+    const deadline = Date.now() + 12000;
+    while (!existsSync(ready)) {
+      if (result?.error) throw result.error;
+      assert(!result && Date.now() < deadline, 'Native sequence did not become ready to capture the action');
+      await delay(10);
+    }
+    await action();
+  } finally {
+    await recording;
+    rmSync(ready, { force: true });
+  }
+  if (result.error) throw result.error;
+  return result.value;
 }

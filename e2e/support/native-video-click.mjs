@@ -18,8 +18,37 @@ async function nativePointer(args = [], timeout = 15000) {
 }
 /** Activate the uniquely identified test window, using its verified caption when needed. */
 export const activateNativeApplication = () => nativePointer(['-ActivateOnly']);
-/** Click uncovered owned video after verified test-window activation. */
-export const clickNativeVideo = () => nativePointer();
+
+// This function runs inside the tested WebView. A native region alone cannot
+// identify an interactive point once HTML is composed above the video HWND.
+export function readNativeVideoClickTarget() {
+  const surface = document.querySelector('.player-surface-toggle');
+  if (!surface || surface.disabled || surface.closest('[inert], [hidden]')) throw new Error('No enabled visible video input surface');
+  const style = getComputedStyle(surface);
+  if (style.visibility !== 'visible' || style.display === 'none' || style.pointerEvents === 'none' || Number(style.opacity) === 0) throw new Error('Video input surface is not interactive');
+  if (!Number.isFinite(devicePixelRatio) || devicePixelRatio < .5 || devicePixelRatio > 8) throw new Error('Invalid video input DPI');
+  const box = surface.getBoundingClientRect();
+  const left = Math.max(0, box.left), top = Math.max(0, box.top);
+  const right = Math.min(innerWidth, box.right), bottom = Math.min(innerHeight, box.bottom);
+  if (right - left < 4 || bottom - top < 4) throw new Error('Video input surface is outside the WebView');
+  for (const [horizontal, vertical] of [[.5, .5], [.25, .5], [.75, .5], [.5, .25], [.5, .75], [.25, .25], [.75, .25], [.25, .75], [.75, .75]]) {
+    const clientX = Math.floor((left + (right - left) * horizontal) * devicePixelRatio);
+    const clientY = Math.floor((top + (bottom - top) * vertical) * devicePixelRatio);
+    const hit = document.elementFromPoint(clientX / devicePixelRatio, clientY / devicePixelRatio);
+    if (hit !== surface && !surface.contains(hit)) continue;
+    return { clientX, clientY,
+      clientWidth: Math.round(innerWidth * devicePixelRatio), clientHeight: Math.round(innerHeight * devicePixelRatio),
+      dpi: Math.round(devicePixelRatio * 96) };
+  }
+  throw new Error('Every tested video input point is covered by another DOM control');
+}
+
+/** Click DOM-verified video through the owned WebView after native geometry checks. */
+export async function clickNativeVideo() {
+  const point = await browser.execute(readNativeVideoClickTarget);
+  return nativePointer(['-ClientX', String(point.clientX), '-ClientY', String(point.clientY),
+    '-ClientWidth', String(point.clientWidth), '-ClientHeight', String(point.clientHeight), '-Dpi', String(point.dpi)]);
+}
 
 /** Hold the verified native titlebar through a slow outward/return/outward drag. */
 export function dragNativeWindowSnap(axis) {

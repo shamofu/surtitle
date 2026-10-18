@@ -36,7 +36,7 @@ for (const viewport of [{ width: 1024, height: 700 }, { width: 1366, height: 768
     await expect(dialog).toHaveCount(0);
     await expect(opener).toBeFocused();
     await expect(page.getByTestId('surface-state')).toHaveText('available');
-    await expect(page.getByTestId('occlusion-count')).toHaveText('0');
+    await expect(page.getByTestId('modal-state')).toHaveText('none');
   });
 }
 
@@ -79,12 +79,12 @@ test('nested dialogs own Escape and restore focus in order', async ({ page }) =>
   await expect(page.getByRole('dialog', { name: 'Editor' })).toBeVisible();
   await expect(innerOpener).toBeFocused();
   await expect(page.getByTestId('surface-state')).toHaveText('blocked');
-  await expect(page.getByTestId('occlusion-count')).toHaveText('1');
+  await expect(page.getByTestId('modal-state')).toHaveText('registered');
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(opener).toBeFocused();
   await expect(page.getByTestId('surface-state')).toHaveText('available');
-  await expect(page.getByTestId('occlusion-count')).toHaveText('0');
+  await expect(page.getByTestId('modal-state')).toHaveText('none');
 });
 
 test('notifications stay visible and clickable inside the active portal', async ({ page }) => {

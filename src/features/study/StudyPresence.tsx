@@ -7,6 +7,85 @@ import { nativeDockInset, subscribeSurfaceFootprint } from './playback/surfaceFo
 const StudyRegionActivity = createContext(true);
 export const useStudyRegionActive = () => useContext(StudyRegionActivity);
 
+/** Move the real heading and body as one opaque companion page. */
+export function StudyCompanionRegion({ name, selected, active, retain = false, animate = true, keepMounted = false, freezeOnExit = true, heading, children, className = '' }: {
+  name: 'transcript' | 'phrase' | 'activity';
+  selected: 'transcript' | 'phrase' | 'activity' | null;
+  active: boolean;
+  retain?: boolean;
+  animate?: boolean;
+  keepMounted?: boolean;
+  freezeOnExit?: boolean;
+  heading: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  const { reducedMotion } = useAppMotion();
+  const parentActive = useStudyRegionActive();
+  const order = { transcript: 0, phrase: 1, activity: 2 };
+  const endpoint = active || retain ? 0 : order[name] < order[selected || name] ? -1 : 1;
+  const [position] = useState(() => motionValue(endpoint));
+  const [retained, setRetained] = useState(active || retain);
+  const mounted = useRef(false);
+  const previous = useRef(children);
+  const ref = useRef<HTMLDivElement>(null);
+  const visible = active || retain || retained;
+  useLayoutEffect(() => { if (active) previous.current = children; }, [active, children]);
+  useLayoutEffect(() => {
+    const node = ref.current;
+    const first = !mounted.current;
+    mounted.current = true;
+    if (!node) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const render = (value: number) => { node.style.transform = `translateX(${value * 100}%)`; };
+    const unsubscribe = position.on('change', render);
+    render(position.get());
+    if (active || retain) setRetained(true);
+    const finish = () => {
+      if (disposed) return;
+      stop?.();
+      clearTimeout(timer);
+      position.jump(endpoint);
+      setRetained(active || retain);
+    };
+    const distance = Math.abs(position.get() - endpoint);
+    if (first || !animate || reducedMotion || document.hidden || distance < .001 || !visible) finish();
+    else {
+      // A reversal keeps the current position and the full-width slide speed.
+      const duration = .3 * distance;
+      const controls = motionAnimate(position, endpoint, { duration, ease: motionEase, onComplete: finish });
+      stop = () => controls.stop();
+      timer = setTimeout(finish, duration * 1000 + 100);
+    }
+    const settle = () => finish();
+    const visibility = () => { if (document.hidden) finish(); };
+    window.addEventListener('resize', settle);
+    document.addEventListener('visibilitychange', visibility);
+    return () => {
+      disposed = true;
+      const displayed = position.get();
+      stop?.();
+      // Motion's stop() samples the wall clock once more. Reverse from the
+      // pose the user actually saw, including after an expensive React commit.
+      position.jump(displayed);
+      clearTimeout(timer);
+      unsubscribe();
+      window.removeEventListener('resize', settle);
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, [active, retain, endpoint, animate, reducedMotion, position]);
+  return <div ref={ref} className={`study-companion-view ${className}`} data-companion-view={name}
+    data-motion-state={active ? 'open' : visible ? 'exiting' : 'closed'}
+    hidden={!visible} inert={!active} aria-hidden={!active || undefined}>
+    {visible && heading}
+    <StudyRegionActivity.Provider value={parentActive && active}>
+      {active ? children : visible && freezeOnExit ? previous.current : keepMounted || visible ? children : null}
+    </StudyRegionActivity.Provider>
+  </div>;
+}
+
 /** One desktop extent reveals the companion while resizing its native player. */
 export function useStudyPresence(open: boolean, mounted = true) {
   const { reducedMotion } = useAppMotion();

@@ -4,6 +4,11 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Input')][string]$Application,
     [Parameter(ParameterSetName = 'Input')][switch]$ActivateOnly,
     [Parameter(ParameterSetName = 'Input')][ValidateSet('x', 'y')][string]$SnapDragAxis,
+    [Parameter(ParameterSetName = 'Input')][int]$ClientX = -1,
+    [Parameter(ParameterSetName = 'Input')][int]$ClientY = -1,
+    [Parameter(ParameterSetName = 'Input')][int]$ClientWidth,
+    [Parameter(ParameterSetName = 'Input')][int]$ClientHeight,
+    [Parameter(ParameterSetName = 'Input')][int]$Dpi,
     [Parameter(Mandatory, ParameterSetName = 'Inspect')][switch]$InspectInputDesktop
 )
 $ErrorActionPreference = 'Stop'
@@ -39,6 +44,11 @@ public static class SurtitleNativePointer {
     [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder name, int maximum);
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr value);
+    [DllImport("user32.dll")] static extern int GetWindowRgn(IntPtr window, IntPtr region);
+    [DllImport("gdi32.dll")] static extern bool PtInRegion(IntPtr region, int x, int y);
     [DllImport("user32.dll", SetLastError = true)] static extern bool GetCursorPos(out Point point);
     [DllImport("user32.dll", SetLastError = true)] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll", SetLastError = true)] static extern bool GetClipCursor(out Rect rect);
@@ -430,22 +440,57 @@ public static class SurtitleNativePointer {
         }
         return new { samples = samples.ToArray(), released };
     }
-    public static void Click(IntPtr root, uint expectedProcess, IntPtr video, int x, int y) {
+    static Point VideoPoint(IntPtr root, uint expectedProcess, IntPtr video, int clientX, int clientY, int width, int height, int dpi) {
+        ValidateRoot(root, expectedProcess);
         GetWindowThreadProcessId(video, out uint videoProcess);
         if (videoProcess != expectedProcess || GetParent(video) != root || !IsWindowVisible(video)) throw new ArgumentException("Click target must be the owned visible native video");
+        if (width <= 0 || height <= 0 || clientX < 0 || clientY < 0 || clientX >= width || clientY >= height || dpi < 48 || dpi > 768)
+            throw new ArgumentException("Invalid DOM-verified video client coordinates; no input was sent");
+        if (!GetClientRect(root, out Rect client) || client.Right - client.Left != width || client.Bottom - client.Top != height || GetDpiForWindow(root) != dpi)
+            throw new Exception("The WebView client dimensions or DPI changed before video input; no input was sent");
+        var point = new Point { X = clientX, Y = clientY };
+        var origin = new Point();
+        if (!ClientToScreen(root, ref point) || !ClientToScreen(video, ref origin) || !GetClientRect(video, out Rect videoClient)) throw new Win32Exception();
+        int x = point.X - origin.X, y = point.Y - origin.Y;
+        if (x < videoClient.Left || x >= videoClient.Right || y < videoClient.Top || y >= videoClient.Bottom)
+            throw new Exception("The DOM-verified point is outside the actual native video; no input was sent");
+        IntPtr region = CreateRectRgn(0, 0, 0, 0);
+        if (region == IntPtr.Zero) throw new Win32Exception();
+        try {
+            if (GetWindowRgn(video, region) == 0 || !PtInRegion(region, x, y))
+                throw new Exception("The DOM-verified point is outside the retained native video region; no input was sent");
+        } finally { DeleteObject(region); }
+        return point;
+    }
+    static IntPtr OwnedWebViewAt(IntPtr root, uint expectedProcess, Point point) {
+        ValidateRoot(root, expectedProcess);
+        IntPtr hit = WindowFromPoint(point);
+        var name = new StringBuilder(256); GetClassName(hit, name, name.Capacity);
+        if (!IsWindowVisible(hit) || (name.ToString() != "Chrome_RenderWidgetHostHWND" && name.ToString() != "WRY_WEBVIEW"))
+            throw new Exception("The video point is covered by a non-WebView HWND; no input was sent");
+        IntPtr ancestor = hit;
+        for (int depth = 0; depth < 64 && ancestor != IntPtr.Zero; depth++) {
+            ancestor = GetParent(ancestor);
+            if (ancestor == root) return hit;
+        }
+        throw new Exception("The video point belongs to another application's WebView; no input was sent");
+    }
+    public static object Click(IntPtr root, uint expectedProcess, IntPtr video, int clientX, int clientY, int width, int height, int dpi) {
         var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
         if (previous == IntPtr.Zero) throw new Win32Exception();
         try {
             ActivateCore(root, expectedProcess);
-            if (WindowFromPoint(new Point { X = x, Y = y }) != video) throw new Exception("The retained video point is covered by another HWND; no input was sent");
+            var point = VideoPoint(root, expectedProcess, video, clientX, clientY, width, height, dpi);
+            IntPtr input = OwnedWebViewAt(root, expectedProcess, point);
             EnsureIdlePointer(root);
-            MovePointer(x, y);
+            MovePointer(point.X, point.Y);
             EnsureIdlePointer(root);
             ValidateRoot(root, expectedProcess);
-            GetWindowThreadProcessId(video, out uint finalVideoProcess);
-            if (finalVideoProcess != expectedProcess || GetParent(video) != root || !IsWindowVisible(video)
-                || GetForegroundWindow() != root || !CursorRemainsAt(new Point { X = x, Y = y }, video)) throw new Exception("The owned native video lost foreground or pointer ownership before input; no video input was sent");
+            var final = VideoPoint(root, expectedProcess, video, clientX, clientY, width, height, dpi);
+            if (final.X != point.X || final.Y != point.Y || OwnedWebViewAt(root, expectedProcess, final) != input
+                || GetForegroundWindow() != root || !CursorRemainsAt(point, input)) throw new Exception("The owned video input lost foreground, geometry or pointer ownership before input; no video input was sent");
             PressPointer();
+            return new { videoHandle = video.ToInt64(), inputHandle = input.ToInt64(), x = point.X, y = point.Y, clientX, clientY, dpi };
         } finally { SetThreadDpiAwarenessContext(previous); }
     }
 }
@@ -483,13 +528,7 @@ $geometry = [SurtitleNativeWindow]::Inspect($root)
 $videos = @($geometry | Where-Object { $_.parent -eq $root.ToInt64() -and $_.visible -and $_.className -ieq 'STATIC' })
 if ($videos.Count -ne 1) { throw "Expected one visible native video host, found $($videos.Count)." }
 $video = $videos[0]
-$regions = @($video.regionRectangles | Where-Object { $_.Right -gt $_.Left -and $_.Bottom -gt $_.Top } | Sort-Object { ([long]$_.Right - $_.Left) * ([long]$_.Bottom - $_.Top) } -Descending)
-if ($regions.Count -eq 0) { throw 'Native video has no explicitly retained region to click.' }
-$region = $regions[0]
-$x = $video.origin.X + [int][Math]::Floor(($region.Left + $region.Right) / 2)
-$y = $video.origin.Y + [int][Math]::Floor(($region.Top + $region.Bottom) / 2)
-[SurtitleNativePointer]::Click($root, $expectedProcess, [IntPtr]$video.handle, $x, $y)
-@{ videoHandle = $video.handle; x = $x; y = $y; retainedRegion = $region } | ConvertTo-Json -Depth 3
+[SurtitleNativePointer]::Click($root, $expectedProcess, [IntPtr]$video.handle, $ClientX, $ClientY, $ClientWidth, $ClientHeight, $Dpi) | ConvertTo-Json -Depth 3
 } catch {
     try { [Console]::Error.WriteLine('Native input desktop: ' + ([SurtitleNativePointer]::InspectInputDesktop() | ConvertTo-Json -Depth 6 -Compress)) }
     catch { [Console]::Error.WriteLine('Native input desktop diagnostics failed: ' + $_.Exception.Message) }

@@ -29,7 +29,7 @@ function Session({ disabled = false, initialRate = 1 }: SessionProps) {
     <button onClick={() => setModal(value => !value)}>Toggle modal</button>
     {modal && <RegisteredModal />}
     <output data-testid="reported-rate">{rate}</output>
-    <output data-testid="surface-state">{JSON.stringify({ blocked: surface.surfaceHidden, occlusions: surface.occludingElements.length, modal: !!surface.activeModal })}</output>
+    <output data-testid="surface-state">{JSON.stringify({ blocked: surface.surfaceHidden, modal: !!surface.activeModal })}</output>
   </>;
 }
 const scrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
@@ -149,16 +149,16 @@ it('keeps the selected preset open without a redundant rate request and restores
   expect(changeRate).not.toHaveBeenCalled();
 });
 
-it('registers an opaque exclusion without blocking playback and preserves modal stacking on outside dismissal', async () => {
+it('keeps playback available and preserves modal input blocking on outside dismissal', async () => {
   renderSession();
   const user = userEvent.setup();
   await user.click(trigger());
-  expect(screen.getByTestId('surface-state')).toHaveTextContent('{"blocked":false,"occlusions":1,"modal":false}');
+  expect(screen.getByTestId('surface-state')).toHaveTextContent('{"blocked":false,"modal":false}');
   await user.click(screen.getByRole('button', { name: 'Toggle modal' }));
-  await waitFor(() => expect(screen.getByTestId('surface-state')).toHaveTextContent('{"blocked":true,"occlusions":1,"modal":true}'));
+  await waitFor(() => expect(screen.getByTestId('surface-state')).toHaveTextContent('{"blocked":true,"modal":true}'));
   expect(screen.queryByRole('dialog', { name: 'Playback speed' })).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Toggle modal' }));
-  expect(screen.getByTestId('surface-state')).toHaveTextContent('{"blocked":false,"occlusions":0,"modal":false}');
+  expect(screen.getByTestId('surface-state')).toHaveTextContent('{"blocked":false,"modal":false}');
   expect(changeRate).not.toHaveBeenCalled();
 });
 
@@ -187,12 +187,11 @@ it('closes on a second trigger click and reopens on the next without changing th
   expect(changeRate).not.toHaveBeenCalled();
 });
 
-it.each(['{Enter}', ' '])('lets %s close the focused trigger while native clipping is pending', async key => {
+it.each(['{Enter}', ' '])('lets %s close the focused trigger', async key => {
   renderSession();
   const user = userEvent.setup();
   const button = trigger();
   await user.click(button);
-  document.querySelector<HTMLElement>('.playback-rate-popover')!.dataset.nativeOcclusion = 'pending';
   act(() => button.focus());
   expect(button).toHaveAttribute('aria-expanded', 'true');
   await user.keyboard(key);

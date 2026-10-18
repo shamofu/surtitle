@@ -51,3 +51,26 @@ test('unrelated hover and loader animations do not block a stable input surface'
     expect(draftSurfaceSettled(view.target)).toBe(true);
   } finally { view.dom.window.close(); }
 });
+
+test('waits for companion pages, but ignores retained hidden pages and their disclosures', () => {
+  const view = fixture();
+  try {
+    const page = view.dom.window.document.createElement('div');
+    page.className = 'study-companion-view';
+    view.tab.replaceWith(page);
+    page.append(view.tab);
+    page.style.transform = 'translateX(-35%)';
+    expect(draftSurfaceSettled(view.target)).toBe(false);
+    page.style.transform = 'translateX(0%)';
+    expect(draftSurfaceSettled(view.target)).toBe(true);
+    const hidden = view.dom.window.document.createElement('div');
+    hidden.className = 'study-companion-view';
+    hidden.hidden = true;
+    hidden.style.transform = 'translateX(100%)';
+    hidden.innerHTML = '<details data-motion-state="open" style="height: 80px"></details>';
+    view.region.append(hidden);
+    expect(draftSurfaceSettled(view.target)).toBe(true);
+    hidden.hidden = false;
+    expect(draftSurfaceSettled(view.target)).toBe(false);
+  } finally { view.dom.window.close(); }
+});

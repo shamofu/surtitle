@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 .player-card { display: flex; flex-direction: column; flex: 1; min-height: 180px; min-width: 0; background: #000; border-radius: 8px; overflow: hidden; }
 .native-player-viewport { position: relative; flex: 1; min-height: 100px; width: 100%; overflow: hidden; background: #000; }
+:root[data-native-video] :is(.player-card, .native-player-viewport) { background: transparent; }
 .player-surface-toggle { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; background: transparent; border: 0; }
 .player-surface-toggle:focus-visible { outline-offset: -3px; }
 .video-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; color: #C0C9D6; }
@@ -27,10 +28,10 @@
 .playback-rate-trigger[data-focus-visible] { outline: 2px solid var(--accent); outline-offset: -2px; }
 .playback-rate-trigger[disabled] { opacity: .5; }
 .playback-rate-trigger svg { position: static; pointer-events: none; }
-.playback-rate-popover { display: flex; flex-direction: column; z-index: 950; width: 322px; max-width: calc(100vw - 24px); max-height: 320px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); box-shadow: var(--shadow); overflow: hidden; isolation: isolate; }
-.playback-rate-popover[data-native-occlusion='pending'] { visibility: hidden; pointer-events: none; }
+.playback-rate-popover { display: flex; flex-direction: column; z-index: 950; width: 322px; max-width: calc(100vw - 24px); max-height: 320px; --shell-slide-distance: 24px; }
+.playback-rate-popover[data-placement='bottom'] { --shell-slide-distance: -24px; }
 .playback-rate-popover[data-state='closing'] { pointer-events: none; }
-.playback-rate-content { display: flex; flex-direction: column; flex: 1; min-height: 0; transform-origin: center; }
+.playback-rate-content { display: flex; flex-direction: column; flex: 1; min-height: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); box-shadow: var(--shadow); overflow: hidden; isolation: isolate; }
 .playback-rate-dialog { display: flex; flex-direction: column; flex: 1; min-height: 0; outline: none; }
 .playback-rate-header { display: flex; flex-shrink: 0; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
 .playback-rate-heading { margin: 0; color: var(--text); font-size: 13px; line-height: 1.4; font-weight: 650; }

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('inspect', 'resize', 'resize-maximize', 'capture', 'monitor', 'move-monitor', 'snap-edge', 'close', 'maximize', 'restore')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('inspect', 'resize', 'resize-maximize', 'capture', 'capture-sequence', 'monitor', 'move-monitor', 'snap-edge', 'close', 'maximize', 'restore')][string]$Action,
     [Parameter(Mandatory)][string]$Application,
     [int]$Width,
     [int]$Height,
@@ -41,7 +41,7 @@ if ($Action -in @('resize', 'resize-maximize')) {
     }
 }
 $geometry = [SurtitleNativeWindow]::Inspect($window)
-if ($Action -eq 'capture') {
+if ($Action -in @('capture', 'capture-sequence')) {
     $outputRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../work/test-results/native'))
     if (-not $Screenshot -or -not [IO.Path]::IsPathFullyQualified($Screenshot)) { throw 'Screenshot must have an absolute output path.' }
     $output = [IO.Path]::GetFullPath($Screenshot)
@@ -49,13 +49,34 @@ if ($Action -eq 'capture') {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $output) | Out-Null
     Add-Type -AssemblyName System.Drawing.Common
     $bounds = $geometry[0].screen
+    $frames = @()
+    $count = if ($Action -eq 'capture-sequence') { 32 } else { 1 }
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    if ($Action -eq 'capture-sequence') { [IO.File]::WriteAllText($output + '.ready', 'ready') }
     $bitmap = [Drawing.Bitmap]::new($bounds.Right - $bounds.Left, $bounds.Bottom - $bounds.Top)
-    $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    $device = $graphics.GetHdc()
     try {
-        # Ask only this application's window to render; never capture the wider desktop.
-        if (-not [SurtitleNativeWindow]::PrintWindow($window, $device, 2)) { throw 'The application window could not be captured.' }
-    } finally { $graphics.ReleaseHdc($device); $graphics.Dispose() }
-    try { $bitmap.Save($output, [Drawing.Imaging.ImageFormat]::Png) } finally { $bitmap.Dispose() }
+        for ($frameIndex = 0; $frameIndex -lt $count; $frameIndex++) {
+            $graphics = [Drawing.Graphics]::FromImage($bitmap)
+            $device = $graphics.GetHdc()
+            $startedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            try {
+                # Ask only this application's window to render; never capture the wider desktop.
+                if (-not [SurtitleNativeWindow]::PrintWindow($window, $device, 2)) { throw 'The application window could not be captured.' }
+            } finally { $graphics.ReleaseHdc($device); $graphics.Dispose() }
+            $capturedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            $framePath = if ($count -eq 1) { $output } else {
+                Join-Path (Split-Path -Parent $output) (([IO.Path]::GetFileNameWithoutExtension($output)) + ('-{0:D3}.png' -f $frameIndex))
+            }
+            $bitmap.Save($framePath, [Drawing.Imaging.ImageFormat]::Png)
+            $frames += @{ file = [IO.Path]::GetFileName($framePath); startedAt = $startedAt; capturedAt = $capturedAt; elapsedMs = $clock.ElapsedMilliseconds }
+            if ($count -gt 1) { Start-Sleep -Milliseconds 30 }
+        }
+    } finally { $bitmap.Dispose() }
+    if ($Action -eq 'capture-sequence') {
+        $sequence = @{ capture = 'PrintWindow'; frames = $frames; geometry = $geometry }
+        $sequence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath ([IO.Path]::ChangeExtension($output, '.json'))
+        $sequence | ConvertTo-Json -Depth 8
+        exit 0
+    }
 }
 $geometry | ConvertTo-Json -Depth 6

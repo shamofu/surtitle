@@ -48,6 +48,16 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; color: var(--text); background: var(--bg); }
+/* Keep the page opaque except for the measured native video viewport. The
+   WebView paints every dialog above this aperture, including moving corners. */
+:root[data-native-video] {
+  background:
+    linear-gradient(var(--bg), var(--bg)) left top / 100% var(--native-video-top) no-repeat,
+    linear-gradient(var(--bg), var(--bg)) left bottom / 100% calc(100% - var(--native-video-bottom)) no-repeat,
+    linear-gradient(var(--bg), var(--bg)) left top / var(--native-video-left) 100% no-repeat,
+    linear-gradient(var(--bg), var(--bg)) right top / calc(100% - var(--native-video-right)) 100% no-repeat;
+}
+:root[data-native-video] body { background: transparent; }
 button, input, select, textarea { font: inherit; }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button, a { touch-action: manipulation; }

@@ -8,7 +8,6 @@
   justify-content: center;
 }
 .modal-container { outline: none; }
-.modal[data-native-occlusion='pending'] { visibility: hidden; pointer-events: none; }
 .modal {
   border: 1px solid var(--border);
   border-radius: 12px;

@@ -134,7 +134,9 @@ impl Mpv {
                 0,
                 class.as_ptr(),
                 ptr::null(),
-                WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+                // The transparent WebView is above this child. WS_CLIPSIBLINGS
+                // would discard the video beneath it, including its clear area.
+                WS_CHILD | WS_CLIPCHILDREN,
                 0,
                 0,
                 1,
@@ -183,6 +185,12 @@ impl Mpv {
             }
             #[cfg(feature = "e2e-test")]
             for (key, value) in [("hwdec", "no"), ("d3d11-warp", "yes"), ("ao", "null")] {
+                // Opt-in desktop validation uses the shipped graphics path;
+                // automated CI remains deterministic and audio stays muted.
+                if key != "ao" && std::env::var("SURTITLE_E2E_REAL_RENDERER").as_deref() == Ok("1")
+                {
+                    continue;
+                }
                 let result = option(
                     handle,
                     CString::new(key)?.as_ptr(),
@@ -450,7 +458,7 @@ fn place_video_window(child: windows_sys::Win32::Foundation::HWND, b: &Bounds) -
     let positioned = unsafe {
         SetWindowPos(
             child,
-            HWND_TOP,
+            HWND_BOTTOM,
             (b.x * b.scale_factor).round() as i32,
             (b.y * b.scale_factor).round() as i32,
             (b.width * b.scale_factor).round() as i32,
@@ -480,7 +488,7 @@ mod surface_tests {
     use super::*;
 
     #[test]
-    fn video_is_above_sibling_after_resize_and_modal_restore() {
+    fn video_stays_below_webview_after_resize_and_restore_without_taking_focus() {
         unsafe {
             let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
             let create = |parent, style| {
@@ -528,7 +536,7 @@ mod surface_tests {
                 );
                 bounds.width = width;
                 place_video_window(video, &bounds).unwrap();
-                assert_eq!(GetTopWindow(parent), video);
+                assert_eq!(GetTopWindow(parent), webview);
                 assert_ne!(GetWindowLongPtrW(video, GWL_STYLE) as u32 & WS_VISIBLE, 0);
                 assert_eq!(GetForegroundWindow(), active);
             }

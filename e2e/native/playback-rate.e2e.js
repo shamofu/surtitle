@@ -2,10 +2,10 @@
 import assert from 'node:assert/strict';
 import { nativeArtifact } from '../support/native-artifacts.mjs';
 import { invokeNative as invoke, clickNative } from '../support/native-app.mjs';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
-import { assertNativeVideoBounds, resizeNativeWindow, saveNativeScreenshot } from '../support/native-window.mjs';
+import { assertNativeVideoBounds, inspectNativeMonitor, moveNativeWindowToMonitor, resizeNativeWindow, saveNativeScreenshot } from '../support/native-window.mjs';
 import { activateNativeApplication, clickNativeVideo } from '../support/native-video-click.mjs';
 
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
@@ -21,10 +21,10 @@ async function openSpeed() {
   await $(popupSelector).waitForDisplayed();
   await browser.waitUntil(async () => browser.execute(() => {
     const popup = document.querySelector('.playback-rate-popover');
-    return popup && !popup.hasAttribute('data-native-occlusion')
+    return popup
       && Number(getComputedStyle(popup.querySelector('.playback-rate-content')).opacity) === 1
       && popup.querySelector('.playback-rate-slider') === document.activeElement;
-  }), { timeoutMsg: 'The native speed widget did not recover slider focus after exclusion acknowledgement' });
+  }), { timeoutMsg: 'The speed widget did not settle with slider focus' });
 }
 async function expectRate(rate) {
   await browser.waitUntil(async () => (await state()).rate === rate,
@@ -57,7 +57,24 @@ describe('real native playback speed popup', () => {
     await control({ action: 'rate', value: 1 });
     await control({ action: 'seek', value: 200 });
     await browser.waitUntil(async () => (await $(triggerSelector).getText()).includes('1×'));
-    if (process.platform === 'win32') await activateNativeApplication();
+    if (process.platform === 'win32') {
+      try { await activateNativeApplication(); }
+      catch (error) {
+        const details = `${error?.message ?? ''} ${error?.stderr ?? ''}`.replace(/\u001b\[[0-9;]*m/g, '').replace(/\s+/g, ' ');
+        if (!/No uncovered HTCAPTION point belongs to the owned test root;[ |]*no input was sent\./.test(details)) throw error;
+        const display = await inspectNativeMonitor();
+        const alternate = display.monitors.find(monitor => monitor.handle !== display.current);
+        if (!alternate) throw error;
+        // Only this isolated test window moves; other applications and display
+        // settings remain untouched. Any failure of the single retry propagates.
+        await moveNativeWindowToMonitor(alternate.handle);
+        const activation = await activateNativeApplication();
+        writeFileSync(nativeArtifact('playback-speed-activation-relocation.json'), JSON.stringify({
+          reason: 'Owned caption covered before any input was sent', fromMonitor: display.current,
+          toMonitor: alternate.handle, activation,
+        }, null, 2));
+      }
+    }
     await browser.waitUntil(async () => browser.execute(() => document.hasFocus()),
       { timeoutMsg: 'The test application must be foreground before opening speed choices' });
   });
@@ -146,7 +163,7 @@ describe('real native playback speed popup', () => {
     }
   });
 
-  (process.platform === 'win32' ? it : it.skip)('excludes actual HWND pixels behind the popup and restores them after Escape', async () => {
+  (process.platform === 'win32' ? it : it.skip)('retains actual video pixels behind the popup and restores video input after Escape', async () => {
     await control({ action: 'pause' });
     const before = await assertNativeVideoBounds();
     await openSpeed();
@@ -165,7 +182,7 @@ describe('real native playback speed popup', () => {
     const y = ((overlap.top + overlap.bottom) / 2 - viewport.y) * scale;
     const native = during.native.find(row => row.parent === during.native[0].handle && row.className.toLowerCase() === 'static');
     assert(native?.regionRectangles?.length, 'Native video has no explicit retained region');
-    assert(!native.regionRectangles.some(rect => contains(rect, x, y)), 'Native video pixels cover speed choices');
+    assert(native.regionRectangles.some(rect => contains(rect, x, y)), 'Speed choices cut a hole in the underlying video');
     assert(native.regionRectangles.some(rect => rect.Right > rect.Left && rect.Bottom > rect.Top), 'The speed popup removed all video pixels');
     const corners = [[card.x + 1, card.y + 1], [card.x + card.width - 2, card.y + 1],
       [card.x + 1, card.y + card.height - 2], [card.x + card.width - 2, card.y + card.height - 2]]

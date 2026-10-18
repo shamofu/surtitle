@@ -28,10 +28,9 @@ function Editor({ onClose, action, locked = false }: { onClose: () => void; acti
 }
 function Harness({ action, locked }: { action: () => void | Promise<void>; locked?: boolean }) {
   const [open, setOpen] = useState(false);
-  const { surfaceHidden, occludingElements, activeModal } = useSurface();
+  const { surfaceHidden, activeModal } = useSurface();
   return <>
     <output>{surfaceHidden ? 'Input blocked' : 'Input available'}</output>
-    <output>{occludingElements.length} opaque surfaces</output>
     <output>{activeModal?.matches('[data-app-modal]') ? 'Dialog registered' : 'No dialog'}</output>
     <button onClick={() => setOpen(true)}>Open editor</button>
     {open && <Editor action={action} locked={locked} onClose={() => setOpen(false)} />}
@@ -53,7 +52,6 @@ it('commits once immediately and retains the opaque surface, input block and not
   fireEvent.click(screen.getByText('Open editor'));
   const dialog = screen.getByRole('dialog');
   expect(dialog.tagName).toBe('SECTION');
-  expect(screen.getByText('1 opaque surfaces')).toBeInTheDocument();
   expect(screen.getByText('Dialog registered')).toBeInTheDocument();
   fireEvent.click(screen.getByText('Notify'));
   fireEvent.click(screen.getByText('Accepted close'));
@@ -70,7 +68,6 @@ it('commits once immediately and retains the opaque surface, input block and not
   await act(async () => { pending.resolve(); });
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(screen.getByText('Input available')).toBeInTheDocument();
-  expect(screen.getByText('0 opaque surfaces')).toBeInTheDocument();
 });
 
 it('locks dismissal while busy but accepts a successful programmatic close', async () => {
@@ -101,7 +98,6 @@ it('reopens the same DOM and keeps uncontrolled input after an accepted close fa
   expect(input).toHaveValue('寄り道のメモ');
   expect(screen.getByText('Mutate 1')).toBeInTheDocument();
   expect(screen.getByText('Close failed')).toBeInTheDocument();
-  expect(screen.getByText('1 opaque surfaces')).toBeInTheDocument();
   await act(async () => { fireEvent.click(screen.getByText('Accepted close')); });
   expect(action).toHaveBeenCalledTimes(2);
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

@@ -11,7 +11,7 @@ const fixture = vi.hoisted(() => ({
   hidden: false, notify: vi.fn(), ready: vi.fn(), position: vi.fn(),
   viewportWidth: 320,
   viewportTop: 0,
-  occludingElements: [] as HTMLElement[],
+  overlays: [] as HTMLElement[],
   listeners: new Set<(event: { payload: PlayerState }) => void>(),
   surfaceListeners: new Set<(event: { payload: void }) => void>(),
 }));
@@ -34,7 +34,7 @@ vi.mock('../app/runtime', () => ({
   useAppearance: () => ({ t: (_ja: string, en: string) => en }),
   useNotifications: () => ({ notify: fixture.notify }),
   useDataActions: () => ({ refresh: async () => {} }),
-  useSurface: () => ({ surfaceHidden: fixture.hidden, activeModal: fixture.occludingElements.at(-1) ?? null, occludingElements: fixture.occludingElements, registerModal: () => () => {} }),
+  useSurface: () => ({ surfaceHidden: fixture.hidden, registerModal: () => () => {} }),
 }));
 const media: Media = { id: 'video', title: 'Video', path: 'C:/video.mkv', kind: 'video', durationMs: 10000, learningLanguage: 'en', explanationLanguage: 'ja', createdAt: '', lastPositionMs: 0, segmentCount: 0, cardCount: 0, status: 'ready' };
 const playerState: PlayerState = { revision: 10, ready: true, positionMs: 0, durationMs: 10000, paused: true, rate: 1, volume: 80, tracks: [{ id: 1, kind: 'sub', title: 'English', selected: true, ffIndex: 4 }] };
@@ -89,7 +89,7 @@ beforeEach(() => {
   fixture.hidden = false;
   fixture.viewportWidth = 320;
   fixture.viewportTop = 0;
-  fixture.occludingElements = [];
+  fixture.overlays = [];
   fixture.listeners.clear();
   fixture.surfaceListeners.clear();
   vi.mocked(playerApi.loadMedia).mockResolvedValue();
@@ -101,7 +101,7 @@ beforeEach(() => {
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   HTMLDialogElement.prototype.close = function () { this.open = false; };
 });
-afterEach(() => { cleanup(); fixture.occludingElements.forEach(element => element.remove()); vi.restoreAllMocks(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); fixture.overlays.forEach(element => element.remove()); vi.restoreAllMocks(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
 
 it('reads fresh native rate after a widget adjustment and keeps the widget open', async () => {
   render(player());
@@ -229,28 +229,6 @@ it('surfaces placement errors and retries identical bounds without reloading med
   expect(playerApi.loadMedia).toHaveBeenCalledTimes(1);
 });
 
-it('reveals an overlapping card after failed clipping has hidden the native surface', async () => {
-  const view = render(player());
-  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
-  const clipping = deferred<void>();
-  const recovery = deferred<void>();
-  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds'
-    ? clipping.promise : request.action === 'hide' ? recovery.promise : Promise.resolve());
-  const card = document.createElement('section');
-  document.body.append(card);
-  fixture.occludingElements = [card];
-  fixture.hidden = true;
-  view.rerender(player());
-  expect(card.dataset.nativeOcclusion).toBe('pending');
-
-  await act(async () => clipping.reject(new Error('Clipping rejected')));
-  await waitFor(() => expect(placementRequests().at(-1)?.action).toBe('hide'));
-  expect(card.dataset.nativeOcclusion).toBe('pending');
-  await act(async () => recovery.resolve());
-  expect(card).not.toHaveAttribute('data-native-occlusion');
-  expect(screen.getByText(/Clipping rejected/)).toBeInTheDocument();
-});
-
 it('restores the confirmed volume and reports a failed adjustment', async () => {
   const request = deferred<void>();
   vi.mocked(playerApi.player).mockImplementation(async control => {
@@ -300,114 +278,71 @@ it('keeps the full video geometry and clips only its portion outside the page', 
   })));
 });
 
-it('withholds an overlapping opaque card until its native clipping acknowledgement', async () => {
+it.each([
+  ['modal', false], ['modal', true], ['popup', false], ['popup', true],
+] as const)('keeps %s input visible and focused throughout pending bounds (failure=%s)', async (kind, fails) => {
   const view = render(player());
-  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
+  await waitFor(() => expect(document.querySelector('.native-player-viewport')).toHaveAttribute('data-native-placement', 'ready'));
   const pending = deferred<void>();
   vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
-  const card = document.createElement('section');
-  document.body.append(card);
-  Object.defineProperty(card, 'getBoundingClientRect', { value: () => ({ x: 200, y: 20, width: 200, height: 100,
-    left: 200, right: 400, top: 20, bottom: 120, toJSON: () => ({}) }) });
-  fixture.occludingElements = [card];
-  fixture.hidden = true;
+  const overlay = document.createElement('section');
+  overlay.setAttribute('role', 'dialog');
+  const input = document.createElement('input');
+  input.value = 'keep this phrase';
+  overlay.append(input);
+  document.body.append(overlay);
+  fixture.overlays.push(overlay);
+  input.focus();
+  input.setSelectionRange(5, 9);
+  fixture.hidden = kind === 'modal';
   view.rerender(player());
-  expect(card.dataset.nativeOcclusion).toBe('pending');
-  expect(placementRequests().at(-1)?.bounds).toEqual(expect.objectContaining({
-    width: 320, height: 200, inputBlocked: true,
-    occlusions: [{ x: 200, y: 20, width: 200, height: 100 }],
-  }));
-  await act(async () => pending.resolve());
-  expect(card).not.toHaveAttribute('data-native-occlusion');
-  expect(placementRequests().at(-1)?.action).toBe('bounds');
+  await resizeSurface(300);
+  const bounds = placementRequests().filter(request => request.action === 'bounds').at(-1)?.bounds;
+  expect(bounds?.occlusions || []).toEqual([]);
+  expect(!!bounds?.inputBlocked).toBe(kind === 'modal');
+  expect(overlay).toBeVisible();
+  expect(overlay).not.toHaveAttribute('data-native-occlusion');
+  expect(input).toHaveFocus();
+  expect([input.selectionStart, input.selectionEnd]).toEqual([5, 9]);
+  if (fails) await act(async () => pending.reject(new Error('Placement rejected')));
+  else await act(async () => pending.resolve());
+  expect(overlay).toBeVisible();
+  expect(overlay).not.toHaveAttribute('data-native-occlusion');
+  expect(input).toHaveFocus();
+  expect([input.selectionStart, input.selectionEnd]).toEqual([5, 9]);
+  expect(placementRequests().filter(request => request.action === 'bounds').every(request => !request.bounds?.occlusions?.length)).toBe(true);
+  if (fails) expect(screen.getByText(/Placement rejected/)).toBeInTheDocument();
 });
 
-it.each(['input', 'disabled input', 'removed input', 'dialog'] as const)(
-  'restores focus lost while clipping is pending to the %s or active dialog fallback', async target => {
-    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
-    const view = render(player());
-    await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
-    const pending = deferred<void>();
-    vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
-    const card = document.createElement('section');
-    card.tabIndex = -1;
-    const input = document.createElement('input');
-    input.value = 'keep this phrase';
-    card.append(input);
-    document.body.append(card);
-    (target === 'dialog' ? card : input).focus();
-    input.setSelectionRange(5, 9);
-    fixture.occludingElements = [card];
-    fixture.hidden = true;
-    view.rerender(player());
-    expect(card.dataset.nativeOcclusion).toBe('pending');
-    // jsdom does not implement CSS visibility focus loss. Reproduce the BODY
-    // state observed in real WebView2 while the clipping acknowledgement waits.
-    (document.activeElement as HTMLElement).blur();
-    if (target === 'disabled input') input.disabled = true;
-    if (target === 'removed input') input.remove();
-    expect(document.body).toHaveFocus();
-    await act(async () => pending.resolve());
-    expect(card).not.toHaveAttribute('data-native-occlusion');
-    expect(target === 'input' ? input : card).toHaveFocus();
-    if (target === 'input') expect([input.selectionStart, input.selectionEnd]).toEqual([5, 9]);
-  },
-);
-
-it('preserves focus and selection moved to another descendant before the clipping acknowledgement', async () => {
-  vi.spyOn(document, 'hasFocus').mockReturnValue(true);
-  const view = render(player());
-  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
-  const pending = deferred<void>();
-  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
-  const card = document.createElement('section');
-  card.tabIndex = -1;
-  const previous = document.createElement('input');
-  const current = document.createElement('input');
-  current.value = 'new selection';
-  card.append(previous, current);
-  document.body.append(card);
-  previous.focus();
-  fixture.occludingElements = [card];
-  fixture.hidden = true;
-  view.rerender(player());
-  previous.blur();
-  current.focus();
-  current.setSelectionRange(4, 9);
-  await act(async () => pending.resolve());
-  expect(current).toHaveFocus();
-  expect([current.selectionStart, current.selectionEnd]).toEqual([4, 9]);
+it('updates the transparent background aperture to the visible clipped viewport when geometry changes', async () => {
+  fixture.viewportTop = -30;
+  render(player());
+  const root = document.documentElement;
+  await waitFor(() => expect(root).toHaveAttribute('data-native-video', ''));
+  expect(root.style.getPropertyValue('--native-video-left')).toBe('0px');
+  expect(root.style.getPropertyValue('--native-video-top')).toBe('0px');
+  expect(root.style.getPropertyValue('--native-video-right')).toBe('320px');
+  expect(root.style.getPropertyValue('--native-video-bottom')).toBe('170px');
+  fixture.viewportTop = 25;
+  await resizeSurface(240);
+  expect(root.style.getPropertyValue('--native-video-left')).toBe('0px');
+  expect(root.style.getPropertyValue('--native-video-top')).toBe('25px');
+  expect(root.style.getPropertyValue('--native-video-right')).toBe('240px');
+  expect(root.style.getPropertyValue('--native-video-bottom')).toBe('225px');
 });
 
-it('does not restore an older modal during cleanup or a stale acknowledgement after a nested modal opens', async () => {
-  vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+it.each(['hide', 'unmount'] as const)('removes the native video background aperture on %s', async reason => {
   const view = render(player());
-  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
-  const pending = deferred<void>();
-  vi.mocked(playerApi.player).mockImplementation(request => request.action === 'bounds' ? pending.promise : Promise.resolve());
-  const outer = document.createElement('section');
-  outer.tabIndex = -1;
-  const previous = document.createElement('input');
-  outer.append(previous);
-  document.body.append(outer);
-  previous.focus();
-  fixture.occludingElements = [outer];
-  fixture.hidden = true;
-  view.rerender(player());
-  previous.blur();
-  const inner = document.createElement('section');
-  inner.tabIndex = -1;
-  const current = document.createElement('input');
-  inner.append(current);
-  document.body.append(inner);
-  fixture.occludingElements = [outer, inner];
-  view.rerender(player());
-  expect(document.body).toHaveFocus();
-  expect(inner.dataset.nativeOcclusion).toBe('pending');
-  current.focus();
-  await act(async () => pending.resolve());
-  expect(current).toHaveFocus();
-  expect(inner).not.toHaveAttribute('data-native-occlusion');
+  const root = document.documentElement;
+  await waitFor(() => expect(root).toHaveAttribute('data-native-video', ''));
+  if (reason === 'unmount') view.unmount();
+  else {
+    fixture.viewportTop = -300;
+    await resizeSurface(320);
+    await waitFor(() => expect(placementRequests().at(-1)?.action).toBe('hide'));
+  }
+  expect(root).not.toHaveAttribute('data-native-video');
+  for (const edge of ['left', 'top', 'right', 'bottom']) expect(root.style.getPropertyValue(`--native-video-${edge}`)).toBe('');
 });
 
 it('coalesces animated bounds while one placement is pending and sends the final width', async () => {
@@ -483,47 +418,6 @@ it('retains inward clip changes even when the rounded HWND width stays the same'
   vi.mocked(playerApi.player).mockClear();
   await resizeSurface(320.1);
   expect(placementRequests()).toEqual([expect.objectContaining({ action: 'bounds', bounds: expect.objectContaining({ width: 320.1 }) })]);
-});
-
-it('retains outward occlusion changes while deduplicating the same physical region', async () => {
-  let left = 10.1;
-  const card = document.createElement('section');
-  document.body.append(card);
-  fixture.occludingElements = [card];
-  vi.spyOn(card, 'getBoundingClientRect').mockImplementation(() => new DOMRect(left, 10, 10, 10));
-  render(player());
-  await waitFor(() => expect(placementRequests().some(request => request.action === 'bounds')).toBe(true));
-  vi.mocked(playerApi.player).mockClear();
-  left = 10.2;
-  await resizeSurface(320);
-  expect(placementRequests()).toEqual([]);
-  expect(card).not.toHaveAttribute('data-native-occlusion');
-  left = 10;
-  await resizeSurface(320);
-  expect(placementRequests()).toHaveLength(1);
-});
-
-it('sends the rounded shell shape and updates it when only its physical corner radius changes', async () => {
-  const card = document.createElement('section');
-  card.style.borderTopLeftRadius = '12px';
-  document.body.append(card);
-  fixture.occludingElements = [card];
-  vi.spyOn(card, 'getBoundingClientRect').mockImplementation(() => new DOMRect(-20, 10, 60, 40));
-  render(player());
-  await waitFor(() => expect(placementRequests().at(-1)?.bounds?.occlusions).toEqual([
-    { x: -20, y: 10, width: 60, height: 40, borderRadius: 12 },
-  ]));
-  vi.mocked(playerApi.player).mockClear();
-  card.style.borderTopLeftRadius = '12.1px';
-  await resizeSurface(320);
-  expect(placementRequests()).toEqual([]);
-  card.style.borderTopLeftRadius = '8px';
-  await resizeSurface(320);
-  expect(placementRequests()).toHaveLength(1);
-  expect(placementRequests()[0].bounds?.occlusions?.[0].borderRadius).toBe(8);
-  card.style.borderTopLeftRadius = '0px';
-  await resizeSurface(320);
-  expect(placementRequests().at(-1)?.bounds?.occlusions).toEqual([{ x: -20, y: 10, width: 60, height: 40 }]);
 });
 
 it('matches native rounding away from zero for negative half-pixel positions', async () => {

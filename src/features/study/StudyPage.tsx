@@ -58,7 +58,7 @@ import { TranscriptionWorkspace, type TranscriptionRequest } from './transcript/
 import { resolveSourceSelection } from './source-selection';
 import type { SelectedContext } from './source-selection';
 import { useStudyExitGuard } from './useStudyExitGuard';
-import { StudyRegion, useStudyPresence } from './StudyPresence';
+import { StudyCompanionRegion, StudyRegion, useStudyPresence } from './StudyPresence';
 
 export function StudyPage() {
   const { mediaId } = useParams({ from: '/study/$mediaId' });
@@ -194,7 +194,6 @@ function StudySession({ mediaId }: { mediaId: string }) {
     window.innerWidth >= 1000 && window.innerHeight >= 681 ? 'transcript' : null);
   const initialTranscript = useRef(panel === 'transcript');
   const companion = useStudyPresence(panel !== null, !!media);
-  const companionContents = useRef<HTMLDivElement>(null);
   const previousPanel = useRef(panel);
   useLayoutEffect(() => { if (panel) previousPanel.current = panel; }, [panel]);
   const presentedPanel = panel || previousPanel.current;
@@ -697,6 +696,15 @@ function StudySession({ mediaId }: { mediaId: string }) {
     if (kind === 'vocabulary' && formKey && selected) setMeaningRequest({ key: formKey, term: meaningTerm });
   }
 
+  const companionHeading = (name: 'transcript' | 'phrase' | 'activity') => <header className="companion-heading">
+    <h2 ref={panel === name ? panelTitle : undefined} tabIndex={-1}>
+      {name === 'phrase' ? t('意味とフレーズ', 'Meaning and phrases') : name === 'activity' ? t('処理・管理', 'Activity & tools') : t('字幕', 'Transcript')}
+    </h2>
+    {panel !== null && <IconButton label={t('パネルを閉じる', 'Close panel')} disabled={busy || saveBusy} onClick={() => void closePanel()}>
+      <X size={19} />
+    </IconButton>}
+  </header>;
+
   return (
     <div className={`study-page ${companion.visible ? 'has-companion' : ''}`}>
       <header className="study-top">
@@ -810,23 +818,9 @@ function StudySession({ mediaId }: { mediaId: string }) {
             className={`study-companion transcript-panel ${presentedPanel === 'phrase' ? 'phrase-panel' : ''}`}
             aria-label={presentedPanel === 'phrase' ? t('意味とフレーズ', 'Meaning and phrases') : presentedPanel === 'activity' ? t('処理・管理', 'Activity & tools') : t('字幕パネル', 'Transcript panel')}
           >
-            <header className="companion-heading">
-              <h2
-                ref={panelTitle}
-                tabIndex={-1}
-              >
-                {presentedPanel === 'phrase' ? t('意味とフレーズ', 'Meaning and phrases') : presentedPanel === 'activity' ? t('処理・管理', 'Activity & tools') : t('字幕', 'Transcript')}
-              </h2>
-              {panel !== null && <IconButton
-                label={t('パネルを閉じる', 'Close panel')}
-                disabled={busy || saveBusy}
-                onClick={() => void closePanel()}
-              >
-                <X size={19} />
-              </IconButton>}
-            </header>
-            <div className="study-companion-body" ref={companionContents}>
-      <div className="study-auxiliary" hidden={panel !== 'activity'}>
+            <div className="study-companion-body">
+      <StudyCompanionRegion name="activity" selected={presentedPanel} active={panel === 'activity'} retain={!panel && companion.visible && presentedPanel === 'activity'} animate={!!panel && !companion.moving} keepMounted freezeOnExit={false} heading={companionHeading('activity')}>
+      <div className="study-auxiliary">
       {emptyRangeIssues.length > 0 && <AnimatedDetails className="notice warning">
         <summary><AnimatedValue value={t(`字幕がない要確認区間 (${emptyRangeIssues.length})`, `Passages without subtitles to check (${emptyRangeIssues.length})`)} /></summary>
         <p>{t('発話なしと判定された区間などです。再生して確認できます。学習はそのまま続けられます。', 'These include passages detected as having no speech. Play them to check; you can continue studying.')}</p>
@@ -909,8 +903,10 @@ function StudySession({ mediaId }: { mediaId: string }) {
           </Button>
         </div></MotionRegion>
       </div>
+      </StudyCompanionRegion>
 
-            <StudyRegion className="study-transcript" open={panel === 'transcript'} retain={!panel && companion.visible && presentedPanel === 'transcript'} animate={!companion.moving} keepMounted freezeOnExit={false}>
+            <StudyCompanionRegion name="transcript" selected={presentedPanel} active={panel === 'transcript'} retain={!panel && companion.visible && presentedPanel === 'transcript'} animate={!!panel && !companion.moving} keepMounted freezeOnExit={false} heading={companionHeading('transcript')}>
+            <div className="study-transcript">
               <StudyTranscript
                 active={panel === 'transcript'}
                 transcriptionWorkspace={<TranscriptionWorkspace media={media} request={transcriptionRequest} onRequest={openTranscription} continuations={continuationsQuery.data} onResume={resumeAi} active={panel === 'transcript' && tab === 'transcription'} onOpenEarlierDrafts={() => setTab('draft')} onDone={() => { setTranscriptionRequest(undefined); void continuationsQuery.refetch(); }} onStarted={() => { setTranscriptionRequest(undefined); setTab('transcript'); void continuationsQuery.refetch(); }} />}
@@ -956,8 +952,9 @@ function StudySession({ mediaId }: { mediaId: string }) {
                   }
                 }}
               />
-            </StudyRegion>
-            <StudyRegion open={panel === 'phrase'} retain={!panel && companion.visible && presentedPanel === 'phrase'} animate={!companion.moving}>
+            </div>
+            </StudyCompanionRegion>
+            <StudyCompanionRegion name="phrase" selected={presentedPanel} active={panel === 'phrase'} retain={!panel && companion.visible && presentedPanel === 'phrase'} animate={!!panel && !companion.moving} heading={companionHeading('phrase')}>
             {panel === 'phrase' && <div className="phrase-inspector">
                 {fromTranscript && <Button
                   variant="ghost"
@@ -1110,7 +1107,7 @@ function StudySession({ mediaId }: { mediaId: string }) {
                   {t('元の位置から再生を再開', 'Resume from original position')}
                 </Button>
               </div>}
-            </StudyRegion>
+            </StudyCompanionRegion>
             </div>
           </aside>
         </div>

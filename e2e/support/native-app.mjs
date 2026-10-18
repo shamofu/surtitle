@@ -61,10 +61,11 @@ export async function restartNativeSession(session = globalThis.browser) {
 export function nativeSurfaceSettled(node) {
   const region = node.closest('[role="dialog"], .study-companion') ?? node;
   if (region.closest('.study-companion-dock')?.dataset.moving === 'true') return false;
-  for (const surface of region.querySelectorAll('details[data-motion-state], .motion-region, .study-motion-region')) {
+  for (const surface of region.querySelectorAll('details[data-motion-state], .motion-region, .study-motion-region, .study-companion-view')) {
+    if (surface.closest('[hidden]')) continue;
     const transform = surface.style.transform;
     if (surface.style.height || surface.style.overflow === 'hidden' ||
-      (surface.classList.contains('study-motion-region') && transform && !['none', 'translateX(0px)'].includes(transform))) return false;
+      (surface.matches('.study-motion-region, .study-companion-view') && transform && !['none', 'translateX(0px)', 'translateX(0%)'].includes(transform))) return false;
   }
   return true;
 }

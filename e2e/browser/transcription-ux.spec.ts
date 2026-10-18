@@ -152,6 +152,12 @@ test('transcription inputs and quote survive tab switches, inspection, and closi
   await page.getByRole('tab', { name: 'Transcription', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'From', exact: true })).toHaveValue('0:12');
   await expect(page.getByRole('textbox', { name: 'To', exact: true })).toHaveValue('0:42');
+  const liveFrom = await page.getByRole('textbox', { name: 'From', exact: true }).elementHandle();
+  await page.getByRole('button', { name: 'Activity & tools', exact: true }).click();
+  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Transcription', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('textbox', { name: 'From', exact: true })).toHaveValue('0:12');
+  expect(await page.getByRole('textbox', { name: 'From', exact: true }).evaluate((node, original) => node === original, liveFrom)).toBe(true);
   await page.getByRole('button', { name: 'Transcript', exact: true }).click();
   await page.getByRole('button', { name: 'Transcript', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'From', exact: true })).toHaveValue('0:12');

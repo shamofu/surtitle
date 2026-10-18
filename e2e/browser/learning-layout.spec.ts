@@ -73,7 +73,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await page.locator('.save-phrase-form').getByRole('button', { name: locale === 'ja' ? 'あとで続ける' : 'Continue later', exact: true }).click();
       await page.getByRole('button', { name: locale === 'ja' ? '元の位置から再生を再開' : 'Resume from original position', exact: true }).click();
       await expect(page.getByLabel(locale === 'ja' ? '字幕を検索' : 'Search transcript')).toBeVisible();
-      await expect(page.locator('.study-companion h2')).toBeFocused();
+      await expect(page.getByRole('heading', { name: locale === 'ja' ? '字幕' : 'Transcript', exact: true })).toBeFocused();
       await transcript.click();
       await expect(page.locator('.study-companion')).toBeHidden();
       await expect(transcript).toHaveAttribute('aria-expanded', 'false');

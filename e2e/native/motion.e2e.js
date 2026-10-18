@@ -79,7 +79,6 @@ async function observeHeldAcknowledgement(kind) {
       const dock = document.querySelector('.study-companion-dock');
       frames.push({ at: performance.now(), visibility: style.visibility, opacity: style.opacity,
         placement: document.querySelector('.native-player-viewport').dataset.nativePlacement,
-        occlusion: element.dataset.nativeOcclusion ?? null,
         nativeSafeLeft: (dock.getBoundingClientRect().left + Number(dock.dataset.nativeClipLeft || 0)) * devicePixelRatio,
         inert: element.inert });
       // Hold beyond the entrance duration: a timer must not expose unacknowledged UI.
@@ -265,7 +264,7 @@ describe('stable layout with the real Windows video surface', () => {
           const video = viewport.getBoundingClientRect(), panel = document.querySelector('.study-companion').getBoundingClientRect();
           return { ancestors, adjacent: video.right <= panel.left + 1 || video.bottom <= panel.top + 1 };
         });
-        assert(layout.adjacent, 'Study content overlaps the video without an exclusion');
+        assert(layout.adjacent, 'The settled study panel overlaps the video viewport');
         for (const ancestor of layout.ancestors) {
           assert.equal(ancestor.transform, 'none', `${ancestor.name} transformed the native video`);
           assert.equal(ancestor.opacity, '1', `${ancestor.name} faded the native video`);
@@ -285,23 +284,14 @@ describe('stable layout with the real Windows video surface', () => {
         const opener = $(`button=${labels.settings}`);
         await opener.click();
         await $('[role="dialog"]').waitForDisplayed();
-        await browser.waitUntil(async () => browser.execute(() => !document.querySelector('[data-native-occlusion="pending"]')));
+        await $('[role="dialog"]').waitForStable();
         const modal = await assertNativeVideoBounds();
         assert.equal((await player()).surfaceVisible, true, 'Modal entry hid the whole native video');
         assert.deepEqual(modal.dom.viewport, before.dom.viewport);
-        assert(nativeVideo(modal.native)?.regionRectangles?.length, 'Native modal exclusion was not applied');
-        const ancestors = await browser.execute(() => {
-          const result = [];
-          for (let node = document.querySelector('[role="dialog"]'); node; node = node.parentElement) {
-            const css = getComputedStyle(node);
-            result.push({ name: node.className || node.tagName, transform: css.transform, opacity: css.opacity });
-          }
-          return result;
-        });
-        for (const ancestor of ancestors) {
-          assert.equal(ancestor.transform, 'none', `${ancestor.name} transformed the native modal exclusion`);
-          assert.equal(ancestor.opacity, '1', `${ancestor.name} faded the native modal exclusion`);
-        }
+        assert.deepEqual(nativeVideo(modal.native)?.regionRectangles, nativeVideo(before.native)?.regionRectangles,
+          'Opening a WebView dialog cut a hole in the native video');
+        assert(await browser.execute(() => document.querySelector('[role="dialog"]').contains(document.activeElement)),
+          'The animated dialog lost its initial focus');
         await browser.execute(() => document.querySelector('[role="dialog"]').focus());
         await browser.keys(Key.Space);
         assert.equal((await player()).paused, true, 'Modal Space started background playback');
@@ -315,10 +305,11 @@ describe('stable layout with the real Windows video surface', () => {
         await assertNativeVideoBounds();
       });
 
-      it('protects drawer pixels and withholds modals until real native placement responses are delivered', async () => {
+      it('withholds drawer input but presents animated dialogs while native placement responses are delayed', async () => {
         const before = await assertNativeVideoBounds();
         const observations = [];
         for (const kind of ['panel', 'modal']) {
+          const previous = await assertNativeVideoBounds();
           await holdNativePlacementAcknowledgements();
           try {
             await $(`button=${kind === 'panel' ? labels.transcript : labels.settings}`).click();
@@ -326,17 +317,24 @@ describe('stable layout with the real Windows video surface', () => {
             assert(frames.length > 0, 'The held response must be observed before release');
             for (const frame of frames) {
               assert.equal(frame.placement, 'pending', 'Native placement was acknowledged before response delivery');
-              if (kind === 'modal') {
-                assert.equal(frame.visibility, 'hidden', 'Modal became visible before native acknowledgement');
-                assert.equal(frame.occlusion, 'pending');
-              } else assert.equal(frame.inert, true, 'An unacknowledged drawer became interactive');
+              if (kind === 'panel') assert.equal(frame.inert, true, 'An unacknowledged drawer became interactive');
+              else assert.equal(frame.visibility, 'visible', 'Dialog visibility still depends on native placement acknowledgement');
             }
             const native = await inspectNativeWindow();
             const video = nativeVideo(native);
             assert(video, 'A delayed response must not hide the native video');
-            if (kind === 'modal') assert(video.regionRectangles?.length, 'The real native exclusion must precede its delayed acknowledgement');
-            else for (const frame of frames) assert(frame.nativeSafeLeft >= video.screen.Right - native[0].origin.X - 1,
-              'Visible drawer pixels overlapped possible native video bounds');
+            if (kind === 'panel') {
+              for (const frame of frames) assert(frame.nativeSafeLeft >= video.screen.Right - native[0].origin.X - 1,
+                'Visible drawer pixels overlapped possible native video bounds');
+            } else {
+              assert.equal(frames.at(-1).opacity, '1', 'The dialog did not finish entering while the native response was held');
+              assert.deepEqual(video.regionRectangles, nativeVideo(previous.native).regionRectangles,
+                'Modal input blocking changed the native video region');
+              assert(await browser.execute(() => document.querySelector('[role="dialog"]').contains(document.activeElement)),
+                'The unacknowledged dialog lost initial focus');
+              await browser.keys(Key.Space);
+              assert.equal((await player()).paused, true, 'Modal keyboard input reached background playback during the delayed response');
+            }
             if (locale === 'ja' && theme === 'light') await saveNativeScreenshot(nativeArtifact(`motion-${scenario}-${kind}-pending.png`));
             const requests = await releaseNativeAcknowledgements();
             assert(requests.some(request => request.deliveredAt - request.receivedAt >= 450), 'A real native response was not delayed');

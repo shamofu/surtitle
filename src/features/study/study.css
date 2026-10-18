@@ -74,6 +74,9 @@
 .study-transcript, .transcript-view, .transcription-view, .transcript-draft-view { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
 .study-companion[hidden], .study-transcript[hidden], .transcription-view[hidden] { display: none; }
 .study-companion-body, .transcript-tab-content { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
+.study-companion-view { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface); overflow: clip; }
+.study-companion-view[hidden] { display: none; }
+.study-companion-view[inert] { pointer-events: none; }
 .study-motion-region { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
 .study-motion-region[hidden] { display: none; }
 .study-motion-region[data-motion-state='exiting'] { position: absolute; inset: 0; pointer-events: none; }

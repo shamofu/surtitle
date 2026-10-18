@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { animate, motionValue } from 'motion';
 import { Button, DialogTrigger, Popover } from 'react-aria-components';
 import { Gauge, Minus, Plus, X } from 'lucide-react';
 import { useSurface } from '../../../app/runtime';
-import { motionDistances, motionDurations, motionEase, motionExitEase, useAppMotion } from '../../../shared/motion';
-import { canAnimate } from '../../../shared/motion/surfaces';
+import { motionDistances, motionDurations } from '../../../shared/motion';
+import { useShellPresence } from '../../../shared/motion/useShellPresence';
 import { MotionButton } from '../../../shared/ui';
 
 const presets = [{ value: .5, text: '0.5' }, { value: .75, text: '0.75' }, { value: 1, text: '1.0' }, { value: 1.25, text: '1.25' }, { value: 1.5, text: '1.5' }, { value: 2, text: '2.0' }, { value: 3, text: '3.0' }];
@@ -18,85 +17,26 @@ function RatePopupContent({ open, triggerRef, onExited, children }: {
   children: ReactNode;
 }) {
   const content = useRef<HTMLDivElement>(null);
-  const visibleProgress = useRef(0);
-  const { registerOcclusion, activeModal } = useSurface();
-  const { reducedMotion } = useAppMotion();
-  useLayoutEffect(() => {
-    const shell = content.current?.closest<HTMLElement>('.playback-rate-popover');
-    if (shell) return registerOcclusion?.(shell);
-  }, [registerOcclusion]);
-  useLayoutEffect(() => {
-    const node = content.current, shell = node?.closest<HTMLElement>('.playback-rate-popover');
-    if (!open || activeModal || !node || !shell) return;
-    const recoverFocus = () => {
-      if (shell.dataset.nativeOcclusion === 'pending' || !document.hasFocus()) return;
-      // React Aria may restore hidden-control focus to its trigger while the
-      // native clipping request is pending. Resume adjustment when that
-      // popup becomes readable without taking focus from another control.
-      if (document.activeElement !== document.body && document.activeElement !== triggerRef.current
-        && document.activeElement !== node.querySelector('[role="dialog"]')) return;
-      const target = node.querySelector<HTMLInputElement>('.playback-rate-slider');
-      target?.focus({ preventScroll: true });
-    };
-    const observer = new MutationObserver(recoverFocus);
-    observer.observe(shell, { attributes: true, attributeFilter: ['data-native-occlusion'] });
-    window.addEventListener('focus', recoverFocus);
-    node.addEventListener('focusin', recoverFocus);
-    const frame = requestAnimationFrame(recoverFocus);
-    return () => {
-      cancelAnimationFrame(frame); observer.disconnect();
-      window.removeEventListener('focus', recoverFocus); node.removeEventListener('focusin', recoverFocus);
-    };
-  }, [open, activeModal, triggerRef]);
+  const { activeModal } = useSurface();
   useLayoutEffect(() => {
     const node = content.current;
-    const shell = node?.closest<HTMLElement>('.playback-rate-popover');
-    if (!node || !shell) return;
-    if (!open && shell.contains(document.activeElement)) triggerRef.current?.focus({ preventScroll: true });
-    let disposed = false, started = false, finished = false;
-    let stop: (() => void) | undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const render = (visible: number) => {
-      visibleProgress.current = visible;
-      node.style.opacity = String(.25 + .75 * visible);
-      node.style.transform = `translateY(${motionDistances.menu * (1 - visible)}px) scale(${.96 + .04 * visible})`;
+    if (!open || activeModal || !node) return;
+    const recoverFocus = () => {
+      if (!document.hasFocus()) return;
+      // A retained popup does not remount its autoFocus input when reopened.
+      // Return to adjustment only while focus still belongs to this trigger.
+      if (document.activeElement !== document.body && document.activeElement !== triggerRef.current
+        && document.activeElement !== node.querySelector('[role="dialog"]')) return;
+      node.querySelector<HTMLInputElement>('.playback-rate-slider')?.focus({ preventScroll: true });
     };
-    render(reducedMotion ? (open ? 1 : 0) : visibleProgress.current);
-    const finish = () => {
-      if (disposed || finished) return;
-      finished = true;
-      stop?.(); stop = undefined;
-      clearTimeout(timer);
-      render(open ? 1 : 0);
-      if (!open) onExited();
-    };
-    if (reducedMotion) { finish(); return; }
-    const start = () => {
-      if (started || shell.dataset.nativeOcclusion === 'pending') return;
-      started = true;
-      if (!canAnimate(node, reducedMotion)) { finish(); return; }
-      const progress = motionValue(visibleProgress.current);
-      const unsubscribe = progress.on('change', render);
-      const destination = open ? 1 : 0;
-      const duration = (open ? motionDurations.menuOpen : motionDurations.menuClose) * Math.abs(destination - progress.get());
-      const controls = animate(progress, destination, { duration, ease: open ? motionEase : motionExitEase });
-      stop = () => { unsubscribe(); controls.stop(); progress.destroy(); };
-      timer = setTimeout(finish, duration * 1000 + 100);
-      void controls.finished.then(finish, () => {});
-    };
-    const observer = new MutationObserver(start);
-    observer.observe(shell, { attributes: true, attributeFilter: ['data-native-occlusion'] });
-    // Let native registration/positioning mark the shell before revealing its
-    // contents; only the list animates, so the opaque exclusion stays fixed.
-    const frame = requestAnimationFrame(start);
-    const settle = () => { if (document.hidden || !open) finish(); };
-    document.addEventListener('visibilitychange', settle);
-    window.addEventListener('resize', finish);
-    return () => {
-      disposed = true; cancelAnimationFrame(frame); observer.disconnect(); stop?.(); clearTimeout(timer);
-      document.removeEventListener('visibilitychange', settle); window.removeEventListener('resize', finish);
-    };
-  }, [open, onExited, reducedMotion, triggerRef]);
+    recoverFocus();
+    window.addEventListener('focus', recoverFocus);
+    return () => { window.removeEventListener('focus', recoverFocus); };
+  }, [open, activeModal, triggerRef]);
+  useLayoutEffect(() => {
+    if (!open && content.current?.contains(document.activeElement)) triggerRef.current?.focus({ preventScroll: true });
+  }, [open, triggerRef]);
+  useShellPresence(content, { open, distance: motionDistances.menu, enterDuration: motionDurations.menuOpen, exitDuration: motionDurations.menuClose, onExited });
   return <div ref={content} className="playback-rate-content" inert={!open} aria-hidden={!open || undefined}>{children}</div>;
 }
 
@@ -162,10 +102,6 @@ export function PlaybackRateControl({ label, decreaseLabel, increaseLabel, close
     // The video's click handler owns dismissal. Its preceding focus transition
     // must not close first and turn that same click into a playback toggle.
     if (!next && videoPointer.current) return;
-    // Hiding the web popup until its native exclusion is ready can temporarily
-    // drop focus to BODY. That readiness transition is not an outside dismissal.
-    if (!next && document.activeElement === document.body
-      && document.querySelector('[data-native-popup="playback-rate"][data-native-occlusion="pending"]')) return;
     onOpenChange(next);
   }, [onOpenChange]);
   useLayoutEffect(() => { if (isOpen) setRetained(true); }, [isOpen]);
@@ -173,11 +109,6 @@ export function PlaybackRateControl({ label, decreaseLabel, increaseLabel, close
     if (!isOpen || activeModal) return;
     const escape = (event: KeyboardEvent) => {
       if (event.isComposing || event.keyCode === 229 || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
-      if (document.activeElement === triggerRef.current
-        && document.querySelector('[data-native-popup="playback-rate"][data-native-occlusion="pending"]')
-        && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) {
-        event.preventDefault(); event.stopPropagation(); return;
-      }
       if (event.key !== 'Escape') return;
       event.preventDefault(); event.stopPropagation();
       triggerRef.current?.focus({ preventScroll: true });

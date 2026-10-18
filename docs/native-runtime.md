@@ -46,7 +46,7 @@ pwsh -File native/windows/native-smoke.ps1
 
 Preparation stages DLLs/notices and downloads the official ORT archive. Development preparation needs the DLL but not source archives or build reports; packaging also needs corresponding sources. Add `-WithDevModel` to preparation for the required Silero integration suite. Smoke loads the selected DLLs and initializes mpv/ORT; missing files, loading failures and initialization errors fail the command. Cached builds still require current [application and integration tests](testing.md).
 
-The app uses a native child window with popup exclusions; see [native rendering](architecture.md#study-surface-and-native-rendering). Changes to that path need visible playback, codec/audio-track selection, seeking, repeat and input checks on actual Windows hardware. Browser tests and software-rendered CI do not establish hardware decoding or perceptual A/V synchronization.
+The app places the native video child behind a transparent WebView; see [native rendering](architecture.md#study-surface-and-native-rendering). Changes to that path need visible playback, codec/audio-track selection, seeking, repeat and input checks on actual Windows hardware. Browser tests and software-rendered CI do not establish hardware decoding or perceptual A/V synchronization.
 
 ## Microsoft prerequisites
 

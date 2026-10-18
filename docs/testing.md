@@ -94,7 +94,7 @@ WEBKIT_DISABLE_COMPOSITING_MODE=1 dbus-run-session -- xvfb-run -a pnpm test:e2e
 
 Set `SURTITLE_NATIVE_DRIVER` if WebKitWebDriver is not on PATH. Select an individual spec with `--spec ./e2e/native/draft-study.e2e.js` using the same prepared environment.
 
-Windows E2E exercises real WebView2/libmpv; Linux uses WebKitGTK and an E2E-only playback adapter. Browser tests cannot establish native persistence, playback or window composition. Windows CI uses software rendering and null audio, so hardware decoding, perceptual A/V synchronization, monitor changes and real IME input still need direct Windows verification. For native screenshots and resizing, use `saveNativeScreenshot` and `resizeNativeWindow` from [native-window.mjs](../e2e/support/native-window.mjs): WebDriver screenshots capture only the WebView, and its resize command targets the nested browser window.
+Windows E2E exercises real WebView2/libmpv; Linux uses WebKitGTK and an E2E-only playback adapter. Browser tests cannot establish native persistence, playback or window composition. Windows CI uses software rendering and null audio. For direct desktop graphics validation, set `SURTITLE_E2E_REAL_RENDERER=1` to use the shipped D3D11/automatic decoding settings; audio remains muted. Perceptual A/V synchronization, monitor changes and real IME input still need direct Windows verification. For native screenshots and resizing, use `saveNativeScreenshot` and `resizeNativeWindow` from [native-window.mjs](../e2e/support/native-window.mjs): WebDriver screenshots capture only the WebView, and its resize command targets the nested browser window.
 
 ## Explicit Rust integration suites
 

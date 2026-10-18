@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { Children, cloneElement, Fragment, isValidElement, useId, useLayoutEffect, useRef } from 'react';
 import type { ButtonHTMLAttributes, ComponentPropsWithRef, HTMLAttributes, ReactNode, RefObject } from 'react';
-import { animate, motionValue } from 'motion';
 import { m, type HTMLMotionProps } from 'motion/react';
 import { Button as AriaButton, Dialog, Modal as AriaModal, ModalOverlay } from 'react-aria-components';
 import { ArrowUpRight, X } from 'lucide-react';
 import { useSurface, useAppearance } from '../../app/runtime';
-import { MotionRegion, MotionSwap, MotionSpinner, motionDistances, motionDurations, motionEase, motionExitEase, motionScales, useAppMotion, useMotionActive } from '../motion';
-import { animateEntrance, canAnimate } from '../motion/surfaces';
+import { MotionRegion, MotionSwap, MotionSpinner, motionDistances, motionDurations, motionEase, motionScales, useMotionActive } from '../motion';
+import { useShellPresence } from '../motion/useShellPresence';
 export { useModalExit } from './useModalExit';
 
 export function MotionButton({ hoverMotion = true, ...props }: ComponentPropsWithRef<'button'> & { hoverMotion?: boolean }) {
@@ -92,8 +91,7 @@ export function Modal(props: ModalProps) {
     </AriaModal>
   </ModalOverlay>;
 }
-// This component mounts inside React Aria's portal, so surface registration
-// happens with the actual dialog node before it can be painted over native video.
+// Register the actual portal node to retain input blocking and notification focus.
 function ModalContent({
   title,
   eyebrow,
@@ -108,16 +106,9 @@ function ModalContent({
   const { registerModal } = useSurface();
   const { t } = useAppearance();
   const notificationHost = useRef<HTMLDivElement>(null);
-  const inner = useRef<HTMLDivElement>(null);
-  const heading = useRef<HTMLElement>(null);
-  const body = useRef<HTMLDivElement>(null);
-  const { reducedMotion } = useAppMotion();
   const motionActive = useMotionActive();
   const titleId = useId();
-  const completed = useRef(false);
-  const entranceAttempted = useRef(false);
-  // Keep the opaque native exclusion until the owner unmounts. An accepted close can
-  // still fail asynchronously; its inputs and focus scope must survive a retry.
+  // Accepted async closes retain their input subtree and focus scope for retries.
   useLayoutEffect(() => {
     const element = dialog.current;
     const host = notificationHost.current;
@@ -130,75 +121,12 @@ function ModalContent({
     return unregister;
   }, [dialog, registerModal]);
   useLayoutEffect(() => {
-    const shell = dialog.current;
-    const contents = [heading.current, body.current].filter((node): node is HTMLElement => !!node);
-    if (entranceAttempted.current) return;
-    if (!shell || !contents.length) return;
-    if (!open || !canAnimate(contents[0], reducedMotion)) { entranceAttempted.current = true; return; }
-    let started = false;
-    let cancels: Array<(() => void) | undefined> = [];
-    // Surface registration can trigger the player's layout effect. Wait until
-    // that commit has marked any native exclusion before starting the contents.
-    const start = () => {
-      if (started || shell.dataset.nativeOcclusion === 'pending') return;
-      started = true;
-      entranceAttempted.current = true;
-      if (canAnimate(contents[0], reducedMotion)) cancels = contents.map(content => animateEntrance(content, 'modal'));
-    };
-    const observer = new MutationObserver(start);
-    const frame = requestAnimationFrame(() => {
-      observer.observe(shell, { attributes: true, attributeFilter: ['data-native-occlusion'] });
-      start();
-    });
-    return () => { cancelAnimationFrame(frame); observer.disconnect(); cancels.forEach(cancel => cancel?.()); };
-  }, [dialog, open, reducedMotion]);
-  useLayoutEffect(() => {
-    const contents = [heading.current, body.current].filter((node): node is HTMLElement => !!node);
-    if (open) {
-      completed.current = false;
-      for (const node of contents) { node.style.opacity = ''; node.style.transform = ''; }
-      return;
-    }
+    if (open) return;
     // Move focus out before making the old controls inert. Notifications remain usable.
     const element = dialog.current;
     if (element?.querySelector('.modal-body')?.contains(document.activeElement)) element.focus({ preventScroll: true });
-    if (completed.current) return;
-    let cancelled = false;
-    const finish = () => {
-      if (cancelled || completed.current) return;
-      completed.current = true;
-      for (const node of contents) { node.style.opacity = '0'; node.style.transform = ''; }
-      onExited?.();
-    };
-    // The shell and notification host stay opaque and stationary throughout exit.
-    if (!contents.length || !canAnimate(contents[0], reducedMotion)) { finish(); return; }
-    const progress = motionValue(0);
-    const render = (value: number) => {
-      for (const node of contents) {
-        node.style.opacity = String(1 - value);
-        node.style.transform = `translateY(${motionDistances.modal * value}px)`;
-      }
-    };
-    render(0);
-    const unsubscribe = progress.on('change', render);
-    const controls = animate(progress, 1, { duration: motionDurations.exit, ease: motionExitEase });
-    const stop = () => { unsubscribe(); controls.stop(); progress.destroy(); };
-    const settle = () => { stop(); finish(); };
-    const visibility = () => { if (document.hidden) settle(); };
-    const timer = window.setTimeout(settle, motionDurations.exit * 1000 + 100);
-    window.addEventListener('resize', settle);
-    document.addEventListener('visibilitychange', visibility);
-    void controls.finished.then(settle, () => {});
-    return () => {
-      cancelled = true;
-      stop();
-      window.clearTimeout(timer);
-      window.removeEventListener('resize', settle);
-      document.removeEventListener('visibilitychange', visibility);
-      // A rejected async close can reopen this exact input subtree.
-      entranceAttempted.current = false;
-    };
-  }, [open, onExited, dialog, reducedMotion]);
+  }, [open, dialog]);
+  useShellPresence(dialog, { open, distance: motionDistances.modal, enterDuration: motionDurations.modal, exitDuration: motionDurations.exit, onExited });
   return (
     <Dialog
       ref={dialog}
@@ -208,8 +136,8 @@ function ModalContent({
       data-motion-geometry="stable"
       data-state={open ? 'open' : 'closing'}
     >
-      <div className="modal-inner" ref={inner}>
-        <header className="modal-header" ref={heading}>
+      <div className="modal-inner">
+        <header className="modal-header">
           <div>
             {eyebrow && <span className="eyebrow">{eyebrow}</span>}
             <h2 id={titleId}>{title}</h2>
@@ -223,7 +151,7 @@ function ModalContent({
           </MotionAriaButton>
         </header>
         <div className="modal-notifications" ref={notificationHost} />
-        <div className="modal-body" ref={body} inert={!open} onClickCapture={event => {
+        <div className="modal-body" inert={!open} onClickCapture={event => {
           if (!open) { event.preventDefault(); event.stopPropagation(); }
         }} onKeyDownCapture={event => {
           if (!open) { event.preventDefault(); event.stopPropagation(); }

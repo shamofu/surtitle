@@ -63,7 +63,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     await toggle.focus();
     await toggle.press('Enter');
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await expect(page.locator('.study-companion h2')).toBeFocused();
+    await expect(page.getByRole('heading', { name: 'Transcript', exact: true })).toBeFocused();
     await expect(page.getByRole('button', { name: 'Close panel', exact: true })).toBeVisible();
     await page.getByLabel('Search transcript').fill('coast');
     await page.getByRole('button', { name: 'Show translations', exact: true }).click();

@@ -28,20 +28,6 @@ async function contrast(control: Locator) {
     return (Math.max(text, background) + .05) / (Math.min(text, background) + .05);
   });
 }
-async function delayPlacement(page: Page) {
-  await page.evaluate(() => {
-    const fixture = (window as any).__learningFixture, original = fixture.call.bind(fixture);
-    let release!: () => void;
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    fixture.call = async (command: string, args: any) => {
-      const result = original(command, args);
-      if (command === 'player_control' && args.request.action === 'bounds' && args.request.bounds.occlusions?.length) await gate;
-      return result;
-    };
-    (window as any).__releaseRatePlacement = release;
-  });
-}
-
 for (const theme of ['light', 'dark'] as const) for (const locale of ['ja', 'en'] as const) {
   test(`reference speed widget keeps adjustments open and readable (${theme}, ${locale})`, async ({ page }) => {
     const trigger = await openStudy(page, locale, theme);
@@ -146,7 +132,8 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
     await expect(slider(page)).toHaveValue('1.25');
     expect(await page.getByTestId('native-player-viewport').boundingBox()).toEqual(before);
     const placements = await page.evaluate(() => (window as any).__learningFixture.calls.filter((call: any) => call.command === 'player_control' && call.args.request.action === 'bounds'));
-    expect(placements.some((call: any) => call.args.request.bounds.occlusions.length === 1 && !call.args.request.bounds.inputBlocked)).toBe(true);
+    expect(placements.length).toBeGreaterThan(0);
+    expect(placements.every((call: any) => !call.args.request.bounds.occlusions?.length && !call.args.request.bounds.inputBlocked)).toBe(true);
     await page.keyboard.press('Escape');
     await expect(popup(page)).toHaveCount(0);
     await expect(trigger).toBeFocused();
@@ -154,12 +141,8 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
   });
 }
 
-test('pending native preparation blocks body shortcuts and resumes slider after trigger or background focus', async ({ page }) => {
-  const trigger = await openStudy(page); await delayPlacement(page); await trigger.click();
-  await expect(popup(page)).toHaveAttribute('data-native-occlusion', 'pending'); await expect(popup(page)).toBeHidden();
-  await page.evaluate(() => { document.body.tabIndex = -1; document.body.focus(); });
-  for (const key of ['Space', 'ArrowRight', 'ArrowLeft']) await page.keyboard.press(key);
-  expect((await actions(page)).filter((action: any) => ['rate', 'seek', 'toggle-pause', 'play'].includes(action.action))).toEqual([]);
+test('the open widget leaves modified keys and IME composition untouched', async ({ page }) => {
+  const trigger = await openStudy(page); await trigger.click();
   await trigger.focus();
   const modifiedKeys = await trigger.evaluate(element => {
     const prevented: boolean[] = [];
@@ -172,14 +155,8 @@ test('pending native preparation blocks body shortcuts and resumes slider after 
     return prevented;
   });
   expect(modifiedKeys).toEqual([false, false, false]);
-  for (const key of ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Home', 'End', 'PageUp', 'PageDown']) await page.keyboard.press(key);
   await expect(popup(page)).toHaveAttribute('data-state', 'open');
   expect((await actions(page)).filter((action: any) => ['rate', 'seek', 'toggle-pause', 'play'].includes(action.action))).toEqual([]);
-  await page.evaluate(() => Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => false }));
-  await page.evaluate(() => (window as any).__releaseRatePlacement());
-  await expect(popup(page)).not.toHaveAttribute('data-native-occlusion', 'pending'); await expect(trigger).toBeFocused();
-  await page.evaluate(() => { Reflect.deleteProperty(document, 'hasFocus'); window.dispatchEvent(new Event('focus')); });
-  await expect(slider(page)).toBeFocused(); await slider(page).press('ArrowRight'); await expect(slider(page)).toHaveValue('1.05');
   await page.keyboard.press('Escape'); await expect(popup(page)).toHaveCount(0); await expect(trigger).toBeFocused();
 });
 
@@ -205,38 +182,6 @@ test('the speed trigger toggles with a pointer and keyboard users can leave the 
     await expect(focusedControl).toBeEnabled();
   }
   expect((await actions(page)).filter((action: any) => ['rate', 'seek', 'toggle-pause', 'play'].includes(action.action))).toEqual([]);
-});
-
-for (const method of ['pointer', 'Enter', 'Space']) {
-  test(`the trigger dismisses pending native preparation with ${method}`, async ({ page }) => {
-    const trigger = await openStudy(page); await delayPlacement(page); await trigger.click();
-    await expect(popup(page)).toHaveAttribute('data-native-occlusion', 'pending');
-    if (method === 'pointer') await trigger.click();
-    else { await trigger.focus(); await trigger.press(method); }
-    await expect(trigger).toHaveAttribute('aria-expanded', 'false'); await expect(trigger).toBeFocused();
-    await page.evaluate(() => (window as any).__releaseRatePlacement());
-    await expect(popup(page)).toHaveCount(0);
-    await expect(page.getByTestId('native-player-viewport')).toHaveAttribute('data-native-placement', 'ready');
-    await trigger.click(); await expect(slider(page)).toBeFocused();
-    expect((await actions(page)).filter((action: any) => ['rate', 'seek', 'toggle-pause', 'play'].includes(action.action))).toEqual([]);
-  });
-}
-
-test('Escape dismisses a hidden pending popup from body focus before native acknowledgement', async ({ page }) => {
-  const trigger = await openStudy(page); await delayPlacement(page); await trigger.click();
-  await expect(popup(page)).toHaveAttribute('data-native-occlusion', 'pending');
-  await page.evaluate(() => { document.body.tabIndex = -1; document.body.focus(); });
-  await expect(page.locator('body')).toBeFocused();
-  await page.keyboard.press('Escape');
-  await expect(popup(page)).toHaveAttribute('data-state', 'closing'); await expect(trigger).toBeFocused();
-  await expect(page.locator('.playback-rate-content')).toHaveAttribute('inert', '');
-  await expect(page.locator('.playback-rate-content')).toHaveAttribute('aria-hidden', 'true');
-  await page.evaluate(() => (window as any).__releaseRatePlacement());
-  await expect(popup(page)).toHaveCount(0);
-  await expect(page.getByTestId('native-player-viewport')).toHaveAttribute('data-native-placement', 'ready');
-  await expect(trigger).toBeFocused();
-  expect((await actions(page)).filter((action: any) => ['rate', 'seek', 'toggle-pause', 'play'].includes(action.action))).toEqual([]);
-  await trigger.press('Space'); await expect(slider(page)).toBeFocused(); await expect(slider(page)).toHaveValue('1');
 });
 
 test('reopening a closing speed widget keeps its value and a new modal retains focus', async ({ page }) => {

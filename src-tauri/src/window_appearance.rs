@@ -10,9 +10,12 @@ fn preference(value: &str) -> Option<Theme> {
 }
 
 fn background(theme: Theme) -> Color {
+    // Windows keeps the host window opaque but lets the WebView composite over
+    // its video sibling. CSS paints the theme everywhere except the viewport.
+    let alpha = if cfg!(target_os = "windows") { 0 } else { 255 };
     match theme {
-        Theme::Light => Color(250, 250, 248, 255),
-        _ => Color(32, 35, 40, 255),
+        Theme::Light => Color(244, 246, 250, alpha),
+        _ => Color(24, 29, 38, alpha),
     }
 }
 

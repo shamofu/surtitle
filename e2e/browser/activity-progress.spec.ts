@@ -53,7 +53,7 @@ for (const [locale, theme] of [['ja', 'light'], ['en', 'dark']] as const) {
   });
 }
 
-test('activity on Study subtracts its opaque card while preserving video bounds through the mocked transport', async ({ page }) => {
+test('activity on Study keeps video bounds and blocks playback input through the mocked transport', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await installLearningFixture(page, 'en', 'dark');
@@ -66,6 +66,7 @@ test('activity on Study subtracts its opaque card while preserving video bounds 
     .at(-1)?.args.request);
   await expect.poll(async () => (await lastSurfaceAction())?.action).toBe('bounds');
   const before = (await lastSurfaceAction()).bounds;
+  const beforeCallCount = await page.evaluate(() => (window as any).__learningFixture.calls.length as number);
   await page.evaluate(() => {
     const fixture = (window as any).__learningFixture;
     const original = fixture.call.bind(fixture);
@@ -83,21 +84,32 @@ test('activity on Study subtracts its opaque card while preserving video bounds 
   await trigger.click();
   const dialog = page.getByRole('dialog', { name: 'Activity', exact: true });
   await expect(dialog).toBeVisible();
+  await expect.poll(() => dialog.evaluate(element => element.contains(document.activeElement))).toBe(true);
   await expect.poll(async () => (await lastSurfaceAction())?.bounds?.inputBlocked).toBe(true);
   const opened = await lastSurfaceAction();
   expect(opened.action).toBe('bounds');
   expect(opened.bounds.width).toBe(before.width);
   expect(opened.bounds.height).toBe(before.height);
-  expect(opened.bounds.occlusions.length).toBeGreaterThan(0);
-  expect(opened.bounds.occlusions[0].width).toBeGreaterThan(0);
-  expect(opened.bounds.occlusions[0].height).toBeGreaterThan(0);
+  expect(opened.bounds.x).toBe(before.x);
+  expect(opened.bounds.y).toBe(before.y);
+  expect(opened.bounds.clip).toEqual(before.clip);
+  expect(opened.bounds.occlusions).toBeUndefined();
   const progress = dialog.getByRole('progressbar', { name: 'Speech detection model', exact: true });
   await expect(progress).not.toHaveAttribute('value');
   await expect(progress).toHaveCSS('animation-name', 'none');
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   await expect.poll(async () => (await lastSurfaceAction())?.bounds?.inputBlocked).toBe(false);
-  expect((await lastSurfaceAction()).bounds.occlusions).toHaveLength(0);
+  expect((await lastSurfaceAction()).bounds.occlusions).toBeUndefined();
+  const placements = await page.evaluate(start => (window as any).__learningFixture.calls.slice(start)
+    .filter((call: any) => call.command === 'player_control' && ['hide', 'bounds'].includes(call.args.request?.action))
+    .map((call: any) => call.args.request), beforeCallCount);
+  expect(placements.length).toBeGreaterThan(0);
+  for (const placement of placements) {
+    expect(placement.action).toBe('bounds');
+    expect(placement.bounds).toMatchObject({ x: before.x, y: before.y, width: before.width, height: before.height });
+    expect(placement.bounds.occlusions).toBeUndefined();
+  }
   await expect(trigger).toBeFocused();
   await expect(inspect).toBeEnabled();
 });
