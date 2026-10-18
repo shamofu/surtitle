@@ -13,11 +13,13 @@
   flex-shrink: 0;
 }
 .brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; font-size: 22px; font-weight: 650; letter-spacing: -.5px; line-height: 1; padding: 8px 0; }
-.main-nav { display: flex; align-items: stretch; align-self: stretch; gap: 8px; }
+.main-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 544px; flex-shrink: 0; align-self: stretch; }
 .main-nav a {
+  position: relative;
   display: flex;
   gap: 8px;
   align-items: center;
+  justify-content: center;
   border-bottom: 3px solid transparent;
   padding: 3px 12px 0;
   color: var(--muted);
@@ -25,10 +27,13 @@
   font-weight: 550;
   white-space: nowrap;
 }
+.main-nav a + a::before { content: ''; position: absolute; inset-inline-start: 0; top: 50%; width: 1px; height: 20px; transform: translateY(-50%); background: var(--border); pointer-events: none; }
 .main-nav a:hover { color: var(--text); background: var(--bg); }
 .main-nav a.active { border-bottom-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .nav-count { width: 5ch; flex: 0 0 5ch; padding: 1px 4px; border-radius: 5px; color: var(--accent); background: var(--accent-soft); font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
 .nav-count[data-empty="true"] { visibility: hidden; }
+.main-nav .nav-label { position: relative; }
+.main-nav .nav-count { position: absolute; top: -5px; inset-inline-start: calc(100% + 3px); width: max-content; min-width: 16px; padding: 0 3px; font-size: 11px; line-height: 16px; border-radius: 8px; color: var(--accent-text); background: var(--accent); }
 .topbar-actions { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .locale-button { min-width: 40px; min-height: 40px; border-radius: 6px; color: var(--muted); font-size: 12px; font-weight: 600; padding: 8px; white-space: nowrap; }
 .locale-button:hover { color: var(--text); background: var(--surface-hover); }
@@ -37,6 +42,32 @@
 /* Page slides may cross the stage edge without opening a horizontal scroll lane.
    Keep this more specific than feature overflow rules; vertical scrolling stays local. */
 main.page-content[data-page-direction] { overflow-x: hidden; }
+/* Only the scroll viewport is captured. The header and live native-player
+   ancestry never receive a transform or take part in a root crossfade. */
+:root:active-view-transition-type(main-forward),
+:root:active-view-transition-type(main-backward) { view-transition-name: none; }
+:root:active-view-transition-type(main-forward) .page-content,
+:root:active-view-transition-type(main-backward) .page-content { view-transition-name: main-page; }
+::view-transition { pointer-events: none; }
+::view-transition-group(main-page) { animation: none; overflow: clip; }
+::view-transition-image-pair(main-page) { isolation: isolate; }
+::view-transition-old(main-page), ::view-transition-new(main-page) {
+  mix-blend-mode: normal;
+  animation-duration: var(--motion-tab);
+  animation-timing-function: var(--motion-ease);
+  animation-fill-mode: both;
+}
+:root:active-view-transition-type(main-forward)::view-transition-old(main-page) { animation-name: main-page-exit-left; }
+:root:active-view-transition-type(main-forward)::view-transition-new(main-page) { animation-name: main-page-enter-right; }
+:root:active-view-transition-type(main-backward)::view-transition-old(main-page) { animation-name: main-page-exit-right; }
+:root:active-view-transition-type(main-backward)::view-transition-new(main-page) { animation-name: main-page-enter-left; }
+@keyframes main-page-exit-left { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+@keyframes main-page-enter-right { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes main-page-exit-right { from { transform: translateX(0); } to { transform: translateX(100%); } }
+@keyframes main-page-enter-left { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+:root[data-motion='reduce']::view-transition-group(main-page),
+:root[data-motion='reduce']::view-transition-old(main-page),
+:root[data-motion='reduce']::view-transition-new(main-page) { animation: none; }
 .page-content > div { max-width: 1440px; margin: 0 auto; }
 .app-notifications { position: fixed; right: 20px; bottom: 16px; z-index: 50; width: min(420px, calc(100vw - 40px)); pointer-events: none; }
 .app-notifications .toast-stack {

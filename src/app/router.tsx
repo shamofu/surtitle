@@ -10,6 +10,7 @@ import { StudyPage } from '../features/study/StudyPage';
 import { CardsPage } from '../features/cards/CardsPage';
 import { ReviewPage } from '../features/cards/ReviewPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
+import { finishPageTransition, pageTransitionTypes, supportsPageTransitions } from './pageMotion';
 
 const rootRoute = createRootRoute({ component: AppShell });
 const indexRoute = createRoute({
@@ -50,7 +51,14 @@ export const router = createRouter({
   // The shell scrolls this element, not the window. Start each new page above
   // its native player instead of inheriting the previous page's scroll offset.
   scrollToTopSelectors: ['.page-content'],
+  defaultViewTransition: supportsPageTransitions() ? {
+    types: ({ fromLocation, toLocation }) => pageTransitionTypes(fromLocation?.pathname, toLocation.pathname),
+  } : false,
 });
+
+// Includes history traversal and excluded destinations such as the native study
+// page: no previous snapshot may cover a newly mounted player.
+router.subscribe('onBeforeLoad', finishPageTransition);
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;

@@ -30,6 +30,8 @@ const entrances = new Map<HTMLElement, () => void>();
 
 /** Animate only a safe live DOM region, never the native video's ancestors. */
 export function animateEntrance(element: HTMLElement, preset: MotionPreset) {
+  const pageTransition = element.closest('[data-page-transition]')?.getAttribute('data-page-transition');
+  if (preset === 'page' && pageTransition && pageTransition !== 'fallback') return;
   if (element.matches('.native-player-viewport, [data-app-modal]') || element.querySelector('.native-player-viewport')) return;
   for (const active of entrances.keys()) {
     if (active !== element && active.contains(element)) return;

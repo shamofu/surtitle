@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
 import { nativeArtifact } from '../support/native-artifacts.mjs';
-import { invokeNative as invoke } from '../support/native-app.mjs';
+import { invokeNative as invoke, clickNative } from '../support/native-app.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
@@ -97,6 +97,52 @@ async function releaseNativeAcknowledgements() {
   });
 }
 
+async function observeNativeNavigation(selector, path, expectedMode) {
+  await browser.execute(() => {
+    let frame, frames = 0;
+    const names = new Set(), unsafe = [];
+    const sample = () => {
+      const stage = document.querySelector('.page-content');
+      if (!stage) return;
+      frames++;
+      const name = getComputedStyle(stage).viewTransitionName;
+      if (name && name !== 'none') names.add(name);
+      for (let node = document.querySelector('.native-player-viewport') ?? stage; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.transform !== 'none' || style.translate !== 'none' || style.opacity !== '1') {
+          if (unsafe.length < 20) unsafe.push({ path: location.pathname, node: node.className || node.tagName,
+            transform: style.transform, translate: style.translate, opacity: style.opacity });
+        }
+      }
+    };
+    const tick = () => { sample(); frame = requestAnimationFrame(tick); };
+    tick();
+    window.__nativeRouteMotion = { stop() {
+      cancelAnimationFrame(frame); sample();
+      return { frames, names: [...names], unsafe, mode: document.querySelector('.page-content')?.dataset.pageTransition };
+    } };
+  });
+  try {
+    await clickNative($(selector));
+    await browser.waitUntil(() => browser.execute((target, mode) => {
+      const stage = document.querySelector('.page-content');
+      return location.pathname === target && stage?.dataset.pageTransition === mode
+        && !document.activeViewTransition
+        && !stage.getAnimations({ subtree: true }).some(animation =>
+          (animation.pending || animation.playState === 'running') && animation.effect?.getTiming().iterations !== Infinity);
+    }, path, expectedMode), { timeoutMsg: `Navigation to ${path} did not settle using ${expectedMode}` });
+    const observation = await browser.execute(() => window.__nativeRouteMotion.stop());
+    assert(observation.frames > 0, 'Native navigation was not observed');
+    assert.deepEqual(observation.unsafe, [], 'Navigation transformed or faded the native player or route stage ancestors');
+    assert.equal(observation.mode, expectedMode);
+    if (expectedMode === 'view') assert(observation.names.includes('main-page'), 'The native WebView did not capture the named main page transition');
+    else assert.deepEqual(observation.names, [], 'Study or reduced-motion navigation entered a view transition');
+    return { path, ...observation };
+  } finally {
+    await browser.execute(() => { window.__nativeRouteMotion?.stop(); delete window.__nativeRouteMotion; });
+  }
+}
+
 describe('stable layout with the real Windows video surface', () => {
   let originalSettings;
   let mediaEmulated = false;
@@ -126,6 +172,49 @@ describe('stable layout with the real Windows video surface', () => {
     }
   });
   afterEach(async () => { await releaseNativeAcknowledgements(); });
+
+  it('keeps native video safe through main-tab push transitions and study round trips', async () => {
+    const observations = [];
+    try {
+      for (const preference of ['system', 'reduce']) {
+        await invoke('update_settings', { settings: { ...originalSettings, locale: 'en', theme: 'light', sentencePause: false, motionPreference: preference } });
+        await browser.refresh();
+        await browser.waitUntil(() => browser.execute(expected => document.documentElement.dataset.motion === expected,
+          preference === 'reduce' ? 'reduce' : 'full'));
+        await resizeNativeWindow(1440, 900);
+        await navigate('/');
+        await $('.library-page').waitForDisplayed();
+        const supported = await browser.execute(() => typeof document.startViewTransition === 'function'
+          && 'activeViewTransition' in document && CSS.supports('selector(:active-view-transition-type(main-page))'));
+        const mainMode = preference === 'reduce' ? 'none' : supported ? 'view' : 'fallback';
+        for (const path of ['/cards', '/review', '/settings', '/']) {
+          observations.push({ preference, ...await observeNativeNavigation(`.main-nav a[href="${path}"]`, path, mainMode) });
+          await expect($(`.main-nav a[href="${path}"]`)).toHaveAttribute('aria-current', 'page');
+          if (path === '/review') await saveNativeScreenshot(nativeArtifact(`motion-main-review-${preference}.png`));
+          if (path === '/settings') await saveNativeScreenshot(nativeArtifact(`motion-main-tabs-${preference}.png`));
+        }
+        for (let visit = 1; visit <= 2; visit++) {
+          const path = `/study/${fixture.mediaId}`;
+          observations.push({ preference, ...await observeNativeNavigation(`a.media-card[href="${path}"]`, path, 'none') });
+          await $('.play-button').waitForEnabled();
+          await browser.waitUntil(async () => {
+            const state = await player();
+            return state.ready && state.surfaceVisible && state.videoWidth > 0 && state.videoHeight > 0;
+          });
+          await control({ action: 'pause' });
+          await control({ action: 'seek', value: 200 });
+          await assertNativeVideoBounds();
+          await saveNativeScreenshot(nativeArtifact(`motion-study-return-${preference}-${visit}.png`));
+          observations.push({ preference, ...await observeNativeNavigation('.main-nav a[href="/review"]', '/review', 'none') });
+          await browser.waitUntil(async () => !(await player()).surfaceVisible,
+            { timeoutMsg: 'Leaving study retained the native video over the main page' });
+          if (visit === 1) observations.push({ preference, ...await observeNativeNavigation('.main-nav a[href="/"]', '/', mainMode) });
+        }
+      }
+    } finally {
+      writeFileSync(nativeArtifact('motion-main-study-navigation.json'), JSON.stringify(observations, null, 2));
+    }
+  });
 
   for (const preference of ['system', 'reduce']) for (const locale of ['ja', 'en']) for (const theme of ['light', 'dark']) {
     const scenario = `${preference}-${locale}-${theme}`;

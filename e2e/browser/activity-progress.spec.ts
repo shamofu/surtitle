@@ -103,10 +103,10 @@ test('activity on Study subtracts its opaque card while preserving video bounds 
 });
 
 for (const locale of ['ja', 'en'] as const) {
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 700 }, { width: 920, height: 620 }]) {
-    test(`shell counts keep learning and navigation stationary ${locale} ${viewport.width}x${viewport.height}`, async ({ page }) => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 700 }, { width: 920, height: 620 }, { width: 640, height: 360 }]) {
+    test(`shell counts keep equal tabs and centered labels stationary ${locale} ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
       await page.setViewportSize(viewport);
-      await installLearningFixture(page, locale, 'light');
+      await installLearningFixture(page, locale, locale === 'ja' ? 'light' : 'dark');
       await page.goto('/study/visual-fixture');
       const trigger = page.getByRole('button', { name: locale === 'ja' ? '処理状況を開く' : 'Open activity', exact: true });
       await expect(page.getByRole('button', { name: locale === 'ja' ? '意味を調べる' : 'Explore meaning', exact: true })).toBeEnabled();
@@ -127,33 +127,88 @@ for (const locale of ['ja', 'en'] as const) {
           for (const domain of ['cards', 'operations']) fixture.publish('data-changed', { version: 1, epoch: 'fixture', revision: ++revision, domain });
         };
         const selectors = ['.page-content', '.main-nav a[href="/review"]', '.main-nav a[href="/settings"]', '.activity-trigger', '.locale-button'];
+        const boundsOf = (element: Element) => {
+          const bounds = element.getBoundingClientRect();
+          return [bounds.x, bounds.y, bounds.width, bounds.height];
+        };
+        const review = document.querySelector('.main-nav a[href="/review"]')!;
+        const contentBounds = () => {
+          const boxes = [...review.querySelectorAll(':scope > svg, :scope > span:not(.nav-count):not(.sr-only)')]
+            .map(element => element.getBoundingClientRect()).filter(box => box.width > 0 && box.height > 0);
+          const left = Math.min(...boxes.map(box => box.left));
+          const top = Math.min(...boxes.map(box => box.top));
+          return [left, top, Math.max(...boxes.map(box => box.right)) - left, Math.max(...boxes.map(box => box.bottom)) - top];
+        };
+        fixture.readShellNavigation = () => ({
+          tabs: [...document.querySelectorAll('.main-nav > a')].map(boundsOf),
+          content: contentBounds(),
+          label: boundsOf(review.querySelector('.nav-label')!),
+          badge: boundsOf(review.querySelector('.nav-count')!),
+        });
         fixture.shellFrames = [];
         let frame = 0;
         const record = () => {
-          fixture.shellFrames.push(selectors.map(selector => {
-            const bounds = document.querySelector(selector)!.getBoundingClientRect();
-            return [bounds.x, bounds.y, bounds.width, bounds.height];
-          }));
+          fixture.shellFrames.push([...selectors.map(selector => boundsOf(document.querySelector(selector)!)), contentBounds()]);
           frame = requestAnimationFrame(record);
         };
         record();
         fixture.stopShellFrames = () => { cancelAnimationFrame(frame); return fixture.shellFrames; };
       });
+      const capturedCounts = new Set<number>();
       for (const count of [0, 1, 9, 10, 105, 0]) {
         await page.evaluate(count => (window as any).__learningFixture.setShellCounts(count), count);
         await expect(trigger.locator('.nav-count')).toHaveText(count > 99 ? '99+' : String(count));
         await expect(trigger.locator('.nav-count')).toHaveAttribute('data-empty', String(count === 0));
         const review = page.locator('.main-nav a[href="/review"]');
         await expect(review.locator('.nav-count')).toHaveText(count > 99 ? '99+' : String(count));
+        const { tabs, content, label, badge }: { tabs: number[][]; content: number[]; label: number[]; badge: number[] } =
+          await page.evaluate(() => (window as any).__learningFixture.readShellNavigation());
+        expect(tabs).toHaveLength(4);
+        for (const tab of tabs) expect(Math.abs(tab[2] - tabs[0][2])).toBeLessThan(1);
+        expect(Math.abs(content[0] + content[2] / 2 - (tabs[2][0] + tabs[2][2] / 2))).toBeLessThan(1);
         if (count) {
+          await expect(review.locator('.nav-count')).toBeVisible();
+          const overlapWidth = Math.min(content[0] + content[2], badge[0] + badge[2]) - Math.max(content[0], badge[0]);
+          const overlapHeight = Math.min(content[1] + content[3], badge[1] + badge[3]) - Math.max(content[1], badge[1]);
+          expect(overlapWidth <= 0 || overlapHeight <= 0, 'The review badge must not overlap its icon or label').toBe(true);
+          const labelGap = badge[0] - (label[0] + label[2]);
+          expect(labelGap).toBeGreaterThanOrEqual(1);
+          expect(labelGap).toBeLessThanOrEqual(5);
+          expect(badge[0]).toBeGreaterThanOrEqual(tabs[2][0]);
+          expect(badge[1]).toBeGreaterThanOrEqual(tabs[2][1]);
+          expect(badge[0] + badge[2]).toBeLessThanOrEqual(tabs[2][0] + tabs[2][2]);
+          expect(badge[1] + badge[3]).toBeLessThanOrEqual(tabs[2][1] + tabs[2][3]);
           await expect(trigger).toHaveAccessibleDescription(locale === 'ja' ? `${count} 件の処理を実行中。` : `${count} operations running.`);
           await expect(review).toHaveAccessibleName(locale === 'ja' ? `復習 ${count} 件` : `Review ${count} due`);
+        } else {
+          await expect(review.locator('.nav-count')).toBeHidden();
+        }
+        if ([0, 1, 105].includes(count) && !capturedCounts.has(count)) {
+          await page.locator('.topbar').screenshot({ path: testInfo.outputPath(`topbar-count-${count}.png`) });
+          capturedCounts.add(count);
         }
       }
       const frames: number[][][] = await page.evaluate(() => (window as any).__learningFixture.stopShellFrames());
       expect(frames.length).toBeGreaterThan(1);
       for (const frame of frames) for (let element = 0; element < frame.length; element++) {
         for (let coordinate = 0; coordinate < 4; coordinate++) expect(Math.abs(frame[element][coordinate] - frames[0][element][coordinate])).toBeLessThan(1);
+      }
+      const review = page.locator('.main-nav a[href="/review"]');
+      const badge = review.locator('.nav-count');
+      await page.evaluate(() => (window as any).__learningFixture.setShellCounts(1));
+      await expect(badge).toHaveText('1');
+      await expect(badge).toBeVisible();
+      const unselectedBadgeBackground = await badge.evaluate(element => getComputedStyle(element).backgroundColor);
+      await review.click();
+      await expect(review).toHaveAttribute('aria-current', 'page');
+      await expect.poll(() => review.evaluate(element => element.getAnimations().some(animation =>
+        animation.pending || animation.playState === 'running'))).toBe(false);
+      for (const count of [1, 105]) {
+        if (count > 1) await page.evaluate(count => (window as any).__learningFixture.setShellCounts(count), count);
+        await expect(badge).toHaveText(count > 99 ? '99+' : String(count));
+        await expect(badge).toHaveCSS('background-color', unselectedBadgeBackground);
+        await expect(review).not.toHaveCSS('background-color', unselectedBadgeBackground);
+        await page.locator('.topbar').screenshot({ path: testInfo.outputPath(`topbar-selected-count-${count}.png`) });
       }
     });
   }

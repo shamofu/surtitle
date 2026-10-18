@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useState } from 'react';
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
 import { BookOpen, CircleHelp, Layers3, LibraryBig, Moon, Settings2, Sun } from 'lucide-react';
 import { useSnapshot, useAppearance } from './runtime';
@@ -11,23 +10,11 @@ import { ActivityButton } from './ActivityModal';
 import { AnimatedValue, MotionSwap } from '../shared/motion';
 import { SelectionIndicator } from '../shared/motion/SelectionIndicator';
 
-const mainPageOrder = ['/', '/cards', '/review', '/settings'];
-type PageDirection = 'none' | 'forward' | 'backward';
-function usePageDirection(pathname: string) {
-  const [navigation, setNavigation] = useState({ pathname, direction: 'none' as PageDirection });
-  if (navigation.pathname !== pathname) {
-    const previous = mainPageOrder.indexOf(navigation.pathname);
-    const next = mainPageOrder.indexOf(pathname);
-    const direction = previous < 0 || next < 0 || previous === next ? 'none' : next > previous ? 'forward' : 'backward';
-    setNavigation({ pathname, direction });
-    return direction;
-  }
-  return navigation.direction;
-}
+import { usePageMotion } from './pageMotion';
 
 export function AppShell() {
   const pathname = useRouterState({ select: state => state.location.pathname });
-  const direction = usePageDirection(pathname);
+  const { direction, transition } = usePageMotion(pathname);
   const { data } = useSnapshot();
   const { t, theme, toggleTheme, locale, setLocale } = useAppearance();
   const due = data ? dueCards(data.cards).length : null;
@@ -51,8 +38,10 @@ export function AppShell() {
             </Link>
             <Link to="/review" activeProps={{ className: 'active', 'aria-current': 'page' }}>
               <BookOpen size={18} aria-hidden="true" />
-              <span>{t('復習', 'Review')}</span>
-              <span className="nav-count" aria-hidden="true" data-empty={due === null || due === 0}><AnimatedValue value={due && due > 99 ? '99+' : due ?? 0} /></span>
+              <span className="nav-label">
+                {t('復習', 'Review')}
+                <span className="nav-count" aria-hidden="true" data-empty={due === null || due === 0}><AnimatedValue value={due && due > 99 ? '99+' : due ?? 0} /></span>
+              </span>
               {due !== null && due > 0 && <span className="sr-only">{t(`${due} 件`, `${due} due`)}</span>}
             </Link>
             <Link to="/settings" activeProps={{ className: 'active', 'aria-current': 'page' }}>
@@ -77,7 +66,7 @@ export function AppShell() {
           </div>
         )}
         <NotificationRegion />
-        <main className="page-content" data-page-direction={direction}><Outlet /></main>
+        <main className="page-content" data-page-direction={direction} data-page-transition={transition}><Outlet /></main>
       </div>
     </div>
   );
