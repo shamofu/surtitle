@@ -68,17 +68,18 @@ $env:SURTITLE_E2E_AV1_FIXTURE = "$PWD/work/e2e-av1.mkv"
 pnpm test:e2e --exclude ./e2e/native/playback-rate.e2e.js
 ```
 
-Run the pointer/playback spec separately with a fresh profile and an available interactive desktop:
+Run pointer/playback and slow titlebar-snap tests separately with a fresh profile and an available interactive desktop:
 
 ```powershell
 $env:SURTITLE_E2E_DATA_DIR = "$PWD/work/e2e-windows-pointer"
 pnpm seed:fixtures "$env:SURTITLE_E2E_DATA_DIR" "$PWD/work/test-results/fixtures/日本語 & sample.mp4"
 $env:SURTITLE_E2E_NATIVE_INPUT = '1'
 pnpm test:e2e --spec ./e2e/native/playback-rate.e2e.js
+pnpm test:e2e --spec ./e2e/native/window-state.e2e.js --mochaOpts.grep 'releases slow titlebar drags'
 Remove-Item Env:SURTITLE_E2E_NATIVE_INPUT
 ```
 
-Only this mode requests foreground assistance for the verified application window. CI also runs foreground-activation script tests and desktop/input preflights; its console-hiding preparation is restricted to hosted runners. Ordinary DOM/IPC specs do not require foreground ownership.
+Only this mode requests foreground assistance for the verified application window. The snap test starts at the top-left corner, holds its verified titlebar through one-physical-pixel movements on each axis, checks the same 32 logical pixel boundary for snapping and release, and saves the cursor/frame traces; ordinary window-state coverage checks initial alignment and persistence without moving the cursor. CI also runs foreground-activation script tests and desktop/input preflights; its console-hiding preparation is restricted to hosted runners. Ordinary DOM/IPC specs do not require foreground ownership.
 
 On Linux:
 

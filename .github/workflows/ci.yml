@@ -306,7 +306,7 @@ jobs:
           SURTITLE_E2E_DATA_DIR: ${{ github.workspace }}\work\e2e-windows
           SURTITLE_E2E_AV1_FIXTURE: ${{ github.workspace }}\work\e2e-av1.mkv
           SURTITLE_TAURI_DRIVER: ${{ github.workspace }}\work\driver\bin\tauri-driver.exe
-      - name: Native pointer and playback speed E2E
+      - name: Native pointer, playback speed and window snap E2E
         id: native-pointer
         if: ${{ !cancelled() && (steps.native-e2e.outcome == 'success' || steps.native-e2e.outcome == 'failure') }}
         timeout-minutes: 10
@@ -317,6 +317,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native pointer fixture preparation failed.' }
           & e2e/support/ci-desktop.ps1 -Action prepare-input
           pnpm test:e2e --spec ./e2e/native/playback-rate.e2e.js
+          if ($LASTEXITCODE -ne 0) { throw 'Native playback E2E failed.' }
+          pnpm test:e2e --spec ./e2e/native/window-state.e2e.js --mochaOpts.grep 'releases slow titlebar drags'
         env:
           SURTITLE_E2E_NATIVE_INPUT: '1'
           SURTITLE_E2E_BINARY: ${{ github.workspace }}\work\target\debug\surtitle.exe

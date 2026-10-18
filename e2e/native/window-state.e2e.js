@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { nativeArtifact } from '../support/native-artifacts.mjs';
 import { invokeNative as invoke, expectNativeRejection, restartNativeSession, prepareNativeSession, replaceNativeValue, clickNative } from '../support/native-app.mjs';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
 import { inspectNativeMonitor, inspectNativeWindow, moveNativeWindowToMonitor, requestNativeWindowCommand, requestNativeWindowSize, resizeNativeWindow, resizeThenMaximizeNativeWindow, saveNativeScreenshot, snapNativeWindow } from '../support/native-window.mjs';
+import { dragNativeWindowSnap, verifyNativeSnapDrag } from '../support/native-video-click.mjs';
 
 const profile = process.env.SURTITLE_E2E_DATA_DIR;
 const fixture = JSON.parse(readFileSync(resolve(profile, 'fixture.json'), 'utf8'));
@@ -61,6 +62,8 @@ describe('native window continuity', () => {
     await browser.waitUntil(async () => browser.execute(() => innerWidth === 1280 && innerHeight === 720));
     await expectNativeRejection(invoke('set_window_size_preset', { preset: 'invalid' }), 'Unknown window size preset: invalid');
     const initial = (await inspectNativeWindow())[0].client;
+    // Without OS input this covers already-aligned move lifecycle and storage.
+    // The opt-in caption test below covers magnetic acquisition and release.
     for (const edge of ['left', 'right', 'top', 'bottom', 'bottom-right', 'top-left']) {
       await snapNativeWindow(edge);
       await browser.waitUntil(async () => {
@@ -77,6 +80,22 @@ describe('native window continuity', () => {
     await browser.waitUntil(() => placement().x === snapped.screen.Left && placement().y === snapped.screen.Top);
     await restartNativeSession();
     assert.deepEqual((await inspectNativeWindow())[0].visibleFrame, snapped.visibleFrame, 'Restart lost the visible snapped alignment');
+  });
+
+  (process.env.SURTITLE_E2E_NATIVE_INPUT === '1' ? it : it.skip)('releases slow titlebar drags at 32 logical pixels in both directions', async () => {
+    await ready();
+    if ((await inspectNativeWindow())[0].maximized) {
+      await requestNativeWindowCommand('restore');
+      await browser.waitUntil(async () => !(await inspectNativeWindow())[0].maximized);
+    }
+    await invoke('set_window_size_preset', { preset: 'hd' });
+    for (const axis of ['x', 'y']) {
+      await moveNativeWindowToMonitor((await inspectNativeMonitor()).current);
+      const receipt = await dragNativeWindowSnap(axis);
+      writeFileSync(nativeArtifact(`window-snap-drag-${axis}.json`), `${JSON.stringify(receipt, null, 2)}\n`);
+      verifyNativeSnapDrag(receipt);
+      await saveNativeScreenshot(nativeArtifact(`window-snap-drag-${axis}.png`));
+    }
   });
 
   it('restores normal bounds and maximization, follows saved appearance, and closes after checkpointing pending input', async () => {

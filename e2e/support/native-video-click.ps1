@@ -3,6 +3,7 @@
 param(
     [Parameter(Mandatory, ParameterSetName = 'Input')][string]$Application,
     [Parameter(ParameterSetName = 'Input')][switch]$ActivateOnly,
+    [Parameter(ParameterSetName = 'Input')][ValidateSet('x', 'y')][string]$SnapDragAxis,
     [Parameter(Mandatory, ParameterSetName = 'Inspect')][switch]$InspectInputDesktop
 )
 $ErrorActionPreference = 'Stop'
@@ -29,6 +30,8 @@ public static class SurtitleNativePointer {
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
     [DllImport("user32.dll", SetLastError = true)] static extern bool GetWindowRect(IntPtr window, out Rect rect);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool GetClientRect(IntPtr window, out Rect rect);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window, uint attribute, out Rect value, int size);
     [DllImport("user32.dll", SetLastError = true)] static extern bool ClientToScreen(IntPtr window, ref Point point);
     [DllImport("user32.dll", SetLastError = true)] static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr wParam, IntPtr lParam, uint flags, uint timeout, out UIntPtr result);
@@ -40,6 +43,7 @@ public static class SurtitleNativePointer {
     [DllImport("user32.dll", SetLastError = true)] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll", SetLastError = true)] static extern bool GetClipCursor(out Rect rect);
     [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")] static extern uint GetDoubleClickTime();
     [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint process);
@@ -213,7 +217,9 @@ public static class SurtitleNativePointer {
         int left = GetSystemMetrics(76), top = GetSystemMetrics(77), width = GetSystemMetrics(78), height = GetSystemMetrics(79);
         if (width < 2 || height < 2 || x < left || x >= left + width || y < top || y >= top + height) throw new Exception("The owned test point is outside the attached desktop; no input was sent");
         var inputs = new[] {
-            new Input { Mouse = new MouseInput { X = (int)((long)(x - left) * 65535 / (width - 1)), Y = (int)((long)(y - top) * 65535 / (height - 1)), Flags = 0x8000 | 0x4000 | 0x0001 } },
+            // Target the middle of the absolute-coordinate cell so adjacent
+            // physical pixels remain distinct through SendInput quantization.
+            new Input { Mouse = new MouseInput { X = (int)(((long)(x - left) * 2 + 1) * 65536 / (width * 2)), Y = (int)(((long)(y - top) * 2 + 1) * 65536 / (height * 2)), Flags = 0x8000 | 0x4000 | 0x0001 } },
         };
         if (SendInput(1, inputs, Marshal.SizeOf<Input>()) != 1) throw new Win32Exception(Marshal.GetLastWin32Error(), "Owned pointer movement failed; no button input was sent");
         var clock = Stopwatch.StartNew();
@@ -341,6 +347,89 @@ public static class SurtitleNativePointer {
         try { ActivateCore(root, expectedProcess); }
         finally { SetThreadDpiAwarenessContext(previous); }
     }
+    static GuiThread DragThread(IntPtr root, uint expectedProcess) {
+        ValidateRoot(root, expectedProcess);
+        if (GetForegroundWindow() != root) throw new Exception("The caption drag lost the owned foreground window");
+        uint thread = GetWindowThreadProcessId(root, out _);
+        var info = new GuiThread { Size = (uint)Marshal.SizeOf<GuiThread>() };
+        if (!GetGUIThreadInfo(thread, ref info)) throw new Win32Exception();
+        return info;
+    }
+    public static object DragCaption(IntPtr root, uint expectedProcess, string axis, int travel) {
+        if ((axis != "x" && axis != "y") || travel < 8 || travel > 384) throw new ArgumentException("Invalid caption drag path");
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        if (previous == IntPtr.Zero) throw new Win32Exception();
+        bool pressed = false, released = false;
+        var samples = new List<object>();
+        try {
+            ActivateCore(root, expectedProcess);
+            // Activation may itself click this caption. Do not turn the drag
+            // press into Windows' titlebar double-click/maximize gesture.
+            Thread.Sleep(checked((int)GetDoubleClickTime()) + 20);
+            EnsureIdlePointer(root);
+            if (!GetWindowRect(root, out Rect outer)) throw new Win32Exception();
+            var clientOrigin = new Point();
+            if (!ClientToScreen(root, ref clientOrigin)) throw new Win32Exception();
+            var start = new Point { X = outer.Left + (outer.Right - outer.Left) / 2, Y = outer.Top + (clientOrigin.Y - outer.Top) / 2 };
+            var last = start;
+            PositionOwnedCaption(root, expectedProcess, start);
+            EnsureIdlePointer(root);
+            if (GetForegroundWindow() != root || !CursorRemainsAt(start, root) || !IsOwnedCaption(root, expectedProcess, start))
+                throw new Exception("The verified titlebar lost input ownership before dragging");
+            var down = new[] { new Input { Mouse = new MouseInput { Flags = 2 } } };
+            if (SendInput(1, down, Marshal.SizeOf<Input>()) != 1) throw new Win32Exception(Marshal.GetLastWin32Error(), "Caption button down failed");
+            pressed = true;
+            var clock = Stopwatch.StartNew();
+            while (DragThread(root, expectedProcess).MoveSize != root && clock.ElapsedMilliseconds < 1500) Thread.Sleep(10);
+            Action<string, int> record = (phase, offset) => {
+                var info = DragThread(root, expectedProcess);
+                if (info.MoveSize != root || (info.Flags & 2) == 0) throw new Exception("The owned native Win32 move loop is not active");
+                if (!GetCursorPos(out Point cursor) || !GetWindowRect(root, out Rect screen) || !GetClientRect(root, out Rect client)) throw new Win32Exception();
+                if (cursor.X != last.X || cursor.Y != last.Y) throw new Exception("The pointer changed outside the owned caption drag at " + phase + ":" + offset
+                    + "; expected=(" + last.X + "," + last.Y + "); actual=(" + cursor.X + "," + cursor.Y + "); samples=" + samples.Count);
+                if (DwmGetWindowAttribute(root, 9, out Rect frame, Marshal.SizeOf<Rect>()) != 0) throw new Exception("The dragged visible frame is unavailable");
+                samples.Add(new { phase, offset, cursor, screen, visibleFrame = frame, client, moveSize = info.MoveSize.ToInt64() });
+            };
+            record("start", 0);
+            Action<string, int> step = (phase, offset) => {
+                if (DragThread(root, expectedProcess).MoveSize != root) throw new Exception("Caption drag no longer owns the Win32 move loop");
+                if (!GetCursorPos(out Point cursor) || cursor.X != last.X || cursor.Y != last.Y) throw new Exception("The pointer changed before the next owned drag step");
+                MovePointer(start.X + (axis == "x" ? offset : 0), start.Y + (axis == "y" ? offset : 0));
+                last = new Point { X = start.X + (axis == "x" ? offset : 0), Y = start.Y + (axis == "y" ? offset : 0) };
+                // Deliberate slow steps expose boundary crossing and snapback;
+                // a single large SendInput move would miss the original defect.
+                Thread.Sleep(40);
+                record(phase, offset);
+            };
+            for (int offset = 1; offset <= travel; offset++) step("outward", offset);
+            int turn = 0;
+            for (int offset = travel - 1; offset >= 0; offset--) {
+                step("approach", offset);
+                if (!GetWindowRect(root, out Rect current)) throw new Win32Exception();
+                // Turn at first acquisition, before overshooting the edge.
+                if (axis == "x" ? current.Left == outer.Left : current.Top == outer.Top) { turn = offset; break; }
+            }
+            for (int offset = 1; offset <= travel; offset++) step("outward-again", turn + offset);
+        } finally {
+            try {
+                if (pressed) {
+                    // Release only our held button while the verified target
+                    // still owns foreground and the active move loop, or the
+                    // untouched caption if Windows never entered the loop.
+                    var info = DragThread(root, expectedProcess);
+                    if (info.MoveSize != root && (info.MoveSize != IntPtr.Zero || !GetCursorPos(out Point cursor) || WindowFromPoint(cursor) != root))
+                        throw new Exception("Caption drag lost its input ownership before button release");
+                    var up = new[] { new Input { Mouse = new MouseInput { Flags = 4 } } };
+                    if (SendInput(1, up, Marshal.SizeOf<Input>()) != 1) throw new Win32Exception(Marshal.GetLastWin32Error(), "Caption button release failed");
+                    var clock = Stopwatch.StartNew();
+                    while (DragThread(root, expectedProcess).MoveSize == root && clock.ElapsedMilliseconds < 1500) Thread.Sleep(10);
+                    released = DragThread(root, expectedProcess).MoveSize != root && GetAsyncKeyState(1) >= 0;
+                    if (!released) throw new Exception("The native caption drag did not finish after button release");
+                }
+            } finally { SetThreadDpiAwarenessContext(previous); }
+        }
+        return new { samples = samples.ToArray(), released };
+    }
     public static void Click(IntPtr root, uint expectedProcess, IntPtr video, int x, int y) {
         GetWindowThreadProcessId(video, out uint videoProcess);
         if (videoProcess != expectedProcess || GetParent(video) != root || !IsWindowVisible(video)) throw new ArgumentException("Click target must be the owned visible native video");
@@ -373,6 +462,18 @@ if ($apps.Count -ne 1) { throw "Expected exactly one window for the configured t
 $root = $apps[0].MainWindowHandle
 $expectedProcess = [uint32]$apps[0].Id
 try {
+if ($SnapDragAxis) {
+    if ($ActivateOnly -or $env:SURTITLE_E2E_NATIVE_INPUT -ne '1') { throw 'Caption dragging requires explicit SURTITLE_E2E_NATIVE_INPUT=1 and cannot activate-only.' }
+    # Align both axes so the stationary axis does not newly enter the snap band.
+    [SurtitleNativeWindow]::SnapToEdge($root, 'top-left')
+    $geometry = [SurtitleNativeWindow]::Inspect($root)
+    $display = [SurtitleNativeWindow]::InspectMonitor($root)
+    $area = ($display.monitors | Where-Object { $_.handle -eq $display.current }).workArea
+    $travel = [int][Math]::Round(48 * $geometry[0].dpi / 96.0)
+    $drag = [SurtitleNativePointer]::DragCaption($root, $expectedProcess, $SnapDragAxis, $travel)
+    @{ axis = $SnapDragAxis; dpi = $geometry[0].dpi; rootHandle = $root.ToInt64(); workArea = $area; samples = $drag.samples; released = $drag.released } | ConvertTo-Json -Depth 6
+    exit 0
+}
 if ($ActivateOnly) {
     [SurtitleNativePointer]::Activate($root, $expectedProcess)
     @{ rootHandle = $root.ToInt64(); activated = $true } | ConvertTo-Json
