@@ -108,12 +108,14 @@ describe('real native learning workflow (no cloud requests)', () => {
       assert.deepEqual(after.settings, before.settings, 'Checking metadata must not change saved settings');
       assert.deepEqual(after.budget, before.budget, 'Checking metadata must leave AI usage and reservations unchanged');
       assert.deepEqual(after.jobs, before.jobs, 'Checking metadata must not create, send, or change AI jobs');
-      // The update control is at the category's top. Scroll to its final note
-      // explicitly before exercising navigation away from a scrolled page.
-      const toolsHelp = $('#tools > .helper-text');
-      await toolsHelp.waitForDisplayed();
-      await browser.execute(node => node.scrollIntoView({ block: 'end', behavior: 'instant' }), await toolsHelp);
-      await toolsHelp.waitForDisplayed({ withinViewport: true });
+      // Tools can fit without scrolling after optional tools are removed.
+      // The AI category has enough content to exercise navigation from below.
+      await clickInView('#settings-nav-ai');
+      await expect($('#settings-nav-ai')).toHaveAttribute('aria-pressed', 'true');
+      const budgetHelp = $('#budget > .notice');
+      await budgetHelp.waitForDisplayed();
+      await browser.execute(node => node.scrollIntoView({ block: 'end', behavior: 'instant' }), await budgetHelp);
+      await budgetHelp.waitForDisplayed({ withinViewport: true });
       await browser.waitUntil(async () => browser.execute(() => document.querySelector('.settings-layout').scrollTop > 0),
         { timeoutMsg: 'The settings page did not scroll before navigation' });
     } finally {
