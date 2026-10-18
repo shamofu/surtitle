@@ -1,0 +1,10 @@
+{
+  "get_change_checkpoint": {"version":1,"epoch":"session-1","revision":7,"domains":[{"domain":"subtitles","revision":7}]},
+  "get_snapshot_patch": {"media":[],"cards":[]},
+  "list_ui_drafts": [],
+  "archive_ui_draft": {"kind":"card","entityId":"card-1","revision":8,"fields":{"term":"unfinished"},"updatedAt":"2026-10-11T00:00:00Z","stale":true,"archiveId":"archive-1"},
+  "import_subtitles": true,
+  "commit_subtitle_editor_draft": null,
+  "select_media_files": ["C:/lesson.mp4"],
+  "restore_learning": {"warnings":["cleanup failed"]}
+}

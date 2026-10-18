@@ -1,0 +1,173 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+export type AiPurpose =
+  | 'transcription'
+  | 'vocabulary'
+  | 'explanation'
+  | 'translation';
+
+export interface AiPricePreference {
+  id: string;
+  source: string;
+  observedAtMs: number;
+  inputMicrousdPerMillion: number;
+  outputMicrousdPerMillion: number;
+}
+export interface PriceLookup {
+  price: AiPricePreference | null;
+  candidates: { sku: string; description: string; direction: string; microusdPerMillion: number }[];
+  complete: boolean;
+  observedAtMs: number;
+}
+
+export interface AiModelPreference {
+  modelId: string;
+  transcriptionMode: 'transcribe' | 'subtitles';
+  maxOutputTokens: number;
+  thinkingLevel?: string | null;
+  thinkingBudget?: number | null;
+  price?: AiPricePreference | null;
+}
+
+export interface DiscoveredModel {
+  id: string;
+  displayName: string;
+  launchStage?: string;
+  version?: string;
+}
+
+export interface BudgetSummary {
+  spentUsd: number;
+  reservedUsd: number;
+  limitUsd: number;
+  unknownAttempts?: {
+    id: string;
+    jobId: string;
+    ordinal: number;
+    heldUsd: number | null;
+    createdAt: string;
+  }[];
+  unpricedAttempts?: number;
+  monetaryTotalsComplete?: boolean;
+}
+
+export interface JobSummary {
+  id: string;
+  mediaId?: string;
+  kind: string;
+  status:
+    | 'queued'
+    | 'running'
+    | 'paused'
+    | 'completed'
+    | 'failed'
+    | 'unknown'
+    | 'cancelled';
+  progress: number;
+  executionOutcome?: 'running' | 'complete' | 'partial' | 'failed' | 'stopped';
+  requestCounts?: { total: number; succeeded: number; rejected: number; pending: number; inFlight: number };
+  message?: string;
+  createdAt: string;
+  pendingResults?: number;
+  transcriptReview?: boolean;
+  hasTranscriptResult?: boolean;
+  needsAttention?: boolean;
+  resultState?: 'none' | 'ready' | 'applied' | 'applied_with_warnings';
+  issue?: { code: string; phase: string; occurredAt: string; ordinal?: number; httpStatus?: number; nextAction: string };
+  retry?: {
+    state: 'waiting' | 'retrying' | 'exhausted' | 'deferred';
+    ordinal: number;
+    retryNumber: number;
+    maxRetries: number;
+    nextRetryAt?: string;
+  };
+  pacing?: {
+    ordinal: number;
+    nextSendAt?: string;
+    intervalMs: number;
+    slowed: boolean;
+  };
+  automaticTranscript?: boolean;
+  transcriptionRanges?: { startMs: number; endMs: number; state: 'pending' | 'received' | 'failed' | 'source_block' }[];
+}
+
+export interface AiRuntimeSnapshot {
+  jobId: string;
+  approvalId: string;
+  revision: number;
+  events: {
+    id: string;
+    timestamp: string;
+    phase: string;
+    ordinal?: number;
+    attemptId?: string;
+    reason?: string;
+    httpStatus?: number;
+  }[];
+  preview?: {
+    attemptId: string;
+    ordinal: number;
+    text: string;
+    state: 'streaming' | 'validated' | 'rejected';
+    truncated?: boolean;
+  };
+}
+
+export interface TranscriptionPreparation {
+  id: string;
+  mediaId: string;
+  startMs: number;
+  endMs: number;
+  coreDurationMs: number;
+  sendDurationMs: number;
+  chunkCount: number;
+  jobId?: string;
+  repairParentJobId?: string;
+  repairBoundaryId?: string;
+  wholeMedia?: boolean;
+  audioStreamIndex?: number;
+}
+
+export interface SavedAiResult {
+  jobId: string;
+  ordinal: number;
+  applied: boolean;
+  canApply: boolean;
+  blockedReason?: string;
+  translations: {
+    source: string;
+    translation: string;
+    startMs: number;
+    endMs: number;
+  }[];
+}
+
+export interface AiQuote {
+  id: string;
+  mediaId: string;
+  kind: 'transcribe' | 'translate' | 'vocabulary';
+  startMs: number;
+  endMs: number;
+  model: string;
+  estimatedUsd: number | null;
+  maximumUsd: number | null;
+  inputTokens: number;
+  maxOutputTokens: number;
+  expiresAt: string;
+  warnings: string[];
+  canApprove: boolean;
+  blockedReason?: string;
+  isRetry?: boolean;
+  focusTerm?: string;
+  digest?: string;
+  requestCount?: number;
+  sendDurationMs?: number;
+  totalOutputTokens?: number;
+  pricingSource?: string | null;
+  unpriced?: boolean;
+  location?: string;
+  applyPolicy?: 'manual' | 'auto';
+  retryPolicy?: { version: number; maxRetries: number };
+  maximumRequestCount?: number;
+  maximumSendDurationMs?: number;
+  maximumTotalOutputTokens?: number;
+}

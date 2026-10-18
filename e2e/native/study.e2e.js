@@ -1,0 +1,298 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import assert from 'node:assert/strict';
+import { invokeNative as invoke, NativeIpcError, waitForNativeInput, clickNative, replaceNativeValue } from '../support/native-app.mjs';
+import { Key } from 'webdriverio';
+import { resizeNativeWindow } from '../support/native-window.mjs';
+
+const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
+const mediaId = fixture.mediaId || 'fixture-media';
+const cardId = fixture.cardId || 'fixture-card';
+async function snapshot() { return invoke('get_app_snapshot'); }
+async function navigate(path) {
+  await browser.execute(nextPath => { window.history.pushState({}, '', nextPath); window.dispatchEvent(new PopStateEvent('popstate')); }, path);
+}
+async function clickInView(selector) {
+  const element = $(selector);
+  await waitForNativeInput(element);
+  await clickNative(element);
+}
+async function openTranscript() {
+  const transcript = $('button=Transcript');
+  await waitForNativeInput(transcript);
+  if (await transcript.getAttribute('aria-expanded') !== 'true') await clickNative(transcript);
+  await waitForNativeInput($('[aria-label="Search transcript"]'));
+}
+async function expectPageTop(path) {
+  await browser.waitUntil(async () => browser.execute(expected =>
+    window.location.pathname === expected && document.querySelector('.page-content')?.scrollTop === 0, path),
+  { timeoutMsg: `Navigation to ${path} retained the previous page's scroll position` });
+}
+describe('real native learning workflow (no cloud requests)', () => {
+  before(async () => {
+    await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__), { timeoutMsg: 'Native IPC was not available' });
+    // Exercise the minimum supported desktop client size.
+    if (process.platform === 'win32') await resizeNativeWindow(1280, 720);
+    const initial = await snapshot();
+    await invoke('update_settings', { settings: { ...initial.settings, locale: 'en', dailyBudgetUsd: 0 } });
+    await browser.refresh();
+    await $('h1').waitForDisplayed();
+  });
+  it('reuses the seeded Japanese-path video without duplicating the local media record', async () => {
+    const before = await snapshot();
+    const existing = before.media.find(media => media.id === mediaId);
+    assert(existing && existing.path === fixture.mediaPath);
+    const result = await invoke('import_local_media', { request: { path: fixture.mediaPath, learningLanguage: 'en', explanationLanguage: 'ja' } });
+    assert.deepEqual(result, { mediaId: existing.id, created: false });
+    const after = await snapshot();
+    assert.equal(after.media.length, before.media.length);
+    const imported = after.media.find(media => media.id === existing.id);
+    assert(imported);
+    assert.equal(imported.path, existing.path);
+    assert(imported.title.includes('日本語 & sample'));
+    assert.equal(imported.status, 'ready');
+    assert.equal(after.budget.spentUsd, 0);
+    await browser.refresh();
+    assert((await snapshot()).media.some(media => media.id === existing.id && media.path === existing.path));
+  });
+  it('loads persisted content, handles 20000 subtitles, and suspends auto-follow on manual scroll', async () => {
+    const initial = await snapshot();
+    assert(initial.media.some(media => media.id === mediaId));
+    assert.equal((await invoke('list_segments', { mediaId })).length, 20000);
+    await navigate(`/study/${mediaId}`);
+    await openTranscript();
+    await $('[aria-label="Subtitle list"]').waitForDisplayed();
+    const rows = await $$('.transcript-row');
+    assert(rows.length > 0 && rows.length < 80, `Expected virtualized DOM, got ${rows.length} rows`);
+    await browser.execute(() => document.querySelector('.transcript-scroll').dispatchEvent(new WheelEvent('wheel', { deltaY: 650, bubbles: true })));
+    await expect($('button=Show current subtitle')).toBeDisplayed();
+    const search = $('[aria-label="Search transcript"]');
+    await waitForNativeInput(search);
+    await replaceNativeValue(search, '19999');
+    await browser.waitUntil(async () => (await $$('.transcript-row')).length === 1);
+    await expect($('.transcript-row')).toHaveText(expect.stringContaining('Practice sentence 19999. Repeat repeat.'));
+    await clickInView('button=Show current subtitle');
+    await expect($('[aria-label="Search transcript"]')).toHaveValue('');
+    await expect($('button=Following playback')).toBeDisplayed();
+  });
+  it('checks tool updates without changing AI usage and resets page scroll through normal navigation', async () => {
+    const before = await snapshot();
+    assert.equal(before.settings.credentialConfigured, false, 'Expected the disposable profile without credentials');
+    assert.equal(before.budget.spentUsd, 0);
+    assert.equal(before.budget.reservedUsd, 0);
+    assert.equal(before.budget.limitUsd, 0);
+    assert(before.media.some(media => media.id === mediaId && media.path === fixture.mediaPath), 'Expected the exact disposable media fixture');
+    const assertNoManagedCli = tools => {
+      const cli = tools.filter(tool => tool.id === 'ffmpeg');
+      assert.deepEqual(cli.map(tool => tool.id).sort(), ['ffmpeg']);
+      for (const tool of cli) {
+        // Installed managed tools would perform a real upstream metadata request.
+        assert(tool.provider === 'external' || (tool.provider === 'managed' && tool.status === 'missing'), `Refusing a network-capable update check for ${tool.id}`);
+      }
+    };
+    assertNoManagedCli(before.tools);
+    try {
+      await $('.main-nav a[href="/settings"]').waitForClickable();
+      await clickNative($('.main-nav a[href="/settings"]'));
+      await clickNative($('#settings-nav-tools'));
+      await expect($('#settings-nav-tools')).toHaveAttribute('aria-pressed', 'true');
+      await $('button=Check updates').waitForEnabled();
+      await clickInView('button=Check updates');
+      const success = $('button.toast.success');
+      await expect(success).toBeDisplayed();
+      await expect(success).toHaveText('Update information checked.');
+      const after = await snapshot();
+      assertNoManagedCli(after.tools);
+      assert.deepEqual(after.tools, before.tools, 'Checking metadata must not install tools or change their provider, path, or version');
+      assert.deepEqual(after.settings, before.settings, 'Checking metadata must not change saved settings');
+      assert.deepEqual(after.budget, before.budget, 'Checking metadata must leave AI usage and reservations unchanged');
+      assert.deepEqual(after.jobs, before.jobs, 'Checking metadata must not create, send, or change AI jobs');
+      // The update control is at the category's top. Scroll to its final note
+      // explicitly before exercising navigation away from a scrolled page.
+      const toolsHelp = $('#tools > .helper-text');
+      await toolsHelp.waitForDisplayed();
+      await browser.execute(node => node.scrollIntoView({ block: 'end', behavior: 'instant' }), await toolsHelp);
+      await toolsHelp.waitForDisplayed({ withinViewport: true });
+      await browser.waitUntil(async () => browser.execute(() => document.querySelector('.settings-layout').scrollTop > 0),
+        { timeoutMsg: 'The settings page did not scroll before navigation' });
+    } finally {
+      await $('.main-nav a[href="/"]').waitForClickable();
+      await clickNative($('.main-nav a[href="/"]'));
+      await expectPageTop('/');
+      await clickInView(`.media-card[href="/study/${encodeURIComponent(mediaId)}"]`);
+      await openTranscript();
+      await $('[aria-label="Subtitle list"]').waitForDisplayed();
+      await expectPageTop(`/study/${mediaId}`);
+    }
+  });
+  (process.platform === 'win32' ? it : it.skip)('plays one selected interval, pauses at its end, changes speed, and retains uncovered video for a modal', async () => {
+    // Linux CI validates the application flow; libmpv native HWND playback is Windows-only.
+    await navigate(`/study/${mediaId}`);
+    await invoke('load_media', { mediaId });
+    await browser.waitUntil(async () => { const state = await invoke('get_player_state'); return state.surfaceVisible && state.videoWidth === 640 && state.videoHeight === 360; }, { timeoutMsg: 'Native surface was not shown or video was not decoded at its fixture dimensions' });
+    await invoke('player_control', { request: { action: 'seek', startMs: 500, endMs: 1600 } });
+    await browser.waitUntil(async () => { const state = await invoke('get_player_state'); return state.paused && state.positionMs >= 1400; }, { timeout: 12000, timeoutMsg: 'Selected interval did not stop at its end' });
+    await invoke('player_control', { request: { action: 'rate', value: 1.25 } });
+    assert.equal((await invoke('get_player_state')).rate, 1.25);
+    await clickNative($('button=Playback settings'));
+    await expect($('[role="dialog"]')).toBeDisplayed();
+    await browser.waitUntil(async () => (await invoke('get_player_state')).surfaceVisible, { timeoutMsg: 'Native video disappeared while the modal was open' });
+    await clickNative($('button[aria-label="Close"]'));
+    await expect($('[role="dialog"]')).not.toExist();
+    await browser.waitUntil(async () => (await invoke('get_player_state')).surfaceVisible, { timeoutMsg: 'Native surface did not return after closing the modal' });
+  });
+  it('preserves milliseconds in the subtitle editor and replaces the generated subtitle track after repeated edits', async () => {
+    await navigate(`/study/${mediaId}`);
+    await $('.play-button').waitForEnabled();
+    await browser.waitUntil(async () => (await invoke('get_player_state')).ready);
+    await invoke('player_control', { request: { action: 'seek', value: 0 } });
+    const original = (await invoke('list_segments', { mediaId })).find(segment => segment.id === 'fixture-0');
+    assert(original);
+    const timed = { ...original, startMs: 125, endMs: 875, text: 'Milliseconds matter.' };
+    await invoke('edit_segment', { segment: timed });
+    // Reload reads actual persisted data and remounts the native player, with no test-only IPC.
+    await browser.refresh();
+    await openTranscript();
+    await $('[aria-label="Subtitle list"]').waitForDisplayed();
+    const editedRow = $('.transcript-row[data-index="0"]');
+    await editedRow.waitForDisplayed();
+    await expect(editedRow.$('.segment-text')).toHaveText('Milliseconds matter.');
+    await clickInView('.transcript-row[data-index="0"] .segment-options summary');
+    const editSubtitle = editedRow.$('[aria-label="Edit subtitle"]');
+    await editSubtitle.waitForClickable();
+    await clickNative(editSubtitle);
+    await $('[role="dialog"]').waitForDisplayed();
+    const times = await $$('[role="dialog"] .field-row input');
+    await expect(times[0]).toHaveValue('0:00.125');
+    await expect(times[1]).toHaveValue('0:00.875');
+    const subtitleInput = $('[role="dialog"] textarea');
+    await $('button=Confirm and save').waitForEnabled();
+    await waitForNativeInput(subtitleInput);
+    if (process.platform === 'win32') {
+      // WebView2's WebDriver clear can omit the input event for controlled fields.
+      // Wait for draft loading and the native exclusion/entrance before clicking.
+      await browser.waitUntil(async () => browser.execute(node => {
+        const dialog = node.closest('[role="dialog"]');
+        const body = node.closest('.modal-body');
+        return dialog?.dataset.nativeOcclusion !== 'pending' && body &&
+          !body.style.transform && !body.style.opacity &&
+          document.querySelector('[data-testid="native-player-viewport"]')?.dataset.nativePlacement !== 'pending';
+      }, await subtitleInput), { timeoutMsg: 'The subtitle editor did not finish its native exclusion and entrance' });
+      await subtitleInput.waitForClickable();
+      await clickNative(subtitleInput);
+      await expect(subtitleInput).toBeFocused();
+      await browser.keys([Key.Ctrl, 'a']);
+      await browser.waitUntil(async () => browser.execute(node =>
+        document.activeElement === node && node.selectionStart === 0 && node.selectionEnd === node.value.length,
+      await subtitleInput), { timeoutMsg: 'Ctrl+A did not select the subtitle text in the focused editor' });
+      // Send deletion to the verified editor through WebDriver's element key
+      // input, rather than a separate global action that may target a native HWND.
+      await subtitleInput.addValue(Key.Backspace);
+      await expect(subtitleInput).toHaveValue('');
+      await subtitleInput.addValue('Milliseconds survive a text-only edit.');
+    } else {
+      await replaceNativeValue(subtitleInput, 'Milliseconds survive a text-only edit.');
+    }
+    await expect(subtitleInput).toHaveValue('Milliseconds survive a text-only edit.');
+    await clickNative($('button=Confirm and save'));
+    await expect($('[role="dialog"]')).not.toExist();
+    const saved = (await invoke('list_segments', { mediaId })).find(segment => segment.id === original.id);
+    assert.equal(saved.startMs, 125);
+    assert.equal(saved.endMs, 875);
+    assert.equal(saved.text, 'Milliseconds survive a text-only edit.');
+    if (process.platform === 'win32') {
+      const generated = async () => (await invoke('get_player_state')).tracks.filter(track => track.kind === 'sub' && track.title === 'Surtitle');
+      await browser.waitUntil(async () => (await generated()).length === 1, { timeoutMsg: 'Expected one generated Surtitle subtitle track after editing' });
+      const previousId = (await generated())[0].id;
+      for (let iteration = 0; iteration < 3; iteration++) {
+        await invoke('edit_segment', { segment: { ...saved, text: `Repeated subtitle refresh ${iteration}.` } });
+        await browser.waitUntil(async () => (await generated()).length === 1, { timeoutMsg: 'Generated subtitle tracks accumulated during repeated edits' });
+      }
+      assert.notEqual((await generated())[0].id, previousId, 'Editing did not replace the generated subtitle track');
+    }
+  });
+  it('keeps quotes blocked without credentials even when the budget is unlimited', async () => {
+    assert.equal((await snapshot()).settings.credentialConfigured, false);
+    const result = await invoke('create_quote', { request: { mediaId, kind: 'translate', startMs: 0, endMs: 2000 } })
+      .then(quote => ({ canApprove: quote.canApprove }), error => {
+        if (!(error instanceof NativeIpcError)) throw error;
+        return { rejectionMessage: error.reason };
+      });
+    if (result.rejectionMessage) assert.match(result.rejectionMessage, /budget|credential|service.account|price|pricing|auth|model|予算|認証|料金/i);
+    else assert.equal(result.canApprove, false);
+    const state = await snapshot();
+    assert.equal(state.budget.spentUsd, 0);
+    assert.equal(state.budget.reservedUsd, 0);
+  });
+  it('opens a real six-hour audio file and seeks past five hours without installing FFmpeg', async function () {
+    const path = resolve(dirname(fixture.mediaPath), 'six-hour-silence.flac');
+    assert(existsSync(path), 'Generate the real six-hour FLAC before native E2E');
+    const before = await snapshot();
+    const beforeTool = before.tools.find(tool => tool.id === 'ffmpeg');
+    const result = await invoke('import_local_media', { request: { path: path, learningLanguage: 'en', explanationLanguage: 'ja' } });
+    const after = await snapshot();
+    const imported = after.media.find(media => media.id === result.mediaId);
+    assert(imported, 'Six-hour media was not imported');
+    if (process.platform === 'win32') {
+      await navigate(`/study/${imported.id}`);
+      // Direct IPC import bypasses React Query's UI mutation invalidation.
+      await browser.refresh();
+      await $('[data-testid="native-player-viewport"]').waitForDisplayed();
+      await invoke('load_media', { mediaId: imported.id });
+      await browser.waitUntil(async () => Math.abs((await invoke('get_player_state')).durationMs - 21600000) < 1000, { timeoutMsg: 'libmpv did not read the real six-hour duration' });
+      const startMs = 18000500, endMs = 18001600;
+      await invoke('player_control', { request: { action: 'seek', startMs, endMs } });
+      await browser.waitUntil(async () => { const state = await invoke('get_player_state'); return state.paused && state.positionMs >= endMs - 250 && state.positionMs <= endMs + 1000; }, { timeout: 12000, timeoutMsg: 'Interval playback did not stop correctly beyond five hours' });
+      await invoke('player_control', { request: { action: 'rate', value: 1.5 } });
+      assert.equal((await invoke('get_player_state')).rate, 1.5);
+      await browser.waitUntil(async () => { const text = await $('.player-time').getText(); return text.includes('5:00') && text.includes('6:00:00'); }, { timeoutMsg: 'The player UI did not show the six-hour timeline and far seek' });
+    }
+    const afterTool = (await snapshot()).tools.find(tool => tool.id === 'ffmpeg');
+    const identity = tool => ({ provider: tool?.provider, status: tool?.status, path: tool?.path, version: tool?.version });
+    assert.deepEqual(identity(afterTool), identity(beforeTool), 'First playback unexpectedly installed or changed FFmpeg');
+  });
+  it('requires revealing the meaning before rating and persists the new schedule across reload', async () => {
+    const before = (await snapshot()).cards.find(card => card.id === cardId);
+    assert(before, 'Seeded review card missing');
+    await navigate('/review');
+    await $('.review-card').waitForDisplayed();
+    await expect($('.rating-button.good')).toBeDisabled();
+    await clickInView('button*=Reveal meaning');
+    await $('.rating-button.good').waitForEnabled();
+    await clickInView('.rating-button.good');
+    await browser.waitUntil(async () => (await snapshot()).cards.find(card => card.id === cardId).reviewCount === before.reviewCount + 1);
+    await browser.refresh();
+    const after = (await snapshot()).cards.find(card => card.id === cardId);
+    assert.equal(after.reviewCount, before.reviewCount + 1);
+    assert(Date.parse(after.dueAt) > Date.parse(before.dueAt));
+  });
+  it('uses an explicitly selected PATH FFmpeg to preserve real card audio and explanation independently of subtitle edits', async () => {
+    const candidates = await invoke('scan_external_tools');
+    const ffmpeg = candidates.find(candidate => candidate.toolId === 'ffmpeg' && candidate.selectable);
+    assert(ffmpeg, 'A compatible FFmpeg/ffprobe pair must be available on PATH for native E2E');
+    await invoke('set_tool_provider', { request: { toolId: 'ffmpeg', provider: 'external', path: ffmpeg.path } });
+    const before = await snapshot();
+    const segment = (await invoke('list_segments', { mediaId })).find(item => item.id === 'fixture-0');
+    assert(segment);
+    const request = { mediaId, segmentId: segment.id, term: 'subtitle', meaning: 'a written caption', example: segment.text, explanation: 'A test explanation retained with the original context.', translation: '元の文脈と音声を保存します。' };
+    await invoke('save_card', { request });
+    const after = await snapshot();
+    const saved = after.cards.find(card => !before.cards.some(previous => previous.id === card.id));
+    assert(saved, 'Saving did not persist a new card');
+    assert.equal(saved.explanation, request.explanation);
+    assert.equal(saved.translation, request.translation);
+    assert(saved.audioPath, 'The card did not preserve an audio path');
+    assert(existsSync(saved.audioPath), 'The extracted review audio does not exist');
+    const originalAudio = readFileSync(saved.audioPath);
+    assert(statSync(saved.audioPath).size > 44, 'The review clip is empty');
+    await invoke('edit_segment', { segment: { ...segment, text: 'This is a later transcript edit.', translation: '後から字幕だけを編集しました。' } });
+    await browser.refresh();
+    const persisted = (await snapshot()).cards.find(card => card.id === saved.id);
+    assert.equal(persisted.example, request.example);
+    assert.equal(persisted.explanation, request.explanation);
+    assert.equal(persisted.translation, request.translation);
+    assert.equal(persisted.audioPath, saved.audioPath);
+    assert.deepEqual(readFileSync(persisted.audioPath), originalAudio, 'Editing the transcript changed the preserved card audio');
+  });
+});

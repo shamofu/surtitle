@@ -1,0 +1,434 @@
+use crate::{CancellationToken, ToolSnapshot};
+use anyhow::{Context, Result, bail, ensure};
+use serde::{Deserialize, Serialize};
+use std::{ffi::OsString, path::PathBuf, process::Stdio, time::Duration};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt},
+    process::Command,
+};
+
+#[derive(Debug, Clone)]
+pub struct CommandSpec {
+    pub program: PathBuf,
+    /// Each entry is one literal argument. Never join these into shell text.
+    pub args: Vec<OsString>,
+    pub guards: Vec<ToolSnapshot>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandOutput {
+    pub code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+}
+impl CommandSpec {
+    pub async fn run(
+        &self,
+        timeout: Duration,
+        cancel: &CancellationToken,
+    ) -> Result<CommandOutput> {
+        for guard in &self.guards {
+            guard.verify()?;
+        }
+        ensure!(
+            self.program.is_absolute(),
+            "command executable must be absolute"
+        );
+        ensure!(!cancel.is_cancelled(), "operation cancelled");
+        let mut command = Command::new(&self.program);
+        command
+            .args(&self.args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        #[cfg(windows)]
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        #[cfg(unix)]
+        command.process_group(0);
+        let mut child = command
+            .spawn()
+            .with_context(|| format!("cannot start {}", self.program.display()))?;
+        #[cfg(windows)]
+        let _job = WindowsJob::attach(child.id().context("child has no process ID")?)?;
+        #[cfg(unix)]
+        let _group = UnixProcessGroup(child.id().context("child has no process ID")? as i32);
+        let stdout = child.stdout.take().context("child stdout not captured")?;
+        let stderr = child.stderr.take().context("child stderr not captured")?;
+        let work = async {
+            let (stdout, stderr, status) =
+                tokio::try_join!(read_bounded(stdout), read_bounded(stderr), async {
+                    Ok::<_, anyhow::Error>(child.wait().await?)
+                })?;
+            Ok(CommandOutput {
+                code: status.code(),
+                stdout,
+                stderr,
+            })
+        };
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => bail!("operation cancelled"),
+            result = tokio::time::timeout(timeout, work) => result.context("tool execution timed out")?,
+        }
+    }
+}
+async fn read_bounded(reader: impl AsyncRead + Unpin) -> Result<String> {
+    const MAX: u64 = 16 * 1024 * 1024;
+    let mut data = Vec::new();
+    reader.take(MAX + 1).read_to_end(&mut data).await?;
+    ensure!(data.len() as u64 <= MAX, "tool output exceeded limit");
+    Ok(String::from_utf8_lossy(&data).into_owned())
+}
+
+#[cfg(windows)]
+struct WindowsJob(windows_sys::Win32::Foundation::HANDLE);
+#[cfg(unix)]
+struct UnixProcessGroup(i32);
+#[cfg(unix)]
+impl Drop for UnixProcessGroup {
+    fn drop(&mut self) {
+        unsafe {
+            libc::kill(-self.0, libc::SIGKILL);
+        }
+    }
+}
+#[cfg(windows)]
+unsafe impl Send for WindowsJob {}
+#[cfg(windows)]
+impl WindowsJob {
+    fn attach(pid: u32) -> Result<Self> {
+        use windows_sys::Win32::{
+            Foundation::{CloseHandle, HANDLE},
+            System::{JobObjects::*, Threading::*},
+        };
+        unsafe {
+            let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            ensure!(!handle.is_null(), "cannot create Windows process job");
+            let job = Self(handle);
+            let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            ensure!(
+                SetInformationJobObject(
+                    handle,
+                    JobObjectExtendedLimitInformation,
+                    &limits as *const _ as *const _,
+                    std::mem::size_of_val(&limits) as u32
+                ) != 0,
+                "cannot set process job limits"
+            );
+            let process: HANDLE = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+            ensure!(
+                !process.is_null(),
+                "cannot open child process for job assignment"
+            );
+            let assigned = AssignProcessToJobObject(handle, process);
+            CloseHandle(process);
+            ensure!(assigned != 0, "cannot assign child process to Windows job");
+            Ok(job)
+        }
+    }
+}
+#[cfg(windows)]
+impl Drop for WindowsJob {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::probe::spec;
+    use crate::{ToolKind, ffmpeg_extract_audio, probe_and_record};
+    use std::path::Path;
+    fn compiled_ffmpeg_fixture(directory: &Path, version: &str) -> PathBuf {
+        std::fs::create_dir_all(directory).unwrap();
+        let source = directory.join("fixture.rs");
+        std::fs::write(
+            &source,
+            format!(
+                r#"fn main() {{
+            if std::env::args().any(|arg| arg == "-encoders") {{
+                println!(" A..... flac\n A..... pcm_s16le");
+            }} else {{
+                let executable = std::env::current_exe().unwrap();
+                let name = executable.file_stem().unwrap().to_str().unwrap();
+                println!("{{name}} version {version}");
+            }}
+        }}"#
+            ),
+        )
+        .unwrap();
+        let executable = directory.join(ToolKind::FfmpegPair.executable());
+        let result = std::process::Command::new("rustc")
+            .args(["--edition=2024", "--crate-name", "surtitle_tool_fixture"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&executable)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        std::fs::copy(
+            &executable,
+            directory.join(if cfg!(windows) {
+                "ffprobe.exe"
+            } else {
+                "ffprobe"
+            }),
+        )
+        .unwrap();
+        executable
+    }
+    #[tokio::test]
+    async fn new_probes_follow_selected_updates_and_keep_original_job_evidence() {
+        let root = tempfile::tempdir().unwrap();
+        let old = compiled_ffmpeg_fixture(&root.path().join("old"), "90.0.1");
+        let new = compiled_ffmpeg_fixture(&root.path().join("new"), "90.0.2");
+        let selected = root.path().join(ToolKind::FfmpegPair.executable());
+        let redirect = |target: &Path| {
+            let companion_name = if cfg!(windows) {
+                "ffprobe.exe"
+            } else {
+                "ffprobe"
+            };
+            for (selected, target) in [
+                (selected.clone(), target.to_owned()),
+                (
+                    selected.with_file_name(companion_name),
+                    target.with_file_name(companion_name),
+                ),
+            ] {
+                #[cfg(windows)]
+                {
+                    std::fs::write(&selected, b"unexecuted Scoop shim").unwrap();
+                    std::fs::write(
+                        selected.with_extension("shim"),
+                        format!("path = \"{}\"", target.display()),
+                    )
+                    .unwrap();
+                }
+                #[cfg(unix)]
+                {
+                    if selected.symlink_metadata().is_ok() {
+                        std::fs::remove_file(&selected).unwrap();
+                    }
+                    std::os::unix::fs::symlink(target, &selected).unwrap();
+                }
+            }
+        };
+        let manager = crate::ToolManager::new(root.path().join("managed")).unwrap();
+        let selection = crate::ToolSelection::External {
+            path: selected.clone(),
+        };
+        let cancel = CancellationToken::new();
+        redirect(&old);
+        let mut first = manager
+            .lease_tools(&[(ToolKind::FfmpegPair, selection.clone())])
+            .unwrap();
+        probe_and_record(&mut first.tools[0], &cancel)
+            .await
+            .unwrap();
+        let original = serde_json::to_vec(&first.tools).unwrap();
+        assert_eq!(
+            first.tools[0].probe.as_ref().unwrap().version,
+            "ffmpeg version 90.0.1"
+        );
+        redirect(&new);
+        let mut second = manager
+            .lease_tools(&[(ToolKind::FfmpegPair, selection)])
+            .unwrap();
+        assert!(second.tools[0].probe.is_none());
+        probe_and_record(&mut second.tools[0], &cancel)
+            .await
+            .unwrap();
+        assert_eq!(
+            second.tools[0].probe.as_ref().unwrap().version,
+            "ffmpeg version 90.0.2"
+        );
+        assert_eq!(
+            second.tools[0].tool.selected_path,
+            first.tools[0].tool.selected_path
+        );
+        assert_ne!(
+            second.tools[0].tool.executable,
+            first.tools[0].tool.executable
+        );
+        assert_ne!(
+            second.tools[0].executable_sha256,
+            first.tools[0].executable_sha256
+        );
+        assert_eq!(
+            first.tools[0]
+                .probe
+                .as_ref()
+                .unwrap()
+                .companion_version
+                .as_deref(),
+            Some("ffprobe version 90.0.1")
+        );
+        assert_eq!(
+            second.tools[0]
+                .probe
+                .as_ref()
+                .unwrap()
+                .companion_version
+                .as_deref(),
+            Some("ffprobe version 90.0.2")
+        );
+        assert_ne!(
+            first.tools[0].ffprobe_sha256,
+            second.tools[0].ffprobe_sha256
+        );
+        first.tools[0].verify().unwrap();
+        assert_eq!(serde_json::to_vec(&first.tools).unwrap(), original);
+        std::fs::remove_file(&new).unwrap();
+        assert!(
+            probe_and_record(&mut second.tools[0], &cancel)
+                .await
+                .is_err()
+        );
+        assert!(second.tools[0].probe.is_none());
+        assert!(old.is_file());
+    }
+    fn fake(kind: ToolKind) -> ToolSnapshot {
+        ToolSnapshot {
+            tool: crate::ResolvedTool {
+                kind,
+                source: crate::ToolSource::External,
+                selected_path: PathBuf::from("unused"),
+                executable: std::env::temp_dir()
+                    .join("日本 語 & test")
+                    .join(kind.executable()),
+                ffprobe: (kind == ToolKind::FfmpegPair)
+                    .then(|| std::env::temp_dir().join("ffprobe.exe")),
+            },
+            executable_sha256: "hash".into(),
+            ffprobe_sha256: None,
+            probe: None,
+        }
+    }
+    #[test]
+    fn audio_interval_validation() {
+        let temp = std::env::temp_dir();
+        assert!(
+            ffmpeg_extract_audio(
+                &fake(ToolKind::FfmpegPair),
+                &temp.join("in.mp4"),
+                2,
+                f64::NAN,
+                1.0,
+                &temp.join("out.wav")
+            )
+            .is_err()
+        );
+        let cmd = ffmpeg_extract_audio(
+            &fake(ToolKind::FfmpegPair),
+            &temp.join("日本 語 & in.mp4"),
+            3,
+            1.5,
+            10.0,
+            &temp.join("out.flac"),
+        )
+        .unwrap();
+        assert!(cmd.args.contains(&"-n".into()));
+        assert!(cmd.args.contains(&"16000".into()));
+        assert!(cmd.args.contains(&"0:3".into()));
+    }
+    #[tokio::test]
+    #[ignore = "run by required Linux and Windows native CI suites; requires SURTITLE_TEST_FFMPEG"]
+    async fn multitrack_extraction_preserves_selected_stream() {
+        let ffmpeg = ToolSnapshot::capture(
+            crate::resolve_external(
+                ToolKind::FfmpegPair,
+                &PathBuf::from(
+                    std::env::var_os("SURTITLE_TEST_FFMPEG").expect("explicit FFmpeg path"),
+                ),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("日本語 & multi.mkv");
+        let cancel = CancellationToken::new();
+        let mut generate = spec(
+            &ffmpeg,
+            &ffmpeg.tool.executable,
+            &[
+                "-nostdin",
+                "-v",
+                "error",
+                "-n",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=16x16:r=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:sample_rate=16000",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=880:sample_rate=16000",
+                "-t",
+                "1",
+                "-map",
+                "0:v",
+                "-map",
+                "1:a",
+                "-map",
+                "2:a",
+                "-c:v",
+                "ffv1",
+                "-c:a",
+                "pcm_s16le",
+            ],
+        );
+        generate.args.push(source.clone().into_os_string());
+        assert_eq!(
+            generate
+                .run(Duration::from_secs(30), &cancel)
+                .await
+                .unwrap()
+                .code,
+            Some(0)
+        );
+        let mut crossings = Vec::new();
+        for index in [1, 2] {
+            let output = temp.path().join(format!("stream-{index}.wav"));
+            assert_eq!(
+                ffmpeg_extract_audio(&ffmpeg, &source, index, 0.2, 0.5, &output)
+                    .unwrap()
+                    .run(Duration::from_secs(30), &cancel)
+                    .await
+                    .unwrap()
+                    .code,
+                Some(0)
+            );
+            let bytes = std::fs::read(output).unwrap();
+            let data = bytes.windows(4).position(|w| w == b"data").unwrap() + 8;
+            let samples = bytes[data..]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| i16::from_le_bytes([b[0], b[1]]))
+                .collect::<Vec<_>>();
+            assert!((7900..8100).contains(&samples.len()));
+            crossings.push(samples.windows(2).filter(|p| p[0] < 0 && p[1] >= 0).count());
+        }
+        assert!(
+            (215..225).contains(&crossings[0]),
+            "first audio was not 440 Hz: {crossings:?}"
+        );
+        assert!(
+            (435..445).contains(&crossings[1]),
+            "selected second audio was not 880 Hz: {crossings:?}"
+        );
+    }
+}

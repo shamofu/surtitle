@@ -1,0 +1,39 @@
+{
+  "name": "Surtitle • Ubuntu 24.04",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspaces/surtitle",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/surtitle,type=bind",
+  "mounts": [
+    "source=surtitle-${devcontainerId}-pnpm,target=/workspaces/surtitle/.pnpm,type=volume,volume-nocopy",
+    "source=surtitle-${devcontainerId}-cargo,target=/workspaces/surtitle/.cargo,type=volume,volume-nocopy",
+    "source=surtitle-${devcontainerId}-node-modules,target=/workspaces/surtitle/node_modules,type=volume,volume-nocopy",
+    "source=surtitle-${devcontainerId}-work,target=/workspaces/surtitle/work,type=volume,volume-nocopy",
+    "source=surtitle-${devcontainerId}-tauri-gen,target=/workspaces/surtitle/src-tauri/gen,type=volume,volume-nocopy",
+    "source=surtitle-${devcontainerId}-resources,target=/workspaces/surtitle/src-tauri/resources,type=volume,volume-nocopy",
+    "source=${localWorkspaceFolder}/src-tauri/resources/native/.gitkeep,target=/workspaces/surtitle/src-tauri/resources/native/.gitkeep,type=bind",
+    "source=${localWorkspaceFolder}/src-tauri/resources/notices/README.txt,target=/workspaces/surtitle/src-tauri/resources/notices/README.txt,type=bind"
+  ],
+  "updateRemoteUserUID": true,
+  "forwardPorts": [
+    1420
+  ],
+  "containerEnv": {
+    "RUST_BACKTRACE": "1",
+    "CARGO_TARGET_DIR": "/workspaces/surtitle/work/target",
+    "WEBKIT_DISABLE_COMPOSITING_MODE": "1"
+  },
+  "postCreateCommand": "sudo chown -R --no-dereference \"$(id -u):$(id -g)\" .pnpm .cargo node_modules && sudo chown --no-dereference \"$(id -u):$(id -g)\" work src-tauri/gen src-tauri/resources src-tauri/resources/native src-tauri/resources/notices && pnpm install --frozen-lockfile",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tauri-apps.tauri-vscode",
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  }
+}

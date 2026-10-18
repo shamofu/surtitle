@@ -1,0 +1,194 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { invoke } from '@tauri-apps/api/core';
+import { AppProviders } from '../app/providers';
+import { SettingsPage } from '../features/settings/SettingsPage';
+import type { AppSnapshot } from '../shared/contracts/snapshot';
+
+vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({}), useLocation: ({ select }: { select: (location: { hash: string }) => unknown }) => select({ hash: '' }), useNavigate: () => vi.fn(), useBlocker: () => ({ status: 'idle' }) }));
+vi.mock('../shared/native/window', () => ({ subscribeWindowClose: () => () => {}, registerCloseTask: () => () => {}, hasPendingCloseTasks: () => false, closeWindow: vi.fn() }));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  isTauri: () => true,
+  invoke: vi.fn(),
+}));
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
+}));
+const clients: QueryClient[] = [];
+afterEach(() => {
+  cleanup();
+  clients.splice(0).forEach((client) => client.clear());
+  vi.mocked(invoke).mockReset();
+});
+
+function mount(locale: 'ja' | 'en', check: () => Promise<void>) {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  const data: AppSnapshot = {
+    settings: {
+      theme: 'dark',
+      locale,
+      learningLanguage: 'en',
+      explanationLanguage: 'ja',
+      dailyBudgetUsd: 0,
+      vertexProject: '',
+      vertexLocation: 'global',
+      credentialConfigured: false,
+      retention: 0.9,
+      proficiency: 'B1',
+
+      aiModels: {},
+    },
+    media: [],
+    cards: [],
+    jobs: [],
+    budget: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 },
+    tools: [
+      {
+        id: 'ffmpeg',
+        name: 'FFmpeg',
+        provider: 'managed',
+        status: 'ready',
+        version: '2.0.0',
+        canRollback: false,
+      },
+    ],
+  };
+  vi.mocked(invoke).mockImplementation(async (command, arguments_) => {
+    const args = arguments_ as Record<string, any> | undefined;
+    if (command === 'get_app_snapshot') return structuredClone(data);
+    if (command === 'get_change_checkpoint') return { version: 1, epoch: 'fixture', revision: 0, domains: [] };
+    if (command === 'get_snapshot_patch') return Object.fromEntries(args!.domains.map((domain: keyof AppSnapshot) => [domain, structuredClone(data[domain])]));
+    if (command === 'get_settings_state') return { settings: structuredClone(data.settings), revision: JSON.stringify(data.settings) };
+    if (command === 'get_ui_draft') return null;
+    if (command === 'save_ui_draft') return { ...args!.request, revision: args!.request.expectedRevision + 1 };
+    if (command === 'delete_ui_draft') return;
+    if (command === 'update_settings_patch') { Object.assign(data.settings, args!.patch.budgets ?? args!.patch); return { settings: structuredClone(data.settings), revision: JSON.stringify(data.settings) }; }
+    if (command === 'list_operation_progress') return [];
+    if (command === 'scan_external_tools') return [];
+    if (command === 'list_ai_continuations') return [];
+    if (command === 'check_tool_updates') return check();
+    throw new Error(`Unexpected IPC during metadata discovery: ${command}`);
+  });
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  clients.push(client);
+  render(
+    <QueryClientProvider client={client}>
+      <AppProviders>
+        <SettingsPage />
+      </AppProviders>
+    </QueryClientProvider>,
+  );
+}
+
+function commands() {
+  return vi.mocked(invoke).mock.calls.map(([command]) => command);
+}
+
+describe('manual managed-tool update discovery', () => {
+  it.each([
+    {
+      locale: 'en' as const,
+      button: 'Check updates',
+      rescan: 'Rescan PATH',
+      language: 'Learning language',
+      success: 'Update information checked.',
+    },
+    {
+      locale: 'ja' as const,
+      button: '更新を確認',
+      rescan: 'PATH を再検索',
+      language: '学習する言語',
+      success: '更新情報を確認しました。',
+    },
+  ])(
+    'checks metadata explicitly with independent busy state in $locale',
+    async ({ locale, button, rescan, language, success }) => {
+      let finish!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      mount(locale, () => pending);
+      await waitFor(() =>
+        expect(
+          screen.getByRole('combobox', { name: new RegExp(language) }),
+        ).toHaveValue(locale === 'ja' ? '英語' : 'English'),
+      );
+      expect(commands()).not.toContain('check_tool_updates');
+      fireEvent.change(
+        screen.getByRole('combobox', { name: new RegExp(language) }),
+        { target: { value: 'fr' } },
+      );
+      fireEvent.click(screen.getByRole('button', { name: locale === 'ja' ? 'ツール' : 'Tools' }));
+      const checkButton = await screen.findByRole('button', { name: button });
+      fireEvent.click(checkButton);
+      expect(checkButton).toBeDisabled();
+      expect(checkButton).toHaveAttribute('aria-busy', 'true');
+      fireEvent.click(checkButton);
+      await waitFor(() =>
+        expect(
+          vi
+            .mocked(invoke)
+            .mock.calls.filter(([command]) => command === 'check_tool_updates'),
+        ).toEqual([['check_tool_updates', undefined]]),
+      );
+      const scanButton = screen.getByRole('button', { name: rescan });
+      expect(scanButton).toBeEnabled();
+      fireEvent.click(scanButton);
+      await waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith('scan_external_tools', {
+          rescan: true,
+        }),
+      );
+      expect(checkButton).toBeDisabled();
+      await act(async () => {
+        finish();
+      });
+      expect(await screen.findByText(success)).toBeVisible();
+      await waitFor(() => expect(checkButton).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: locale === 'ja' ? '学習' : 'Learning' }));
+      expect(
+        screen.getByRole('combobox', { name: new RegExp(language) }),
+      ).toHaveValue('fr');
+      for (const mutation of [
+        'install_tool',
+        'update_tool',
+        'set_tool_provider',
+        'update_settings',
+      ])
+        expect(commands()).not.toContain(mutation);
+    },
+  );
+
+  it('surfaces metadata failures through the shared error toast and enables another explicit check', async () => {
+    mount('en', () =>
+      Promise.reject(new Error('Upstream metadata unavailable')),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Tools' }));
+    const button = await screen.findByRole('button', { name: 'Check updates' });
+    fireEvent.click(button);
+    expect(
+      await screen.findByText('Upstream metadata unavailable'),
+    ).toHaveClass('error');
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(
+      screen.queryByText('Update information checked.'),
+    ).not.toBeInTheDocument();
+    expect(
+      commands().filter((command) => command === 'check_tool_updates'),
+    ).toHaveLength(1);
+    expect(commands()).not.toContain('install_tool');
+    expect(commands()).not.toContain('update_tool');
+  });
+});

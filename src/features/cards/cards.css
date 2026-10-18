@@ -1,0 +1,208 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.compact-select {
+  font-size: 13px;
+  padding: 8px 12px;
+  background: var(--surface);
+  max-width: 220px;
+}
+.phrase-list {
+  border-top: 1px solid var(--border);
+}
+.phrase-card {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--border);
+}
+.phrase-card header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.phrase-card h3 {
+  min-width: 0;
+  font-size: clamp(22px, 2.4vw, 28px);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.3px;
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+.phrase-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.phrase-meaning {
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--text);
+  max-width: 72ch;
+  margin: 0;
+}
+.phrase-card blockquote {
+  font-size: 16px;
+  line-height: 1.8;
+  margin: 16px 0;
+  padding-left: 16px;
+  border-left: 2px solid var(--border);
+  max-width: 72ch;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.phrase-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  gap: 16px;
+  color: var(--muted);
+  margin-top: 16px;
+}
+.phrase-card footer a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 40px;
+}
+.phrase-card footer a:hover {
+  color: var(--accent);
+}
+.phrase-card footer a > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.phrase-card footer > span:not(.badge) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.phrases-page .search-box input { min-width: 0; }
+.phrases-page .search-box > .icon-button { flex-shrink: 0; width: 30px; height: 30px; min-height: 30px; }
+.phrase-card footer .badge {
+  flex-shrink: 0;
+}
+.phrase-metadata {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.phrase-language {
+  white-space: nowrap;
+}
+.phrase-details-toggle.button {
+  justify-content: flex-start;
+  padding-inline: 8px;
+  margin-left: -8px;
+  color: var(--accent);
+}
+.phrase-details-toggle[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+.phrase-details {
+  display: grid;
+  gap: 16px;
+  margin-top: 8px;
+  padding: 20px 24px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.phrase-details[hidden] {
+  display: none;
+}
+.phrase-details h4 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.phrase-details p {
+  margin: 0;
+  max-width: 76ch;
+  font-size: 15px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.phrase-details-empty {
+  color: var(--muted);
+}
+.phrase-search-matches {
+  max-width: 76ch;
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.phrase-search-matches p { margin: 8px 0; }
+.phrase-search-matches span { color: var(--muted); }
+.phrase-options {
+  position: relative;
+}
+.phrase-options summary {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  list-style: none;
+  cursor: pointer;
+  border-radius: 8px;
+  color: var(--muted);
+}
+.phrase-options summary::-webkit-details-marker {
+  display: none;
+}
+.phrase-options summary:hover,
+.phrase-options[open] summary {
+  background: var(--surface-raised);
+  color: var(--text);
+}
+.phrase-options-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+  z-index: 30;
+}
+.phrase-options-panel .button {
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+}
+@media (max-width: 620px) {
+  .phrase-card header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .phrase-card header h3 { flex-basis: 100%; }
+  .phrase-controls {
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .phrase-controls > .button {
+    padding-inline: 10px;
+  }
+  .phrase-card footer {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .phrase-metadata { justify-content: flex-start; }
+  .phrase-details { padding: 16px; }
+  .phrases-page .library-tools {
+    width: 100%;
+  }
+}

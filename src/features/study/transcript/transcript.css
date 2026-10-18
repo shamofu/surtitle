@@ -1,0 +1,193 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.transcript-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  flex: 0 0 auto;
+  align-items: start;
+  gap: 8px;
+  padding: 0 12px;
+}
+.transcript-filter-bar .transcript-marked-filter { padding-inline: 0; }
+.transcript-marked-filter:has(input:disabled) { opacity: .65; }
+.transcript-status-slot { position: relative; flex: 0 0 36px; width: 36px; height: 36px; margin-left: auto; }
+.transcript-status, .segment-options { position: relative; }
+.transcript-status summary, .segment-options summary {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 6px;
+  color: var(--muted);
+}
+.transcript-status summary { color: var(--warning); }
+.transcript-status summary::-webkit-details-marker, .segment-options summary::-webkit-details-marker { display: none; }
+.transcript-status summary:hover, .segment-options summary:hover, .segment-options[open] summary { background: var(--surface-hover); }
+.transcript-status-panel, .segment-options-panel {
+  position: absolute;
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 4px;
+  width: 220px;
+  max-width: calc(100vw - 40px);
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+}
+.transcript-status-panel { top: calc(100% + 4px); }
+.transcript-status-panel p { margin: 0 0 4px; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; color: var(--text); }
+.transcript-status-panel .button, .segment-options-panel .button { justify-content: flex-start; white-space: normal; text-align: left; }
+.segment-options-panel { bottom: calc(100% + 4px); }
+.transcript-row:has(.segment-options[open]) { z-index: 2; }
+.transcript-row.selected { border-left-width: 3px; }
+.segment-time > span:first-child { display: grid; place-items: center; width: 18px; height: 18px; }
+.segment-actions { align-items: center; }
+.segment-actions .segment-save { width: 36px; height: 36px; min-height: 36px; padding: 6px; }
+.segment-review-slot { display: flex; align-items: center; flex: 1; min-width: 20px; height: 36px; }
+.segment-review-mark { display: inline-flex; color: var(--warning); }
+.segment-translation, .suggestion-card p { color: var(--text); }
+.segment-content > .source-block-note { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.draft-cues {
+  height: 300px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 12px 0;
+  overscroll-behavior: contain;
+}
+.draft-cue {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.draft-cue p {
+  margin: 0 0 7px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  line-height: 1.8;
+}
+.draft-cue .segment-time {
+  min-height: 40px;
+  font-size: 12px;
+  align-self: start;
+}
+.draft-chunks {
+  margin: 16px 0;
+  max-height: 240px;
+  overflow: auto;
+  font-size: 12px;
+}
+.draft-chunks summary {
+  cursor: pointer;
+  color: var(--muted);
+  padding: 10px 0;
+  min-height: 40px;
+  line-height: 1.7;
+}
+.draft-chunks > div {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.draft-chunks .badge {
+  margin-left: 12px;
+}
+.boundary-editor {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 16px 0;
+  background: var(--surface);
+}
+.boundary-alternatives {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 16px 0;
+}
+.boundary-alternative {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 280px;
+  overflow: auto;
+  min-width: 0;
+}
+.boundary-alternative h4 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.boundary-alternative p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  line-height: 1.8;
+}
+.boundary-alternative .text-button {
+  font-size: 12px;
+  min-height: 40px;
+  padding-block: 8px;
+}
+.boundary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.boundary-manual {
+  margin-top: 16px;
+}
+.boundary-edit-row {
+  display: grid;
+  grid-template-columns: 110px 110px minmax(0, 1fr) 40px;
+  gap: 8px;
+  align-items: start;
+  margin: 10px 0;
+}
+.boundary-editor .button,
+.boundary-edit-row .icon-button,
+.repair-estimate .button {
+  min-height: 40px;
+}
+.boundary-edit-row textarea {
+  min-height: 70px;
+  resize: vertical;
+}
+.repair-estimate {
+  border-top: 1px solid var(--border);
+  margin-top: 18px;
+  padding-top: 16px;
+}
+.repair-estimate small {
+  display: block;
+  color: var(--muted);
+  line-height: 1.7;
+  margin-top: 8px;
+  font-size: 12px;
+  max-width: 76ch;
+}
+.repair-result {
+  margin-top: 14px;
+}
+@media (max-width: 850px) {
+  .boundary-edit-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .boundary-alternatives {
+    grid-template-columns: 1fr;
+  }
+  .draft-cue {
+    grid-template-columns: 95px minmax(0, 1fr);
+  }
+}

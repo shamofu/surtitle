@@ -1,0 +1,316 @@
+//! Durable settlement, unknown outcomes, and interrupted-work recovery.
+use super::{audit, AiStore};
+use crate::{
+    AiError, OutputFailureReason, ParsedOutput, ReservedRequest, Result, TextFailurePolicy,
+};
+use rusqlite::{params, TransactionBehavior};
+
+impl AiStore {
+    pub fn require_review(&self, job_id: &str, reason: &str) -> Result<()> {
+        let conn = self.connect()?;
+        conn.execute(
+            "UPDATE ai_jobs SET state='needs_review' WHERE id=? AND state!='cancelled'",
+            [job_id],
+        )?;
+        audit(
+            &conn,
+            self.now_ms(),
+            "source_review_required",
+            Some(job_id),
+            reason,
+        )?;
+        Ok(())
+    }
+
+    /// Only call when the native worker knows no paid request was sent (e.g. key import
+    /// or fingerprint failed). HTTP errors with unknown usage must use mark_unknown.
+    pub fn release_unsent(&self, attempt_id: &str, code: &str) -> Result<()> {
+        self.finish_attempt(attempt_id, Some(0), None, None, Some(code), "released")
+    }
+
+    pub fn settle(
+        &self,
+        attempt_id: &str,
+        actual_microusd: u64,
+        usage: &serde_json::Value,
+        response: Option<&ParsedOutput>,
+        validation_error: Option<&str>,
+    ) -> Result<()> {
+        self.finish_attempt(
+            attempt_id,
+            Some(actual_microusd),
+            Some(usage),
+            response,
+            validation_error,
+            "settled",
+        )
+    }
+
+    /// A received result with unknown price is settled without inventing a zero cost.
+    pub fn settle_unpriced(
+        &self,
+        attempt_id: &str,
+        usage: &serde_json::Value,
+        response: Option<&ParsedOutput>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        self.finish_attempt(attempt_id, None, Some(usage), response, error, "settled")
+    }
+
+    /// Record a fully received text response rejected by output validation.
+    /// Only this fixed diagnostic class can be skipped by an opted-in plan.
+    /// Unknown usage, transport failure, and local persistence errors never
+    /// become settled rejections and therefore still block further dispatch.
+    pub fn settle_rejected(
+        &self,
+        request: &ReservedRequest,
+        actual_microusd: Option<u64>,
+        usage: &serde_json::Value,
+        reason: OutputFailureReason,
+    ) -> Result<()> {
+        self.finish_attempt(
+            &request.attempt_id,
+            actual_microusd,
+            Some(usage),
+            None,
+            Some(reason.code()),
+            "settled",
+        )
+    }
+
+    pub(crate) fn record_model_version(&self, attempt_id: &str, value: Option<&str>) -> Result<()> {
+        if let Some(version) = value.filter(|v| {
+            !v.is_empty()
+                && v.len() <= 200
+                && v.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-._@".contains(&b))
+        }) {
+            self.connect()?.execute(
+                "UPDATE ai_attempts SET model_version=? WHERE id=? AND state='reserved'",
+                params![version, attempt_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn mark_unknown_usage(
+        &self,
+        attempt_id: &str,
+        observed: &serde_json::Value,
+    ) -> Result<()> {
+        self.finish_attempt(
+            attempt_id,
+            None,
+            Some(observed),
+            None,
+            Some("usage_unknown"),
+            "unknown",
+        )
+    }
+
+    pub fn mark_unknown(&self, attempt_id: &str) -> Result<()> {
+        self.finish_attempt(
+            attempt_id,
+            None,
+            None,
+            None,
+            Some("unknown_outcome"),
+            "unknown",
+        )
+    }
+
+    fn finish_attempt(
+        &self,
+        id: &str,
+        charged: Option<u64>,
+        usage: Option<&serde_json::Value>,
+        response: Option<&ParsedOutput>,
+        error: Option<&str>,
+        state: &str,
+    ) -> Result<()> {
+        if charged.is_some_and(|n| n > i64::MAX as u64) {
+            return Err(AiError::Invalid("Usage cost overflow".into()));
+        }
+        let mut conn = self.connect()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (job_id, ordinal, previous, reserve): (String, u32, String, Option<u64>) = tx
+            .query_row(
+                "SELECT job_id,ordinal,state,reserve_microusd FROM ai_attempts WHERE id=?",
+                [id],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get::<_, Option<i64>>(3)?.map(|n| n as u64),
+                    ))
+                },
+            )?;
+        if !["reserved", "unknown"].contains(&previous.as_str()) {
+            return Err(AiError::Invalid(
+                "Attempt is already final; settlement is never applied twice".into(),
+            ));
+        }
+        if state == "released" && previous != "reserved" {
+            return Err(AiError::UnknownOutcome);
+        }
+        tx.execute("UPDATE ai_attempts SET state=?,charged_microusd=?,settled_at_ms=?,usage_json=? WHERE id=?",params![state,charged.map(|n|n as i64),self.now_ms(),usage.map(serde_json::to_string).transpose()?,id])?;
+        tx.execute("UPDATE ai_approval_requests SET retry_state=NULL,retry_at_ms=NULL WHERE last_attempt_id=?", [id])?;
+        let success = response.is_some() && error.is_none() && state == "settled";
+        let dispatched: bool = tx.query_row(
+            "SELECT dispatched_at_ms IS NOT NULL FROM ai_attempts WHERE id=?",
+            [id],
+            |row| row.get(0),
+        )?;
+        let (plan, _, _, _) = super::accounting::read_job(&tx, &job_id)?;
+        if previous == "reserved" && dispatched && state != "released" {
+            self.pace_outcome(&tx, &plan, ordinal, success)?;
+        }
+        tx.execute("UPDATE ai_requests SET state=?,response_json=?,error_code=? WHERE job_id=? AND ordinal=?",params![if success {"completed"} else if state == "unknown" {"unknown"} else {"failed"},response.map(serde_json::to_string).transpose()?,error,job_id,ordinal])?;
+        let over_reservation = charged.zip(reserve).is_some_and(|(n, r)| n > r);
+        let output_within_limit = usage
+            .and_then(|usage| {
+                let candidate = match usage.get("candidatesTokenCount") {
+                    Some(value) => value.as_u64()?,
+                    None if usage
+                        .get("totalTokenCount")
+                        .and_then(serde_json::Value::as_u64)
+                        == usage
+                            .get("promptTokenCount")
+                            .and_then(serde_json::Value::as_u64) =>
+                    {
+                        0
+                    }
+                    None => return None,
+                };
+                let thoughts = match usage.get("thoughtsTokenCount") {
+                    Some(value) => value.as_u64()?,
+                    None => 0,
+                };
+                usage
+                    .get("promptTokenCount")
+                    .and_then(serde_json::Value::as_u64)?;
+                candidate.checked_add(thoughts)
+            })
+            .is_some_and(|tokens| tokens <= u64::from(plan.execution.max_output_tokens));
+        let skip_rejection = !success
+            && state == "settled"
+            && dispatched
+            && error.and_then(OutputFailureReason::from_code).is_some()
+            && output_within_limit
+            && !over_reservation
+            && plan.text_failure_policy == TextFailurePolicy::SkipRejected;
+        if !success && !skip_rejection || over_reservation {
+            tx.execute(
+                "UPDATE ai_jobs SET state='needs_review' WHERE id=? AND state NOT IN ('cancelled','paused')",
+                [&job_id],
+            )?;
+        } else {
+            // A drained batch with rejected requests is finished, but it still
+            // has work the user may explicitly reapprove. Never leave it running.
+            tx.execute("UPDATE ai_jobs SET state=CASE WHEN EXISTS(SELECT 1 FROM ai_requests WHERE job_id=? AND state!='completed') THEN 'needs_review' ELSE 'completed' END WHERE id=? AND state='approved' AND NOT EXISTS(SELECT 1 FROM ai_requests WHERE job_id=? AND state IN ('pending','reserved','unknown'))",params![job_id,job_id,job_id])?;
+        }
+        audit(&tx, self.now_ms(), state, Some(&job_id), id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Call once at application startup, before starting workers. Charges are retained.
+    pub fn recover_interrupted(&self) -> Result<u64> {
+        let mut conn = self.connect()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let interrupted = {
+            let mut statement = tx.prepare("SELECT id FROM ai_jobs WHERE state='approved'")?;
+            let jobs = statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            jobs
+        };
+        let dispatched = {
+            let mut statement = tx.prepare("SELECT job_id,ordinal FROM ai_attempts WHERE state='reserved' AND dispatched_at_ms IS NOT NULL")?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            rows
+        };
+        for (job, ordinal) in dispatched {
+            let (plan, _, _, _) = super::accounting::read_job(&tx, &job)?;
+            self.pace_outcome(&tx, &plan, ordinal, false)?;
+        }
+        let changed = tx.execute(
+            "UPDATE ai_attempts SET state='unknown' WHERE state='reserved'",
+            [],
+        )?;
+        tx.execute(
+            "UPDATE ai_approval_requests SET retry_state=NULL,retry_at_ms=NULL
+            WHERE last_attempt_id IN (SELECT id FROM ai_attempts WHERE state='unknown')",
+            [],
+        )?;
+        tx.execute("UPDATE ai_requests SET state='unknown',error_code='interrupted' WHERE state='reserved'",[])?;
+        tx.execute(
+            "UPDATE ai_jobs SET state='needs_review' WHERE state='approved'",
+            [],
+        )?;
+        audit(
+            &tx,
+            self.now_ms(),
+            "recovered_interrupted",
+            None,
+            &changed.to_string(),
+        )?;
+        tx.commit()?;
+        for job in interrupted {
+            let unknown: bool = self.connect()?.query_row(
+                "SELECT EXISTS(SELECT 1 FROM ai_attempts WHERE job_id=? AND state='unknown')",
+                [&job],
+                |row| row.get(0),
+            )?;
+            self.record_job_issue(
+                &job,
+                if unknown {
+                    "unknown_outcome"
+                } else {
+                    "interrupted"
+                },
+                "recovery",
+                None,
+                if unknown { "review_unknown" } else { "resume" },
+            )?;
+        }
+        Ok(changed as u64)
+    }
+
+    /// Finish only locally applied jobs whose requests are already durably complete.
+    pub fn finish_local_application(&self, job_id: &str) -> Result<()> {
+        self.connect()?.execute("UPDATE ai_jobs SET state='completed' WHERE id=? AND state IN ('needs_review','paused') AND NOT EXISTS(SELECT 1 FROM ai_requests WHERE job_id=? AND state!='completed')", params![job_id,job_id])?;
+        Ok(())
+    }
+
+    /// Explicitly accept the conservative reservation as potentially spent. This does
+    /// not refund it, create a retry, or approve any new paid work.
+    pub fn acknowledge_unknown(&self, attempt_id: &str) -> Result<()> {
+        let mut conn = self.connect()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (job, ordinal): (String, u32) = tx.query_row(
+            "SELECT job_id,ordinal FROM ai_attempts WHERE id=? AND state='unknown'",
+            [attempt_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        tx.execute(
+            "UPDATE ai_attempts SET state='accepted_unknown' WHERE id=?",
+            [attempt_id],
+        )?;
+        tx.execute("UPDATE ai_requests SET state='needs_review' WHERE job_id=? AND ordinal=? AND state='unknown'",params![job,ordinal])?;
+        audit(
+            &tx,
+            self.now_ms(),
+            "unknown_cost_accepted",
+            Some(&job),
+            attempt_id,
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+}

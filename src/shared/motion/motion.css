@@ -1,0 +1,54 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* MotionProvider publishes the shared tokens before paint. */
+:where(body, .app-shell, .topbar, .page-content, .modal, .study-companion,
+  button, a, input, select, textarea, summary, .media-row, .phrase-card, .transcript-row) {
+  transition: background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease);
+}
+:where(.button, .icon-button, .locale-button, .rating-button) {
+  transition: background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease);
+}
+.motion-spinner { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; }
+.toast { animation: none; }
+.motion-region[hidden] { display: none !important; }
+.motion-region[inert] { pointer-events: none; }
+.motion-swap { position: relative; min-width: 0; }
+.motion-swap-live { min-width: 0; }
+.motion-swap-inline { display: inline-grid; vertical-align: baseline; }
+.motion-swap-inline > .motion-swap-live { display: inline-flex; align-items: center; gap: inherit; }
+.animated-value { font-variant-numeric: tabular-nums; white-space: inherit; max-width: 100%; }
+.button > .motion-region { display: inline-flex; align-items: center; }
+.notification-portal { display: contents; }
+.toast-slot { min-width: 0; }
+.toast-slot > .toast { width: 100%; }
+/* Expansion preserves the original hit area, including its bottom edge. */
+/* Native controls and navigation links share the press response of MotionButton. */
+:where(button, a, summary):not([data-motion-control]):not(.segment-text):not(:disabled):not([aria-disabled='true']) {
+  transition: background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease),
+    scale var(--motion-release) var(--motion-ease);
+}
+@media (hover: hover) {
+  :root[data-motion='full'] :where(button, a, summary):not([data-motion-control]):not(.segment-text):not(:disabled):not([aria-disabled='true']):hover {
+    scale: 1.025;
+  }
+}
+:root[data-motion='full'] :where(button, a, summary):not([data-motion-control]):not(.segment-text):not(:disabled):not([aria-disabled='true']):active {
+  scale: .94;
+  transition-duration: var(--motion-press);
+}
+details[data-motion-state='exiting'] > :not(summary) { pointer-events: none; }
+:root[data-motion='reduce'] *,
+:root[data-motion='reduce'] *::before,
+:root[data-motion='reduce'] *::after,
+:root[data-visibility='hidden'] *,
+:root[data-visibility='hidden'] *::before,
+:root[data-visibility='hidden'] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}

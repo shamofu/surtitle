@@ -1,0 +1,397 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { MotionLink } from '../../shared/ui/MotionLink';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
+import { Link } from '@tanstack/react-router';
+import { m } from 'motion/react';
+import {
+  ArrowDownToLine,
+  ArrowRight,
+  BookOpen,
+  ChevronDown,
+  ChevronRight,
+  Layers3,
+  MoreHorizontal,
+  Search,
+  Volume2,
+  X,
+} from 'lucide-react';
+import { cardsApi } from './api';
+import { playerApi } from '../study/playback/api';
+import type { StudyCard } from '../../shared/contracts/cards';
+import {
+  useDataActions,
+  useSnapshot,
+  useAppearance,
+  useNotifications,
+} from '../../app/runtime';
+import { dueCards, languageName } from '../../shared/format';
+import {
+  Badge,
+  Button,
+  EmptyState,
+  PageTitle,
+  IconButton,
+} from '../../shared/ui/index';
+import { TransferDialog } from '../transfer/TransferDialog';
+import { EditCardDialog, DeleteCardDialog } from './CardManagement';
+import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
+import { AnimatedValue, MotionRegion, MotionSwap, motionLayoutTransition, motionReferences, useMotionEntrance } from '../../shared/motion';
+import { useListMotion } from '../../shared/motion/useListMotion';
+
+function closePhraseMenu(element: HTMLElement, restoreFocus = true) {
+  const menu = element.closest('details');
+  if (!menu) return;
+  if (restoreFocus) menu.querySelector('summary')?.focus({ preventScroll: true });
+}
+
+function matchesPhraseText(value: string | undefined, query: string) {
+  return (value ?? '').toLocaleLowerCase().includes(query);
+}
+
+function matchingExcerpt(value: string, query: string) {
+  const start = Math.max(0, value.toLocaleLowerCase().indexOf(query) - 48);
+  const end = Math.min(value.length, start + Math.max(160, query.length + 48));
+  return `${start ? '…' : ''}${value.slice(start, end)}${end < value.length ? '…' : ''}`;
+}
+
+export function CardsPage() {
+  const page = useRef<HTMLDivElement>(null);
+  useMotionEntrance(page);
+  const { mutate, refresh } = useDataActions();
+  const { data, loading, error } = useSnapshot();
+  const { t, locale } = useAppearance();
+  const { report } = useNotifications();
+  const [search, setSearch] = useState('');
+  const [language, setLanguage] = useState('all');
+  const [transfer, setTransfer] = useState(false);
+  const [edit, setEdit] = useState<StudyCard>();
+  const [deleting, setDeleting] = useState<StudyCard>();
+  const [busyCard, setBusyCard] = useState<string>();
+  const [openMenu, setOpenMenu] = useState<string>();
+  const [expandedCard, setExpandedCard] = useState<string>();
+  const activeMenu = useRef<HTMLDetailsElement | null>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+  const [focusedCard, setFocusedCard] = useState<string>();
+  useEffect(() => {
+    if (!openMenu) return;
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Node && !activeMenu.current?.contains(event.target)) {
+        setOpenMenu(undefined);
+      }
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [openMenu]);
+  function closeMenu(element: HTMLElement) {
+    setOpenMenu(undefined);
+    closePhraseMenu(element);
+  }
+  async function suspend(card: StudyCard) {
+    setBusyCard(card.id);
+    await report(() =>
+      mutate(() => cardsApi.suspendCard(card.id, !card.suspended), {
+        kind: 'snapshot',
+      }),
+    );
+    setBusyCard(undefined);
+  }
+  const cards = data?.cards || [];
+  const languages = [...new Set(cards.map((card) => card.language))];
+  const query = search.trim().toLocaleLowerCase();
+  const filtered = cards.filter(
+    (card) =>
+      (language === 'all' || card.language === language) &&
+      [card.term, card.meaning, card.example, card.translation, card.explanation]
+        .some(value => matchesPhraseText(value, query)),
+  );
+  useEffect(() => {
+    if (expandedCard && !filtered.some(card => card.id === expandedCard)) setExpandedCard(undefined);
+  }, [expandedCard, filtered]);
+  const due = dueCards(cards);
+  const dueIds = new Set(due.map(card => card.id));
+  const mediaById = useMemo(() => new Map(data?.media.map(media => [media.id, media])), [data?.media]);
+  const virtualized = filtered.length > 40;
+  const reflow = useListMotion(!virtualized);
+  const listDependency = `${language}:${search}:${expandedCard ?? ''}`;
+  const scroller = list.current?.closest<HTMLElement>('.page-content');
+  const virtual = useVirtualizer({
+    useFlushSync: false,
+    enabled: virtualized,
+    count: filtered.length,
+    getScrollElement: () => list.current?.closest<HTMLElement>('.page-content') ?? null,
+    // Disabling virtual mode clears its observed viewport. Seed the current
+    // viewport when reenabling so retained, focused rows never disappear for a frame.
+    initialRect: scroller ? { width: scroller.clientWidth, height: scroller.clientHeight } : undefined,
+    initialOffset: () => list.current?.closest<HTMLElement>('.page-content')?.scrollTop ?? 0,
+    getItemKey: index => filtered[index].id,
+    estimateSize: () => 240,
+    overscan: 4,
+    gap: 12,
+    scrollMargin,
+    rangeExtractor: range => [...new Set([...defaultRangeExtractor(range), ...[focusedCard, openMenu, edit?.id, deleting?.id]
+      .map(id => filtered.findIndex(card => card.id === id)).filter(index => index >= 0)])].sort((a, b) => a - b),
+  });
+  useLayoutEffect(() => {
+    const element = list.current, scroller = element?.closest<HTMLElement>('.page-content');
+    if (!element || !scroller || !virtualized) return;
+    const measure = () => setScrollMargin(element.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop);
+    measure();
+    const observer = new ResizeObserver(measure); observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [virtualized]);
+  useLayoutEffect(() => { list.current?.closest<HTMLElement>('.page-content')?.scrollTo({ top: 0 }); }, [search, language]);
+  useLayoutEffect(() => {
+    if (!virtualized) return;
+    list.current?.querySelectorAll<HTMLElement>('[data-index]').forEach(element => virtual.measureElement(element));
+  }, [expandedCard, virtualized, virtual]);
+  const visible = virtualized ? virtual.getVirtualItems().map(item => ({ card: filtered[item.index], item })) : filtered.map(card => ({ card, item: undefined }));
+  return (
+    <div className="phrases-page" ref={page}>
+      <PageTitle
+        title={t('フレーズ帳', 'Phrases')}
+        description={t(
+          '作品で出会った表現を、音声と文脈から振り返る。',
+          'Return to the phrases you saved, with their original audio and context.',
+        )}
+      >
+        <Button onClick={() => setTransfer(true)}>
+          <ArrowDownToLine size={16} />
+          {t('書き出す', 'Export')}
+        </Button>
+        <MotionLink to="/review" className="button primary">
+          <BookOpen size={17} />
+          {t('復習する', 'Start review')}
+          <MotionRegion mode="status" open={due.length > 0} as="span"><span className="button-count"><AnimatedValue value={due.length} /></span></MotionRegion>
+        </MotionLink>
+      </PageTitle>
+      <div className="library-toolbar">
+        <div className="section-heading">
+          <h2>{t('保存した表現', 'Saved phrases')}</h2>
+          <span className="count-pill"><AnimatedValue value={filtered.length} /></span>
+        </div>
+        <div className="library-tools">
+          <select
+            className="compact-select"
+            aria-label={t('学習言語で絞り込む', 'Filter by learning language')}
+            value={language}
+            onChange={(event) => { setLanguage(event.target.value); setOpenMenu(undefined); }}
+          >
+            <option value="all">{t('すべての言語', 'All languages')}</option>
+            {languages.map((code) => (
+              <option key={code} value={code}>
+                {languageName(code, locale)}
+              </option>
+            ))}
+          </select>
+          <div className="search-box">
+            <Search size={16} />
+            <input
+              ref={searchInput}
+              value={search}
+              onChange={(event) => { setSearch(event.target.value); setOpenMenu(undefined); }}
+              placeholder={t('表現・訳・解説を検索', 'Search phrases, translations, notes')}
+              aria-label={t('フレーズを検索', 'Search your phrases')}
+            />
+            <MotionRegion mode="status" open={!!search} as="span"><IconButton label={t('検索をクリア', 'Clear search')} onClick={() => {
+              setSearch(''); searchInput.current?.focus();
+            }}><X size={15} /></IconButton></MotionRegion>
+          </div>
+        </div>
+      </div>
+      <MotionSwap disabled stateKey={!data && loading ? 'loading' : !data && error ? 'error' : `${language}:${filtered.map(card => card.id).join('|')}`}>
+      {!data && loading ? <p role="status">{t('フレーズを読み込み中…', 'Loading your phrases…')}</p>
+      : !data && error ? <div className="notice warning" role="alert">
+        <span>{t('フレーズを読み込めませんでした。', 'Could not load your phrases.')} {error.message}</span>
+        <Button onClick={() => void report(() => refresh())}>{t('再試行', 'Retry')}</Button>
+      </div>
+      : !filtered.length ? (
+        <div className="library-empty">
+          <EmptyState
+            icon={<Layers3 size={33} strokeWidth={1.4} />}
+            title={
+              cards.length
+                ? t('一致するフレーズはありません', 'No matching phrases')
+                : t(
+                    '保存したフレーズはまだありません',
+                    'No saved phrases yet',
+                  )
+            }
+            description={cards.length
+              ? t('検索語や言語の絞り込みを変えてください。', 'Try another search or language filter.')
+              : t(
+                  '作品を観ながら気になる表現を保存すると、ここで原音を聴き直せます。',
+                  'Save a phrase while watching, then listen to its original audio here.',
+                )}
+          >
+            {cards.length ? <Button variant="primary" onClick={() => {
+              setSearch(''); setLanguage('all'); searchInput.current?.focus();
+            }}>{t('絞り込みをリセット', 'Reset filters')}</Button> : <MotionLink to="/" className="button primary">
+              {t('作品を選ぶ', 'Choose something to watch')}
+              <ArrowRight size={16} />
+            </MotionLink>}
+          </EmptyState>
+        </div>
+      ) : (
+        <div ref={list} className="phrase-list" style={virtualized ? { position: 'relative', height: virtual.getTotalSize(), display: 'block' } : undefined}>
+          {visible.map(({ card, item }) => {
+            const media = mediaById.get(card.mediaId);
+            const isDue = dueIds.has(card.id);
+            const isExpanded = expandedCard === card.id;
+            const detailsId = `phrase-details-${card.id}`;
+            const hiddenMatch = query && ![card.term, card.meaning, card.example].some(value => matchesPhraseText(value, query));
+            const matchingDetails = hiddenMatch ? [
+              { label: t('翻訳', 'Translation'), text: card.translation },
+              { label: t('解説・メモ', 'Explanation or notes'), text: card.explanation },
+            ].filter(field => field.text && matchesPhraseText(field.text, query)) : [];
+            return (
+              <div key={card.id} data-index={item?.index}
+                ref={item ? virtual.measureElement : undefined}
+                style={item ? { position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${item.start - scrollMargin}px)` } : undefined}>
+              <m.article className={`phrase-card${isExpanded ? ' is-expanded' : ''}`}
+                layout={reflow ? 'position' : false} layoutDependency={listDependency}
+                transition={{ layout: motionLayoutTransition }} data-motion-reference={motionReferences.list}
+                onFocusCapture={() => setFocusedCard(card.id)}
+                onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocusedCard(undefined); }}>
+                <header>
+                  <h3><MotionSwap disabled as="span" stateKey={card.term}>{card.term}</MotionSwap></h3>
+                  <div className="phrase-controls">
+                    <Button variant="ghost" aria-label={t('フレーズを編集', 'Edit phrase')} onClick={() => setEdit(card)}>
+                      {t('編集', 'Edit')}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      disabled={!card.audioPath}
+                      aria-label={t(`${card.term}の原音を聴く`, `Listen to ${card.term}`)}
+                      onClick={() =>
+                        void report(() => playerApi.playCardAudio(card.id))
+                      }
+                    >
+                      <Volume2 size={18} />
+                      {t('原音を聴く', 'Listen')}
+                    </Button>
+                    <AnimatedDetails
+                      className="phrase-options"
+                      open={openMenu === card.id}
+                      onBlur={(event) => {
+                        if (!event.currentTarget.contains(event.relatedTarget)) setOpenMenu(undefined);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Escape' || !event.currentTarget.open) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        closeMenu(event.currentTarget);
+                      }}
+                    >
+                      <summary aria-label={t(`${card.term}の操作`, `Actions for ${card.term}`)} onClick={(event) => {
+                        event.preventDefault();
+                        activeMenu.current = event.currentTarget.closest('details');
+                        setOpenMenu(current => current === card.id ? undefined : card.id);
+                      }}>
+                        <MoreHorizontal size={20} />
+                      </summary>
+                      <div className="phrase-options-panel">
+                        <Button
+                          busy={busyCard === card.id}
+                          onClick={(event) => { closeMenu(event.currentTarget); void suspend(card); }}
+                        >
+                          {card.suspended
+                            ? t('復習を再開', 'Resume reviews')
+                            : t('復習を停止', 'Suspend reviews')}
+                        </Button>
+                        <Button variant="danger" onClick={(event) => {
+                          closeMenu(event.currentTarget);
+                          setDeleting(card);
+                        }}>
+                          {t('削除', 'Delete')}
+                        </Button>
+                      </div>
+                    </AnimatedDetails>
+                  </div>
+                </header>
+                <p className="phrase-meaning"><MotionSwap disabled as="span" stateKey={card.meaning}>{card.meaning}</MotionSwap></p>
+                <blockquote><MotionSwap disabled as="span" stateKey={card.example}>{card.example}</MotionSwap></blockquote>
+                {!isExpanded && matchingDetails.length > 0 && <div className="phrase-search-matches">
+                  {matchingDetails.map(field => <p key={field.label}>
+                    <span>{field.label}{t('に一致：', ' match: ')}</span>
+                    {matchingExcerpt(field.text!, query)}
+                  </p>)}
+                </div>}
+                <Button
+                  variant="ghost"
+                  className="phrase-details-toggle"
+                  aria-expanded={isExpanded}
+                  aria-controls={detailsId}
+                  aria-label={t(`${card.term}の訳・解説`, `Translation and notes for ${card.term}`)}
+                  onClick={() => setExpandedCard(current => current === card.id ? undefined : card.id)}
+                >
+                  <ChevronDown size={16} aria-hidden="true" />
+                  {t('訳・解説', 'Translation and notes')}
+                </Button>
+                <div id={detailsId} className="phrase-details" hidden={!isExpanded}>
+                  {card.translation?.trim() && <section>
+                    <h4>{t('翻訳', 'Translation')}</h4>
+                    <p>{card.translation}</p>
+                  </section>}
+                  {card.explanation?.trim() && <section>
+                    <h4>{t('解説・メモ', 'Explanation or notes')}</h4>
+                    <p>{card.explanation}</p>
+                  </section>}
+                  {!card.translation?.trim() && !card.explanation?.trim() && <p className="phrase-details-empty">
+                    {t('訳・解説はまだありません。「編集」から追加できます。', 'No translation or notes yet. Add them with Edit.')}
+                  </p>}
+                </div>
+                <footer>
+                  {media ? (
+                    <Link
+                      to="/study/$mediaId"
+                      params={{ mediaId: card.mediaId }}
+                    >
+                      <BookOpen size={15} />
+                      <span>{media.title}</span>
+                      <ChevronRight size={15} />
+                    </Link>
+                  ) : (
+                    <span>
+                      {card.sourceTitle ||
+                        t('除外した教材の文脈', 'Context from removed media')}
+                    </span>
+                  )}
+                  <div className="phrase-metadata">
+                    <span className="phrase-language">{languageName(card.language, locale)}</span>
+                    <MotionSwap disabled as="span" stateKey={`${card.suspended}:${isDue}`}><Badge tone={isDue ? 'accent' : 'neutral'}>
+                    {card.suspended
+                      ? t('復習を停止中', 'Reviews suspended')
+                      : isDue
+                        ? t('復習の時間', 'Ready to review')
+                        : t('次回の復習待ち', 'Review scheduled')}
+                    </Badge></MotionSwap>
+                  </div>
+                </footer>
+              </m.article>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      </MotionSwap>
+      {transfer && <TransferDialog onClose={() => setTransfer(false)} />}
+      {edit && (
+        <EditCardDialog card={edit} onClose={() => {
+          // Keep the opener mounted until React Aria restores focus, including
+          // when filtering just moved the card outside the virtual viewport.
+          setFocusedCard(edit.id);
+          setEdit(undefined);
+        }} />
+      )}
+      {deleting && (
+        <DeleteCardDialog
+          card={deleting}
+          onClose={() => { setFocusedCard(deleting.id); setDeleting(undefined); }}
+        />
+      )}
+    </div>
+  );
+}

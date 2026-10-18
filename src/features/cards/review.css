@@ -1,0 +1,284 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.review-page {
+  max-width: 820px !important;
+  width: 100%;
+  margin-inline: auto;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 4px minmax(0, 1fr);
+  gap: 16px;
+}
+.page-content:has(.review-page) { padding: 16px 24px; overflow: hidden; }
+.review-session, .review-transition, .review-transition > .motion-swap-live { min-height: 0; height: 100%; }
+.review-transition > .motion-swap-live { display: grid; grid-template-rows: minmax(0, 1fr) auto; }
+.review-transition { position: relative; }
+.review-outgoing { position: absolute; inset: 0; pointer-events: none; }
+.review-outgoing > .review-card { height: 100%; background: transparent; border-color: transparent; }
+.review-outgoing .review-prompt, .review-outgoing .review-answer { background: transparent; }
+.review-outgoing .review-answer { border-color: transparent; }
+.review-answer-reveal { min-height: 0; }
+.review-page-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.review-page-header > .back-link { justify-self: start; }
+.review-page-header > .review-counter { justify-self: end; }
+.review-counter {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.review-title {
+  margin: 0;
+  text-align: center;
+}
+.review-title h1 {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
+.review-title p {
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.session-progress {
+  height: 4px;
+  background: var(--surface-raised);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 0;
+}
+.session-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.review-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+.review-card-top {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 24px 0;
+}
+.review-question,
+.review-answer-label {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.review-unavailable { display: flex; flex-direction: column; }
+.review-prompt {
+  flex: none;
+  max-height: 48%;
+  overflow: auto;
+  padding: 20px 24px;
+}
+.review-answer-region { flex: 1; min-height: 64px; overflow: auto; overscroll-behavior: contain; }
+.review-answer-region > .motion-swap-live { min-height: 100%; }
+.review-prompt h2 {
+  font-size: clamp(24px, 3vw, 34px);
+  letter-spacing: -0.6px;
+  font-weight: 550;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.review-prompt p {
+  font-size: 18px;
+  line-height: 1.8;
+  color: var(--text);
+  margin: 12px 0;
+  max-width: 66ch;
+  overflow-wrap: anywhere;
+}
+.review-answer {
+  min-height: 88px;
+  padding: 20px 24px;
+  background: var(--surface-raised);
+  border-top: 1px solid var(--border);
+}
+.review-answer.concealed {
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.review-answer p {
+  font-size: 18px;
+  line-height: 1.8;
+  margin-top: 9px;
+  overflow-wrap: anywhere;
+}
+.review-answer kbd {
+  margin-left: 10px;
+  font-size: 12px;
+  color: inherit;
+  background: transparent;
+  border-color: currentColor;
+}
+.review-answer .review-translation,
+.review-answer .review-explanation {
+  font-size: 15px;
+  color: var(--text);
+}
+.review-detail-label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+.review-answer .review-explanation {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.review-card footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 24px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+}
+.review-answer p,
+.review-card footer a,
+.review-card footer > span:not(.review-card-reps) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.review-card-reps {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.rating-area {
+  text-align: center;
+  margin-top: 12px;
+}
+.rating-area > p {
+  font-size: 15px;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+.rating-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.rating-button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 8px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.rating-button strong {
+  font-weight: 550;
+  font-size: 15px;
+}
+.rating-button small,
+.rating-area > small {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.rating-key {
+  position: absolute;
+  left: 10px;
+  top: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.rating-button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.rating-area.waiting .rating-buttons {
+  visibility: hidden;
+}
+@media (max-height: 760px) {
+  .review-title p, .rating-area > small { display: none; }
+  .rating-button { padding: 20px 8px 12px; }
+  .review-card-top { padding: 10px 20px 0; }
+  .review-prompt { padding: 10px 20px; }
+  .review-prompt h2 { font-size: 26px; line-height: 1.3; }
+  .review-prompt p { font-size: 16px; line-height: 1.5; margin: 6px 0; }
+  .review-answer { padding: 12px 20px; }
+  .review-card footer { padding: 10px 20px; }
+  .review-title h1 { font-size: 24px; }
+}
+@media (max-height: 680px) {
+  .review-answer.concealed { min-height: 64px; padding-block: 8px; }
+}
+.review-complete {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  padding: 36px 0;
+}
+.review-complete-icon {
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+.review-complete h2 {
+  font-size: 24px;
+  font-weight: 550;
+}
+.review-complete p {
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--muted);
+  margin: 16px 0 24px;
+  max-width: 60ch;
+}
+.review-complete-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+@media (max-width: 620px) {
+  .review-page-header { gap: 8px; }
+  .review-title p { display: none; }
+  .review-page-header > .back-link { font-size: 12px; }
+  .review-card-top,
+  .review-prompt,
+  .review-answer,
+  .review-card footer {
+    padding-inline: 20px;
+  }
+  .review-question {
+    max-width: 24ch;
+    text-align: right;
+  }
+  .rating-buttons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .review-card footer {
+    flex-wrap: wrap;
+  }
+}
+/* Small work areas need document scrolling, rather than a clipped card and controls. */
+@media (max-width: 820px) and (max-height: 500px) {
+  .page-content:has(.review-page) { overflow: auto; }
+  .review-page { height: auto; min-height: 100%; grid-template-rows: auto 4px auto; }
+  .review-session, .review-transition, .review-transition > .motion-swap-live { height: auto; }
+  .review-transition > .motion-swap-live { grid-template-rows: auto auto; }
+  .review-card { min-height: 280px; }
+  .review-prompt { max-height: none; }
+}

@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "platform": "windows-x64",
+  "purpose": "Intended Windows distribution: source-built libmpv and official CPU ONNX Runtime; Microsoft VC Runtime is a separately installed prerequisite.",
+  "components": [
+    {
+      "id": "libmpv",
+      "version": "0.41.0-surtitle-ffmpeg-9.0.2-20261011",
+      "provider": "Surtitle source build in isolated Linux container (MinGW x64)",
+      "archiveUrl": null,
+      "archiveFile": null,
+      "runtimeFiles": [
+        {
+          "source": "mpv-2.dll",
+          "target": "mpv-2.dll"
+        }
+      ],
+      "noticeFiles": [
+        {
+          "path": "native/libmpv-ThirdPartyNotices.txt"
+        }
+      ],
+      "redistribution": {
+        "dependencyInventory": {
+          "path": "work/native-ci-artifact/libmpv-build-evidence.json"
+        },
+        "correspondingSource": {
+          "path": "work/native-ci-artifact/libmpv-source.tar.gz"
+        }
+      },
+      "format": "source-build",
+      "localRuntimePath": "work/native-ci-artifact",
+      "sourceId": "mpv"
+    },
+    {
+      "id": "onnxruntime",
+      "version": "1.29.0",
+      "provider": "microsoft/onnxruntime (official CPU release)",
+      "sourcePage": "https://github.com/microsoft/onnxruntime/releases/tag/v1.29.0",
+      "archiveUrl": "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-win-x64-1.29.0.zip",
+      "archiveFile": "ort.zip",
+      "format": "zip",
+      "runtimeFiles": [
+        {
+          "source": "onnxruntime-win-x64-1.29.0/lib/onnxruntime.dll",
+          "target": "onnxruntime.dll"
+        },
+        {
+          "source": "onnxruntime-win-x64-1.29.0/lib/onnxruntime_providers_shared.dll",
+          "target": "onnxruntime_providers_shared.dll"
+        }
+      ],
+      "noticeFiles": [
+        {
+          "path": "native/onnxruntime-LICENSE"
+        },
+        {
+          "path": "native/onnxruntime-ThirdPartyNotices.txt"
+        },
+        {
+          "path": "native/onnxruntime-ActualDependencyNotices.txt"
+        }
+      ],
+      "redistribution": {
+        "dependencyInventory": {
+          "path": "work/native-ci-artifact/onnxruntime-source-inventory.json"
+        },
+        "correspondingSource": {
+          "path": "work/native-ci-artifact/onnxruntime-source.tar.gz"
+        }
+      }
+    }
+  ],
+  "models": [
+    {
+      "id": "silero-vad",
+      "version": "6.2",
+      "sourceCommit": "be95df9152c0d7618fa1edfeb296fc3dae32376f",
+      "url": "https://raw.githubusercontent.com/snakers4/silero-vad/be95df9152c0d7618fa1edfeb296fc3dae32376f/src/silero_vad/data/silero_vad.onnx",
+      "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+      "developmentPath": "work/native-fixtures/silero_vad.onnx",
+      "installedPath": "models/silero_vad.onnx",
+      "bundled": false,
+      "license": "MIT",
+      "noticePath": "native/silero-LICENSE",
+      "noticeSha256": "2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b"
+    }
+  ],
+  "prerequisites": [
+    {
+      "id": "microsoft-vc-runtime-x64",
+      "minimumVersion": "14.44.35211.0",
+      "bundled": false,
+      "installedBy": "Microsoft interactive installer after explicit user consent",
+      "downloadUrl": "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+      "requiredSystemFiles": [
+        "msvcp140.dll",
+        "msvcp140_1.dll",
+        "vcruntime140.dll",
+        "vcruntime140_1.dll"
+      ],
+      "checkBeforeAppLaunch": true,
+      "hookPath": "native/windows-prerequisite.nsh",
+      "helperPath": "native/vc-prerequisite.ps1"
+    }
+  ]
+}

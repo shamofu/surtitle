@@ -1,0 +1,25 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Saved-learning management. */
+.card-management {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0;
+}
+.card-management .button {
+  font-size: 13px;
+  padding: 9px 12px;
+  min-height: 40px;
+}
+.track-controls select {
+  max-width: 230px;
+}
+.study-top .page-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 1100px) {
+  .study-top .page-actions {
+    max-width: 350px;
+  }
+}

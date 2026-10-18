@@ -1,0 +1,465 @@
+name: Test and release
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+env:
+  CARGO_TARGET_DIR: ${{ github.workspace }}/work/target
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  validate:
+    if: github.event.deleted != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - run: node scripts/check-release.mjs
+  native-build:
+    needs: [validate]
+    uses: ./.github/workflows/native-build.yml
+  browser:
+    needs: [validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: docker/setup-buildx-action@v4.3.0
+      - name: Build the pinned browser test environment
+        id: browser-build
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: .
+          file: e2e/browser/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: surtitle-browser-tests
+          cache-from: type=gha,scope=browser-linux-amd64
+          cache-to: type=gha,scope=browser-linux-amd64,mode=max
+      - name: Browser behavior, UI structure and layout
+        id: browser-tests
+        run: |
+          mkdir -p work/test-results work/playwright-report
+          docker run --rm --init --ipc=host \
+            --mount "type=bind,source=$PWD/work/test-results,target=/app/work/test-results" \
+            --mount "type=bind,source=$PWD/work/playwright-report,target=/app/work/playwright-report" \
+            surtitle-browser-tests
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: browser-evidence-${{ github.sha }}
+          path: |
+            work/test-results/browser/
+            work/playwright-report/browser/
+  linux:
+    needs: [validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: 4
+      WEBKIT_DISABLE_COMPOSITING_MODE: 1
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        id: node
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Read the native Rust toolchain pin
+        id: rust
+        shell: bash
+        run: echo "version=$(node -p 'require("./native/installer-inputs.json").rust.version')" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+          components: rustfmt, clippy
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: cargo-nextest@0.9.148
+      - name: Install the package manager declared by this checkout
+        id: pnpm
+        run: |
+          npm install -g "$(node -p 'require("./package.json").packageManager')"
+          echo "version=$(pnpm --version)" >> "$GITHUB_OUTPUT"
+          echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: ubuntu-24.04-debug
+          workspaces: . -> work/target
+      - name: Install Linux desktop and test dependencies
+        id: native-dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake perl pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf xvfb dbus-x11 webkit2gtk-driver ffmpeg libmpv-dev fonts-noto-cjk
+      - run: pnpm install --frozen-lockfile
+        id: dependencies
+      - run: pnpm setup:rust-tools
+        id: rust-tools
+      - name: Production feature contract
+        id: contracts
+        run: node scripts/check-production-features.mjs
+      - name: Frontend and script tests
+        id: javascript-tests
+        run: pnpm test
+        env:
+          SURTITLE_TEST_REPORT: work/test-results/vitest/linux.xml
+      - name: Build frontend
+        id: frontend-build
+        run: pnpm build
+      - name: Rust formatting
+        id: rust-format
+        run: pnpm fmt:rust:check
+      - name: Rust workspace tests
+        id: rust-tests
+        run: pnpm test:rust
+      - name: Rust tests without default features
+        id: rust-no-default
+        run: pnpm test:rust:no-default-features
+      - name: Rust documentation tests
+        id: rust-doc
+        run: pnpm test:rust:doc
+      - name: Rust lint
+        id: rust-lint
+        run: pnpm lint:rust
+      - name: Dependency audits
+        id: dependency-audits
+        run: |
+          pnpm audit:rust
+          node scripts/audit-js-licenses.mjs
+      - name: Required FFmpeg integration tests
+        id: rust-native
+        run: SURTITLE_TEST_FFMPEG="$(command -v ffmpeg)" pnpm test:rust:required linux-ffmpeg
+      - name: Build and seed the native Linux application
+        id: native-build
+        run: |
+          pnpm build:native:e2e
+          pnpm test:fixtures
+          mkdir -p work
+          data_dir="$(mktemp -d "$PWD/work/e2e-linux.XXXXXXXX")"
+          pnpm seed:fixtures "$data_dir" "$PWD/work/test-results/fixtures/日本語 & sample.mp4"
+          echo "SURTITLE_E2E_DATA_DIR=$data_dir" >> "$GITHUB_ENV"
+      - name: WebKitGTK and native Tauri E2E
+        id: native-e2e
+        run: dbus-run-session -- xvfb-run -a pnpm test:e2e
+        env:
+          SURTITLE_E2E_BINARY: ${{ github.workspace }}/work/target/debug/surtitle
+          SURTITLE_E2E_SEED_BINARY: ${{ github.workspace }}/work/target/debug/examples/seed_fixture
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: linux-evidence-${{ github.sha }}
+          path: |
+            work/artifacts/
+            work/test-results/
+  windows:
+    needs: [native-build]
+    runs-on: windows-2025
+    # Native build/runtime checks precede the sequential desktop suites.
+    # Leave headroom after the E2E limit to upload failure evidence.
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        id: node
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Prepare hosted Windows desktop capacity
+        id: desktop-setup
+        run: node e2e/support/prepare-ci-desktop.mjs
+      - name: Prepare and verify native input desktop
+        id: input-setup
+        run: |
+          node e2e/support/prepare-native-input.mjs
+          & e2e/support/ci-desktop.ps1 -Action prepare-input
+          Copy-Item -LiteralPath work/test-results/windows-input-console.json -Destination work/test-results/windows-input-console-pre-build.json
+          node e2e/support/native-input-smoke.mjs
+      - name: Read the native Rust toolchain pin
+        id: rust
+        shell: bash
+        run: echo "version=$(node -p 'require("./native/installer-inputs.json").rust.version')" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+          components: rustfmt, clippy
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: cargo-nextest@0.9.148
+      - name: Install the package manager declared by this checkout
+        id: pnpm
+        run: |
+          $packageManager = (Get-Content package.json -Raw | ConvertFrom-Json).packageManager
+          npm install -g $packageManager
+          "version=$(pnpm --version)" >> $env:GITHUB_OUTPUT
+          "store=$(pnpm store path --silent)" >> $env:GITHUB_OUTPUT
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: native-build-${{ github.sha }}
+          path: work/native-ci-artifact/
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: windows-2025-debug
+          workspaces: . -> work/target
+      - run: pnpm install --frozen-lockfile
+        id: dependencies
+      - run: node scripts/check-production-features.mjs
+        id: production-contract
+      - name: Windows process, profile and distribution script tests
+        id: script-tests
+        run: pnpm test:scripts --exclude e2e/support/foreground-activation.test.mjs
+        env:
+          SURTITLE_TEST_REPORT: work/test-results/vitest/windows-scripts.xml
+      - name: Verify native activation when foreground requests are denied
+        id: foreground-tests
+        run: pnpm test:scripts e2e/support/foreground-activation.test.mjs
+        env:
+          SURTITLE_E2E_NATIVE_INPUT: '1'
+          SURTITLE_TEST_REPORT: work/test-results/vitest/windows-foreground.xml
+      - run: pnpm build
+        id: frontend-build
+      - name: Rust workspace tests
+        id: rust-tests
+        run: pnpm test:rust
+      - name: Verify ordinary builds cannot bypass evaluation accounting
+        id: rust-no-default
+        run: pnpm test:rust:no-default-features
+      - name: Rust documentation tests
+        id: rust-doc
+        run: pnpm test:rust:doc
+      - run: pnpm lint:rust
+        id: rust-lint
+      - name: Prepare native runtime and test initialization
+        id: native-runtime
+        run: |
+          pwsh native/windows/native-prepare.ps1 -WithDevModel
+          pwsh native/windows/native-smoke.ps1
+      - name: Cache the pinned test FFmpeg archive
+        uses: actions/cache@v6.1.0
+        with:
+          path: work/ci-ffmpeg/*.zip
+          key: test-ffmpeg-${{ runner.os }}-${{ hashFiles('e2e/support/prepare-ffmpeg.ps1') }}
+      - name: Prepare native WebDriver and generated media
+        id: native-tools-fixtures
+        run: |
+          pnpm setup:driver
+          pwsh e2e/support/prepare-webdriver.ps1 -InstallRuntime
+          & e2e/support/prepare-ffmpeg.ps1
+          pnpm test:fixtures
+          & $env:FFMPEG_PATH -v error -f lavfi -i 'testsrc2=size=320x180:rate=12:duration=3' -c:v libaom-av1 -cpu-used 8 -crf 50 -y work/e2e-av1.mkv
+          pnpm build:fixtures
+          # Create mutable SQLite files with the same permissions as the app.
+          $seedArguments = ConvertTo-Json -Compress -InputObject @("$PWD/work/e2e-windows", "$PWD/work/test-results/fixtures/日本語 & sample.mp4")
+          $seedArgumentsBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($seedArguments))
+          & pwsh -NoProfile -File e2e/support/run-windows-standard-user.ps1 -Application "$PWD/work/target/debug/examples/seed_fixture.exe" -ArgumentsBase64 $seedArgumentsBase64
+          if ($LASTEXITCODE -ne 0) { throw 'Windows E2E learning fixture preparation failed.' }
+      - name: Build actual Windows native E2E binary
+        id: native-build
+        run: |
+          $frontendScript = node e2e/support/frontend-bundle.mjs
+          pnpm build:native:e2e
+          "SURTITLE_E2E_FRONTEND_SCRIPT=$frontendScript" >> $env:GITHUB_ENV
+      - name: Required FFmpeg, libmpv and Silero regressions
+        id: rust-native
+        run: |
+          python e2e/support/acquire-spoken-fixtures.py
+          pnpm test:rust:required windows-native
+        env:
+          SURTITLE_SPOKEN_FIXTURES: ${{ github.workspace }}\work\spoken-fixtures
+      - name: WebView2 and libmpv E2E
+        id: native-e2e
+        timeout-minutes: 50
+        run: |
+          # Prepare the runner desktop before lowering the test process tree for ordinary-user input.
+          & e2e/support/ci-desktop.ps1 -Action prepare-input
+          pnpm test:e2e --exclude ./e2e/native/playback-rate.e2e.js
+        env:
+          SURTITLE_E2E_BINARY: ${{ github.workspace }}\work\target\debug\surtitle.exe
+          SURTITLE_E2E_SEED_BINARY: ${{ github.workspace }}\work\target\debug\examples\seed_fixture.exe
+          SURTITLE_E2E_DATA_DIR: ${{ github.workspace }}\work\e2e-windows
+          SURTITLE_E2E_AV1_FIXTURE: ${{ github.workspace }}\work\e2e-av1.mkv
+          SURTITLE_TAURI_DRIVER: ${{ github.workspace }}\work\driver\bin\tauri-driver.exe
+      - name: Native pointer and playback speed E2E
+        id: native-pointer
+        if: ${{ !cancelled() && (steps.native-e2e.outcome == 'success' || steps.native-e2e.outcome == 'failure') }}
+        timeout-minutes: 10
+        run: |
+          $seedArguments = ConvertTo-Json -Compress -InputObject @("$PWD/work/e2e-windows-pointer", "$PWD/work/test-results/fixtures/日本語 & sample.mp4")
+          $seedArgumentsBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($seedArguments))
+          & pwsh -NoProfile -File e2e/support/run-windows-standard-user.ps1 -Application "$PWD/work/target/debug/examples/seed_fixture.exe" -ArgumentsBase64 $seedArgumentsBase64
+          if ($LASTEXITCODE -ne 0) { throw 'Native pointer fixture preparation failed.' }
+          & e2e/support/ci-desktop.ps1 -Action prepare-input
+          pnpm test:e2e --spec ./e2e/native/playback-rate.e2e.js
+        env:
+          SURTITLE_E2E_NATIVE_INPUT: '1'
+          SURTITLE_E2E_BINARY: ${{ github.workspace }}\work\target\debug\surtitle.exe
+          SURTITLE_E2E_SEED_BINARY: ${{ github.workspace }}\work\target\debug\examples\seed_fixture.exe
+          SURTITLE_E2E_DATA_DIR: ${{ github.workspace }}\work\e2e-windows-pointer
+          SURTITLE_TAURI_DRIVER: ${{ github.workspace }}\work\driver\bin\tauri-driver.exe
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: windows-evidence-${{ github.sha }}
+          path: |
+            work/artifacts/
+            work/test-results/
+            work/webdriver/receipt.json
+            work/spoken-fixtures/acquisition.json
+  package:
+    needs: [native-build]
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Verify the system VC runtime before building the installer
+        id: vc-runtime
+        run: |
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File native/vc-prerequisite.ps1 -CheckOnly
+          if ($LASTEXITCODE -ne 0) { throw 'The package runner failed the VC runtime prerequisite check.' }
+      - uses: actions/setup-node@v7.0.0
+        id: node
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Prepare hosted Windows desktop capacity
+        id: desktop-setup
+        run: node e2e/support/prepare-ci-desktop.mjs
+      - name: Read the native Rust toolchain pin
+        id: rust
+        shell: bash
+        run: echo "version=$(node -p 'require("./native/installer-inputs.json").rust.version')" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      - name: Install the package manager declared by this checkout
+        id: pnpm
+        run: |
+          $packageManager = (Get-Content package.json -Raw | ConvertFrom-Json).packageManager
+          npm install -g $packageManager
+          "version=$(pnpm --version)" >> $env:GITHUB_OUTPUT
+          "store=$(pnpm store path --silent)" >> $env:GITHUB_OUTPUT
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: native-build-${{ github.sha }}
+          path: work/native-ci-artifact/
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: windows-2025-release-v2
+          workspaces: . -> work/target
+          cache-targets: false
+          cache-directories: |
+            work/target/debug
+            work/target/release
+      - run: pnpm install --frozen-lockfile
+        id: dependencies
+      - run: pwsh native/windows/native-prepare.ps1
+        id: native-runtime
+      - name: Prepare standard installer sources and runtime notices
+        id: installer-inputs
+        run: python native/windows/native-installer-prepare.py
+      - name: Generate distribution notices and dependency manifests
+        id: notices
+        run: |
+          pnpm setup:licenses
+          & ./work/package-tools/bin/cargo-about.exe --version
+          & ./work/package-tools/bin/cargo-about.exe generate scripts/licenses.hbs --output-file src-tauri/resources/notices/rust.html
+          node scripts/audit-js-licenses.mjs
+      # The package script owns the Cargo separator before PowerShell can consume it.
+      - run: pnpm package:app
+        id: package-build
+      - name: Cache the pinned test FFmpeg archive
+        uses: actions/cache@v6.1.0
+        with:
+          path: work/ci-ffmpeg/*.zip
+          key: test-ffmpeg-${{ runner.os }}-${{ hashFiles('e2e/support/prepare-ffmpeg.ps1') }}
+      - name: Prepare exact production WebDriver and generated media
+        id: native-tools-fixtures
+        run: |
+          pnpm setup:driver
+          pwsh e2e/support/prepare-webdriver.ps1 -InstallRuntime
+          & e2e/support/prepare-ffmpeg.ps1
+          pnpm test:fixtures
+      - name: Test production installer and assemble source/SBOM
+        id: package-tests
+        run: pwsh native/windows/package-verify.ps1
+      - name: Preserve package verification diagnostics
+        uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: package-evidence-${{ github.sha }}
+          path: |
+            work/artifacts/*.json
+            work/webdriver/receipt.json
+            work/test-results/windows-desktop.json
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: release-${{ github.sha }}
+          path: work/artifacts/release/
+          if-no-files-found: error
+  ci:
+    name: ci
+    needs: [validate, native-build, browser, linux, windows, package]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every validation job to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: jq -e 'length == 6 and all(.[]; .result == "success")' <<< "$RESULTS"
+  publish:
+    needs: [ci]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.event.deleted != true
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.0.0
+        id: node
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: release-${{ github.sha }}
+          path: work/artifacts/release/
+      - run: node scripts/release.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}

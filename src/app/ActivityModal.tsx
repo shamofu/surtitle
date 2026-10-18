@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { MotionLink } from '../shared/ui/MotionLink';
+import { Children, isValidElement, useId, useState, type MouseEvent, type ReactNode } from 'react';
+import { useNavigate } from '@tanstack/react-router';
+import { useQueryClient } from '@tanstack/react-query';
+import { Activity as ActivityIcon, CircleAlert, RefreshCw } from 'lucide-react';
+import { useActivities } from './providers/Activities';
+import { useAppearance, useNotifications, useDataActions, useSnapshot } from './runtime';
+import { Button, Modal, useModalExit } from '../shared/ui';
+import { ProgressStatus } from '../shared/ui/ProgressStatus';
+import { rootActivities, type Activity } from '../shared/contracts/activity';
+import { queryKeys } from '../shared/query/keys';
+import { aiApi } from '../features/ai/api';
+import { AiRuntime } from '../features/ai/AiRuntime';
+import { AnimatedValue, MotionRegion, MotionSwap, MotionSpinner } from '../shared/motion';
+
+export function ActivityButton() {
+  const { runningCount, open, isOpen, close, error: activityError } = useActivities();
+  const { data, error } = useSnapshot();
+  const { t } = useAppearance();
+  const descriptionId = useId();
+  const problem = (data && error?.message) || activityError;
+  return <>
+    <button className="activity-trigger" data-problem={!!problem} onClick={open} aria-label={t('処理状況を開く', 'Open activity')} aria-describedby={runningCount > 0 || problem ? descriptionId : undefined} aria-haspopup="dialog">
+      <MotionSwap as="span" className="activity-trigger-icon" stateKey={problem ? 'error' : runningCount > 0 ? 'running' : 'idle'}>{problem ? <CircleAlert size={17} aria-hidden="true" /> : runningCount ? <MotionSpinner><RefreshCw size={17} aria-hidden="true" /></MotionSpinner> : <ActivityIcon size={17} aria-hidden="true" />}</MotionSwap>
+      <span className="activity-trigger-label">{t('処理状況', 'Activity')}</span>
+      <span className="nav-count" aria-hidden="true" data-empty={runningCount === 0}><AnimatedValue value={runningCount > 99 ? '99+' : runningCount} /></span>
+    </button>
+    <span className="sr-only" id={descriptionId}>
+      {runningCount > 0 && t(`${runningCount} 件の処理を実行中。`, `${runningCount} operations running. `)}
+      <span role="status">{problem && t('更新できませんでした。詳細と再試行を開きます。', 'Could not refresh. Open details and retry.')}</span>
+    </span>
+    {isOpen && <ActivityModal onClose={close} />}
+  </>;
+}
+
+export function ActivityModal({ onClose }: { onClose: () => void }) {
+  const { activities, error } = useActivities();
+  const { data, error: snapshotError } = useSnapshot();
+  const { refresh } = useDataActions();
+  const { report } = useNotifications();
+  const [retrying, setRetrying] = useState(false);
+  const client = useQueryClient();
+  const { t } = useAppearance();
+  const exit = useModalExit();
+  function retry(action: () => Promise<unknown>) {
+    setRetrying(true);
+    void report(action).finally(() => setRetrying(false));
+  }
+  return <Modal {...exit.modalProps} title={t('処理状況', 'Activity')} onClose={() => void exit.close(onClose)}>
+    {data && snapshotError && <div className="activity-refresh-error">
+      <h3>{t('データを更新できませんでした', 'Could not refresh your data')}</h3>
+      <p>{t('読み込み済みの内容で学習を続けられます。', 'You can keep learning with the content already loaded.')}</p>
+      <p className="notice warning" role="alert">{snapshotError.message}</p>
+      <Button busy={retrying} disabled={exit.exiting} onClick={() => retry(refresh)}>{t('再試行', 'Retry')}<RefreshCw size={14} aria-hidden="true" /></Button>
+    </div>}
+    {error && <div className="activity-refresh-error">
+      <h3>{t('処理状況を更新できませんでした', 'Could not refresh activity')}</h3>
+      <p className="notice warning" role="alert">{error}</p>
+      <Button busy={retrying} disabled={exit.exiting} onClick={() => retry(() => client.invalidateQueries({ queryKey: queryKeys.operations }, { throwOnError: true }))}>{t('再試行', 'Retry')}<RefreshCw size={14} aria-hidden="true" /></Button>
+    </div>}
+    <MotionSwap disabled stateKey={rootActivities(activities).map(activity => activity.id).join('|') || 'empty'}>{activities.length ? <div className="activity-list">{rootActivities(activities).map(activity => <ActivityRow key={activity.id} activity={activity} exiting={exit.exiting} onNavigate={action => exit.close(async () => { onClose(); await action(); })}>
+      {activities.filter(child => child.parentId === activity.id).map(child => <ProgressStatus key={child.id} {...child} compact />)}
+    </ActivityRow>)}</div> : <p className="activity-empty">{t('現在処理中の操作はありません。', 'No operations are running.')}</p>}</MotionSwap>
+    <p className="activity-note">{t('この起動中の完了・失敗・中止は、直近20件まで表示します。', 'The latest 20 completed, failed, or cancelled operations from this session are shown.')}</p>
+  </Modal>;
+}
+
+function ActivityRow({ activity, children, onNavigate, exiting }: { activity: Activity; children: ReactNode; onNavigate: (action: () => Promise<void>) => Promise<boolean>; exiting: boolean }) {
+  const { t } = useAppearance();
+  const { report } = useNotifications();
+  const { mutate } = useDataActions();
+  const [busy, setBusy] = useState(false);
+  const childKey = Children.toArray(children).map(child => isValidElement(child) ? child.key : '').join('|');
+  const navigate = useNavigate();
+  function follow(event: MouseEvent<HTMLAnchorElement>, action: () => Promise<void>) {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    void report(() => onNavigate(action));
+  }
+  const cancellable = activity.status === 'running' && (activity.source === 'ai' || (activity.source === 'native' && activity.kind === 'preparation'));
+  async function cancel() {
+    if (busy || exiting) return;
+    setBusy(true);
+    try {
+      await report(() => activity.source === 'ai' ? mutate(() => aiApi.cancelAiJob(activity.sourceId!), { kind: 'snapshot' })
+        : aiApi.cancelPreparation(activity.id));
+    } finally { setBusy(false); }
+  }
+  return <article className="activity-item" data-activity-id={activity.id}>
+    <ProgressStatus {...activity} />
+    {activity.aiJob && <AiRuntime job={activity.aiJob} />}
+    <MotionRegion mode="status" open={Children.count(children) > 0}><MotionSwap disabled stateKey={childKey}><div className="activity-children">{children}</div></MotionSwap></MotionRegion>
+    <MotionSwap disabled stateKey={`${cancellable}:${activity.mediaId ?? activity.kind}`}><div className="inline-actions">
+      {cancellable && <Button busy={busy} onClick={() => void cancel()}>{t('中止', 'Cancel')}</Button>}
+      {activity.mediaId ? <MotionLink to="/study/$mediaId" params={{ mediaId: activity.mediaId }} className="button" onClick={event => follow(event, () => navigate({ to: '/study/$mediaId', params: { mediaId: activity.mediaId! } }))}>{t('教材を開く', 'Open media')}</MotionLink>
+        : ['tool', 'tool_check', 'models', 'tool_scan', 'tool_updates'].includes(activity.kind) ? <MotionLink to="/settings" className="button" onClick={event => follow(event, () => navigate({ to: '/settings' }))}>{t('設定を開く', 'Open settings')}</MotionLink>
+          : ['import_check', 'import', 'restore', 'restore_preview', 'export'].includes(activity.kind) ? <MotionLink to="/" className="button" onClick={event => follow(event, () => navigate({ to: '/' }))}>{t('ライブラリを開く', 'Open library')}</MotionLink> : null}
+    </div></MotionSwap>
+  </article>;
+}

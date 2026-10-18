@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { JobActions } from '../features/ai/JobActions';
+import { aiApi } from '../features/ai/api';
+import type { AiQuote, JobSummary } from '../shared/contracts/ai';
+import { motionDurations } from '../shared/motion';
+
+const fixture = vi.hoisted(() => ({ reduced: false, errors: [] as string[] }));
+vi.mock('motion', async importActual => ({
+  ...await importActual<typeof import('motion')>(),
+  animate: vi.fn(() => ({ stop: vi.fn(), finished: new Promise<void>(() => {}) })),
+}));
+vi.mock('../shared/motion', async importOriginal => ({
+  ...await importOriginal<typeof import('../shared/motion')>(),
+  useAppMotion: () => ({ reducedMotion: fixture.reduced }),
+}));
+vi.mock('../features/ai/api', () => ({ aiApi: { createRetryQuote: vi.fn(), reapproveQuote: vi.fn() } }));
+vi.mock('../app/runtime', () => {
+  const useFixture = () => ({
+    t: (_ja: string, en: string) => en,
+    mutate: (action: () => Promise<unknown>) => action(),
+    report: async (action: () => Promise<unknown>) => {
+      try { return await action(); } catch (error) { fixture.errors.push(String(error)); return undefined; }
+    },
+  });
+  return { useSnapshot: useFixture, useDataActions: useFixture, useAppearance: useFixture, useNotifications: useFixture, useSurface: useFixture };
+});
+
+const job: JobSummary = { id: 'paused', kind: 'transcribe', status: 'paused', progress: 0.5, createdAt: '2026-09-08T00:00:00Z' };
+const quote: AiQuote = {
+  id: 'retry', mediaId: 'media', kind: 'transcribe', startMs: 0, endMs: 2000,
+  model: 'test', estimatedUsd: null, maximumUsd: null, unpriced: true,
+  inputTokens: 100, maxOutputTokens: 100, expiresAt: '2099-01-01T00:00:00Z',
+  warnings: [], canApprove: true, isRetry: true,
+};
+beforeEach(() => {
+  vi.useFakeTimers();
+  fixture.reduced = false;
+  fixture.errors = [];
+  vi.mocked(aiApi.createRetryQuote).mockResolvedValue(quote);
+  vi.mocked(aiApi.reapproveQuote).mockResolvedValue(undefined);
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, value: vi.fn(() => ({
+    cancel: vi.fn(), finished: new Promise<void>(() => {}),
+  })) });
+});
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); vi.restoreAllMocks(); delete (HTMLElement.prototype as Partial<HTMLElement>).animate; });
+const exitFallbackMs = motionDurations.revealClose * 1000 + 100;
+
+async function openQuote() {
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Resume remaining work' })); });
+  return screen.getByRole('region', { name: 'Review remaining work' });
+}
+
+it('retains a closing inline quote while locking approval and removes it before a fresh quote can reopen', async () => {
+  render(<JobActions job={job} inlineTranscription />);
+  const panel = await openQuote();
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  const approval = screen.getByRole('button', { name: 'Start transcription' });
+  expect(approval).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  expect(panel).toHaveAttribute('data-state', 'closing');
+  expect(panel).toHaveAttribute('inert');
+  expect(panel).toHaveAttribute('aria-hidden', 'true');
+  expect(approval).toBeDisabled();
+  fireEvent.click(approval);
+  expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
+  await act(async () => { vi.advanceTimersByTime(exitFallbackMs - 1); });
+  expect(panel).toBeInTheDocument();
+  await act(async () => { vi.advanceTimersByTime(1); });
+  expect(panel).not.toBeInTheDocument();
+  const reopened = await openQuote();
+  expect(reopened).toHaveAttribute('data-state', 'open');
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  await act(async () => { vi.advanceTimersByTime(exitFallbackMs * 2); });
+  expect(reopened).toBeInTheDocument();
+  expect(aiApi.createRetryQuote).toHaveBeenCalledTimes(2);
+});
+
+it('closes after successful approval without sending another request during exit', async () => {
+  render(<JobActions job={job} inlineTranscription />);
+  const panel = await openQuote();
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  const approval = screen.getByRole('button', { name: 'Start transcription' });
+  await act(async () => { fireEvent.click(approval); });
+  expect(panel).toHaveAttribute('data-state', 'closing');
+  fireEvent.click(approval);
+  expect(aiApi.reapproveQuote).toHaveBeenCalledExactlyOnceWith(quote);
+  await act(async () => { vi.advanceTimersByTime(exitFallbackMs); });
+  expect(panel).not.toBeInTheDocument();
+});
+
+it('keeps the same quote available when approval fails', async () => {
+  vi.mocked(aiApi.reapproveQuote).mockRejectedValueOnce(new Error('Connection failed'));
+  render(<JobActions job={job} inlineTranscription />);
+  const panel = await openQuote();
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Start transcription' })); });
+  expect(panel).toHaveAttribute('data-state', 'open');
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Start transcription' })).toBeEnabled();
+  expect(fixture.errors).toEqual(['Error: Connection failed']);
+});
+
+it('removes inline quotes synchronously with reduced motion', async () => {
+  fixture.reduced = true;
+  render(<JobActions job={job} inlineTranscription />);
+  const panel = await openQuote();
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  expect(panel).not.toBeInTheDocument();
+});

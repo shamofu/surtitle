@@ -1,0 +1,272 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import assert from 'node:assert/strict';
+import { invokeNative as invoke, restartNativeSession, clickNative } from '../support/native-app.mjs';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { isAbsolute, relative, resolve } from 'node:path';
+import { Key } from 'webdriverio';
+import { assertOfflineFixtureLedger, readFeeLedger } from '../support/native-e2e-ledger.mjs';
+
+const dataDirectory = resolve(process.env.SURTITLE_E2E_DATA_DIR);
+const fixture = JSON.parse(readFileSync(resolve(dataDirectory, 'fixture.json'), 'utf8'));
+const mediaId = fixture.mediaId || 'fixture-media';
+const snapshot = () => invoke('get_app_snapshot');
+const control = request => invoke('player_control', { request });
+const player = () => invoke('get_player_state');
+const navigate = path => browser.execute(next => { window.history.pushState({}, '', next); window.dispatchEvent(new PopStateEvent('popstate')); }, path);
+const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+const contextInput = () => $('//label[contains(., "Playback context on each side (ms)")]/input');
+let originalSettings, originalTool, originalCues = [], nominalCues = [], ledgerBefore, budgetBefore, verified = false;
+const savedCards = [];
+
+const ledger = () => readFeeLedger(dataDirectory);
+async function timedStep(label, run) {
+  const started = Date.now();
+  console.info(`[replay-context] ${label}: started`);
+  const result = await run();
+  console.info(`[replay-context] ${label}: completed in ${Date.now() - started} ms`);
+  return result;
+}
+function readClip(card) {
+  assert(card.audioPath && isAbsolute(card.audioPath), 'Expected an absolute saved clip path');
+  const inside = relative(resolve(dataDirectory, 'card-audio'), resolve(card.audioPath));
+  assert(inside && !inside.startsWith('..') && !isAbsolute(inside), 'Refusing to read audio outside the exact disposable profile');
+  const bytes = readFileSync(card.audioPath);
+  assert.equal(bytes.toString('ascii', 0, 4), 'RIFF');
+  assert.equal(bytes.toString('ascii', 8, 12), 'WAVE');
+  let format, data;
+  for (let offset = 12; offset + 8 <= bytes.length;) {
+    const id = bytes.toString('ascii', offset, offset + 4), length = bytes.readUInt32LE(offset + 4), start = offset + 8;
+    assert(start + length <= bytes.length, 'Truncated WAV chunk');
+    if (id === 'fmt ') format = bytes.subarray(start, start + length);
+    if (id === 'data') data = bytes.subarray(start, start + length);
+    offset = start + length + length % 2;
+  }
+  assert(format?.length >= 16 && data?.length > 0, 'Saved WAV has no format or audio data');
+  assert.equal(format.readUInt16LE(0), 1);
+  assert.equal(format.readUInt16LE(2), 1);
+  assert.equal(format.readUInt32LE(4), 16000);
+  assert.equal(format.readUInt16LE(14), 16);
+  return { sha256: hash(bytes), sampleCount: data.length / 2, durationMs: data.length / 32 };
+}
+async function openStudy() {
+  await navigate(`/study/${mediaId}`);
+  await $('[data-testid="native-player-viewport"]').waitForDisplayed();
+  // An old native session may still report ready until this React player finishes loading.
+  await $('.play-button').waitForEnabled();
+  await browser.waitUntil(async () => { const state = await player(); return state.ready && state.surfaceVisible && state.videoWidth === 640 && state.durationMs >= 11990 && state.durationMs <= 12010; }, { timeoutMsg: 'The real twelve-second disposable media was not loaded' });
+}
+async function saveContextInUi(value) {
+  await navigate('/settings');
+  await contextInput().waitForEnabled();
+  // Use real editing keys so React observes clearing the controlled numeric input.
+  await clickNative(contextInput());
+  await browser.keys([Key.Ctrl, 'a']);
+  await browser.keys(Key.Backspace);
+  await expect(contextInput()).toHaveValue('');
+  await contextInput().addValue(String(value));
+  await expect(contextInput()).toHaveValue(String(value));
+  await browser.keys(Key.Tab);
+  await browser.waitUntil(async () => (await snapshot()).settings.replayContextMs === value, { timeoutMsg: `Playback context ${value} was not saved` });
+  // Even a same-value edit must flush its temporary empty input before reload.
+  await expect($('.settings-save [role="status"]')).toHaveText('Changes save automatically');
+  await expect($('.settings-save')).toHaveAttribute('aria-busy', 'false');
+  await browser.refresh();
+  await expect(contextInput()).toHaveValue(String(value));
+  await openStudy();
+}
+async function replayToEnd(request, expectedEnd) {
+  await control({ action: 'pause' });
+  await control({ action: 'loop' });
+  await control({ action: 'seek', startMs: 6000 });
+  // Precise source bounds are checked by Rust range tests and the real PCM
+  // extraction cases below. Do not require the remote driver to catch a 140 ms
+  // playback window; reaching the contextual stop is the observable contract.
+  await control({ action: 'rate', value: .5 });
+  await control(request);
+  await browser.waitUntil(async () => {
+    const state = await player();
+    assert.equal(state.error, null);
+    return state.paused && state.positionMs >= expectedEnd - 45 && state.positionMs <= expectedEnd + 120;
+  }, { timeout: 14000, interval: 50, timeoutMsg: `Source replay did not pause at contextual end ${expectedEnd}` });
+  const stopped = await player();
+  assert(stopped.positionMs <= expectedEnd + 120, `Expected source stop near ${expectedEnd}, got ${stopped.positionMs}`);
+}
+async function assertNominalUnchanged() {
+  const current = await invoke('list_segments', { mediaId });
+  assert.deepEqual(nominalCues.map(cue => current.find(item => item.id === cue.id)), nominalCues, 'Playback context changed nominal subtitle times or text');
+}
+
+describe('source replay context and retained native card clips', () => {
+  before(async () => {
+    await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__));
+    const initial = await snapshot();
+    assert.equal(initial.settings.credentialConfigured, false, 'Refusing a profile with credentials');
+    assert.equal(initial.settings.dailyBudgetUsd, 0);
+    assert.equal(initial.budget.spentUsd, 0);
+    assert.equal(initial.budget.reservedUsd, 0);
+    assert.equal(initial.budget.limitUsd, 0);
+    assert.equal(initial.budget.unknownAttempts?.length ?? 0, 0);
+    assert.equal(initial.budget.unpricedAttempts ?? 0, 0);
+    assert(initial.media.some(item => item.id === mediaId && item.path === fixture.mediaPath), 'Expected the exact disposable media fixture');
+    ledgerBefore = ledger();
+    assertOfflineFixtureLedger(initial, ledgerBefore);
+    budgetBefore = initial.budget;
+    originalSettings = initial.settings;
+    originalTool = initial.tools.find(tool => tool.id === 'ffmpeg');
+    verified = true;
+    const settings = { ...originalSettings, locale: 'en', sentencePause: false };
+    delete settings.replayContextMs;
+    await invoke('update_settings', { settings });
+    assert.equal((await snapshot()).settings.replayContextMs, 150, 'The backend must supply the default when the optional input field is absent');
+    const cues = await invoke('list_segments', { mediaId });
+    originalCues = ['fixture-0', 'fixture-3', 'fixture-11'].map(id => cues.find(cue => cue.id === id));
+    assert(originalCues.every(Boolean));
+    const times = [[250, 750], [3000, 3750], [11250, 11750]];
+    for (const [index, cue] of originalCues.entries()) {
+      const segment = { ...cue, startMs: times[index][0], endMs: times[index][1], text: `Replay context fixture ${index}.`, status: 'confirmed' };
+      await invoke('edit_segment', { segment });
+    }
+    const current = await invoke('list_segments', { mediaId });
+    nominalCues = originalCues.map(cue => current.find(item => item.id === cue.id));
+    await browser.refresh();
+    await openStudy();
+  });
+  after(async () => {
+    if (!verified) return;
+    await control({ action: 'pause' });
+    await control({ action: 'loop' });
+    for (const card of savedCards) await invoke('delete_card', { cardId: card.id });
+    for (const segment of originalCues.filter(Boolean)) await invoke('edit_segment', { segment });
+    if (originalTool) await invoke('set_tool_provider', { request: { toolId: 'ffmpeg', provider: originalTool.provider, ...(originalTool.provider === 'external' ? { path: originalTool.path } : {}) } });
+    await invoke('update_settings', { settings: originalSettings });
+    assert.deepEqual(ledger(), ledgerBefore, 'Replay and card extraction changed the fee or approval ledger');
+    assert.deepEqual((await snapshot()).budget, budgetBefore, 'Replay and card extraction changed AI usage');
+  });
+
+  it('persists the default, zero and maximum context and applies it without retiming subtitles', async () => {
+    await navigate('/settings');
+    await expect(contextInput()).toHaveValue('150');
+    for (const value of [0, 150, 1000]) {
+      await saveContextInUi(value);
+      await replayToEnd({ action: 'source-seek', startMs: 3000, endMs: 3750 }, 3750 + value);
+      await assertNominalUnchanged();
+    }
+    // Ordinary timeline seeks retain their explicitly supplied range.
+    await replayToEnd({ action: 'seek', startMs: 3000, endMs: 3750 }, 3750);
+    await assertNominalUnchanged();
+  });
+
+  it('clamps added context at media edges and repeats the expanded source interval', async () => {
+    await saveContextInUi(1000);
+    await replayToEnd({ action: 'source-seek', startMs: 250, endMs: 750 }, 1750);
+    await replayToEnd({ action: 'source-seek', startMs: 11250, endMs: 11750 }, 12000);
+    await control({ action: 'pause' });
+    await control({ action: 'rate', value: 1 });
+    await control({ action: 'seek', startMs: 2000 });
+    await control({ action: 'source-loop', startMs: 3000, endMs: 3750 });
+    await control({ action: 'play' });
+    const observed = await browser.execute(async () => {
+      let preceding = false, following = false, wrapped = false, previous = 2000;
+      const deadline = performance.now() + 10000;
+      const samples = [];
+      while (performance.now() < deadline && !(preceding && following && wrapped)) {
+        const state = await window.__TAURI_INTERNALS__.invoke('get_player_state');
+        if (samples.length < 100) samples.push({ positionMs: state.positionMs, paused: state.paused });
+        if (state.paused || state.error || state.positionMs < 1950 || state.positionMs > 4900)
+          return { problem: 'Source repeat paused or escaped its expanded bounds', state, samples };
+        preceding ||= state.positionMs < 2850;
+        following ||= state.positionMs > 4050;
+        wrapped ||= previous - state.positionMs > 1400;
+        previous = state.positionMs;
+        await new Promise(resolve => setTimeout(resolve, 40));
+      }
+      return { preceding, following, wrapped, samples };
+    });
+    assert(!observed.problem && observed.preceding && observed.following && observed.wrapped,
+      `Native repeat did not include both margins and wrap: ${JSON.stringify(observed)}`);
+    await control({ action: 'pause' });
+    await control({ action: 'source-loop' });
+    await control({ action: 'rate', value: .5 });
+    await invoke('play_source_range', { mediaId, sourceCueIds: [nominalCues[1].id] });
+    await browser.waitUntil(async () => { const state = await player(); return state.paused && state.positionMs >= 4705 && state.positionMs <= 4870; }, { timeout: 14000, interval: 40, timeoutMsg: 'Saved-source replay did not use the configured context' });
+    await assertNominalUnchanged();
+  });
+
+  it('keeps the latest rapid seek and lets pause and play control the pending range', async () => {
+    await openStudy();
+    await control({ action: 'pause' });
+    await control({ action: 'loop' });
+    await control({ action: 'rate', value: .5 });
+    await browser.execute(async () => {
+      const nativeInvoke = window.__TAURI_INTERNALS__.invoke;
+      await nativeInvoke('player_control', { request: { action: 'seek', startMs: 1000, endMs: 2000 } });
+      await nativeInvoke('player_control', { request: { action: 'seek', startMs: 3000, endMs: 4000 } });
+      await nativeInvoke('player_control', { request: { action: 'seek', startMs: 5000, endMs: 6000 } });
+      await nativeInvoke('player_control', { request: { action: 'pause' } });
+    });
+    await browser.waitUntil(async () => {
+      const state = await player();
+      return state.paused && state.positionMs >= 4955 && state.positionMs <= 5120;
+    }, { timeout: 5000, interval: 30, timeoutMsg: 'Rapid seeks did not retain the last target and pause choice' });
+    await control({ action: 'play' });
+    await browser.waitUntil(async () => {
+      const state = await player();
+      assert.equal(state.error, null);
+      return !state.paused && state.positionMs > 5200 && state.positionMs < 6000;
+    }, { timeout: 5000, interval: 30, timeoutMsg: 'Playing did not resume the last rapid seek' });
+    await browser.waitUntil(async () => {
+      const state = await player();
+      return state.paused && state.positionMs >= 5955 && state.positionMs <= 6120;
+    }, { timeout: 6000, interval: 30, timeoutMsg: 'The last rapid seek lost its explicit range stop' });
+    await assertNominalUnchanged();
+  });
+
+  describe('retained PCM card clips', () => {
+    const contexts = [0, 150, 1000];
+    before(async () => {
+      await control({ action: 'pause' });
+      const candidate = (await timedStep('scan external tools', () => invoke('scan_external_tools'))).find(item => item.toolId === 'ffmpeg' && item.selectable);
+      assert(candidate, 'Select a compatible existing FFmpeg/ffprobe pair on PATH for this native test');
+      await timedStep('select external FFmpeg', () => invoke('set_tool_provider', { request: { toolId: 'ffmpeg', provider: 'external', path: candidate.path } }));
+    });
+    // Each save hashes and probes the real external tools before extracting PCM.
+    // Give each extraction its own test budget; retain all clips for one restart.
+    for (const context of contexts) {
+      it(`records the actual PCM extraction range with ${context} ms of context`, async () => {
+        const before = await snapshot();
+        await invoke('update_settings', { settings: { ...before.settings, replayContextMs: context } });
+        const cue = nominalCues[1];
+        await timedStep(`extract card with ${context} ms context`, () => invoke('save_card', { request: { mediaId, segmentId: cue.id, term: `replay context ${context}`, meaning: 'A context regression fixture', example: cue.text, explanation: 'Saved explanation from the original subtitle.' } }));
+        const card = (await snapshot()).cards.find(item => !before.cards.some(previous => previous.id === item.id));
+        assert(card, 'Saving the source did not produce a card');
+        savedCards.push(card);
+        assert.equal(card.startMs, 3000);
+        assert.equal(card.endMs, 3750);
+        assert.deepEqual(card.sourceCues, [cue]);
+        assert.deepEqual(card.audioClipRange, { startMs: 3000 - context, endMs: 3750 + context });
+        const clip = readClip(card);
+        assert.equal(clip.sampleCount, (750 + context * 2) * 16, 'Extracted PCM duration does not match its stored actual source range');
+        card.testClip = clip;
+      });
+    }
+    it('preserves all three PCM clips after setting and source edits and a native restart', async () => {
+      assert.equal(savedCards.length, contexts.length, 'All context extractions must finish before checking persistence');
+      assert(savedCards.every(card => card.testClip), 'All context clips must pass PCM validation before checking persistence');
+      const beforeChange = await snapshot();
+      await invoke('update_settings', { settings: { ...beforeChange.settings, replayContextMs: 0 } });
+      await invoke('edit_segment', { segment: { ...nominalCues[1], startMs: 3100, endMs: 3800, text: 'Edited source after the audio was saved.' } });
+      await timedStep('restart native session', () => restartNativeSession());
+      await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__));
+      const persisted = await snapshot();
+      assert.equal(persisted.settings.replayContextMs, 0);
+      for (const saved of savedCards) {
+        const card = persisted.cards.find(item => item.id === saved.id);
+        const { testClip, ...original } = saved;
+        assert.deepEqual(card, original, 'A settings/source edit changed the frozen learning card');
+        assert.deepEqual(readClip(card), testClip, 'A settings/source edit changed an existing audio clip');
+      }
+      assert.deepEqual(ledger(), ledgerBefore);
+    });
+  });
+});

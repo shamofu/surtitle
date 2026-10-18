@@ -1,0 +1,20 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+[data-selection-indicator] { position: relative; }
+.selection-indicator {
+  position: absolute;
+  pointer-events: none;
+  background: var(--accent);
+  transition: none;
+}
+.selection-indicator[hidden] { display: none; }
+[data-selection-indicator='underline'] > .selection-indicator { z-index: 1; }
+:is(.main-nav, .transcript-tabs)[data-selection-ready] > :is(a.active, button.active) { border-bottom-color: transparent; }
+[data-selection-indicator='pill'] > .selection-indicator {
+  border-radius: 5px;
+  background: var(--surface-raised);
+  box-shadow: 0 2px 3px #0001;
+}
+[data-selection-indicator='pill'] > button { position: relative; z-index: 1; }
+.segmented-control[data-selection-ready] > button.selected { background: transparent; box-shadow: none; }
+.filter-tabs[data-selection-ready] > button.active { background: transparent; }
+.filter-tabs > .selection-indicator { background: var(--accent-soft); box-shadow: none; }

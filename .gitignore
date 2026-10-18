@@ -1,0 +1,15 @@
+/node_modules/
+/.pnpm/
+/.cargo/config.toml
+/work/
+/src-tauri/resources/native/*
+!/src-tauri/resources/native/.gitkeep
+/src-tauri/resources/notices/*
+!/src-tauri/resources/notices/README.txt
+/src-tauri/gen/
+/.env
+*.key
+*.pem
+*service-account*.json
+.DS_Store
+*.tsbuildinfo

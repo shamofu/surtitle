@@ -1,0 +1,44 @@
+nextest-version = { required = "0.9.148" }
+
+[store]
+dir = "work/test-results/nextest"
+
+[test-groups.native-integration]
+max-threads = 1
+
+[profile.ci]
+retries = 0
+fail-fast = false
+status-level = "slow"
+final-status-level = "slow"
+success-output = "never"
+failure-output = "final"
+slow-timeout = "60s"
+
+[profile.ci.junit]
+path = "junit.xml"
+store-success-output = false
+store-failure-output = true
+report-skipped = "ignored"
+
+[profile.ci-no-default]
+inherits = "ci"
+
+# Native resources are serial. The CI job bounds compilation; these limits
+# apply only once each test process starts.
+[profile.required]
+inherits = "ci"
+slow-timeout = { period = "60s", terminate-after = 3 }
+junit.report-skipped = "none"
+
+[[profile.required.overrides]]
+filter = 'test(=application::media_tools::card_audio::tests::installed_ffmpeg_preserves_native_rate_wav_tail_without_padding) | test(=prepare::tests::real_preparation_failures_remove_receipts_and_temporary_files) | test(=prepare::spoken_pause_test::real_spoken_audio_and_interior_pause_require_only_local_warning_review)'
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+[[profile.required.overrides]]
+filter = 'test(=application::media_tools::card_audio::tests::installed_ffmpeg_preserves_source_clock_and_cleans_failed_outputs)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
+[[profile.required.overrides]]
+filter = 'all()'
+test-group = "native-integration"

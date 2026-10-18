@@ -1,0 +1,20 @@
+[workspace]
+members = ["crates/core", "crates/tools", "crates/ai", "crates/ai-validation", "src-tauri"]
+default-members = ["crates/core", "crates/tools", "crates/ai"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+rust-version = "1.99"
+
+# Keep useful backtraces without full type and variable debug information.
+# The test profile inherits this; incremental compilation remains enabled locally.
+[profile.dev]
+debug = 1
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1

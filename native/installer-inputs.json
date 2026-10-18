@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "nsisVersion": "3.11",
+  "sourceArchive": {
+    "file": "nsis-3.11-src.tar.bz2",
+    "url": "https://downloads.sourceforge.net/project/nsis/NSIS%203/3.11/nsis-3.11-src.tar.bz2",
+    "sha256": "19e72062676ebdc67c11dc032ba80b979cdbffd3886c60b04bb442cdd401ff4b"
+  },
+  "plugin": {
+    "version": "0.5.3",
+    "sourceArchive": {
+      "file": "nsis-tauri-utils-13d9edd27b69310e108d6fbd49f90992f8a05390.tar.gz",
+      "url": "https://codeload.github.com/tauri-apps/nsis-tauri-utils/tar.gz/13d9edd27b69310e108d6fbd49f90992f8a05390",
+      "sha256": "9b277f7cdec4277b48d319c32e10b5dc4303e9efce8c3b44f1db77f86a8131c7"
+    },
+    "sourceCrates": [
+      {
+        "file": "proc-macro2-1.0.107.crate",
+        "url": "https://static.crates.io/crates/proc-macro2/proc-macro2-1.0.107.crate",
+        "sha256": "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
+      },
+      {
+        "file": "quote-1.0.47.crate",
+        "url": "https://static.crates.io/crates/quote/quote-1.0.47.crate",
+        "sha256": "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
+      },
+      {
+        "file": "semver-1.0.28.crate",
+        "url": "https://static.crates.io/crates/semver/semver-1.0.28.crate",
+        "sha256": "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+      },
+      {
+        "file": "syn-2.0.119.crate",
+        "url": "https://static.crates.io/crates/syn/syn-2.0.119.crate",
+        "sha256": "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297"
+      },
+      {
+        "file": "unicode-ident-1.0.24.crate",
+        "url": "https://static.crates.io/crates/unicode-ident/unicode-ident-1.0.24.crate",
+        "sha256": "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+      },
+      {
+        "file": "windows-link-0.2.1.crate",
+        "url": "https://static.crates.io/crates/windows-link/windows-link-0.2.1.crate",
+        "sha256": "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+      },
+      {
+        "file": "windows-sys-0.61.2.crate",
+        "url": "https://static.crates.io/crates/windows-sys/windows-sys-0.61.2.crate",
+        "sha256": "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
+      }
+    ]
+  },
+  "rust": {
+    "version": "1.99.0",
+    "sourceArchive": {
+      "file": "rust-src-1.99.0.tar.xz",
+      "url": "https://static.rust-lang.org/dist/2026-10-01/rust-src-1.99.0.tar.xz",
+      "sha256": "3f1f9b7ed48f4596fc87889b7b3c61747336a55c9c22db1ab0c697e0aadb77aa"
+    },
+    "notices": [
+      {
+        "file": "COPYRIGHT-library.html"
+      },
+      {
+        "file": "licenses/Apache-2.0.txt"
+      },
+      {
+        "file": "licenses/BSD-2-Clause.txt"
+      },
+      {
+        "file": "licenses/CC-BY-SA-4.0.txt"
+      },
+      {
+        "file": "licenses/GCC-exception-3.1.txt"
+      },
+      {
+        "file": "licenses/GPL-2.0-only.txt"
+      },
+      {
+        "file": "licenses/GPL-3.0-or-later.txt"
+      },
+      {
+        "file": "licenses/ISC.txt"
+      },
+      {
+        "file": "licenses/LLVM-exception.txt"
+      },
+      {
+        "file": "licenses/MIT.txt"
+      },
+      {
+        "file": "licenses/NCSA.txt"
+      },
+      {
+        "file": "licenses/OFL-1.1.txt"
+      },
+      {
+        "file": "licenses/Unicode-3.0.txt"
+      }
+    ]
+  },
+  "notices": [
+    {
+      "file": "NSIS-3.11-COPYING.txt"
+    },
+    {
+      "file": "NSIS-Modern-UI-2-LICENSE.txt"
+    },
+    {
+      "file": "NSIS-Modern-UI-LICENSE.txt"
+    },
+    {
+      "file": "nsis-tauri-utils-LICENSE-APACHE-2.0.txt"
+    },
+    {
+      "file": "nsis-tauri-utils-LICENSE-MIT.txt"
+    },
+    {
+      "file": "NSISdl-LICENSE.txt"
+    },
+    {
+      "file": "semver-LICENSE-APACHE.txt"
+    },
+    {
+      "file": "semver-LICENSE-MIT.txt"
+    },
+    {
+      "file": "SOURCE-AVAILABILITY.txt"
+    },
+    {
+      "file": "Tauri-LICENSE-APACHE-2.0.txt"
+    },
+    {
+      "file": "Tauri-LICENSE-MIT.txt"
+    },
+    {
+      "file": "windows-link-license-apache-2.0.txt"
+    },
+    {
+      "file": "windows-link-license-mit.txt"
+    },
+    {
+      "file": "windows-sys-license-apache-2.0.txt"
+    },
+    {
+      "file": "windows-sys-license-mit.txt"
+    }
+  ]
+}

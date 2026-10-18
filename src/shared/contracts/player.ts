@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+export interface PlayerTrack {
+  id: number;
+  kind: string;
+  title: string;
+  language?: string;
+  selected: boolean;
+  ffIndex?: number | null;
+  external?: boolean;
+}
+
+export interface PlayerState {
+  /** Native snapshot ordering, including snapshots returned by direct queries. */
+  revision?: number;
+  sentencePause?: boolean;
+  ready?: boolean;
+  positionMs: number;
+  durationMs: number;
+  paused: boolean;
+  rate: number;
+  volume: number;
+  tracks: PlayerTrack[];
+  error?: string;
+  surfaceVisible?: boolean;
+  videoWidth?: number;
+  videoHeight?: number;
+}
+
+export interface PlayerSurfaceRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PlayerSurfaceOcclusion extends PlayerSurfaceRect {
+  /** Uniform circular CSS border radius; omitted for rectangular surfaces. */
+  borderRadius?: number;
+}
+
+export interface PlayerControlRequest {
+  action:
+    | 'source-seek'
+    | 'source-loop'
+    | 'play'
+    | 'pause'
+    | 'toggle-pause'
+    | 'seek'
+    | 'rate'
+    | 'volume'
+    | 'loop'
+    | 'bounds'
+    | 'hide'
+    | 'track'
+    | 'fullscreen'
+    | 'sentence-pause'
+    | 'draft-mode';
+  trackKind?: 'audio' | 'sub';
+  value?: number;
+  startMs?: number;
+  endMs?: number;
+  /** CSS-pixel coordinates; native backend converts using scaleFactor. */
+  bounds?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    scaleFactor: number;
+    /** Visible intersection with the page, in the same CSS coordinates. */
+    clip?: PlayerSurfaceRect;
+    /** Opaque UI shapes to subtract without resizing the video. */
+    occlusions?: PlayerSurfaceOcclusion[];
+    /** Modal input ownership is independent from video visibility. */
+    inputBlocked?: boolean;
+  };
+}
