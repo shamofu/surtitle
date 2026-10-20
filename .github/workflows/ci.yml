@@ -74,7 +74,7 @@ jobs:
     timeout-minutes: 60
     env:
       CARGO_BUILD_JOBS: 4
-      WEBKIT_DISABLE_COMPOSITING_MODE: 1
+      LIBGL_ALWAYS_SOFTWARE: 1
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0

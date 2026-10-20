@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
 import { assertNativeVideoBounds, captureNativeScreenshotSequence, resizeNativeWindow, saveNativeScreenshot } from '../support/native-window.mjs';
 import { setWebViewReducedMotion } from '../support/webview-media.mjs';
+import { startNativePlaybackObservation, summarizeNativePlayback } from '../support/native-playback-observation.mjs';
 
 const control = request => invoke('player_control', { request });
 const state = () => invoke('get_player_state');
@@ -128,7 +129,7 @@ describe('WebView surfaces above the real native video', () => {
 
   it('records whole-shell activity and speed entrance and exit over continuously playing native video', async () => {
     await resizeNativeWindow(1280, 720);
-    await control({ action: 'loop' });
+    const repeat = { startMs: 200, endMs: 3200 };
     const surfaces = [
       { name: 'activity', shell: '.modal', heading: '.modal-header', body: '.modal-body', trigger: '.activity-trigger', close: '.modal-header .icon-button', distance: 48 },
       { name: 'speed', shell: '.playback-rate-content', heading: '.playback-rate-header', body: '.playback-rate-body', trigger: '.playback-rate-trigger', close: '.playback-rate-close', distance: 24 },
@@ -136,26 +137,63 @@ describe('WebView surfaces above the real native video', () => {
     try {
       for (const surface of surfaces) {
         await control({ action: 'seek', value: 200 });
+        // Native captures can outlast the 12-second fixture. A seek clears the
+        // repeat, so select its explicit bounds after each seek.
+        await control({ action: 'loop', ...repeat });
         await control({ action: 'play' });
-        const before = await assertNativeVideoBounds();
-        const started = await state();
-        await recordSurfaceTransition(`live-${surface.name}-enter`, surface, true);
-        const opened = await assertNativeVideoBounds();
-        assert.deepEqual(nativeVideo(opened).regionRectangles, nativeVideo(before).regionRectangles,
-          'The animated WebView surface cut a hole in the underlying video');
-        assert.deepEqual(opened.dom.viewport, before.dom.viewport);
-        await recordSurfaceTransition(`live-${surface.name}-exit`, surface, false);
-        const ended = await state();
-        assert.equal(ended.paused, false, 'Popup motion paused native playback');
-        assert.equal(ended.surfaceVisible, true, 'Popup motion hid native video');
-        assert(ended.positionMs > started.positionMs + 500, 'Playback stopped while the popup entered and exited');
-        const closed = await assertNativeVideoBounds();
-        assert.deepEqual(nativeVideo(closed).regionRectangles, nativeVideo(before).regionRectangles,
-          'Popup exit left a native clipping change');
-        await expect($(surface.trigger)).toBeFocused();
-        writeFileSync(nativeArtifact(`live-${surface.name}-playback.json`), JSON.stringify({ started, ended, before, opened, closed }, null, 2));
+        const observation = { repeat };
+        await browser.execute(startNativePlaybackObservation);
+        try {
+          observation.started = await state();
+          const before = observation.before = await assertNativeVideoBounds();
+          await recordSurfaceTransition(`live-${surface.name}-enter`, surface, true);
+          const opened = observation.opened = await assertNativeVideoBounds();
+          assert.deepEqual(nativeVideo(opened).regionRectangles, nativeVideo(before).regionRectangles,
+            'The animated WebView surface cut a hole in the underlying video');
+          assert.deepEqual(opened.dom.viewport, before.dom.viewport);
+          await recordSurfaceTransition(`live-${surface.name}-exit`, surface, false);
+          observation.ended = await state();
+          const closed = observation.closed = await assertNativeVideoBounds();
+          assert.deepEqual(nativeVideo(closed).regionRectangles, nativeVideo(before).regionRectangles,
+            'Popup exit left a native clipping change');
+          await expect($(surface.trigger)).toBeFocused();
+          // Fast HWND captures can finish before the repeat's first wrap.
+          // Observe completion explicitly rather than relying on capture cost.
+          await browser.waitUntil(async () => {
+            const samples = await browser.execute(() => window.__nativePlaybackObservation.read());
+            return summarizeNativePlayback(samples, repeat).wraps > 0;
+          }, { timeout: 15000, interval: 100, timeoutMsg: 'Native playback never completed the explicit repeat' });
+        } catch (error) {
+          observation.failure = String(error?.message ?? error);
+          throw error;
+        } finally {
+          try {
+            observation.playback = await browser.execute(async () => {
+              try { return await window.__nativePlaybackObservation.stop(); }
+              finally { delete window.__nativePlaybackObservation; }
+            });
+            observation.progress = summarizeNativePlayback(observation.playback.samples, repeat);
+          } catch (error) {
+            observation.samplingFailure = String(error?.message ?? error);
+            throw error;
+          } finally {
+            writeFileSync(nativeArtifact(`live-${surface.name}-playback.json`), JSON.stringify(observation, null, 2));
+          }
+        }
+        assert.deepEqual(observation.playback.errors, [], 'Native playback sampling failed during popup motion');
+        assert(observation.playback.samples.length >= 2, 'Popup motion had no continuous native playback observations');
+        for (const sample of [observation.started, ...observation.playback.samples, observation.ended]) {
+          assert.equal(sample.paused, false, 'Popup motion paused native playback');
+          assert.equal(sample.surfaceVisible, true, 'Popup motion hid native video');
+          assert.equal(sample.error, null, 'Popup motion caused a native playback error');
+        }
+        assert(observation.progress.wraps > 0, 'Native playback never completed the explicit repeat');
+        assert(observation.progress.advancedMs > 500, 'Playback stopped while the popup entered and exited');
       }
-    } finally { await control({ action: 'pause' }); }
+    } finally {
+      try { await control({ action: 'pause' }); }
+      finally { await control({ action: 'loop' }); }
+    }
   });
 
   it('keeps video through rounded speed-popup corners and closes with its trigger in both themes', async () => {

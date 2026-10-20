@@ -57,6 +57,8 @@ public static class SurtitleCiDesktop {
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr data, uint size, out uint required);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr text);
     [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr memory);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool SystemParametersInfo(uint action, uint parameter, out bool value, uint flags);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool SystemParametersInfo(uint action, uint parameter, IntPtr value, uint flags);
 
     public sealed class InputWindow {
         public string hwnd { get; set; }
@@ -78,6 +80,9 @@ public static class SurtitleCiDesktop {
         public bool passed { get; set; }
         public bool requestedHide { get; set; }
         public bool hideRequestAccepted { get; set; }
+        public bool? fullWindowDragBefore { get; set; }
+        public bool? fullWindowDragAfter { get; set; }
+        public bool requestedFullWindowDrag { get; set; }
         public string outcome { get; set; }
         public string error { get; set; }
         public int? nativeErrorCode { get; set; }
@@ -271,12 +276,26 @@ public static class SurtitleCiDesktop {
             receipt.outcome = receipt.requestedHide ? "runner-terminal-hidden" : "runner-terminal-already-hidden";
         } finally { CloseHandle(process); }
     }
+    static void PrepareFullWindowDrag(InputConsoleReceipt receipt) {
+        if (!SystemParametersInfo(0x26, 0, out bool enabled, 0)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot inspect full-window dragging"); // SPI_GETDRAGFULLWINDOWS
+        receipt.fullWindowDragBefore = enabled;
+        if (!enabled) {
+            receipt.requestedFullWindowDrag = true;
+            // SPI_SETDRAGFULLWINDOWS; flags 0 changes this ephemeral session
+            // without persisting a user preference or broadcasting a change.
+            if (!SystemParametersInfo(0x25, 1, IntPtr.Zero, 0)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot enable full-window dragging in the hosted CI session");
+        }
+        if (!SystemParametersInfo(0x26, 0, out enabled, 0)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot verify full-window dragging after CI input preparation");
+        receipt.fullWindowDragAfter = enabled;
+        if (!enabled) throw new InvalidOperationException("Full-window dragging remained disabled after CI input preparation; live caption geometry is unavailable");
+    }
     public static InputConsoleReceipt PrepareInputConsole() {
         RequireHostedRunner();
         var receipt = new InputConsoleReceipt();
         LastInputConsoleReceipt = receipt;
         try {
             receipt.before = InputConsoleState();
+            PrepareFullWindowDrag(receipt);
             if (receipt.before.attachedConsole.hwnd == "0x0") {
                 PrepareRunnerTerminal(receipt);
             } else {

@@ -54,6 +54,7 @@ public static class SurtitleNativePointer {
     [DllImport("user32.dll", SetLastError = true)] static extern bool GetClipCursor(out Rect rect);
     [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
     [DllImport("user32.dll")] static extern uint GetDoubleClickTime();
+    [DllImport("user32.dll", SetLastError = true)] static extern bool SystemParametersInfo(uint action, uint parameter, out bool value, uint flags);
     [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint process);
@@ -367,6 +368,8 @@ public static class SurtitleNativePointer {
     }
     public static object DragCaption(IntPtr root, uint expectedProcess, string axis, int travel) {
         if ((axis != "x" && axis != "y") || travel < 8 || travel > 384) throw new ArgumentException("Invalid caption drag path");
+        if (!SystemParametersInfo(0x26, 0, out bool fullWindowDrag, 0)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot inspect full-window dragging before caption input"); // SPI_GETDRAGFULLWINDOWS
+        if (!fullWindowDrag) throw new InvalidOperationException("Caption drag requires full-window dragging; run ci-desktop.ps1 -Action prepare-input on GitHub-hosted Windows CI or enable Show window contents while dragging locally before rerunning. No input was sent.");
         var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
         if (previous == IntPtr.Zero) throw new Win32Exception();
         bool pressed = false, released = false;
@@ -438,7 +441,7 @@ public static class SurtitleNativePointer {
                 }
             } finally { SetThreadDpiAwarenessContext(previous); }
         }
-        return new { samples = samples.ToArray(), released };
+        return new { samples = samples.ToArray(), released, fullWindowDrag };
     }
     static Point VideoPoint(IntPtr root, uint expectedProcess, IntPtr video, int clientX, int clientY, int width, int height, int dpi) {
         ValidateRoot(root, expectedProcess);
@@ -516,7 +519,7 @@ if ($SnapDragAxis) {
     $area = ($display.monitors | Where-Object { $_.handle -eq $display.current }).workArea
     $travel = [int][Math]::Round(48 * $geometry[0].dpi / 96.0)
     $drag = [SurtitleNativePointer]::DragCaption($root, $expectedProcess, $SnapDragAxis, $travel)
-    @{ axis = $SnapDragAxis; dpi = $geometry[0].dpi; rootHandle = $root.ToInt64(); workArea = $area; samples = $drag.samples; released = $drag.released } | ConvertTo-Json -Depth 6
+    @{ axis = $SnapDragAxis; dpi = $geometry[0].dpi; rootHandle = $root.ToInt64(); workArea = $area; samples = $drag.samples; released = $drag.released; fullWindowDrag = $drag.fullWindowDrag } | ConvertTo-Json -Depth 6
     exit 0
 }
 if ($ActivateOnly) {

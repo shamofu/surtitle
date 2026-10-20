@@ -106,6 +106,61 @@ test.runIf(process.platform === 'win32')('console preparation refuses local and 
   } finally { rmSync(cwd, { recursive: true }); }
 }, 15000);
 
+test.runIf(process.platform === 'win32')('input preparation enables full-window dragging only when needed and requires successful readback', () => {
+  // Only the Win32 settings boundary is replaced; the preparation policy and
+  // receipts are real. No hosted environment or desktop mutation is used.
+  const result = execFileSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', String.raw`
+    $ErrorActionPreference = 'Stop'
+    $source = [IO.File]::ReadAllText($env:SURTITLE_CI_DESKTOP_SOURCE)
+    $getBinding = '[DllImport("user32.dll", SetLastError = true)] static extern bool SystemParametersInfo(uint action, uint parameter, out bool value, uint flags);'
+    $setBinding = '[DllImport("user32.dll", SetLastError = true)] static extern bool SystemParametersInfo(uint action, uint parameter, IntPtr value, uint flags);'
+    # Refuse to run if either native boundary cannot be replaced safely.
+    if (-not $source.Contains($getBinding) -or -not $source.Contains($setBinding)) { throw 'Native settings boundaries changed; no settings test was executed' }
+    $source = $source.Replace($getBinding, 'static bool SystemParametersInfo(uint action, uint parameter, out bool value, uint flags) { return DragSettingsBoundary.Read(action, parameter, out value, flags); }')
+    $source = $source.Replace($setBinding, 'static bool SystemParametersInfo(uint action, uint parameter, IntPtr value, uint flags) { return DragSettingsBoundary.Write(action, parameter, value, flags); }')
+    $source += @'
+    public static class DragSettingsBoundary {
+      public static bool Before, After, AcceptWrite;
+      public static int Reads, Writes;
+      public static bool Read(uint action, uint parameter, out bool value, uint flags) {
+        if (action != 0x26 || parameter != 0 || flags != 0) throw new System.Exception("Invalid drag settings query");
+        value = ++Reads == 1 ? Before : After;
+        return true;
+      }
+      public static bool Write(uint action, uint parameter, System.IntPtr value, uint flags) {
+        if (action != 0x25 || parameter != 1 || value != System.IntPtr.Zero || flags != 0) throw new System.Exception("Drag setting must be session-only");
+        Writes++;
+        return AcceptWrite;
+      }
+    }
+'@
+    Add-Type -TypeDefinition $source
+    $prepare = [SurtitleCiDesktop].GetMethod('PrepareFullWindowDrag', [Reflection.BindingFlags]'NonPublic,Static')
+    if (-not $prepare) { throw 'Input preparation cannot ensure full-window dragging' }
+    foreach ($case in @(
+      @{ before = $false; after = $true; acceptWrite = $true; writes = 1; passed = $true },
+      @{ before = $true; after = $true; acceptWrite = $true; writes = 0; passed = $true },
+      @{ before = $false; after = $false; acceptWrite = $true; writes = 1; passed = $false },
+      @{ before = $false; after = $false; acceptWrite = $false; writes = 1; passed = $false }
+    )) {
+      [DragSettingsBoundary]::Before = $case.before; [DragSettingsBoundary]::After = $case.after
+      [DragSettingsBoundary]::AcceptWrite = $case.acceptWrite
+      [DragSettingsBoundary]::Reads = 0; [DragSettingsBoundary]::Writes = 0
+      $receipt = [SurtitleCiDesktop+InputConsoleReceipt]::new()
+      $failure = $null
+      try { $prepare.Invoke($null, [object[]]@($receipt)) } catch { $failure = $_ }
+      if (($null -eq $failure) -ne $case.passed) { throw "Unexpected drag preparation outcome: $failure" }
+      if ([DragSettingsBoundary]::Writes -ne $case.writes) { throw 'Drag setting changed unnecessarily or not enabled' }
+      if ($receipt.requestedFullWindowDrag -ne (-not $case.before)) { throw 'Drag setting request was not recorded' }
+      if ($receipt.fullWindowDragBefore -ne $case.before) { throw 'Original drag setting was not recorded' }
+      if ($case.acceptWrite -and $receipt.fullWindowDragAfter -ne $case.after) { throw 'Drag setting readback was not recorded' }
+      if (-not $case.acceptWrite -and $receipt.fullWindowDragAfter -ne $null) { throw 'Failed setting change claimed a readback' }
+    }
+    'Session-only drag preparation and readback verified'
+  `], { encoding: 'utf8', windowsHide: true, env: { ...process.env, CI: '', GITHUB_ACTIONS: '', RUNNER_ENVIRONMENT: '', SURTITLE_CI_DESKTOP_SOURCE: fileURLToPath(new URL('./ci-desktop.cs', import.meta.url)) } });
+  assert.match(result, /Session-only drag preparation and readback verified/);
+}, 15000);
+
 test.runIf(process.platform === 'win32')('detached runner terminal policy rejects foreign owners and changed foreground process identities', () => {
   // Exercise only the pure identity checks. No hosted environment is fabricated
   // and no native window/process discovery or visibility API is invoked.

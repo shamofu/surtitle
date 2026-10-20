@@ -79,7 +79,7 @@ pnpm test:e2e --spec ./e2e/native/window-state.e2e.js --mochaOpts.grep 'releases
 Remove-Item Env:SURTITLE_E2E_NATIVE_INPUT
 ```
 
-Only this mode requests foreground assistance for the verified application window. The snap test starts at the top-left corner, holds its verified titlebar through one-physical-pixel movements on each axis, checks the same 32 logical pixel boundary for snapping and release, and saves the cursor/frame traces; ordinary window-state coverage checks initial alignment and persistence without moving the cursor. CI also runs foreground-activation script tests and desktop/input preflights; its console-hiding preparation is restricted to hosted runners. Ordinary DOM/IPC specs do not require foreground ownership.
+Only this mode requests foreground assistance for the verified application window. The snap test requires Windows **Show window contents while dragging**, starts at the top-left corner, holds its verified titlebar through one-physical-pixel movements on each axis, checks the same 32 logical pixel boundary for snapping and release, and saves the cursor/frame traces; ordinary window-state coverage checks initial alignment and persistence without moving the cursor. CI also runs foreground-activation script tests and desktop/input preflights; console hiding and enabling full-window dragging for the session are restricted to hosted runners. Local and self-hosted desktop settings are never changed by these helpers. Ordinary DOM/IPC specs do not require foreground ownership.
 
 On Linux:
 
@@ -89,10 +89,10 @@ export SURTITLE_E2E_BINARY="${CARGO_TARGET_DIR:-$PWD/work/target}/debug/surtitle
 export SURTITLE_E2E_SEED_BINARY="${CARGO_TARGET_DIR:-$PWD/work/target}/debug/examples/seed_fixture"
 export SURTITLE_E2E_DATA_DIR="$(mktemp -d)"
 pnpm seed:fixtures "$SURTITLE_E2E_DATA_DIR" "$PWD/work/test-results/fixtures/日本語 & sample.mp4"
-WEBKIT_DISABLE_COMPOSITING_MODE=1 dbus-run-session -- xvfb-run -a pnpm test:e2e
+LIBGL_ALWAYS_SOFTWARE=1 dbus-run-session -- xvfb-run -a pnpm test:e2e
 ```
 
-Set `SURTITLE_NATIVE_DRIVER` if WebKitWebDriver is not on PATH. Select an individual spec with `--spec ./e2e/native/draft-study.e2e.js` using the same prepared environment.
+Keep WebKit compositing enabled for page transitions; `LIBGL_ALWAYS_SOFTWARE=1` uses software rendering under Xvfb. Unset any inherited `WEBKIT_DISABLE_COMPOSITING_MODE`, or rebuild an older Dev Container to apply the current environment. Set `SURTITLE_NATIVE_DRIVER` if WebKitWebDriver is not on PATH. Select an individual spec with `--spec ./e2e/native/draft-study.e2e.js` using the same prepared environment.
 
 Windows E2E exercises real WebView2/libmpv; Linux uses WebKitGTK and an E2E-only playback adapter. Browser tests cannot establish native persistence, playback or window composition. Windows CI uses software rendering and null audio. For direct desktop graphics validation, set `SURTITLE_E2E_REAL_RENDERER=1` to use the shipped D3D11/automatic decoding settings; audio remains muted. Perceptual A/V synchronization, monitor changes and real IME input still need direct Windows verification. For native screenshots and resizing, use `saveNativeScreenshot` and `resizeNativeWindow` from [native-window.mjs](../e2e/support/native-window.mjs): WebDriver screenshots capture only the WebView, and its resize command targets the nested browser window.
 

@@ -24,7 +24,7 @@
   "containerEnv": {
     "RUST_BACKTRACE": "1",
     "CARGO_TARGET_DIR": "/workspaces/surtitle/work/target",
-    "WEBKIT_DISABLE_COMPOSITING_MODE": "1"
+    "LIBGL_ALWAYS_SOFTWARE": "1"
   },
   "postCreateCommand": "sudo chown -R --no-dereference \"$(id -u):$(id -g)\" .pnpm .cargo node_modules && sudo chown --no-dereference \"$(id -u):$(id -g)\" work src-tauri/gen src-tauri/resources src-tauri/resources/native src-tauri/resources/notices && pnpm install --frozen-lockfile",
   "customizations": {
