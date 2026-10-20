@@ -195,7 +195,7 @@ describe('WebView surfaces above the real native video', () => {
 
   it('preserves video size, actual HWND pixels and input while an opaque dialog is open', async () => {
     const observations = [];
-    for (const [width, height] of [[1280, 720], [1280, 800], [1440, 900], [1440, 940]]) {
+    for (const [width, height] of [[1280, 720], [1280, 800], [1440, 900], [1440, 940], [1920, 1080]]) {
       await resizeNativeWindow(width, height);
       await control({ action: 'seek', value: 200 });
       await control({ action: 'pause' });

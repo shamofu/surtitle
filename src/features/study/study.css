@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-.page-content:has(.study-page) { padding: 12px 24px 16px; overflow: hidden; scroll-behavior: auto; }
-.page-content > .study-page { max-width: 1600px; }
+.page-content:has(.study-page) { padding: 12px var(--page-gutter) 16px; overflow: hidden; scroll-behavior: auto; }
 .study-page { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 16px; }
 .study-top { display: flex; gap: 16px; align-items: center; flex-shrink: 0; min-height: 48px; }
 .study-top .back-link { width: 40px; justify-content: center; flex-shrink: 0; }
@@ -196,7 +195,7 @@
   .caption-navigation-slot { padding-left: 0; border-left: 0; }
 }
 @media (max-width: 999px) {
-  .page-content:has(.study-page) { overflow: auto; padding: 16px; }
+  .page-content:has(.study-page) { overflow: auto; padding: 16px var(--page-gutter); }
   .study-page { height: auto; min-height: 100%; }
   .study-grid { grid-template-columns: minmax(0, 1fr); flex: none; min-height: 0; row-gap: 16px; }
   .study-left { grid-column: 1; grid-row: 1; }

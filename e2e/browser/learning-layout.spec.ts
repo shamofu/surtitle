@@ -3,7 +3,8 @@ import { expect, test } from '@playwright/test';
 import { installLearningFixture } from './learning-fixture';
 
 for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'] as const) {
-  for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 700 }, { width: 800, height: 900 }]) {
+  for (const size of [{ width: 2560, height: 1440 }, { width: 1920, height: 1080 },
+    { width: 1440, height: 900 }, { width: 1024, height: 700 }, { width: 800, height: 900 }]) {
     test(`learning layout ${locale} ${theme} ${size.width}x${size.height}`, async ({ page }) => {
       await page.setViewportSize(size);
       await installLearningFixture(page, locale, theme);
@@ -11,6 +12,14 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
         await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
         await expect(page.getByText('Unimplemented visual-test command:', { exact: false })).toHaveCount(0);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        const bounds = await page.locator('main.page-content').evaluate(main => {
+          const outer = main.getBoundingClientRect();
+          const content = main.firstElementChild!.getBoundingClientRect();
+          return { left: content.left - outer.left, right: outer.left + main.clientWidth - content.right };
+        });
+        const gutter = size.width < 1000 ? 16 : 24;
+        expect(bounds.left, 'The page should use the available width instead of a centered narrow column').toBeCloseTo(gutter, 0);
+        expect(bounds.right, 'The page should leave only the outer gutter, excluding its scrollbar').toBeCloseTo(gutter, 0);
       };
       await page.goto('/');
       await expect(page.getByRole('heading', { name: locale === 'ja' ? 'ライブラリ' : 'Library', exact: true })).toBeVisible();

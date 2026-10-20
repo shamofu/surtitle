@@ -1,5 +1,4 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-.page-content > .library-page { max-width: 1240px; }
 .library-utilities { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 24px; margin: -8px 0 24px; }
 .library-utilities .library-drop-hint { margin: 0; flex: 1 1 300px; }
 .library-secondary-actions { display: flex; flex-wrap: wrap; gap: 4px; }
