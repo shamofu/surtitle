@@ -29,6 +29,36 @@ export async function requestNativeWindowSize(width, height) {
   return nativeWindow('resize', ['-Width', String(width), '-Height', String(height)]);
 }
 
+/** Predict a supported client size before resizing, using the current monitor. */
+export async function nativeWindowSizeWithinWorkArea(width, height) {
+  validateNativeSize(width, height);
+  if (process.platform !== 'win32') return { width, height };
+  const [native, display] = await Promise.all([inspectNativeWindow(), inspectNativeMonitor()]);
+  const root = native?.[0];
+  assert(root && Number.isSafeInteger(root.handle) && root.handle > 0 && root.parent === 0 &&
+    root.visible === true && root.maximized === false, 'Work-area sizing requires a visible normal top-level window');
+  assert(Number.isInteger(root.dpi) && root.dpi >= 48 && root.dpi <= 768, 'Invalid native window DPI');
+  const monitor = display?.monitors?.find(item => item.handle === display.current);
+  assert(monitor, 'The current native monitor is missing');
+  const size = (rectangle, name) => {
+    assert(rectangle && ['Left', 'Top', 'Right', 'Bottom'].every(edge => Number.isSafeInteger(rectangle[edge])) &&
+      rectangle.Right > rectangle.Left && rectangle.Bottom > rectangle.Top, `Invalid ${name} rectangle`);
+    return { width: rectangle.Right - rectangle.Left, height: rectangle.Bottom - rectangle.Top };
+  };
+  const client = size(root.client, 'client');
+  const frame = size(root.visibleFrame, 'visible frame');
+  const work = size(monitor.workArea, 'monitor work area');
+  const decoration = { width: frame.width - client.width, height: frame.height - client.height };
+  assert(decoration.width >= 0 && decoration.height >= 0, 'Invalid native window decoration dimensions');
+  const scale = root.dpi / 96;
+  const fitted = {
+    width: Math.min(width, Math.floor((work.width - decoration.width) / scale)),
+    height: Math.min(height, Math.floor((work.height - decoration.height) / scale)),
+  };
+  validateNativeSize(fitted.width, fitted.height);
+  return fitted;
+}
+
 export async function resizeNativeWindow(width, height) {
   await requestNativeWindowSize(width, height);
   let dom;

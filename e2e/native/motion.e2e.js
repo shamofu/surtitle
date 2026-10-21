@@ -5,7 +5,7 @@ import { invokeNative as invoke, clickNative } from '../support/native-app.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
-import { assertNativeVideoBounds, inspectNativeWindow, resizeNativeWindow, saveNativeScreenshot } from '../support/native-window.mjs';
+import { assertNativeVideoBounds, inspectNativeWindow, nativeWindowSizeWithinWorkArea, resizeNativeWindow, saveNativeScreenshot } from '../support/native-window.mjs';
 import { setWebViewReducedMotion } from '../support/webview-media.mjs';
 
 const fixture = JSON.parse(readFileSync(resolve(process.env.SURTITLE_E2E_DATA_DIR, 'fixture.json'), 'utf8'));
@@ -247,7 +247,10 @@ describe('stable layout with the real Windows video surface', () => {
       });
 
       it('resizes the real video beside the panel without hiding it or changing its height', async () => {
-        for (const [width, height] of [[1440, 900], [1920, 1080]]) {
+        const wide = await nativeWindowSizeWithinWorkArea(1920, 1080);
+        writeFileSync(nativeArtifact('wide-layout-size.json'), JSON.stringify({ requested: { width: 1920, height: 1080 }, expected: wide }, null, 2));
+        assert(wide.width > 1440 && wide.height >= 940, 'Desktop cannot hold a distinct wide native layout case');
+        for (const [width, height] of [[1440, 900], [wide.width, wide.height]]) {
           await resizeNativeWindow(width, height);
           const before = await assertNativeVideoBounds();
           await $(`button=${labels.transcript}`).click();

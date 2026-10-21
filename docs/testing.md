@@ -96,6 +96,8 @@ Keep WebKit compositing enabled for page transitions; `LIBGL_ALWAYS_SOFTWARE=1` 
 
 Windows E2E exercises real WebView2/libmpv; Linux uses WebKitGTK and an E2E-only playback adapter. Browser tests cannot establish native persistence, playback or window composition. Windows CI uses software rendering and null audio. For direct desktop graphics validation, set `SURTITLE_E2E_REAL_RENDERER=1` to use the shipped D3D11/automatic decoding settings; audio remains muted. Perceptual A/V synchronization, monitor changes and real IME input still need direct Windows verification. For native screenshots and resizing, use `saveNativeScreenshot` and `resizeNativeWindow` from [native-window.mjs](../e2e/support/native-window.mjs): WebDriver screenshots capture only the WebView, and its resize command targets the nested browser window.
 
+Wide native layout cases request up to 1920×1080 logical client pixels. Before resizing, `nativeWindowSizeWithinWorkArea` deducts the visible window frame from the current monitor work area and accounts for DPI. The selected size must remain wider than the 1440-pixel case and at least 940 pixels tall; `resizeNativeWindow` still requires an exact match. Requested and expected sizes are saved in `wide-layout-size.json`. A 1920×1080 desktop cannot contain that same client size plus its frame and taskbar; browser tests retain exact 1920×1080 viewport coverage.
+
 ## Explicit Rust integration suites
 
 Some real-media tests are ignored in ordinary unit runs and selected explicitly in CI:

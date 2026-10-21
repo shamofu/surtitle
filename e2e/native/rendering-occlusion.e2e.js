@@ -5,7 +5,7 @@ import { invokeNative as invoke, clickNative } from '../support/native-app.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Key } from 'webdriverio';
-import { assertNativeVideoBounds, captureNativeScreenshotSequence, resizeNativeWindow, saveNativeScreenshot } from '../support/native-window.mjs';
+import { assertNativeVideoBounds, captureNativeScreenshotSequence, nativeWindowSizeWithinWorkArea, resizeNativeWindow, saveNativeScreenshot } from '../support/native-window.mjs';
 import { setWebViewReducedMotion } from '../support/webview-media.mjs';
 import { startNativePlaybackObservation, summarizeNativePlayback } from '../support/native-playback-observation.mjs';
 
@@ -233,7 +233,10 @@ describe('WebView surfaces above the real native video', () => {
 
   it('preserves video size, actual HWND pixels and input while an opaque dialog is open', async () => {
     const observations = [];
-    for (const [width, height] of [[1280, 720], [1280, 800], [1440, 900], [1440, 940], [1920, 1080]]) {
+    const wide = await nativeWindowSizeWithinWorkArea(1920, 1080);
+    writeFileSync(nativeArtifact('wide-layout-size.json'), JSON.stringify({ requested: { width: 1920, height: 1080 }, expected: wide }, null, 2));
+    assert(wide.width > 1440 && wide.height >= 940, 'Desktop cannot hold a distinct wide native layout case');
+    for (const [width, height] of [[1280, 720], [1280, 800], [1440, 900], [1440, 940], [wide.width, wide.height]]) {
       await resizeNativeWindow(width, height);
       await control({ action: 'seek', value: 200 });
       await control({ action: 'pause' });
