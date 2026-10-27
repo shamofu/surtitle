@@ -2,6 +2,7 @@
 /.pnpm/
 /.cargo/config.toml
 /work/
+target/
 /src-tauri/resources/native/*
 !/src-tauri/resources/native/.gitkeep
 /src-tauri/resources/notices/*
