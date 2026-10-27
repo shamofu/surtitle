@@ -17,4 +17,10 @@ RUN bash -lc '. "$HOME/.nvm/nvm.sh" && nvm install "$(cat /tmp/surtitle-node-ver
 ENV PATH="/home/vscode/.local/bin:${PATH}"
 RUN PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=never pnpm --dir /tmp/surtitle-bootstrap setup:rust-tools
 RUN PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=never pnpm --dir /tmp/surtitle-bootstrap setup:nextest
+USER root
+COPY verification/toolchain.json /tmp/surtitle-formal-toolchain.json
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    "openjdk-$(python3 -c 'import json; print(json.load(open("/tmp/surtitle-formal-toolchain.json"))["javaMajor"])')-jre-headless" \
+    && rm -rf /var/lib/apt/lists/*
+USER vscode
 WORKDIR /workspaces/surtitle

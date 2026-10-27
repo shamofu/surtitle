@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "transcript_publication_order_tests.rs"]
+mod bounded_orders;
+
 fn cue(id: &str, start_ms: u64, end_ms: u64, text: &str) -> SubtitleSegment {
     serde_json::from_value(serde_json::json!({
         "id":id, "mediaId":"media", "startMs":start_ms, "endMs":end_ms,

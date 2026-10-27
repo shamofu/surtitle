@@ -4,6 +4,39 @@ Vitest runs UI and script tests, Playwright checks browser behavior, WebdriverIO
 
 Ordinary tests use authored fixtures and disposable data without Vertex requests. AI integration tests exercise approval, execution, accounting and result application against real SQLite databases with offline transport. They do not measure generated-language quality; use [explicitly approved live verification](vertex-verification.md) for that.
 
+## Bounded formal and operation-order checks
+
+The Dev Container includes the Java major version in [verification/toolchain.json](../verification/toolchain.json). The same manifest pins the TLC release, download digest, heap and total time limit. On another machine, install that Java version, then run:
+
+```sh
+pnpm setup:formal
+pnpm test:formal
+```
+
+Setup reuses a verified local JAR or downloads and verifies it. Checking requires that JAR and makes no network requests. Linux CI runs both commands. Each positive model must finish exploring its entire finite reachable graph; a timeout, nonempty exploration queue, parse failure or missing result fails the check. Each negative control must fail its named invariant with TLC's normal invariant-violation exit. One worker uses at most a 4 GiB Java heap; the combined model run has a ten-minute deadline. These are bounded checks, not a proof of arbitrary executions or external service behavior.
+
+| Model configuration | Finite scope |
+| --- | --- |
+| `ClaimSafety` | Two jobs, one request each, one send per approval; competing claims, pause/cancel/source changes, reapproval and one restart |
+| `RetrySafety` | One job, two requests, up to three sends per request and approval; 429 retries, evidence/settlement failures and completed-request protection |
+| `PacingSharedSafety`, `PacingSeparateSafety` | Two jobs, one request each, one retry each; shared or separate project/model/location keys, pause and reapproval |
+| `PacingStopSafety`, `PacingRestartSafety` | Complementary two-job retry scenarios with terminal stops/source invalidation or crash/reopen and reapproval |
+| `HealthyProgress` | Eventual completion under weak fairness, successful external operations and no permanent pause, unknown result, budget or excess-cost block |
+| `MissingGenerationGuard`, `UnknownRefund`, `RetryFloorIgnored` | Deliberate model faults detected respectively by `NoStaleAuthority`, `UnknownHoldPreserved`, `RetryFloorRespected` |
+
+All models use at most two approval generations. Time is represented by finite expired/backoff/server-floor classes; precise UTC boundaries and monetary values belong to the implementation tests. Priced success may exceed its reservation. Acknowledging an unknown result and locally reusing evidence preserve financial holds. This is a single-process worker model under the application lock: a crash destroys workers, while a delayed completion in a live process remains a separate transition. Final authorization and HTTP start are separate, so cancellation after authorization may still allow that send. SQLite transaction internals remain atomic. The model covers the worker settlement path; the Store API's explicit settlement of a recovered unknown attempt is tested separately.
+
+| Contract | Model/action and implementation evidence |
+| --- | --- |
+| Claim and dispatch authority | `Reserve`, `Authorize`, `Start`; [dispatch.rs](../crates/ai/src/ledger/dispatch.rs), [vertex.rs](../crates/ai/src/vertex.rs) and offline worker tests |
+| Evidence, holds, retry and recovery | `SaveEvidence`, `Settle`, `Reject429`, `Acknowledge`, `Crash`, `Reopen`; ledger settlement/retries/initialize/accounting and their SQLite tests |
+| Model-to-worker boundaries | [model_boundary_replay.rs](../crates/ai/src/vertex/fault_tests/model_boundary_replay.rs): actual worker plus SQLite, authorization-to-send cancellation, durable evidence with failed settlement, 429/unknown holds through reapproval, stale completion and raw recovery settlement; existing AI tests cover exact UTC, costs, per-key pacing and three-send exhaustion |
+| Manual edits and publication ownership | [transcript_publication_order_tests.rs](../crates/core/src/store/transcript_publication_order_tests.rs): 1,260 real Store histories, two jobs/three initial cues, precise/source-block intervals, disjoint/touching/overlap/containment, edits/deletes/moves, partial/duplicate results, restart and detachment |
+| Cache epochs and delayed reads | [data-synchronization-orderings.test.ts](../src/test/data-synchronization-orderings.test.ts): 104 histories using the real synchronizer, QueryClient and active QueryObserver; read start, snapshot capture and completion are separate |
+| Raw input, persistence and restore | [editor-session-orderings.test.ts](../src/test/editor-session-orderings.test.ts): 96 real editor-session histories, delayed success/conflict/failure, newer input, recovery, legal flush-before-restore and detached drafts |
+
+The Rust and TypeScript ordering checks run in the ordinary `pnpm test:rust` and `pnpm test:ui` suites. They enumerate every topological ordering of fixed action families with explicit causal prerequisites, normally at most six actions, without random sampling or visible-state deduplication. Frontend families use selected pairs of domains/entities/epochs and at most two unfinished reads, rather than an unrestricted cross product. Existing rollback and committed-restore warning tests remain authoritative. Identical-source restore compatibility applies to plain source-snapshot card creation; checked existing-card edits include the learning generation and phrase drafts detach. Model and renderer checks do not establish native rendering, Windows input or live-provider behavior.
+
 ## Routine checks
 
 Install the [development prerequisites](../README.md#development), then run:
@@ -125,6 +158,7 @@ Runner exit codes determine test success; the final CI job requires every prereq
 | Evidence | Local path |
 | --- | --- |
 | Vitest JUnit | `work/test-results/vitest/` |
+| TLC inputs, per-configuration logs and completion summary | `work/test-results/formal/<run>/` |
 | Browser JSON/JUnit, failure screenshots and traces | `work/test-results/browser/`, `work/playwright-report/browser/` |
 | Rust JUnit | `work/test-results/nextest/` |
 | Required Rust discovery, execution and JUnit | `work/artifacts/required-rust-tests/<suite>/run-*/` |

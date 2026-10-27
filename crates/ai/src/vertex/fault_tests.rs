@@ -16,6 +16,8 @@ use std::{
     },
 };
 
+mod model_boundary_replay;
+
 const FAKE_TOKEN: &str = "test-only-bearer-secret-never-persist";
 const FAKE_PROVIDER_SECRET: &str = "test-only-provider-detail-never-expose";
 

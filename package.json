@@ -13,6 +13,8 @@
     "test:watch": "vitest",
     "test:ui": "vitest run --project ui",
     "test:scripts": "vitest run --project scripts",
+    "setup:formal": "node scripts/formal.mjs setup",
+    "test:formal": "node scripts/formal.mjs check",
     "test:browser": "playwright test",
     "test:structure": "playwright test e2e/browser/learning-structure.spec.ts",
     "test:e2e": "node e2e/support/run-native-e2e.mjs",

@@ -116,6 +116,21 @@ jobs:
         id: dependencies
       - run: pnpm setup:rust-tools
         id: rust-tools
+      - name: Read the formal verification Java pin
+        id: formal-toolchain
+        run: echo "java=$(node -p 'require("./verification/toolchain.json").javaMajor')" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-java@v6.1.0
+        with:
+          distribution: temurin
+          java-version: ${{ steps.formal-toolchain.outputs.java }}
+      - uses: actions/cache@v6.1.0
+        with:
+          path: work/tools/tla/
+          key: tlc-${{ hashFiles('verification/toolchain.json') }}
+      - name: Acquire and verify the pinned model checker
+        run: pnpm setup:formal
+      - name: Exhaustive AI models and negative controls
+        run: pnpm test:formal
       - name: Production feature contract
         id: contracts
         run: node scripts/check-production-features.mjs

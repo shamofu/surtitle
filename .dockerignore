@@ -16,6 +16,8 @@
 !public/**
 !scripts/
 !scripts/**
+!verification/
+!verification/**
 !native/
 !native/**
 !e2e/
