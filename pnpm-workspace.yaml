@@ -5,8 +5,6 @@ packages:
   - '!node_modules/**'
   - '!.pnpm/**'
   - '!.git/**'
-  - '!src-tauri/gen/**'
-  - '!src-tauri/resources/**'
   - '!vendor/**'
   - '!javascript-packages/**'
   - '!native-sources/**'
@@ -16,6 +14,4 @@ cargo:
 # Preserve native Windows arguments containing backslashes, spaces and symbols.
 shellEmulator: true
 allowBuilds:
-  edgedriver: false
   esbuild: true
-  geckodriver: false

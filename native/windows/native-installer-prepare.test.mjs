@@ -13,9 +13,9 @@ with tempfile.TemporaryDirectory() as temp:
     root=pathlib.Path(temp); downloads=root/'work/native-installer-downloads'; downloads.mkdir(parents=True)
     toolchain=root/'rust'; notice=toolchain/'share/doc/rust/LICENSE-MIT'; notice.parent.mkdir(parents=True); notice.write_bytes(b'rust notice')
     (root/'native/installer-notices').mkdir(parents=True); (root/'native/installer-notices/NSIS.txt').write_bytes(b'NSIS notice')
-    notices=root/'src-tauri/resources/notices/installer'; notices.mkdir(parents=True); (notices/'NSIS.txt').write_bytes(b'previous output')
+    notices=root/'work/resources/notices/installer'; notices.mkdir(parents=True); (notices/'NSIS.txt').write_bytes(b'previous output')
     (root/'work/installer-sources').mkdir(parents=True)
-    payloads={name:name.encode() for name in ['nsis-source.tar.bz2','plugin.tar.gz','dependency.crate']}
+    payloads={name:name.encode() for name in ['nsis-source.tar.bz2']}
     data=io.BytesIO()
     with tarfile.open(fileobj=data,mode='w:xz') as archive:
         item=tarfile.TarInfo('rust-src/rust-src/lib/rustlib/src/rust/library/compiler-builtins/LICENSE.txt'); item.size=8; archive.addfile(item,io.BytesIO(b'builtins'))
@@ -23,7 +23,6 @@ with tempfile.TemporaryDirectory() as temp:
     digest=lambda data: hashlib.sha256(data).hexdigest()
     item=lambda file:{'file':file,'url':'https://example.invalid/'+file,'sha256':digest(payloads[file])}
     inputs={'sourceArchive':item('nsis-source.tar.bz2'),
-      'plugin':{'sourceArchive':item('plugin.tar.gz'),'sourceCrates':[item('dependency.crate')]},
       'rust':{'sourceArchive':item('rust.tar.xz'),'notices':[{'file':'LICENSE-MIT'}]},
       'notices':[{'file':'NSIS.txt'}]}
     (root/'native/installer-inputs.json').write_text(json.dumps(inputs))
@@ -32,7 +31,7 @@ with tempfile.TemporaryDirectory() as temp:
     requests=[]
     def response(request,timeout): requests.append(request.full_url); return io.BytesIO(payloads[pathlib.PurePosixPath(request.full_url).name])
     with patch.object(m.urllib.request,'urlopen',response): m.prepare(root,toolchain)
-    assert len(requests)==4
+    assert len(requests)==2
     generated=(root/'work/installer-prerequisite.nsh').read_text()
     assert '!define SURTITLE_VC_MINIMUM_VERSION "14.44.35211"' in generated
     assert '!define SURTITLE_VC_DOWNLOAD_URL "https://example.invalid/vc.exe"' in generated
@@ -40,7 +39,7 @@ with tempfile.TemporaryDirectory() as temp:
     notice.write_bytes(b'updated rust notice')
     (root/'native/installer-notices/NSIS.txt').write_bytes(b'updated NSIS notice')
     with patch.object(m.urllib.request,'urlopen',response): m.prepare(root,toolchain)
-    assert len(requests)==4, 'A retry must reuse verified downloads'
+    assert len(requests)==2, 'A retry must reuse verified downloads'
     assert (notices/'NSIS.txt').read_bytes()==b'updated NSIS notice'
     assert (notices/'rust-runtime/LICENSE-MIT').read_bytes()==b'updated rust notice'
     for name in ['../escape', '..\\escape', '/absolute', 'C:\\absolute', 'C:relative']:
@@ -50,11 +49,11 @@ with tempfile.TemporaryDirectory() as temp:
     try: m.notice_file(root, 'missing-notice')
     except ValueError: pass
     else: raise AssertionError('missing required notice accepted')
-    assert (root/'src-tauri/resources/notices/installer/rust-runtime/compiler-builtins-LICENSE.txt').read_bytes()==b'builtins'
-    sources=json.loads((root/'work/installer-sources/sources.json').read_text())['sources']; assert len(sources)==4
+    assert (root/'work/resources/notices/installer/rust-runtime/compiler-builtins-LICENSE.txt').read_bytes()==b'builtins'
+    sources=json.loads((root/'work/installer-sources/sources.json').read_text())['sources']; assert len(sources)==2
     for source in sources: assert m.digest(root/'work/installer-sources'/source['file'])==source['sha256']
-    changed=downloads/'dependency.crate'; changed.write_bytes(b'changed')
-    try: m.download(inputs['plugin']['sourceCrates'][0],downloads)
+    changed=downloads/'nsis-source.tar.bz2'; changed.write_bytes(b'changed')
+    try: m.download(inputs['sourceArchive'],downloads)
     except ValueError: pass
     else: raise AssertionError('changed cached archive accepted')
     missing=downloads/'download.bin'; payloads['download.bin']=b'HTTP 200 HTML body'
@@ -74,6 +73,35 @@ with tempfile.TemporaryDirectory() as temp:
     try: m.prepare_prerequisite(root)
     except ValueError: pass
     else: raise AssertionError('NSIS interpolation in the prerequisite URL accepted')
+`], { cwd: new URL('../..', import.meta.url), encoding: 'utf8', windowsHide: true, timeout: 15_000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+}, 20_000);
+
+test('stages separate embedded-asset notices from the selected Cargo source and refuses missing attribution', () => {
+  const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-B', '-c', String.raw`
+import importlib.util, json, pathlib, tempfile
+spec=importlib.util.spec_from_file_location('prepare', 'native/windows/native-installer-prepare.py')
+m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+with tempfile.TemporaryDirectory() as temp:
+    root=pathlib.Path(temp); (root/'native').mkdir(); crate=root/'cargo/gpui-kit-assets'; crate.mkdir(parents=True)
+    (root/'native/installer-inputs.json').write_text(json.dumps({'rustAssetNotices':[{'package':'gpui-kit-assets','files':['LICENSE-LUCIDE']}]}))
+    manifest=crate/'Cargo.toml'; manifest.write_text('[package]')
+    notice=crate/'LICENSE-LUCIDE'; notice.write_bytes(b'upstream embedded icon attribution')
+    packages=[{'name':'gpui-kit-assets','version':'0.9.0','manifest_path':str(manifest)}]
+    m.prepare_asset_notices(root, packages)
+    output=root/'work/resources/notices/assets/gpui-kit-assets-0.9.0/LICENSE-LUCIDE'
+    assert output.read_bytes()==notice.read_bytes()
+    notice.write_bytes(b'current upstream attribution')
+    m.prepare_asset_notices(root, packages)
+    assert output.read_bytes()==notice.read_bytes()
+    notice.unlink()
+    try: m.prepare_asset_notices(root, packages)
+    except ValueError: pass
+    else: raise AssertionError('missing embedded-asset notice was accepted')
+    try: m.prepare_asset_notices(root, [])
+    except ValueError: pass
+    else: raise AssertionError('absent selected Cargo package was accepted')
 `], { cwd: new URL('../..', import.meta.url), encoding: 'utf8', windowsHide: true, timeout: 15_000 });
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stdout + result.stderr);

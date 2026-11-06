@@ -65,11 +65,11 @@ native files, then run:
 pnpm install --frozen-lockfile
 pwsh -File native/windows/native-prepare.ps1
 pwsh -File native/windows/native-smoke.ps1
-pnpm tauri dev
+pnpm dev
 ```
 
 The exported DLL and source archives stay in `work/native-ci-artifact/`.
-Application commands use `work/target` for Rust builds, `work/dist` for the frontend and `work/artifacts` for distribution output. Use `pnpm rust` for additional Cargo commands so the same output default applies.
+Application commands use `work/target` for Rust builds, `work/resources` for staged native runtime and notices and `work/artifacts` for distribution output. Use `pnpm rust` for additional Cargo commands so the same output default applies.
 Preparation stages native DLLs
 and notices and downloads the selected official ORT archive. The smoke check
 loads the selected DLLs and initializes mpv/ORT. Windows application tests cover
@@ -81,8 +81,10 @@ want to return to those sources after normal `pnpm install --frozen-lockfile`,
 which acquires JavaScript and Rust dependencies and replaces the marked source
 configuration. Restore that saved `.cargo/config.toml` in place; do not append it.
 `javascript-packages/` retains the exact JavaScript dependency sources.
+Keep `patches/` alongside `vendor/`: Cargo selects the locally corrected dependency
+sources there through the root manifest, and the source ZIP includes those files.
 
-## Standard Tauri installer
+## Standard NSIS installer
 
 From a fresh working copy with native resources prepared:
 
@@ -91,18 +93,20 @@ python native/windows/native-installer-prepare.py
 pnpm package:app
 ```
 
-Preparation collects source archives and installer notices. Tauri obtains and
-caches its standard NSIS tools and official `nsis_tauri_utils.dll` during the
-build. `native-installer-sources/` in the published ZIP retains NSIS source,
-the official plugin's source and locked source crates, and the application's
-Rust runtime source. The app uses Tauri's standard installer
-template and its VC Runtime prerequisite hook. Microsoft runtime installation
+Preparation collects source archives and installer notices. The package helper
+uses the standard pinned NSIS compiler, reusing an acquired matching compiler
+or downloading its checksum-verified upstream archive. `native-installer-sources/` in the published ZIP retains NSIS source
+and the application's Rust runtime source. The app uses `packaging/windows.nsi`
+and the existing VC Runtime prerequisite hook. `packaging/app.json` supplies
+identity; the Cargo workspace supplies version metadata. Microsoft runtime installation
 remains a separate prerequisite; see the [native guide](../docs/native-runtime.md#microsoft-prerequisites).
 
 `native/windows/package-verify.ps1` assembles release assets from Git history and
-therefore requires a Git checkout or CI checkout, rather than this extracted
-ZIP. Run it only in a fresh CI runner or disposable Windows profile, following
-the [native packaging guide](../docs/native-runtime.md#standard-tauri-installer).
+therefore requires a clean Git checkout at the tested revision, rather than this
+extracted ZIP. Uncommitted or untracked source stops verification before installation. Run it only in a fresh CI runner or disposable Windows profile, following
+the [native packaging guide](../docs/native-runtime.md#standard-nsis-installer).
+Package testing requires `-ProductionProbe` with the native GPUI production
+verification script; it requires the native production probe.
 Package testing uses the installer for fresh install, installed-app smoke, overwrite, uninstall
 and learning-data retention checks. A local build does not establish completion
 of those checks or hosted CI. Publication additionally requires the workflow's

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterEach, test, vi } from 'vitest';
-import { spawnWebDriver } from './webdriver-process.mjs';
+import { spawnStandardUser } from './standard-user-process.mjs';
 
 vi.mock('node:child_process', async importOriginal => ({ ...await importOriginal(), spawn: vi.fn() }));
 afterEach(() => vi.clearAllMocks());
@@ -11,7 +11,7 @@ afterEach(() => vi.clearAllMocks());
 test('foreground handoff is an explicit outer-launcher option and never leaks into spawn options', () => {
   const application = 'C:\\owned\\driver.exe', foregroundApplication = 'C:\\owned\\app 日本語.exe';
   const env = { SURTITLE_E2E_BINARY: foregroundApplication, SURTITLE_E2E_NATIVE_INPUT: '1' };
-  spawnWebDriver(application, ['literal & argument'], { env, foregroundApplication, stdio: 'pipe' });
+  spawnStandardUser(application, ['literal & argument'], { env, foregroundApplication, stdio: 'pipe' });
   const [command, args, options] = spawn.mock.calls[0];
   assert.equal(options.env, env);
   assert.equal(options.stdio, 'pipe');
@@ -22,7 +22,7 @@ test('foreground handoff is an explicit outer-launcher option and never leaks in
     assert.equal(options.windowsHide, true);
   } else assert.equal(command, application);
 
-  spawnWebDriver(application, [], { env });
+  spawnStandardUser(application, [], { env });
   assert.equal(spawn.mock.calls[1][1].includes('-ForegroundApplication'), false,
     'Nested driver launches must not infer foreground authority from inherited environment');
 });

@@ -4,7 +4,7 @@
 !define SURTITLE_RUNTIME_MANIFEST "${__FILEDIR__}\runtime-windows-x64.json"
 !include "${__FILEDIR__}\..\work\installer-prerequisite.nsh"
 
-; Explicit Windows language IDs work before Tauri expands MUI_LANGUAGE.
+; Explicit Windows language IDs work before the installer expands MUI_LANGUAGE.
 LangString SurtitleVcConsent 1033 "Surtitle requires Microsoft Visual C++ x64 Runtime ${SURTITLE_VC_MINIMUM_VERSION} or newer.$\r$\n$\r$\nDownload it directly from Microsoft, verify its signature, and open Microsoft's installer now? Microsoft will ask you to accept its terms and may request administrator permission. No automatic restart will occur.$\r$\n$\r$\nIf offline, install the prerequisite separately and run Setup again."
 LangString SurtitleVcConsent 1041 "Surtitleには Microsoft Visual C++ x64 Runtime ${SURTITLE_VC_MINIMUM_VERSION} 以降が必要です。$\r$\n$\r$\nMicrosoftから直接ダウンロードし、署名を確認してMicrosoftのインストーラーを開きますか？ 利用規約への同意と管理者権限の確認が表示されます。自動では再起動しません。$\r$\n$\r$\nオフラインの場合は別途ランタイムを導入してから、セットアップを再実行してください。"
 LangString SurtitleVcUnavailable 1033 "Microsoft runtime prerequisite is unavailable. Install the x64 runtime from ${SURTITLE_VC_DOWNLOAD_URL} and retry. Silent setup never installs this system prerequisite. Offline setup requires it to be installed already."

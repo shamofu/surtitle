@@ -8,7 +8,7 @@ FFmpeg/ffprobe has a managed or external selection. FFmpeg and ffprobe must come
 
 Startup discovery and rescanning read fixed executable names without running candidates or changing selections. Selecting a candidate resolves and probes it. Windows supports native `.exe` files and simple Scoop `path = ...` shims. Shell scripts, aliases and shims needing arguments, environment expansion, cwd changes or elevation are not interpreted; select the underlying executable. Saved shim paths and junctions are resolved again for each job.
 
-Each job holds exact executable snapshots and verifies their hashes before every process starts. Processes use literal arguments without a shell, bounded output, deadlines and cancellation. Windows Job Objects and Unix process groups clean up child processes; they are not a sandbox for hostile executables. The frontend has no generic process-execution IPC.
+Each job holds exact executable snapshots and verifies their hashes before every process starts. Processes use literal arguments without a shell, bounded output, deadlines and cancellation. Windows Job Objects and Unix process groups clean up child processes; they are not a sandbox for hostile executables. The UI calls specific tool operations rather than a generic process-execution API.
 
 Receipts retain selected/resolved paths, hashes, observed versions and capabilities, including ffprobe.
 

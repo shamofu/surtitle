@@ -1,6 +1,6 @@
 # Application test guide
 
-Vitest runs UI and script tests, Playwright checks browser behavior, WebdriverIO drives the real Tauri application, and cargo-nextest runs Rust tests. Maintained suites run in CI on their applicable OS; Windows native input runs separately and sequentially. The final `ci` job requires version validation, native build, browser, Linux, Windows and package jobs to succeed.
+Current product checks use Rust service tests, GPUI fake-platform component tests and production Windows UIAutomation. Vitest covers build/process/distribution helpers. The final `ci` job requires version validation, native build, Linux, Windows and automated package verification to succeed. Comprehensive manual-evidence validation is an explicit opt-in.
 
 Ordinary tests use authored fixtures and disposable data without paid provider requests. AI integration tests exercise approval, execution, accounting and result application against real SQLite databases with offline transport. Provider coverage includes transactional v2→v3 migration, legacy plan/hash preservation, separate caps and unknown holds, global dispatch serialization, quota exhaustion, token/duration settlement, and switching during execution. They do not measure generated-language quality; live Vertex or OpenAI verification requires separate approval of the exact input and spending limit. The [Vertex verification guide](vertex-verification.md) describes the existing live CLI.
 
@@ -36,10 +36,10 @@ The `AiLedger` models use at most two approval generations. Time is represented 
 | Evidence, holds, retry and recovery | `SaveEvidence`, `Settle`, `Reject429`, `Acknowledge`, `Crash`, `Reopen`; ledger settlement/retries/initialize/accounting and their SQLite tests |
 | Model-to-worker boundaries | [model_boundary_replay.rs](../crates/ai/src/vertex/fault_tests/model_boundary_replay.rs): actual worker plus SQLite, authorization-to-send cancellation, durable evidence with failed settlement, 429/unknown holds through reapproval, stale completion and raw recovery settlement; existing AI tests cover exact UTC, costs, per-key pacing and three-send exhaustion |
 | Manual edits and publication ownership | [transcript_publication_order_tests.rs](../crates/core/src/store/transcript_publication_order_tests.rs): 1,260 real Store histories, two jobs/three initial cues, precise/source-block intervals, disjoint/touching/overlap/containment, edits/deletes/moves, partial/duplicate results, restart and detachment |
-| Cache epochs and delayed reads | [data-synchronization-orderings.test.ts](../src/test/data-synchronization-orderings.test.ts): 104 histories using the real synchronizer, QueryClient and active QueryObserver; read start, snapshot capture and completion are separate |
-| Raw input, persistence and restore | [editor-session-orderings.test.ts](../src/test/editor-session-orderings.test.ts): 96 real editor-session histories, delayed success/conflict/failure, newer input, recovery, legal flush-before-restore and detached drafts |
+| Change epochs and delayed reads | [ui/session.rs](../crates/desktop/src/ui/session.rs) validates before/after change checkpoints and retries snapshots invalidated during a read; [ui/tests.rs](../crates/desktop/src/ui/tests.rs) drives actual GPUI components through delayed autosave, navigation and combined flush/drain boundaries on the fake platform |
+| Raw input, persistence and restore | [controller/editing.rs](../crates/desktop/src/controller/editing.rs) and its tests cover late commit/refresh responses, newer raw input and restore invalidation; [editor lifecycle tests](../crates/desktop/src/ui/editors/tests.rs) and [source editor worker/tests](../crates/desktop/src/ui/source_editors/worker.rs) cover generation changes, in-flight drain, immediate close during load, newer-input flush and exact saved-draft reopening |
 
-The Rust and TypeScript ordering checks run in the ordinary `pnpm test:rust` and `pnpm test:ui` suites. They enumerate every topological ordering of fixed action families with explicit causal prerequisites, normally at most six actions, without random sampling or visible-state deduplication. Frontend families use selected pairs of domains/entities/epochs and at most two unfinished reads, rather than an unrestricted cross product. Existing rollback and committed-restore warning tests remain authoritative. Identical-source restore compatibility applies to plain source-snapshot card creation; checked existing-card edits include the learning generation and phrase drafts detach. Model and renderer checks do not establish native rendering, Windows input or live-provider behavior.
+Current Rust controller/service and fake-GPUI checks run in `pnpm test:rust`. Existing rollback and committed-restore warning tests remain authoritative. Identical-source restore compatibility applies to plain source-snapshot card creation; checked existing-card edits include the learning generation and phrase drafts detach. Model and fake-platform checks do not establish native rendering, Windows input or live-provider behavior.
 
 ## Routine checks
 
@@ -61,79 +61,37 @@ node scripts/check-release.mjs --version-only
 node scripts/check-production-features.mjs
 ```
 
-`pnpm test:ui` and `pnpm test:scripts` select one Vitest project; `pnpm test:watch` watches both. IPC generation is checked by the script suite; use `pnpm check:ipc` for a focused check and `pnpm generate:ipc` after changing the Rust contract. Nextest uses separate workspace and no-default-feature profiles; doctests remain a Cargo invocation. Rust and native E2E retries are disabled.
+`pnpm test` and `pnpm test:scripts` run build, process and distribution helper regressions with `scripts/vitest.config.mjs`; `pnpm test:watch` watches that suite. Nextest uses separate workspace and no-default-feature profiles; doctests remain a Cargo invocation. Rust and native E2E retries are disabled.
 
-## Browser checks
+## Required GPUI Windows acceptance
 
-```sh
-pnpm exec playwright install chromium
-pnpm test:browser
-```
+`pnpm test:e2e` runs `native/windows/native-acceptance.ps1`; `pnpm test:native:production` runs the narrower production playback smoke. Both require explicit executable/profile/fixture/build-receipt paths. Neither invokes WDIO or a browser. Native validation may use explicitly isolated application data or a test Windows account. These installed-production runners target Windows known-folder paths, so their existing hosted-runner/disposable-account guards remain; do not bypass those guards to use a normal profile. Syntax, compilation and pure guard tests cannot establish native acceptance; each completed case needs actual observations.
 
-On Linux, use `pnpm exec playwright install --with-deps chromium`. CI runs the same suite in the pinned [browser image](../e2e/browser/Dockerfile). `pnpm test:structure` selects the UI structure/layout subset. Browser CI permits one retry and retains its evidence.
+The behavioral checklist and comprehensive report format are in [packaging/native-acceptance.json](../packaging/native-acceptance.json). Automated acceptance uses the ordinary installed binary, the existing restricted-medium process job and native window helpers, and UIAutomation controls. It measures native resize/minimum/maximize/restart placement, accessible viewport versus native child at the observed DPI, fullscreen, owned-dialog blocking/focus, and unfinished input across a clean process restart. The production smoke supplies actual short-fixture metadata/progress/pause/seek evidence. Fake GPUI tests remain part of `pnpm test:rust`; they do not inspect native pixels or exercise Windows IME.
 
-Browser fixtures exercise the real router, query providers, dialogs and virtualized transcript through test-only native transport. The ordinary preview has no fabricated persisted library. Assertions cover accessible roles, names, state, values, bounds and placement, without pixel baselines. Inspect failed assertions before changing a UI contract; review typography, colors and motion visually. Synthetic composition events do not establish real Windows IME behavior.
+Rendering/composition, real Japanese IME, measured audio output, interval/sentence auto-stop, real long media, multi-DPI/monitor transitions, real keyboard/clipboard/screen-reader operations and current-build GPU/performance remain `not_run` in the automated worker. Unperformed cases must remain unclaimed. The comprehensive evidence gate is opt-in; missing manual measurements do not block the default automated package/release workflow. Manual pause and synthetic subtitle counts are insufficient. Audio evidence must distinguish measured signal/output and timed stop from direct listening; record `directListeningPerformed` accurately. Performance evidence must identify hardware, workload, metrics and acceptance criteria. Unperformed measurements and listening must remain explicitly unclaimed.
 
-## Native E2E
+Supply `-ExternalEvidence PATH` to the native runner or `-NativeExternalEvidence PATH` to `package-verify.ps1`. An external JSON report uses `schemaVersion: 1`, `suite: "gpui-windows-external"`, `normalBuild: true`, `paidRequests: 0`, and the exact `executableSha256`, `installerSha256` and `sourceRevision` from the build receipt. Each genuinely completed case supplies its inventory `id` and `method`, `status: "passed"`, `source: {kind: "manual" or "external-probe", operator, observedAt}` (ISO timestamp), `observations: {summary, measurements}` with actual structured measurements, and `evidence: [{path, sha256}]`. Paths are relative to the external report and must identify nonempty unlinked files. Audio measurements require `outputDevice`, `captureMethod`, numeric `signalRmsDbfs`, `measuredDurationMs`, `stopExpectedMs`, `stopObservedMs`, `stopToleranceMs`, and the boolean `directListeningPerformed`. GPU/performance measurements require `hardware`, `measurementMethod`, `criteria` and `workloads`. Both inventory workloads (1920×1080 at 60 fps and 3840×2160 at 30 fps) need a `current` record identifying the candidate executable hash, actual `assetSha256`, physical `displaySize`, and numeric `requiredMetrics`: CPU/GPU load, dropped frames, measured A/V offset and a positive sample window. Identify the observed drop counter or capture layer and A/V measurement method, including their limitations. Source-file frame counts and estimated playback frame indices cannot substitute for measured drops. Memory usage, input latency and decoded-frame counts are optional supplementary metrics. A generic performance summary cannot substitute for these measurements. Old-version comparisons are outside this scope. A boolean-only measurement object is rejected. Include explicit `limitations`. Do not mark unperformed cases passed or substitute booleans for measurements.
 
-Windows needs MSVC/Windows SDK, PowerShell 7, WebView2 and [prepared DLLs](native-runtime.md#build-and-prepare-native-inputs). Run `pwsh -File native/windows/native-prepare.ps1 -WithDevModel` before building. Use an ordinary, non-administrator PowerShell session so the fixture database and restricted app processes share medium integrity. Linux needs GTK/WebKitGTK development libraries, libmpv, WebKitWebDriver, Xvfb, D-Bus and FFmpeg; the [Dev Container](../.devcontainer/README.md) provides them, and the [Linux CI job](../.github/workflows/ci.yml) lists host packages. Put FFmpeg/ffprobe on PATH for the commands below.
+The `dpi-monitor-transitions` measurements need `dpiSamples` at every inventory scale (100%, 125%, 150%), each with `scalePercent`, actual `windowDpi`, monitor identity and physical `viewportBounds`, `nativeVideoBounds`, `workArea` (`x`, `y`, `width`, `height`). `monitorMoves` must record distinct `fromMonitor`/`toMonitor`, actual before/after DPI and viewport/native bounds. The automated observed-DPI check does not satisfy this matrix.
 
-For either OS:
+The `keyboard-clipboard-accessibility` measurements identify `keyboardInputMethod` (`physical-keyboard` or `windows-sendinput`), recorded `keyboardOperations` from the inventory (`operation`, actual `keys`, `observedResult`), and a real `CF_UNICODETEXT` clipboard round trip (`format`, `copiedText`, `pastedText`). `screenReader` identifies `product`, `version`, `outputCaptureMethod` and each required principal operation with `operation`, `controlRole`, `controlName`, emitted `spokenText`, and `observedResult`. A speech-log capture must be distinguished from direct listening. UIA role queries or ValuePattern edits alone do not satisfy this case.
 
-```sh
-pnpm setup:driver
-pnpm build
-pnpm build:native:e2e
-pnpm build:fixtures
-pnpm test:fixtures
-```
+Other external cases also require concrete records: `rendered-composition` identifies the GPU/window `captureMethod` and normal/wide `layouts` with logical client sizes, total frames and observed video/dialog/transition frame counts. `real-japanese-ime` records `languageTag: "ja-JP"`, engine/version, actual preedit/candidate/committed/restored text, candidate/work-area physical bounds, window DPI and the observed result. `interval-auto-stop` records both inventory stop kinds with requested-start, expected-stop, observed-stop and tolerance clocks plus the clock source/result. `long-media` identifies the actual source SHA256/duration and criteria, at least two observed seeks, distinct before/after process IDs and resumed position, and attributed transcript-scroll cue/latency observations. No quantitative long-duration pass threshold is invented; record the actual source and criteria.
 
-Use disposable profiles and a separate Cargo target directory or retained E2E binary when also developing the ordinary app. E2E builds require an explicit absolute `SURTITLE_E2E_DATA_DIR` and refuse startup without it. Production builds reject E2E, test-support and development-validation features. Never reseed a running profile. Workers create isolated profiles; only restarts within one spec reuse them. Each worker reserves `SURTITLE_WEBDRIVER_PORT` (default 4444) and the following port, explicitly passing the latter to its underlying driver. Before settings hooks or test mutations, it compares the application's job identities with the expected fixture SQLite database; restarts repeat this check.
+The runner verifies and copies external artifacts, refuses external overrides of automated cases, and writes one `gpui-native-acceptance.json` combined report. Missing/failed cases, wrong binary/installer/revision, changed artifacts or unsuccessful final profile audits fail closed with the case names. Passing `-RequireNativeAcceptance` to package verification or installer smoke requires this complete report. Supplying `-NativeExternalEvidence` also enables the gate. The package manifest carries this requirement into publication; `node scripts/release.mjs --require-native-acceptance` can require it explicitly too. A supplied comprehensive report is always validated, even without the flag. Default package/release checks retain automated installer/production smoke, artifact integrity and exact source revision checks. Source assembly/publication require a clean build of the exact tested revision.
 
-On Windows, prepare the matching signed EdgeDriver and set absolute paths (adjust `work/target` if using `CARGO_TARGET_DIR`):
+CI preserves `package-candidate-<SHA>` before desktop acceptance. To reuse the exact measured installer and its matching native dependency artifact, supply the producing run ID as workflow-dispatch `native_candidate_run_id`. Supply a run containing `gpui-native-external-<SHA>/report.json` plus its referenced artifacts as `native_evidence_run_id`. For push/tag runs, the corresponding explicit repository variables are `SURTITLE_NATIVE_CANDIDATE_RUN_ID` and `SURTITLE_NATIVE_EVIDENCE_RUN_ID`; stale SHA/hash evidence is rejected. To produce the external artifact, dispatch [Native measurement intake](../.github/workflows/native-evidence-intake.yml) at the candidate commit with its producing run ID, an HTTPS ZIP URL, and the expected ZIP SHA256. The ZIP must contain `report.json` at its root and its referenced files with visible filenames (dotfile/dot-directory paths are rejected to match artifact upload); limits are 128 MiB compressed, 512 MiB expanded and 512 entries. Intake validates paths/links/duplicates, the actual candidate installer hash, all required measured external cases and the selected revision before uploading `gpui-native-external-<SHA>`. It never executes included files or launches the product. Then pass that intake run ID to the package workflow. The optional `require_native_acceptance` workflow input (or `SURTITLE_REQUIRE_NATIVE_ACCEPTANCE=true`) requires the full report even when no external run is supplied. Providing an external evidence run also opts in; invalid or incomplete supplied evidence is rejected. Leaving both unset keeps ordinary CI independent of manual evidence.
 
-```powershell
-pwsh -File e2e/support/prepare-webdriver.ps1
-$env:SURTITLE_NATIVE_DRIVER = "$PWD/work/webdriver/msedgedriver.exe"
-$env:SURTITLE_TAURI_DRIVER = "$PWD/work/driver/bin/tauri-driver.exe"
-$env:SURTITLE_E2E_BINARY = "$PWD/work/target/debug/surtitle.exe"
-$env:SURTITLE_E2E_SEED_BINARY = "$PWD/work/target/debug/examples/seed_fixture.exe"
-$env:SURTITLE_E2E_DATA_DIR = "$PWD/work/e2e-windows"
-pnpm seed:fixtures "$env:SURTITLE_E2E_DATA_DIR" "$PWD/work/test-results/fixtures/日本語 & sample.mp4"
-ffmpeg -v error -f lavfi -i 'testsrc2=size=320x180:rate=12:duration=3' -c:v libaom-av1 -cpu-used 8 -crf 50 -y work/e2e-av1.mkv
-$env:SURTITLE_E2E_AV1_FIXTURE = "$PWD/work/e2e-av1.mkv"
-pnpm test:e2e --exclude ./e2e/native/playback-rate.e2e.js
-```
+For this migration task, old-version comparison, local installer execution and changing Windows display scaling for 125%/150% DPI verification were explicitly waived. The user also prohibited Narrator; screen-reader execution is excluded from this task and Narrator must not be launched. This does not remove existing automated CI installer lifecycle checks, require a new local Windows account, or mark unperformed checks passed. Native behavioral verification above remains separate from the decision to build a package.
 
-Run pointer/playback and slow titlebar-snap tests separately with a fresh profile and an available interactive desktop:
+## Isolated native development checks
 
-```powershell
-$env:SURTITLE_E2E_DATA_DIR = "$PWD/work/e2e-windows-pointer"
-pnpm seed:fixtures "$env:SURTITLE_E2E_DATA_DIR" "$PWD/work/test-results/fixtures/日本語 & sample.mp4"
-$env:SURTITLE_E2E_NATIVE_INPUT = '1'
-pnpm test:e2e --spec ./e2e/native/playback-rate.e2e.js
-pnpm test:e2e --spec ./e2e/native/window-state.e2e.js --mochaOpts.grep 'releases slow titlebar drags'
-Remove-Item Env:SURTITLE_E2E_NATIVE_INPUT
-```
+Build a separate fixture-enabled executable with `pnpm build:native:e2e`. It requires an explicit absolute `SURTITLE_E2E_DATA_DIR` and refuses startup without it. Generate authored media with `pnpm test:fixtures` and seed a disposable profile with `pnpm build:fixtures` / `pnpm seed:fixtures`. Never reseed a running profile or point a fixture build at normal learning data.
 
-Only this mode requests foreground assistance for the verified application window. The snap test requires Windows **Show window contents while dragging**, starts at the top-left corner, holds its verified titlebar through one-physical-pixel movements on each axis, checks the same 32 logical pixel boundary for snapping and release, and saves the cursor/frame traces; ordinary window-state coverage checks initial alignment and persistence without moving the cursor. CI also runs foreground-activation script tests and desktop/input preflights; console hiding and enabling full-window dragging for the session are restricted to hosted runners. Local and self-hosted desktop settings are never changed by these helpers. Ordinary DOM/IPC specs do not require foreground ownership.
+Fixture builds default to software rendering and null audio. Set `SURTITLE_E2E_REAL_RENDERER=1` for the normal D3D11/automatic decoding path; audio remains muted. Visible pixels establish rendering only: they do not prove real Japanese IME, audio output, mixed-DPI behavior or perceptual A/V synchronization. Ordinary builds ignore E2E profile overrides and contain no test RPC.
 
-On Linux:
-
-```sh
-export SURTITLE_TAURI_DRIVER="$PWD/work/driver/bin/tauri-driver"
-export SURTITLE_E2E_BINARY="${CARGO_TARGET_DIR:-$PWD/work/target}/debug/surtitle"
-export SURTITLE_E2E_SEED_BINARY="${CARGO_TARGET_DIR:-$PWD/work/target}/debug/examples/seed_fixture"
-export SURTITLE_E2E_DATA_DIR="$(mktemp -d)"
-pnpm seed:fixtures "$SURTITLE_E2E_DATA_DIR" "$PWD/work/test-results/fixtures/日本語 & sample.mp4"
-LIBGL_ALWAYS_SOFTWARE=1 dbus-run-session -- xvfb-run -a pnpm test:e2e
-```
-
-Keep WebKit compositing enabled for page transitions; `LIBGL_ALWAYS_SOFTWARE=1` uses software rendering under Xvfb. Unset any inherited `WEBKIT_DISABLE_COMPOSITING_MODE`, or rebuild an older Dev Container to apply the current environment. Set `SURTITLE_NATIVE_DRIVER` if WebKitWebDriver is not on PATH. Select an individual spec with `--spec ./e2e/native/draft-study.e2e.js` using the same prepared environment.
-
-Windows E2E exercises real WebView2/libmpv; Linux uses WebKitGTK and an E2E-only playback adapter. Browser tests cannot establish native persistence, playback or window composition. Windows CI uses software rendering and null audio. For direct desktop graphics validation, set `SURTITLE_E2E_REAL_RENDERER=1` to use the shipped D3D11/automatic decoding settings; audio remains muted. Perceptual A/V synchronization, monitor changes and real IME input still need direct Windows verification. For native screenshots and resizing, use `saveNativeScreenshot` and `resizeNativeWindow` from [native-window.mjs](../e2e/support/native-window.mjs): WebDriver screenshots capture only the WebView, and its resize command targets the nested browser window.
-
-Wide native layout cases request up to 1920×1080 logical client pixels. Before resizing, `nativeWindowSizeWithinWorkArea` deducts the visible window frame from the current monitor work area and accounts for DPI. The selected size must remain wider than the 1440-pixel case and at least 940 pixels tall; `resizeNativeWindow` still requires an exact match. Requested and expected sizes are saved in `wide-layout-size.json`. A 1920×1080 desktop cannot contain that same client size plus its frame and taskbar; browser tests retain exact 1920×1080 viewport coverage.
+The retained Windows helpers provide hosted desktop/input preflights, restricted-medium process jobs, and native window inspection. Desktop-setting changes remain restricted to hosted CI. Local verification must use explicitly isolated data and preserve the user's other windows and settings.
 
 ## Explicit Rust integration suites
 
@@ -155,30 +113,25 @@ pnpm test:rust:required windows-native
 
 The runner validates nextest discovery against exact package/test names before serial execution. Missing inputs, changed discovery and failed or unexecuted groups fail the command. Update the registry in [run-required-rust-tests.mjs](../e2e/support/run-required-rust-tests.mjs) when moving an integration test. Ordinary workspace tests invoke their own crash helpers; do not register those helpers as standalone integrations.
 
-## Opt-in live OpenAI evaluation
+## Live provider evaluation
 
-Paid validation uses a normal Windows build (without `e2e-test`), a separate application identifier, and a user-entered DPAPI-protected API key. Offline fixtures and null-audio runs do not establish live service quality. Keep source audio, references, rubric, hashes and response evidence under ignored `work/`; do not send reference answers or the quality rubric to the model.
+Paid validation requires separate approval of the exact input, destination and spending limit. Keep campaign profiles, source audio, references, rubric, hashes and response evidence under ignored `work/`; preserve the original spending ledger across dates and restarts. Do not send reference answers or the quality rubric to the model.
 
-The campaign-specific [live session helper](../e2e/support/live-api-session.mjs) requires explicit opt-in, the evaluation identity `app.surtitle.evaluation.openai20261029`, and a persistent `work/live-openai` campaign. Its USD 60 lifetime ceiling includes every charged attempt and unreleased reservation in the original SQLite ledger, across dates and restarts. Do not reset or replace that profile during a campaign. A new campaign needs its own reviewed identity and spending authorization.
+The retained [budget guard](../e2e/support/live-api-budget.mjs) checks unpriced or stale work, unknown outcomes, overlapping approvals and approved scope against the original SQLite ledger. It does not provide a GPUI automation transport or permission to send requests. Credentials must never appear in command arguments, logs or evidence files.
 
-Live sessions also reserve distinct application/underlying driver ports and compare the application's job identities with the campaign's original SQLite ledger before exposing commands and after restart. This check requires an existing nonempty campaign; an empty new profile needs a separately reviewed identity check before live work.
-
-Use only `session.approve(Object.freeze(nativeQuote))` for paid approvals. The [budget guard](../e2e/support/live-api-budget.mjs) rejects unpriced or stale work, unknown outcomes, overlapping approvals and scope outside the approved bounds; SQLite contention fails closed after a bounded wait. The underlying WebDriver is privileged and must not bypass this guard. Restart the controller after changing its imported guard/session modules. Never inject, read back, log or place credentials in command arguments or evidence files.
-
-Record source linkage and semantic accuracy separately from request completion. Verify saved-result reuse, pause/restart, provider switching and local learning/export behavior against the same ledger. Quota exhaustion, missing usage and transport failures remain offline fault checks unless an explicitly authorized live case observes them; do not deliberately exhaust credits.
+Record source linkage and semantic accuracy separately from request completion. Offline fixtures and null-audio runs do not establish live service quality. Verify saved-result reuse, pause/restart, provider switching and local learning/export behavior against the same ledger; do not deliberately exhaust credits.
 
 ## Results and failure evidence
 
-Runner exit codes determine test success; the final CI job requires every prerequisite job to succeed. Native startup, readiness, hook and cleanup failures also fail the run. Expected IPC rejection is an application result; driver/transport errors remain failures. CI uploads diagnostics even after a failed test step.
+Runner exit codes determine test success; the final CI job requires every prerequisite job to succeed. Native startup, readiness, hook and cleanup failures also fail the run. Expected application rejection is a tested result; automation/transport errors remain failures. CI uploads diagnostics even after a failed test step.
 
 | Evidence | Local path |
 | --- | --- |
 | Vitest JUnit | `work/test-results/vitest/` |
 | TLC inputs, per-configuration logs and completion summary | `work/test-results/formal/<run>/` |
-| Browser JSON/JUnit, failure screenshots and traces | `work/test-results/browser/`, `work/playwright-report/browser/` |
 | Rust JUnit | `work/test-results/nextest/` |
 | Required Rust discovery, execution and JUnit | `work/artifacts/required-rust-tests/<suite>/run-*/` |
-| Native session logs, status and bounded failure diagnostics | `work/test-results/native/<run>/<spec>/` |
+| Native production/acceptance logs and observations | `work/artifacts/` |
 | Installer/runtime smoke | `work/artifacts/` |
 
-Required-suite reruns use unique directories; `--evidence-dir <directory>` changes their parent. Native output names each spec and test as it runs, then reports counts, hook failures and diagnostic paths. Successful tests do not record screenshot sequences or videos. Reports and generated fixtures are ignored local outputs, not source-controlled acceptance records. See [native packaging](native-runtime.md#standard-tauri-installer) for production installer checks and [fixed AI responses](../crates/ai/tests/fixtures/README.md) for offline fixture maintenance.
+Required-suite reruns use unique directories; `--evidence-dir <directory>` changes their parent. Successful tests do not record screenshot sequences or videos. Reports and generated fixtures are ignored local outputs, not source-controlled acceptance records. See [native packaging](native-runtime.md#standard-nsis-installer) for production installer checks and [fixed AI responses](../crates/ai/tests/fixtures/README.md) for offline fixture maintenance.

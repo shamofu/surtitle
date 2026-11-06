@@ -45,7 +45,7 @@ for (const entry of readdirSync(root, { withFileTypes: true })) {
 if (!packages.length) throw new Error('Install dependencies before auditing licenses.');
 mkdirSync('work/artifacts', { recursive: true });
 writeFileSync('work/artifacts/js-licenses.json', JSON.stringify(packages, null, 2));
-mkdirSync('src-tauri/resources/notices', { recursive: true });
-writeFileSync('src-tauri/resources/notices/javascript.txt', 'Surtitle JavaScript dependency notices. Development-only test dependencies are included in the separate source archive.\n' + notices.join('\n'));
+mkdirSync('work/resources/notices', { recursive: true });
+writeFileSync('work/resources/notices/javascript.txt', 'Surtitle JavaScript dependency notices. Development-only test dependencies are included in the separate source archive.\n' + notices.join('\n'));
 writeFileSync('work/artifacts/js-sbom.cdx.json', JSON.stringify({ bomFormat: 'CycloneDX', specVersion: '1.6', version: 1, components: packages.map(p => ({ type: 'library', name: p.name, version: p.version, purl: `pkg:npm/${p.name.replace('@','%40')}@${p.version}`, licenses: [{ expression: p.license }] })) }, null, 2));
 console.log(`Audited ${packages.length} installed JavaScript dependencies. Source notices are retained in the source bundle.`);

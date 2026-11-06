@@ -7,6 +7,8 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { validateRelease, publishRelease } from './release.mjs';
+import { requiredNativeCases } from './check-native-acceptance.mjs';
+import { syntheticMeasurements } from './fixtures/native-acceptance.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 function fixture(t) {
@@ -14,19 +16,48 @@ function fixture(t) {
   t.onTestFinished(() => rmSync(workspace, { recursive: true, force: true }));
   const directory = join(workspace, 'work/artifacts/release');
   mkdirSync(directory, { recursive: true });
-  writeFileSync(join(workspace, 'package.json'), JSON.stringify({ version: '0.1.0' }));
+  writeFileSync(join(workspace, 'Cargo.toml'), '[workspace.package]\nversion = "0.1.0"\n');
   for (const file of ['surtitle.exe', 'surtitle-source.zip', 'native-runtime-manifest.json', 'js-sbom.cdx.json', 'rust-dependencies.json']) writeFileSync(join(directory, file), file);
   writeFileSync(join(directory, 'release-manifest.json'), JSON.stringify({ version: '0.1.0', installer: 'surtitle.exe', installerSmokePassed: true }));
   writeFileSync(join(directory, 'installer-smoke.json'), JSON.stringify({ passed: true }));
+  writeFileSync(join(directory, 'surtitle.exe.build.json'), JSON.stringify({schema:1,productionBuild:true,executableSha256:'a'.repeat(64),installerSha256:digest('surtitle.exe'),sourceRevision:'a'.repeat(40),sourceTreeClean:true}));
+  const evidence = 'Synthetic native evidence for release gate tests; never a desktop result';
+  writeFileSync(join(directory, 'native-observations.json'), evidence);
+  writeFileSync(join(directory, 'gpui-native-acceptance.json'), JSON.stringify({schemaVersion:1,suite:'gpui-windows',executableSha256:'a'.repeat(64),installerSha256:digest('surtitle.exe'),sourceRevision:'a'.repeat(40),normalBuild:true,paidRequests:0,passed:true,limitations:['Synthetic gate fixture'],cases:requiredNativeCases.map(item=>({id:item.id,method:item.method,status:'passed',source:{kind:item.method==='native-uia'?'native-uia':'external-probe',operator:'Synthetic release gate fixture',observedAt:'2026-11-06T00:00:00Z'},observations:{summary:'Synthetic test observation',measurements:syntheticMeasurements(item,'a'.repeat(64))},evidence:[{path:'native-observations.json',sha256:digest(evidence)}]}))}));
   return directory;
 }
 
-test('accepts release assets without runtime audits or checksum manifests', t => {
+test('accepts release assets with valid supplied native acceptance and without checksum manifests', t => {
   const directory = fixture(t);
   const archive = Buffer.alloc(2 * 1024 * 1024 + 17, 123);
   archive[archive.length - 1] = 255;
   writeFileSync(join(directory, 'surtitle-source.zip'), archive);
-  assert.equal(validateRelease(directory, '0.1.0').length, 7);
+  assert.equal(validateRelease(directory, '0.1.0').length, 10);
+});
+
+test('default release keeps installer integrity without requiring manual evidence, while explicit acceptance remains mandatory', t => {
+  const directory = fixture(t);
+  rmSync(join(directory, 'gpui-native-acceptance.json'));
+  rmSync(join(directory, 'native-observations.json'));
+  assert.doesNotThrow(() => validateRelease(directory, '0.1.0'));
+  assert.throws(() => validateRelease(directory, '0.1.0', { requireNativeAcceptance: true }), /native acceptance/i);
+  const { run } = publisher();
+  assert.equal(publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), 'v0.1.0');
+  assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv, requireNativeAcceptance: true,
+    run: () => assert.fail('Explicit acceptance must be checked before external commands') }), /native acceptance/i);
+
+  const manifestPath = join(directory, 'release-manifest.json');
+  const manifest = JSON.parse(readFileSync(manifestPath));
+  writeFileSync(manifestPath, JSON.stringify({ ...manifest, nativeAcceptanceRequired: true }));
+  assert.throws(() => validateRelease(directory, '0.1.0'), /native acceptance/i);
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+  const receiptPath = join(directory, 'surtitle.exe.build.json');
+  const receipt = JSON.parse(readFileSync(receiptPath));
+  writeFileSync(receiptPath, JSON.stringify({ ...receipt, productionBuild: false }));
+  assert.throws(() => validateRelease(directory, '0.1.0'), /production.*receipt/i);
+  writeFileSync(receiptPath, JSON.stringify(receipt));
+  writeFileSync(join(directory, 'surtitle.exe'), 'changed installer');
+  assert.throws(() => validateRelease(directory, '0.1.0'), /installer.*hash/i);
 });
 
 test('rejects empty, missing and ambiguous release payloads', t => {
@@ -62,6 +93,12 @@ test('--check validates local package assets without release metadata or publica
   const success = spawnSync(process.execPath, [script, '--check'], options);
   assert.equal(success.status, 0, success.stderr);
   assert.deepEqual(readdirSync(directory), before);
+  rmSync(join(directory, 'gpui-native-acceptance.json'));
+  const ordinary = spawnSync(process.execPath, [script, '--check'], options);
+  assert.equal(ordinary.status, 0, ordinary.stderr);
+  const required = spawnSync(process.execPath, [script, '--check', '--require-native-acceptance'], options);
+  assert.notEqual(required.status, 0);
+  assert.match(required.stderr, /native acceptance/i);
   writeFileSync(join(directory, 'surtitle-source.zip'), '');
   const invalid = spawnSync(process.execPath, [script, '--check'], options);
   assert.notEqual(invalid.status, 0);
@@ -136,13 +173,36 @@ test('rejects unsuccessful installer smoke before upload', t => {
     run: () => assert.fail('Smoke result must be checked before external commands') }), /smoke result/);
 });
 
+test('rejects missing native cases and mismatched installer provenance before any publication command', t => {
+  const directory = fixture(t), path = join(directory, 'gpui-native-acceptance.json');
+  const report = JSON.parse(readFileSync(path));
+  writeFileSync(path, JSON.stringify({...report,cases:report.cases.filter(item=>item.id!=='real-japanese-ime')}));
+  const run=()=>assert.fail('Incomplete acceptance must stop before Git or GitHub');
+  assert.throws(()=>publishRelease({directory,version:'0.1.0',env:releaseEnv,run}),/real-japanese-ime/);
+  writeFileSync(path,JSON.stringify(report));
+  writeFileSync(join(directory,'surtitle.exe'),'different installer bytes');
+  assert.throws(()=>publishRelease({directory,version:'0.1.0',env:releaseEnv,run}),/installer.*hash/i);
+});
+
+test('rejects dirty-source packages and acceptance for a different release revision before publication', t => {
+  const directory=fixture(t), receiptPath=join(directory,'surtitle.exe.build.json');
+  const receipt=JSON.parse(readFileSync(receiptPath));
+  const run=()=>assert.fail('Uncommitted or unrelated sources must stop before Git/GitHub');
+  writeFileSync(receiptPath,JSON.stringify({...receipt,sourceTreeClean:false}));
+  assert.throws(()=>publishRelease({directory,version:'0.1.0',env:releaseEnv,run}),/clean source/i);
+  writeFileSync(receiptPath,JSON.stringify({...receipt,sourceRevision:'b'.repeat(40)}));
+  const path=join(directory,'gpui-native-acceptance.json'),report=JSON.parse(readFileSync(path));
+  writeFileSync(path,JSON.stringify({...report,sourceRevision:'b'.repeat(40)}));
+  assert.throws(()=>publishRelease({directory,version:'0.1.0',env:releaseEnv,run}),/source revision.*release tag/i);
+});
+
 test.for(['Asset upload failed', 'A release with the same tag name already exists'])('propagates GitHub failure: %s', (createError, t) => {
   const directory = fixture(t), originalFiles = readdirSync(directory);
   const { calls, run, uploads } = publisher({ createError });
   assert.throws(() => publishRelease({ directory, version: '0.1.0', env: releaseEnv, run }), { message: createError });
   assert.equal(existsSync(dirname(uploads.find(file => file.name === 'SHA256SUMS.txt').path)), false);
   assert.deepEqual(readdirSync(directory), originalFiles);
-  assert.equal(validateRelease(directory, '0.1.0').length, 7);
+  assert.equal(validateRelease(directory, '0.1.0').length, 10);
   assert.deepEqual(calls.map(call => call.program), ['git', 'gh']);
 });
 

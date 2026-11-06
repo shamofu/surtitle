@@ -1,0 +1,54 @@
+name: Native measurement intake
+on:
+  workflow_dispatch:
+    inputs:
+      archive_url:
+        description: 'HTTPS ZIP containing genuine report.json and its referenced measurement files'
+        required: true
+        type: string
+      archive_sha256:
+        description: 'SHA256 of that ZIP'
+        required: true
+        type: string
+      candidate_run_id:
+        description: 'Run containing package-candidate-<this SHA>; select that same commit when dispatching'
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  intake:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Download the explicitly selected production candidate receipt
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: package-candidate-${{ github.sha }}
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+          path: work/evidence-intake/candidate/
+      - name: Verify and extract the bounded evidence ZIP as data
+        env:
+          SURTITLE_EVIDENCE_URL: ${{ inputs.archive_url }}
+          SURTITLE_EVIDENCE_SHA256: ${{ inputs.archive_sha256 }}
+        run: python3 -B native/windows/native-evidence-intake.py
+      - name: Require complete measured external cases for this exact candidate
+        env:
+          SURTITLE_EXPECTED_REVISION: ${{ github.sha }}
+        run: |
+          mapfile -d '' receipts < <(find work/evidence-intake/candidate -maxdepth 1 -type f -name '*.exe.build.json' -print0)
+          test "${#receipts[@]}" -eq 1
+          node scripts/check-native-acceptance.mjs --external work/evidence-intake/payload/report.json "${receipts[0]}" "$SURTITLE_EXPECTED_REVISION"
+      - name: Store validated measurement data for the package gate
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: gpui-native-external-${{ github.sha }}
+          path: work/evidence-intake/payload/
+          if-no-files-found: error

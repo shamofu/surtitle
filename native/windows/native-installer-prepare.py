@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare the source archives and notices shipped with the standard Tauri installer."""
+"""Prepare the source archives and notices shipped with the native NSIS installer."""
 import hashlib
 import json
 import re
@@ -72,19 +72,37 @@ def prepare_prerequisite(workspace):
                       f'!define SURTITLE_VC_DOWNLOAD_URL "{url}"\n', encoding='utf-8')
 
 
+def prepare_asset_notices(workspace, packages):
+    inputs = json.loads((workspace / 'native/installer-inputs.json').read_text(encoding='utf-8'))
+    output = workspace / 'work/resources/notices/assets'
+    for requirement in inputs.get('rustAssetNotices', []):
+        selected = [package for package in packages if package['name'] == requirement['package']]
+        if not selected:
+            raise ValueError('Selected embedded-asset Cargo package is missing: ' + requirement['package'])
+        for package in selected:
+            identity = package['name'] + '-' + package['version']
+            if not re.fullmatch(r'[A-Za-z0-9._+-]+', identity):
+                raise ValueError('Invalid Cargo package identity for asset notices')
+            crate = Path(package['manifest_path']).parent
+            for name in requirement['files']:
+                source = notice_file(crate, name)
+                destination = contained_path(output / identity, name)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+
+
 def prepare(workspace, toolchain, acquire=download):
     prepare_prerequisite(workspace)
     inputs = json.loads((workspace / 'native/installer-inputs.json').read_text(encoding='utf-8'))
     downloads = workspace / 'work/native-installer-downloads'
     output = workspace / 'work/installer-sources'
     downloads.mkdir(parents=True, exist_ok=True)
-    sources = [inputs['sourceArchive'], inputs['plugin']['sourceArchive'],
-               *inputs['plugin']['sourceCrates'], inputs['rust']['sourceArchive']]
+    sources = [inputs['sourceArchive'], inputs['rust']['sourceArchive']]
     files = {item['file']: acquire(item, downloads) for item in sources}
     output.mkdir(parents=True, exist_ok=True)
     for item in sources:
         shutil.copyfile(files[item['file']], contained_path(output, item['file']))
-    notices = workspace / 'src-tauri/resources/notices/installer'
+    notices = workspace / 'work/resources/notices/installer'
     notices.mkdir(parents=True, exist_ok=True)
     for item in inputs['notices']:
         source = notice_file(workspace / 'native/installer-notices', item['file'])
@@ -108,11 +126,14 @@ def prepare(workspace, toolchain, acquire=download):
 def main():
     workspace = Path(__file__).resolve().parents[2]
     inputs = json.loads((workspace / 'native/installer-inputs.json').read_text(encoding='utf-8'))
-    version = subprocess.check_output(['rustc', '--version'], text=True).split()[1]
+    version = subprocess.check_output(['rustc', '--version'], text=True, encoding='utf-8').split()[1]
     if version != inputs['rust']['version']:
         raise ValueError('Update the Rust source/notices pin for the application toolchain')
-    toolchain = Path(subprocess.check_output(['rustc', '--print', 'sysroot'], text=True).strip())
+    toolchain = Path(subprocess.check_output(['rustc', '--print', 'sysroot'], text=True, encoding='utf-8').strip())
     prepare(workspace, toolchain)
+    metadata = json.loads(subprocess.check_output(['cargo', 'metadata', '--locked', '--offline', '--format-version', '1',
+                                                '--filter-platform', 'x86_64-pc-windows-msvc'], cwd=workspace, text=True, encoding='utf-8'))
+    prepare_asset_notices(workspace, metadata['packages'])
 
 
 if __name__ == '__main__':

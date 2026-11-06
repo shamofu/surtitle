@@ -550,9 +550,9 @@ fn prepare_audio_inner(
         return Err(AiError::PreparationChanged);
     }
     ffmpeg.verify().map_err(local_error)?;
-    let settings_sha256 = sha256_bytes(&serde_json::to_vec(
-        &serde_json::json!({"options":options,"chunks":chunks,"vadModel":assets.model_sha256,"ffmpeg":ffmpeg,"vadPauseEvidence":vad_pause_evidence}),
-    )?);
+    let mut settings_fingerprint = serde_json::json!({"options":options,"chunks":chunks,"vadModel":assets.model_sha256,"ffmpeg":ffmpeg,"vadPauseEvidence":vad_pause_evidence});
+    settings_fingerprint.sort_all_objects();
+    let settings_sha256 = sha256_bytes(&serde_json::to_vec(&settings_fingerprint)?);
     let validation_provider = if openai_file {
         crate::AiProvider::Openai
     } else {
@@ -741,7 +741,7 @@ mod tests {
             .parent()
             .unwrap();
         let assets = VadAssets {
-            runtime_path: repo.join("src-tauri/resources/native/onnxruntime.dll"),
+            runtime_path: repo.join("work/resources/native/onnxruntime.dll"),
             model_path: repo.join("work/native-fixtures/silero_vad.onnx"),
             model_sha256: SILERO_MODEL_SHA256.into(),
         };
@@ -894,7 +894,7 @@ mod tests {
             .parent()
             .unwrap();
         let assets = VadAssets {
-            runtime_path: repo.join("src-tauri/resources/native/onnxruntime.dll"),
+            runtime_path: repo.join("work/resources/native/onnxruntime.dll"),
             model_path: repo.join("work/native-fixtures/silero_vad.onnx"),
             model_sha256: SILERO_MODEL_SHA256.into(),
         };

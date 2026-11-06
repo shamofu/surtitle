@@ -1,0 +1,48 @@
+[package]
+name = "surtitle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+default-run = "surtitle"
+publish = false
+
+[[example]]
+name = "native_host"
+required-features = ["e2e-test"]
+
+[lib]
+name = "surtitle_app"
+
+[dependencies]
+gpui-kit = "=0.9.0"
+raw-window-handle = "0.6"
+surtitle-core = { path = "../core" }
+surtitle-tools = { path = "../tools" }
+surtitle-ai = { path = "../ai" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }
+libloading = "0.8"
+rfd = "0.16"
+sha2 = "0.10"
+zeroize = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_System_LibraryLoader"] }
+
+[features]
+default = []
+e2e-test = ["surtitle-ai/e2e-fixtures"]
+
+[dev-dependencies]
+accesskit_consumer = "0.38"
+gpui-kit = { version = "=0.9.0", features = ["test-support"] }
+surtitle-ai = { path = "../ai", features = ["test-support"] }
+tokio = { version = "1", features = ["macros"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }

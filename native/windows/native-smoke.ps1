@@ -5,7 +5,7 @@ if (-not $IsWindows -or [Runtime.InteropServices.RuntimeInformation]::OSArchitec
     throw 'This native loader smoke test requires Windows x64.'
 }
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-$runtime = if ($RuntimeDirectory) { [IO.Path]::GetFullPath($RuntimeDirectory) } else { Join-Path $repoRoot 'src-tauri/resources/native' }
+$runtime = if ($RuntimeDirectory) { [IO.Path]::GetFullPath($RuntimeDirectory) } else { Join-Path $repoRoot 'work/resources/native' }
 if (-not $runtime.StartsWith($repoRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Native smoke directory must be inside the workspace.' }
 $manifest = Get-Content -LiteralPath (Join-Path $repoRoot 'native/runtime-windows-x64.json') -Raw | ConvertFrom-Json
 & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'native/vc-prerequisite.ps1') -CheckOnly
