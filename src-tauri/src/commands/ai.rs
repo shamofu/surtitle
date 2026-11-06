@@ -56,6 +56,7 @@ pub async fn approve_quote(
     acknowledge_unpriced: bool,
     acknowledge_unqualified: bool,
     retry_policy_version: Option<u32>,
+    ai_configuration_generation: Option<u64>,
 ) -> std::result::Result<(), String> {
     let committed_changes = state.changes.clone();
     let changed_jobs = None;
@@ -67,6 +68,7 @@ pub async fn approve_quote(
         acknowledge_unpriced,
         acknowledge_unqualified,
         retry_policy_version,
+        ai_configuration_generation,
     )
     .await;
     if result.is_ok() {
@@ -153,6 +155,7 @@ pub async fn reapprove_quote(
     acknowledge_unpriced: bool,
     acknowledge_unqualified: bool,
     retry_policy_version: Option<u32>,
+    ai_configuration_generation: Option<u64>,
 ) -> std::result::Result<(), String> {
     let committed_changes = state.changes.clone();
     let changed_jobs = None;
@@ -164,6 +167,7 @@ pub async fn reapprove_quote(
         acknowledge_unpriced,
         acknowledge_unqualified,
         retry_policy_version,
+        ai_configuration_generation,
     )
     .await;
     if result.is_ok() {
@@ -312,6 +316,7 @@ pub fn list_vocabulary_candidates(
     crate::application::ai::results::list_vocabulary_candidates(state.inner().clone(), media_id)
 }
 
+#[allow(clippy::too_many_arguments)] // Keep the existing flat IPC argument contract.
 #[tauri::command]
 pub async fn prepare_transcription(
     app: tauri::AppHandle,
@@ -321,16 +326,17 @@ pub async fn prepare_transcription(
     end_ms: u64,
     whole_media: Option<bool>,
     operation_id: Option<String>,
+    model: Option<surtitle_core::AiModelPreference>,
 ) -> std::result::Result<PreparationSummary, String> {
-    if operation_id.is_some() {
+    if operation_id.is_some() || model.is_some() {
         return crate::application::ai::preparation::prepare_transcription_with_operation(
             app,
             state.inner().clone(),
             media_id,
-            start_ms,
-            end_ms,
+            start_ms..end_ms,
             whole_media.unwrap_or(false),
             operation_id,
+            model,
         )
         .await;
     }

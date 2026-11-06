@@ -307,7 +307,7 @@ beforeEach(() => {
     cards: [],
     tools: [],
     jobs: [
-      {
+      { provider: 'vertex',
         id: 'job',
         mediaId: media.id,
         kind: 'transcribe',
@@ -318,6 +318,7 @@ beforeEach(() => {
       },
     ],
     settings: {
+      activeProvider: 'vertex', aiConfigurationGeneration: 0, openai: { credentialConfigured: false, dailyBudgetUsd: 0, aiModels: {} },
       theme: 'dark',
       locale: 'en',
       learningLanguage: 'en',
@@ -329,7 +330,7 @@ beforeEach(() => {
       retention: 0.9,
       sentencePause: true,
     },
-    budget: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 },
+    budgets: { vertex: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 }, openai: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 } },
   };
   vi.mocked(studyApi.segments).mockResolvedValue([canonical]);
   vi.mocked(studyApi.candidates).mockResolvedValue([]);

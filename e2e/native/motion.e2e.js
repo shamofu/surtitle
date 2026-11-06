@@ -155,7 +155,7 @@ describe('stable layout with the real Windows video surface', () => {
     }
     const snapshot = await invoke('get_app_snapshot');
     assert.equal(snapshot.settings.credentialConfigured, false);
-    assert.equal(snapshot.budget.spentUsd, 0);
+    assert.equal(snapshot.budgets.vertex.spentUsd, 0);
     assert(snapshot.media.some(media => media.id === fixture.mediaId && media.path === fixture.mediaPath));
     originalSettings = snapshot.settings;
     // "system" follows the OS. Hosted Windows can disable animation effects,

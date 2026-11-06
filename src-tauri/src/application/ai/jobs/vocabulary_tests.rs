@@ -70,6 +70,8 @@ impl Fixture {
         let quote = create_quote(
             state.clone(),
             QuoteRequest {
+                provider: None,
+                ai_configuration_generation: None,
                 media_id: "vocabulary".into(),
                 kind: "vocabulary".into(),
                 start_ms: 0,

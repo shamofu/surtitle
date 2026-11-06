@@ -1,10 +1,37 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { spawn } from 'node:child_process';
+import assert from 'node:assert/strict';
 import { get } from 'node:http';
+import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 const launcher = fileURLToPath(new URL('./run-windows-standard-user.ps1', import.meta.url));
+
+export async function availableWebDriverPorts(port, nativePort = port === undefined ? undefined : port + 1) {
+  if (port !== undefined || nativePort !== undefined) {
+    assert(Number.isSafeInteger(port) && port > 0 && port <= 65535, 'Invalid WebDriver port');
+    assert(Number.isSafeInteger(nativePort) && nativePort > 0 && nativePort <= 65535 && nativePort !== port, 'Invalid native WebDriver port');
+  }
+  const listeners = [];
+  try {
+    for (const candidate of [nativePort ?? 0, port ?? 0]) {
+      const listener = createServer();
+      await new Promise((resolve, reject) => {
+        listener.once('error', cause => reject(new Error(`Native driver port ${candidate} unavailable; choose an unused port pair`, { cause })));
+        listener.listen({ host: '127.0.0.1', port: candidate, exclusive: true }, resolve);
+      });
+      listeners.push(listener);
+    }
+    // Keep both reservations until allocation completes so ephemeral ports
+    // cannot select the same address. The driver binds them after return.
+    return { port: listeners[1].address().port, nativePort: listeners[0].address().port };
+  } finally {
+    await Promise.all(listeners.map(listener => new Promise((resolve, reject) => {
+      listener.close(error => error ? reject(error) : resolve());
+    })));
+  }
+}
 
 // WebView2 150+ ignores WebDriver's environment overrides in elevated hosts.
 // Keep the tested application intact and lower the entire driver process tree

@@ -6,7 +6,7 @@ use surtitle_ai::{
     CredentialMetadata, CredentialVault, ExecutionConfig, PriceSnapshot, ThinkingConfig,
     VertexDiscovery,
 };
-use surtitle_core::{AiModelPreference, AiPricePreference, AppSettings};
+use surtitle_core::{AiModelPreference, AiPricePreference, AiProvider, AppSettings};
 
 pub(crate) fn execution_for(
     settings: &AppSettings,
@@ -14,11 +14,30 @@ pub(crate) fn execution_for(
     selected: Option<AiModelPreference>,
 ) -> Result<ExecutionConfig> {
     let model = selected
-        .or_else(|| settings.ai_models.get(purpose).cloned())
-        .context("Select a Gemini model in the AI settings or this job")?;
-    validate_model(&model, &settings.vertex_location, false)?;
-    let mut execution = to_execution(&model, &settings.vertex_location);
-    if purpose == "transcription" && model.transcription_mode == "transcribe" {
+        .or_else(|| {
+            settings
+                .models_for(settings.active_provider)
+                .get(purpose)
+                .cloned()
+        })
+        .context("Select a model in the AI settings or this job")?;
+    validate_model_for(
+        &model,
+        &settings.vertex_location,
+        false,
+        settings.active_provider,
+        purpose,
+    )?;
+    let mut execution = to_execution_for(
+        &model,
+        &settings.vertex_location,
+        settings.active_provider,
+        purpose,
+    );
+    if settings.active_provider == AiProvider::Vertex
+        && purpose == "transcription"
+        && model.transcription_mode == "transcribe"
+    {
         // Word timestamps are only supported by Transcribe's synchronous API.
         execution.response_mode = surtitle_ai::ResponseMode::GenerateContent;
     }
@@ -27,6 +46,11 @@ pub(crate) fn execution_for(
 
 pub(crate) fn to_execution(model: &AiModelPreference, location: &str) -> ExecutionConfig {
     ExecutionConfig {
+        provider: AiProvider::Vertex,
+        vertex_audio_policy: None,
+        openai_audio_chunking_strategy: None,
+        openai_audio_language_hint_format: None,
+        openai_audio_prompt: None,
         model_id: model.model_id.trim().to_owned(),
         response_mode: surtitle_ai::ResponseMode::StreamGenerateContent,
         location: location.to_owned(),
@@ -44,8 +68,29 @@ pub(crate) fn to_execution(model: &AiModelPreference, location: &str) -> Executi
             observed_at_ms: price.observed_at_ms,
             input_microusd_per_million: price.input_microusd_per_million,
             output_microusd_per_million: price.output_microusd_per_million,
+            audio_microusd_per_minute: price.audio_microusd_per_minute,
         }),
     }
+}
+
+fn to_execution_for(
+    model: &AiModelPreference,
+    location: &str,
+    provider: AiProvider,
+    purpose: &str,
+) -> ExecutionConfig {
+    let mut execution = to_execution(model, location);
+    execution.provider = provider;
+    if provider == AiProvider::Openai {
+        execution.location = "global".into();
+        execution.thinking = ThinkingConfig::Omit;
+        execution.response_mode = if purpose == "transcription" {
+            surtitle_ai::ResponseMode::AudioTranscriptions
+        } else {
+            surtitle_ai::ResponseMode::StreamResponses
+        };
+    }
+    execution
 }
 
 pub(crate) fn preference_for(execution: &ExecutionConfig, transcribe: bool) -> AiModelPreference {
@@ -72,11 +117,28 @@ pub(crate) fn preference_for(execution: &ExecutionConfig, transcribe: bool) -> A
             observed_at_ms: p.observed_at_ms,
             input_microusd_per_million: p.input_microusd_per_million,
             output_microusd_per_million: p.output_microusd_per_million,
+            audio_microusd_per_minute: p.audio_microusd_per_minute,
         }),
     }
 }
 
 fn validate_model(model: &AiModelPreference, location: &str, allow_empty: bool) -> Result<()> {
+    validate_model_for(
+        model,
+        location,
+        allow_empty,
+        AiProvider::Vertex,
+        "vocabulary",
+    )
+}
+
+fn validate_model_for(
+    model: &AiModelPreference,
+    location: &str,
+    allow_empty: bool,
+    provider: AiProvider,
+    purpose: &str,
+) -> Result<()> {
     ensure!(
         ["transcribe", "subtitles"].contains(&model.transcription_mode.as_str()),
         "Choose a transcription API mode"
@@ -88,7 +150,13 @@ fn validate_model(model: &AiModelPreference, location: &str, allow_empty: bool) 
     if allow_empty && model.model_id.trim().is_empty() {
         return Ok(());
     }
-    to_execution(model, location).validate()?;
+    if provider == AiProvider::Openai {
+        ensure!(
+            model.thinking_level.is_none() && model.thinking_budget.is_none(),
+            "Vertex thinking settings cannot be used with OpenAI"
+        );
+    }
+    to_execution_for(model, location, provider, purpose).validate()?;
     Ok(())
 }
 
@@ -118,6 +186,18 @@ pub(crate) fn validate_settings(settings: &AppSettings) -> Result<()> {
             "Invalid AI purpose"
         );
         validate_model(model, &settings.vertex_location, true)?;
+    }
+    ensure!(
+        settings.openai.ai_models.len() <= 4,
+        "Invalid OpenAI preferences"
+    );
+    for (purpose, model) in &settings.openai.ai_models {
+        ensure!(
+            ["transcription", "vocabulary", "explanation", "translation"]
+                .contains(&purpose.as_str()),
+            "Invalid AI purpose"
+        );
+        validate_model_for(model, "global", true, AiProvider::Openai, purpose)?;
     }
     Ok(())
 }
@@ -155,6 +235,11 @@ pub fn update_appearance(
 #[cfg(any(test, feature = "e2e-test"))]
 pub(crate) fn fixture_execution() -> ExecutionConfig {
     ExecutionConfig {
+        vertex_audio_policy: None,
+        openai_audio_chunking_strategy: None,
+        openai_audio_language_hint_format: None,
+        openai_audio_prompt: None,
+        provider: AiProvider::Vertex,
         model_id: "gemini-offline-fixture".into(),
         response_mode: surtitle_ai::ResponseMode::GenerateContent,
         location: "global".into(),
@@ -166,6 +251,7 @@ pub(crate) fn fixture_execution() -> ExecutionConfig {
             observed_at_ms: 1_788_825_600_000,
             input_microusd_per_million: 2_000_000,
             output_microusd_per_million: 12_000_000,
+            audio_microusd_per_minute: None,
         }),
     }
 }
@@ -228,6 +314,7 @@ pub async fn lookup_vertex_price(
                 observed_at_ms: p.observed_at_ms,
                 input_microusd_per_million: p.input_microusd_per_million,
                 output_microusd_per_million: p.output_microusd_per_million,
+                audio_microusd_per_minute: p.audio_microusd_per_minute,
             }),
             candidates: lookup.candidates,
             observed_at_ms: lookup.observed_at_ms,
@@ -324,10 +411,24 @@ fn save_application_settings(state: &AppState, mut settings: AppSettings) -> Res
     settings.daily_budget_usd = 0.;
     settings.monthly_budget_usd = None;
     settings.per_job_budget_usd = None;
+    settings.openai.daily_budget_usd = 0.;
+    settings.openai.monthly_budget_usd = 0.;
+    settings.openai.per_job_budget_usd = 0.;
     state.preferences.update(|preferences| {
         // Credential identity is owned by JSON import, never by a stale form.
         settings.vertex_project = preferences.settings.vertex_project.clone();
         settings.credential_configured = preferences.credential_id.is_some();
+        settings.openai.credential_configured = preferences.openai_credential_id.is_some();
+        let old = &preferences.settings;
+        let changed = settings.active_provider != old.active_provider
+            || settings.vertex_location != old.vertex_location
+            || serde_json::to_value(&settings.ai_models)? != serde_json::to_value(&old.ai_models)?
+            || serde_json::to_value(&settings.openai.ai_models)?
+                != serde_json::to_value(&old.openai.ai_models)?;
+        settings.ai_configuration_generation = old
+            .ai_configuration_generation
+            .checked_add(u64::from(changed))
+            .context("AI configuration generation exhausted")?;
         preferences.settings = settings;
         Ok(())
     })?;
@@ -351,8 +452,10 @@ pub fn update_settings(state: AppState, settings: AppSettings) -> IpcResult<()> 
         let _transition = state.preferences.settings_transition()?;
         validate_application_settings(&settings)?;
         let limits = budget_limits(&settings)?;
+        let openai_limits = openai_budget_limits(&settings)?;
         save_application_settings(&state, settings)?;
         state.ai.set_budget(limits)?;
+        state.ai.set_budget_for(AiProvider::Openai, openai_limits)?;
         refresh_playback_settings(&state)
     })()
     .map_err(err)
@@ -382,6 +485,8 @@ pub fn get_settings_state(state: AppState) -> IpcResult<SettingsState> {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BudgetPatch {
+    #[serde(default)]
+    provider: AiProvider,
     daily_budget_usd: f64,
     monthly_budget_usd: f64,
     per_job_budget_usd: f64,
@@ -390,6 +495,8 @@ pub struct BudgetPatch {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct SettingsPatch {
+    active_provider: Option<AiProvider>,
+    openai_models: Option<std::collections::BTreeMap<String, AiModelPreference>>,
     theme: Option<String>,
     motion_preference: Option<String>,
     caption_gap_mode: Option<String>,
@@ -407,7 +514,9 @@ pub struct SettingsPatch {
 
 impl SettingsPatch {
     fn has_preferences(&self) -> bool {
-        self.theme.is_some()
+        self.active_provider.is_some()
+            || self.openai_models.is_some()
+            || self.theme.is_some()
             || self.motion_preference.is_some()
             || self.caption_gap_mode.is_some()
             || self.locale.is_some()
@@ -429,6 +538,7 @@ impl SettingsPatch {
             ($($name:ident),+ $(,)?) => { $(if let Some(value) = self.$name { settings.$name = value; })+ };
         }
         assign!(
+            active_provider,
             theme,
             motion_preference,
             caption_gap_mode,
@@ -443,6 +553,9 @@ impl SettingsPatch {
         );
         if let Some(models) = self.ai_models {
             settings.ai_models.extend(models);
+        }
+        if let Some(models) = self.openai_models {
+            settings.openai.ai_models.extend(models);
         }
         if location_changed {
             for model in settings.ai_models.values_mut() {
@@ -473,7 +586,9 @@ pub fn update_settings_patch(
             settings.daily_budget_usd = budgets.daily_budget_usd;
             settings.monthly_budget_usd = Some(budgets.monthly_budget_usd);
             settings.per_job_budget_usd = Some(budgets.per_job_budget_usd);
-            state.ai.set_budget(budget_limits(&settings)?)?;
+            state
+                .ai
+                .set_budget_for(budgets.provider, budget_limits(&settings)?)?;
         } else if patch.has_preferences() {
             let playback_changed = patch
                 .sentence_pause
@@ -510,9 +625,93 @@ fn import_credential_file(state: &AppState, file: Option<&std::path::Path>) -> R
         p.settings.vertex_project = credential.project_id;
         p.credential_id = Some(credential.id);
         p.settings.credential_configured = true;
+        p.settings.ai_configuration_generation = p
+            .settings
+            .ai_configuration_generation
+            .checked_add(1)
+            .context("AI configuration generation exhausted")?;
         Ok(())
     })?;
     Ok(true)
+}
+
+pub(crate) fn verify_ai_selection(
+    settings: &AppSettings,
+    provider: Option<AiProvider>,
+    generation: Option<u64>,
+) -> Result<()> {
+    ensure!(
+        provider.is_none_or(|provider| provider == settings.active_provider)
+            && generation
+                .is_none_or(|generation| generation == settings.ai_configuration_generation),
+        "AI settings changed. Review a new estimate."
+    );
+    Ok(())
+}
+
+fn openai_budget_limits(settings: &AppSettings) -> Result<surtitle_ai::BudgetLimits> {
+    let mut projected = settings.clone();
+    projected.daily_budget_usd = settings.openai.daily_budget_usd;
+    projected.monthly_budget_usd = Some(settings.openai.monthly_budget_usd);
+    projected.per_job_budget_usd = Some(settings.openai.per_job_budget_usd);
+    budget_limits(&projected)
+}
+
+pub fn save_openai_api_key(state: AppState, api_key: String) -> IpcResult<()> {
+    let key = zeroize::Zeroizing::new(api_key);
+    (|| -> Result<()> {
+        let _transition = state.preferences.settings_transition()?;
+        let vault = CredentialVault::new(state.root.join("credentials"))?;
+        let metadata = vault.save_openai_key(&key)?;
+        state.preferences.update(|preferences| {
+            preferences.openai_credential_id = Some(metadata.id);
+            preferences.settings.openai.credential_configured = true;
+            preferences.settings.ai_configuration_generation = preferences
+                .settings
+                .ai_configuration_generation
+                .checked_add(1)
+                .context("AI configuration generation exhausted")?;
+            Ok(())
+        })
+    })()
+    .map_err(err)
+}
+
+pub fn remove_openai_api_key(state: AppState) -> IpcResult<()> {
+    (|| -> Result<()> {
+        let _transition = state.preferences.settings_transition()?;
+        let id = state.preferences.read()?.openai_credential_id.clone();
+        state.preferences.update(|preferences| {
+            preferences.openai_credential_id = None;
+            preferences.settings.openai.credential_configured = false;
+            preferences.settings.ai_configuration_generation = preferences
+                .settings
+                .ai_configuration_generation
+                .checked_add(1)
+                .context("AI configuration generation exhausted")?;
+            Ok(())
+        })?;
+        if let Some(id) = id {
+            CredentialVault::new(state.root.join("credentials"))?.remove_openai_key(&id)?;
+        }
+        Ok(())
+    })()
+    .map_err(err)
+}
+
+pub async fn list_openai_models(state: AppState) -> IpcResult<Vec<surtitle_ai::DiscoveredModel>> {
+    async {
+        let id = state
+            .preferences
+            .read()?
+            .openai_credential_id
+            .clone()
+            .context("Save an OpenAI API key in Settings")?;
+        let vault = CredentialVault::new(state.root.join("credentials"))?;
+        Ok(surtitle_ai::list_openai_models(&vault, &id).await?)
+    }
+    .await
+    .map_err(err)
 }
 
 #[cfg(test)]
@@ -763,7 +962,7 @@ mod settings_tests {
         let root = tempfile::tempdir().unwrap();
         let state = Services::open(root.path().to_path_buf()).unwrap();
         let connection = rusqlite::Connection::open(root.path().join("charges.sqlite")).unwrap();
-        connection.execute_batch("CREATE TRIGGER reject_budget BEFORE UPDATE ON ai_settings BEGIN SELECT RAISE(ABORT, 'fixture rejects budget'); END;").unwrap();
+        connection.execute_batch("CREATE TRIGGER reject_budget BEFORE UPDATE ON ai_provider_settings BEGIN SELECT RAISE(ABORT, 'fixture rejects budget'); END;").unwrap();
         let mut settings = state.settings().unwrap();
         settings.daily_budget_usd = 10.;
         settings.monthly_budget_usd = Some(100.);
@@ -794,6 +993,105 @@ mod settings_tests {
     }
     fn patch(json: serde_json::Value) -> SettingsPatch {
         serde_json::from_value(json).unwrap()
+    }
+
+    #[test]
+    fn provider_profiles_and_caps_survive_switches_and_restart() {
+        let root = tempfile::tempdir().unwrap();
+        let state = Services::open(root.path().to_path_buf()).unwrap();
+        let initial = get_settings_state(state.clone()).unwrap();
+        assert_eq!(initial.settings.active_provider, AiProvider::Vertex);
+        assert!(initial.settings.openai.ai_models.is_empty());
+        let mut openai_model = preference_for(&fixture_execution(), false);
+        openai_model.model_id = "openai-text-fixture".into();
+        openai_model.price = None;
+        let selected = update_settings_patch(
+            state.clone(),
+            initial.revision,
+            patch(serde_json::json!({
+                "activeProvider":"openai", "openaiModels":{"translation":openai_model}
+            })),
+        )
+        .unwrap();
+        assert_eq!(selected.settings.ai_configuration_generation, 1);
+        let with_vertex_budget = update_settings_patch(state.clone(), selected.revision, patch(serde_json::json!({
+            "budgets":{"provider":"vertex","dailyBudgetUsd":1.,"monthlyBudgetUsd":5.,"perJobBudgetUsd":0.5}
+        }))).unwrap();
+        assert_eq!(
+            with_vertex_budget.settings.active_provider,
+            AiProvider::Openai
+        );
+        assert_eq!(with_vertex_budget.settings.ai_configuration_generation, 1);
+        let with_both_budgets = update_settings_patch(state.clone(), with_vertex_budget.revision, patch(serde_json::json!({
+            "budgets":{"provider":"openai","dailyBudgetUsd":2.,"monthlyBudgetUsd":10.,"perJobBudgetUsd":1.}
+        }))).unwrap();
+        let switched = update_settings_patch(
+            state.clone(),
+            with_both_budgets.revision,
+            patch(serde_json::json!({"activeProvider":"vertex"})),
+        )
+        .unwrap();
+        assert_eq!(switched.settings.ai_configuration_generation, 2);
+        assert_eq!(
+            switched.settings.openai.ai_models["translation"].model_id,
+            "openai-text-fixture"
+        );
+        let disk: serde_json::Value = serde_json::from_reader(
+            std::fs::File::open(root.path().join("preferences.json")).unwrap(),
+        )
+        .unwrap();
+        for field in ["dailyBudgetUsd", "monthlyBudgetUsd", "perJobBudgetUsd"] {
+            assert!(disk["settings"].get(field).is_none());
+            assert!(disk["settings"]["openai"].get(field).is_none());
+        }
+        drop(state);
+        let reopened = Services::open(root.path().to_path_buf()).unwrap();
+        assert_displayed_budget(&reopened, 1., 5., 0.5);
+        assert_eq!(reopened.settings().unwrap().openai.monthly_budget_usd, 10.);
+        assert_eq!(
+            reopened.settings().unwrap().openai.ai_models["translation"].model_id,
+            "openai-text-fixture"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn openai_key_is_write_only_and_replacement_invalidates_only_its_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let state = Services::open(root.path().to_path_buf()).unwrap();
+        state
+            .preferences
+            .update(|p| {
+                p.credential_id = Some("vertex-fixture".into());
+                Ok(())
+            })
+            .unwrap();
+        save_openai_api_key(state.clone(), "sk-test-fixture-first-key".into()).unwrap();
+        let first = state
+            .preferences
+            .read()
+            .unwrap()
+            .openai_credential_id
+            .clone()
+            .unwrap();
+        assert!(state.settings().unwrap().openai.credential_configured);
+        save_openai_api_key(state.clone(), "sk-test-fixture-replacement-key".into()).unwrap();
+        let saved = state.preferences.read().unwrap().clone();
+        assert_ne!(saved.openai_credential_id.as_deref(), Some(first.as_str()));
+        assert_eq!(saved.credential_id.as_deref(), Some("vertex-fixture"));
+        let disk = std::fs::read_to_string(root.path().join("preferences.json")).unwrap();
+        assert!(!disk.contains("sk-test-fixture"));
+        assert!(
+            !serde_json::to_string(&state.settings().unwrap())
+                .unwrap()
+                .contains("sk-test-fixture")
+        );
+        remove_openai_api_key(state.clone()).unwrap();
+        assert!(!state.settings().unwrap().openai.credential_configured);
+        assert_eq!(
+            state.preferences.read().unwrap().credential_id.as_deref(),
+            Some("vertex-fixture")
+        );
     }
 
     #[test]
@@ -947,7 +1245,7 @@ mod settings_tests {
         let state = Services::open(root.path().to_path_buf()).unwrap();
         let initial = get_settings_state(state.clone()).unwrap();
         let connection = rusqlite::Connection::open(root.path().join("charges.sqlite")).unwrap();
-        connection.execute_batch("CREATE TRIGGER reject_budget BEFORE UPDATE ON ai_settings BEGIN SELECT RAISE(ABORT,'fixture failure'); END;").unwrap();
+        connection.execute_batch("CREATE TRIGGER reject_budget BEFORE UPDATE ON ai_provider_settings BEGIN SELECT RAISE(ABORT,'fixture failure'); END;").unwrap();
         assert!(update_settings_patch(state.clone(),initial.revision.clone(),patch(serde_json::json!({"budgets":{"dailyBudgetUsd":3.,"monthlyBudgetUsd":8.,"perJobBudgetUsd":1.}}))).is_err());
         assert_eq!(
             get_settings_state(state.clone()).unwrap().revision,
@@ -967,6 +1265,7 @@ mod settings_tests {
             observed_at_ms: 1,
             input_microusd_per_million: 1,
             output_microusd_per_million: 1,
+            audio_microusd_per_minute: None,
         });
         state
             .preferences

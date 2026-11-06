@@ -4,7 +4,7 @@ import { NativeWorker, initializeNativeRun } from './e2e/support/native-session.
 import { nativePlatformName, nativeSpecsForPlatform } from './e2e/support/native-suite.mjs';
 import { artifactIdentity } from './e2e/support/native-artifacts.mjs';
 import { captureNativeFailure } from './e2e/support/native-diagnostics.mjs';
-import { prepareNativeSession } from './e2e/support/native-app.mjs';
+import { invokeNative, prepareNativeSession, setNativeProfileVerifier } from './e2e/support/native-app.mjs';
 import { assertNativeRunSucceeded, recordNativeRunFailure } from './e2e/support/native-run-status.mjs';
 import NativeProgressReporter from './e2e/support/native-progress-reporter.mjs';
 
@@ -39,7 +39,10 @@ export const config = {
   mochaOpts: { ui: 'bdd', timeout: 300000, failZero: true, forbidOnly: true,
     rootHooks: { async beforeAll() {
       if (startupFailure) throw startupFailure;
-      try { await prepareNativeSession(); }
+      try {
+        setNativeProfileVerifier(globalThis.browser, async () => worker.assertProfile(await invokeNative('get_app_snapshot')));
+        await prepareNativeSession();
+      }
       catch (error) {
         recordNativeRunFailure('readiness', error, { directory: worker?.directory });
         await failure('startup', { title: 'native application readiness' }, { error });

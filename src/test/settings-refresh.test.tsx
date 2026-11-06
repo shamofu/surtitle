@@ -15,8 +15,8 @@ import { aiApi } from '../features/ai/api';
 import type { AppSettings } from '../shared/contracts/settings';
 import type { AppSnapshot } from '../shared/contracts/snapshot';
 const context = vi.hoisted(() => ({ data: undefined as AppSnapshot | undefined, error: null as Error | null, loading: false, native: true, refresh: vi.fn(async () => {}), notify: vi.fn(), navigate: vi.fn(), hash: '', resume: undefined as string | undefined, revision: 0 }));
-vi.mock('../features/settings/api', () => ({ settingsApi: { state: vi.fn(), patch: vi.fn(), scanExternalTools: vi.fn(), setToolProvider: vi.fn(), importCredential: vi.fn(), setWindowSizePreset: vi.fn() } }));
-vi.mock('../features/ai/api', () => ({ aiApi: { vertexModels: vi.fn(), vertexPrice: vi.fn() } }));
+vi.mock('../features/settings/api', () => ({ settingsApi: { state: vi.fn(), patch: vi.fn(), scanExternalTools: vi.fn(), setToolProvider: vi.fn(), importCredential: vi.fn(), setWindowSizePreset: vi.fn(), saveOpenaiApiKey: vi.fn(), removeOpenaiApiKey: vi.fn() } }));
+vi.mock('../features/ai/api', () => ({ aiApi: { vertexModels: vi.fn(), vertexPrice: vi.fn(), openaiModels: vi.fn() } }));
 vi.mock('../features/ai/continuations', () => ({ continuationApi: { list: vi.fn().mockResolvedValue([]) } }));
 vi.mock('../shared/native/transport', () => ({ nativeAvailable: () => context.native }));
 vi.mock('@tanstack/react-router', () => ({ useSearch: () => ({ resume: context.resume }), useLocation: ({ select }: { select: (location: { hash: string }) => unknown }) => select({ hash: context.hash }), useNavigate: () => context.navigate }));
@@ -26,9 +26,9 @@ vi.mock('../app/runtime', () => {
     notify: context.notify, registerModal: () => () => {} });
   return { useSnapshot: useFixture, useDataActions: useFixture, useAppearance: useFixture, useNotifications: useFixture, useSurface: useFixture };
 });
-const settings = (): AppSettings => ({ theme: 'dark', locale: 'en', learningLanguage: 'en', explanationLanguage: 'ja', dailyBudgetUsd: 0,
+const settings = (): AppSettings => ({ activeProvider: 'vertex', aiConfigurationGeneration: 0, openai: { credentialConfigured: false, dailyBudgetUsd: 0, aiModels: {} }, theme: 'dark', locale: 'en', learningLanguage: 'en', explanationLanguage: 'ja', dailyBudgetUsd: 0,
   vertexProject: 'original-project', vertexLocation: 'global', credentialConfigured: false, retention: .9, proficiency: 'B1', aiModels: {} });
-const snapshot = (value: AppSettings): AppSnapshot => ({ settings: value, media: [], cards: [], tools: [], jobs: [], budget: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 } });
+const snapshot = (value: AppSettings): AppSnapshot => ({ settings: value, media: [], cards: [], tools: [], jobs: [], budgets: { vertex: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 }, openai: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 } } });
 const clients: QueryClient[] = [];
 function renderSettings() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); clients.push(client);
@@ -51,8 +51,13 @@ beforeEach(() => {
   vi.mocked(settingsApi.state).mockImplementation(async () => ({ settings: context.data!.settings, revision: String(context.revision) }));
   vi.mocked(settingsApi.patch).mockImplementation(async (revision, patch) => {
     if (revision !== String(context.revision)) throw Error('Revision conflict');
-    const { budgets, ...normal } = patch as Record<string, unknown>;
-    context.data = { ...context.data!, settings: { ...context.data!.settings, ...normal, ...(budgets as object ?? {}) } };
+    const { budgets, openaiModels, ...normal } = patch as Record<string, unknown>;
+    const caps = budgets as { provider?: string; dailyBudgetUsd?: number; monthlyBudgetUsd?: number; perJobBudgetUsd?: number } | undefined;
+    const { provider: _provider, ...limits } = caps ?? {};
+    context.data = { ...context.data!, settings: { ...context.data!.settings, ...normal,
+      ...(caps?.provider === 'openai' ? {} : limits),
+      openai: { ...context.data!.settings.openai, ...(openaiModels ? { aiModels: openaiModels as AppSettings['aiModels'] } : {}), ...(caps?.provider === 'openai' ? limits : {}) },
+    } };
     return { settings: context.data.settings, revision: String(++context.revision) };
   });
   vi.mocked(settingsApi.scanExternalTools).mockResolvedValue([]);
@@ -222,7 +227,7 @@ it('keeps failed input editable and retries from inline status', async () => {
 it('saves budget caps only through the budget patch', async () => {
   await mount('AI'); const input = screen.getByRole('textbox', { name: /Monthly AI budget/ });
   fireEvent.change(input, { target: { value: '5' } }); fireEvent.blur(input);
-  await waitFor(() => expect(settingsApi.patch).toHaveBeenCalledWith('0', { budgets: { dailyBudgetUsd: 5, monthlyBudgetUsd: 5, perJobBudgetUsd: 5 } }));
+  await waitFor(() => expect(settingsApi.patch).toHaveBeenCalledWith('0', { budgets: { provider: 'vertex', dailyBudgetUsd: 5, monthlyBudgetUsd: 5, perJobBudgetUsd: 5 } }));
 });
 it('keeps an unfinished input mounted across categories and reveals it from the persistent error action', async () => {
   await mount();
@@ -366,4 +371,75 @@ describe('shared model catalogue', () => {
     expect(modelId).toHaveValue('gemini-manual');
   });
 
+});
+
+it('keeps provider profiles and budgets separate when switching and editing', async () => {
+  context.data!.settings.openai = { credentialConfigured: true, dailyBudgetUsd: 3, monthlyBudgetUsd: 3, perJobBudgetUsd: 3, aiModels: { transcription: { modelId: 'gpt-transcribe', transcriptionMode: 'transcribe', maxOutputTokens: 12288 } } };
+  context.data!.budgets.vertex.spentUsd = 1.25;
+  context.data!.budgets.openai.spentUsd = 2.50;
+  await mount('AI');
+  expect(screen.getByLabelText('Vertex AI budget')).toHaveTextContent('$1.25');
+  expect(screen.getByLabelText('OpenAI budget')).toHaveTextContent('$2.50');
+  fireEvent.change(screen.getByRole('combobox', { name: /^AI provider/ }), { target: { value: 'openai' } });
+  const monthly = screen.getByRole('textbox', { name: /Monthly AI budget/ });
+  expect(monthly).toHaveValue('3');
+  fireEvent.change(monthly, { target: { value: '7' } }); fireEvent.blur(monthly);
+  await waitFor(() => expect(context.data!.settings.openai.monthlyBudgetUsd).toBe(7));
+  expect(context.data!.settings.dailyBudgetUsd).toBe(0);
+  expect(context.data!.settings.openai.perJobBudgetUsd).toBe(7);
+  expect(settingsApi.patch).toHaveBeenCalledWith(expect.any(String), { budgets: { provider: 'openai', dailyBudgetUsd: 7, monthlyBudgetUsd: 7, perJobBudgetUsd: 7 } });
+});
+it('clears the password input after saving an OpenAI key without adding it to setting drafts', async () => {
+  context.data!.settings.activeProvider = 'openai';
+  vi.mocked(settingsApi.saveOpenaiApiKey).mockResolvedValue(undefined);
+  await mount('AI');
+  const key = screen.getByLabelText('OpenAI API key');
+  fireEvent.change(key, { target: { value: 'test-secret' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save API key' }));
+  await waitFor(() => expect(settingsApi.saveOpenaiApiKey).toHaveBeenCalledWith('test-secret'));
+  expect(key).toHaveValue('');
+  expect(vi.mocked(settingsApi.patch).mock.calls.flat().some(value => JSON.stringify(value).includes('test-secret'))).toBe(false);
+});
+
+it('saves a valid OpenAI cap while retaining an invalid cap in the draft', async () => {
+  context.data!.settings.activeProvider = 'openai';
+  await mount('AI');
+  fireEvent.click(screen.getByText('Adjust daily and per-job limits'));
+  const daily = screen.getByRole('textbox', { name: /Daily limit/ });
+  fireEvent.change(daily, { target: { value: '-1' } });
+  const monthly = screen.getByRole('textbox', { name: /Monthly AI budget/ });
+  fireEvent.change(monthly, { target: { value: '4' } }); fireEvent.blur(monthly);
+  await waitFor(() => expect(settingsApi.patch).toHaveBeenCalledWith(expect.any(String), { budgets: { provider: 'openai', dailyBudgetUsd: 0, monthlyBudgetUsd: 4, perJobBudgetUsd: 4 } }));
+  expect(daily).toHaveValue('-1');
+});
+
+it('continues editing settings after its own key mutation changes only server-owned fields', async () => {
+  context.data!.settings.activeProvider = 'openai';
+  vi.mocked(settingsApi.saveOpenaiApiKey).mockImplementation(async () => {
+    context.data!.settings.openai.credentialConfigured = true;
+    context.data!.settings.aiConfigurationGeneration += 1;
+    context.revision += 1;
+  });
+  await mount('AI');
+  fireEvent.change(screen.getByLabelText('OpenAI API key'), { target: { value: 'fixture-key' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save API key' }));
+  await screen.findByText('API key configured');
+  const monthly = screen.getByRole('textbox', { name: /Monthly AI budget/ });
+  fireEvent.change(monthly, { target: { value: '6' } }); fireEvent.blur(monthly);
+  await waitFor(() => expect(context.data!.settings.openai.monthlyBudgetUsd).toBe(6));
+  expect(screen.queryByRole('textbox', { name: 'Previous input' })).not.toBeInTheDocument();
+});
+
+it('edits the inactive provider budget without switching the provider or its models', async () => {
+  const models = { vocabulary: { modelId: 'vertex-text', transcriptionMode: 'subtitles' as const, maxOutputTokens: 8192 } };
+  context.data!.settings.aiModels = models;
+  await mount('AI');
+  fireEvent.change(screen.getByRole('combobox', { name: /^Budget provider/ }), { target: { value: 'openai' } });
+  const monthly = screen.getByRole('textbox', { name: /Monthly AI budget/ });
+  fireEvent.change(monthly, { target: { value: '9' } }); fireEvent.blur(monthly);
+  await waitFor(() => expect(context.data!.settings.openai.monthlyBudgetUsd).toBe(9));
+  expect(context.data!.settings.activeProvider).toBe('vertex');
+  expect(context.data!.settings.aiModels).toEqual(models);
+  expect(context.data!.settings.dailyBudgetUsd).toBe(0);
+  expect(vi.mocked(settingsApi.patch).mock.calls.some(([, patch]) => 'activeProvider' in patch || 'aiModels' in patch)).toBe(false);
 });

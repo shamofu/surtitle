@@ -253,7 +253,7 @@ beforeEach(() => {
   window.innerHeight = 680;
   fixture.editingSessions.clear();
   fixture.settingsRevision = 0;
-  fixture.settings = { theme: 'dark', locale: 'en', learningLanguage: 'en', explanationLanguage: 'ja', dailyBudgetUsd: 0,
+  fixture.settings = { activeProvider: 'vertex', aiConfigurationGeneration: 0, openai: { credentialConfigured: false, dailyBudgetUsd: 0, aiModels: {} }, theme: 'dark', locale: 'en', learningLanguage: 'en', explanationLanguage: 'ja', dailyBudgetUsd: 0,
     vertexProject: '', vertexLocation: 'global', credentialConfigured: false, retention: .9, captionGapMode: 'review' };
   vi.mocked(settingsApi.state).mockImplementation(async () => ({ settings: structuredClone(fixture.settings), revision: String(fixture.settingsRevision) }));
   vi.mocked(settingsApi.patch).mockImplementation(async (revision, patch) => {

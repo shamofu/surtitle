@@ -1,6 +1,10 @@
 //! Local completion policy. Transport results and competing candidates are never rewritten.
 use super::*;
 
+#[cfg(all(test, feature = "e2e-test"))]
+#[path = "automatic_tests.rs"]
+mod tests;
+
 pub(super) fn issue_records(
     job_id: &str,
     draft: &TranscriptDraft,
@@ -40,6 +44,19 @@ pub(super) fn issue_records(
                 .collect(),
         ));
     }
+    for warning in draft
+        .warnings
+        .iter()
+        .filter(|warning| warning.kind == "forced_chunk_boundary" && !warning.acknowledged)
+    {
+        issues.push(make(
+            warning.id.clone(),
+            warning.kind.clone(),
+            warning.start_ms,
+            warning.end_ms,
+            vec![],
+        ));
+    }
     issues
 }
 
@@ -72,6 +89,20 @@ pub(super) fn generated_segments(
                             text: value.text.clone(),
                         })
                         .collect(),
+                });
+            }
+            for warning in draft.warnings.iter().filter(|warning| {
+                warning.kind == "forced_chunk_boundary"
+                    && !warning.acknowledged
+                    && cue.start_ms < warning.end_ms
+                    && cue.end_ms > warning.start_ms
+            }) {
+                issues.push(surtitle_core::SubtitleReviewIssue {
+                    id: warning.id.clone(),
+                    kind: warning.kind.clone(),
+                    start_ms: warning.start_ms,
+                    end_ms: warning.end_ms,
+                    alternatives: vec![],
                 });
             }
             surtitle_core::SubtitleSegment {

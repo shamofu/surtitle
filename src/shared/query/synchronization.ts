@@ -22,8 +22,9 @@ export const synchronizationApi = {
   },
   async patch(domains: SnapshotDomain[]) {
     const result = await call('get_snapshot_patch', { domains });
-    if (!isRecord(result) || !domains.every(domain => Object.hasOwn(result, domain)) || Object.entries(result).some(([key, value]) =>
-      !domains.includes(key as SnapshotDomain) || (key === 'settings' || key === 'budget' ? !isRecord(value) : !Array.isArray(value)))) throw new Error('Invalid native snapshot patch');
+    const fields = domains.map(domain => domain === 'budget' ? 'budgets' : domain);
+    if (!isRecord(result) || !fields.every(field => Object.hasOwn(result, field)) || Object.entries(result).some(([key, value]) =>
+      !fields.includes(key as typeof fields[number]) || (key === 'settings' || key === 'budgets' ? !isRecord(value) : !Array.isArray(value)))) throw new Error('Invalid native snapshot patch');
     return result as Partial<AppSnapshot>;
   },
 };
@@ -78,7 +79,8 @@ export function createDataSynchronizer(client: QueryClient, source: Source, repo
               const next = { ...current };
               for (const domain of domains) {
                 if (versions.get(domain) !== before.get(domain)) continue;
-                if (patch[domain] !== undefined) Object.assign(next, { [domain]: patch[domain] });
+                const field = domain === 'budget' ? 'budgets' : domain;
+                if (patch[field] !== undefined) Object.assign(next, { [field]: patch[field] });
               }
               return next;
             });

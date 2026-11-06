@@ -52,6 +52,20 @@ impl Fixture {
             false,
         )
         .unwrap();
+        // These dispatch tests require two frozen requests independently of
+        // planner behavior, but their fresh quote uses the current audio policy.
+        let settings = state.preferences.read().unwrap().settings.clone();
+        receipt.chunk_profile = Some(crate::application::transcript::policy::profile(
+            settings.active_provider,
+            false,
+            "transcribe",
+        ));
+        receipt.preparation_context = Some(AudioPreparationContext {
+            provider: settings.active_provider,
+            configuration_generation: settings.ai_configuration_generation,
+        });
+        receipt.prepared_job.execution.vertex_audio_policy =
+            crate::application::transcript::policy::vertex_policy("transcribe", false);
         receipt.prepared_job = receipt
             .prepared_job
             .with_apply_policy(TranscriptApplyPolicy::Auto)
@@ -80,6 +94,8 @@ impl Fixture {
         let quote = crate::application::transcript::preparation::create_transcription_quote(
             state.clone(),
             receipt.id.clone(),
+            None,
+            None,
             None,
         )
         .await
@@ -135,7 +151,10 @@ impl Fixture {
             retry,
             false,
             true,
-            Some(1),
+            ApprovalReview {
+                retry_policy_version: Some(1),
+                ai_configuration_generation: Some(self.quote.ai_configuration_generation),
+            },
         )
         .unwrap()
     }
@@ -270,6 +289,8 @@ async fn immutable_audio_preparation_uses_current_subtitles_at_quote_time_and_pr
         let reused = crate::application::transcript::preparation::create_transcription_quote(
             fixture.state.clone(),
             fixture.preparation_id.clone(),
+            None,
+            None,
             None,
         )
         .await
@@ -984,7 +1005,10 @@ async fn restart_during_http429_wait_requires_reapproval_and_resumes_only_remain
         true,
         false,
         true,
-        Some(1),
+        ApprovalReview {
+            retry_policy_version: Some(1),
+            ai_configuration_generation: Some(quote.ai_configuration_generation),
+        },
     )
     .unwrap();
     let service = Arc::new(

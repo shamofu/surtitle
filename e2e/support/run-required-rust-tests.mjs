@@ -11,6 +11,7 @@ const ffmpegTests = [
   test('surtitle', 'application::media_tools::card_audio::tests::installed_ffmpeg_preserves_native_rate_wav_tail_without_padding'),
   test('surtitle', 'application::media_tools::card_audio::tests::installed_ffmpeg_preserves_source_clock_and_cleans_failed_outputs'),
   test('surtitle-tools', 'command::tests::multitrack_extraction_preserves_selected_stream'),
+  test('surtitle-ai', 'prepare::encoding::file_tests::openai_file_real_encoding_splits_only_oversized_files_and_preserves_pcm'),
 ];
 export const requiredSuites = Object.freeze({
   'linux-ffmpeg': { platform: 'linux', tests: ffmpegTests },

@@ -302,6 +302,98 @@ fn attachment_integrity_api_rejects_changed_or_missing_bytes() {
 }
 
 #[test]
+fn openai_attachment_uses_file_bytes_while_legacy_wrappers_keep_vertex_limits() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("whole.flac");
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(12 * 1024 * 1024 + 1).unwrap();
+    drop(file);
+    let audio = AudioAttachment::from_file_for_provider(
+        path.clone(),
+        7_000,
+        360_001,
+        crate::AiProvider::Openai,
+    )
+    .unwrap();
+    assert!(AudioAttachment::from_file(path.clone(), 7_000, 360_001).is_err());
+    assert!(AudioAttachment::from_file_for_provider(
+        path.clone(),
+        7_000,
+        360_001,
+        crate::AiProvider::Vertex,
+    )
+    .is_err());
+    audio
+        .validate_for_provider(crate::AiProvider::Openai)
+        .unwrap();
+    assert!(audio
+        .validate_for_provider(crate::AiProvider::Vertex)
+        .is_err());
+    assert_eq!(
+        audio
+            .verified_bytes_for_provider(crate::AiProvider::Openai)
+            .unwrap()
+            .len() as u64,
+        audio.byte_len
+    );
+    assert!(audio.verify_integrity().is_err());
+    use std::io::Write;
+    let mut changed = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    changed.write_all(b"changed").unwrap();
+    drop(changed);
+    assert!(matches!(
+        audio.verify_integrity_for_provider(crate::AiProvider::Openai),
+        Err(AiError::PreparationChanged)
+    ));
+}
+
+#[test]
+fn provider_audio_limits_reject_oversize_zero_and_overflow_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("limit.flac");
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(25_000_000).unwrap();
+    let audio = AudioAttachment::from_file_for_provider(
+        path.clone(),
+        0,
+        600_000,
+        crate::AiProvider::Openai,
+    )
+    .unwrap();
+    assert_eq!(audio.byte_len, AudioAttachment::MAX_OPENAI_FILE_BYTES);
+    file.set_len(25_000_001).unwrap();
+    assert!(
+        AudioAttachment::from_file_for_provider(path, 0, 600_000, crate::AiProvider::Openai)
+            .is_err()
+    );
+    for (bytes, start, duration) in [
+        (0, 0, 1),
+        (25_000_001, 0, 1),
+        (1, 0, 0),
+        (1, u64::MAX, 1),
+        (1, 0, 86_400_001),
+    ] {
+        let mut invalid = audio.clone();
+        invalid.byte_len = bytes;
+        invalid.source_start_ms = start;
+        invalid.duration_ms = duration;
+        assert!(invalid
+            .validate_for_provider(crate::AiProvider::Openai)
+            .is_err());
+    }
+    let mut vertex = audio;
+    vertex.byte_len = 12 * 1024 * 1024;
+    vertex.duration_ms = 240_000;
+    vertex
+        .validate_for_provider(crate::AiProvider::Vertex)
+        .unwrap();
+    vertex.duration_ms += 1;
+    assert!(vertex
+        .validate_for_provider(crate::AiProvider::Vertex)
+        .is_err());
+}
+
+#[test]
 fn timestamp_overflow_is_rejected_without_wrapping_or_panicking() {
     let mut audio_task = task("audio");
     if let RequestTask::AudioTranscription { audio, .. } = &mut audio_task {

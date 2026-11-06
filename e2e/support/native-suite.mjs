@@ -8,6 +8,7 @@ export const nativeSpecs = Object.freeze([
   { name: 'motion', platforms: ['win32'] },
   { name: 'phrase-inspection', platforms: ['win32'] },
   { name: 'playback-rate', platforms: ['win32', 'linux'] },
+  { name: 'provider-settings', platforms: ['win32'] },
   { name: 'rendering-occlusion', platforms: ['win32'] },
   { name: 'replay-context', platforms: ['win32'] },
   { name: 'sentence-playback', platforms: ['win32'] },

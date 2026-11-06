@@ -15,12 +15,13 @@ pub struct SnapshotPatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) jobs: Option<Vec<JobSummary>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) budget: Option<BudgetSummary>,
+    pub(crate) budgets:
+        Option<std::collections::BTreeMap<surtitle_core::AiProvider, BudgetSummary>>,
 }
 
 pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, String> {
     (|| {
-        let (jobs, budget) = ai_snapshot(&state)?;
+        let (jobs, budgets) = ai_snapshot(&state)?;
         let (media, cards) = {
             let db = lock(&state.db)?;
             (db.list_media()?, db.list_cards()?)
@@ -31,7 +32,7 @@ pub fn get_app_snapshot(state: AppState) -> std::result::Result<AppSnapshot, Str
             tools: crate::application::tool_runtime::statuses(&state)?,
             settings: state.settings()?,
             jobs,
-            budget,
+            budgets,
         })
     })()
     .map_err(err)
@@ -56,12 +57,12 @@ pub fn get_snapshot_patch(
             patch.tools = Some(crate::application::tool_runtime::statuses(&state)?);
         }
         if domains.contains(&ChangeDomain::Jobs) || domains.contains(&ChangeDomain::Budget) {
-            let (jobs, budget) = ai_snapshot(&state)?;
+            let (jobs, budgets) = ai_snapshot(&state)?;
             if domains.contains(&ChangeDomain::Jobs) {
                 patch.jobs = Some(jobs);
             }
             if domains.contains(&ChangeDomain::Budget) {
-                patch.budget = Some(budget);
+                patch.budgets = Some(budgets);
             }
         }
         Ok(patch)
@@ -69,12 +70,23 @@ pub fn get_snapshot_patch(
     .map_err(err)
 }
 
-fn ai_snapshot(state: &AppState) -> Result<(Vec<JobSummary>, BudgetSummary)> {
+fn ai_snapshot(
+    state: &AppState,
+) -> Result<(
+    Vec<JobSummary>,
+    std::collections::BTreeMap<surtitle_core::AiProvider, BudgetSummary>,
+)> {
     let p = state.preferences.read()?.clone();
-    let summary = state.ai.summary()?;
-    let unknown_jobs: std::collections::HashSet<_> = summary
-        .unknown_attempts
+    let summaries = [
+        surtitle_core::AiProvider::Vertex,
+        surtitle_core::AiProvider::Openai,
+    ]
+    .into_iter()
+    .map(|provider| Ok((provider, state.ai.summary_for(provider)?)))
+    .collect::<Result<Vec<_>>>()?;
+    let unknown_jobs: std::collections::HashSet<_> = summaries
         .iter()
+        .flat_map(|(_, summary)| summary.unknown_attempts.iter())
         .filter(|a| a.state == "unknown")
         .map(|a| a.job_id.as_str())
         .collect();
@@ -126,6 +138,7 @@ fn ai_snapshot(state: &AppState) -> Result<(Vec<JobSummary>, BudgetSummary)> {
                 let execution_outcome = execution_outcome(&q, status, skip_rejected, issue.as_ref());
                 let (ja, en) = match issue.as_ref().map(|issue| issue.code.as_str()) {
                     Some("credentials") => ("認証設定を確認してください。受信済み結果は保存されています。", "Check your credentials. Received results are saved."),
+                    Some("credit_exhausted") => ("OpenAIのクレジットが不足しています。費用保留を維持し、自動再試行は行いません。残高と結果不明の要求を確認してから再承認してください。", "OpenAI credits are exhausted. Holds are retained and no automatic retry is made. Check funding and acknowledge the unknown request before a new approval."),
                     Some("budget") => ("予算の上限に達しました。設定を見直して残りを再開できます。", "The budget limit was reached. Update it to resume the remaining work."),
                     Some("provider") if status == "paused" && issue.as_ref().is_some_and(|issue| issue.http_status == Some(429)) => ("一時停止しています。混雑・利用制限（HTTP 429）の費用記録と受信済み結果は保持しています。続行には残りの処理の承認が必要です。", "Paused. Accounting for HTTP 429 and received results are retained. Approve the remaining work to continue."),
                     Some("provider") if status == "cancelled" && issue.as_ref().is_some_and(|issue| issue.http_status == Some(429)) => ("キャンセルしました。混雑・利用制限（HTTP 429）の費用記録と受信済み結果は保持しています。", "Cancelled. Accounting for HTTP 429 and received results are retained."),
@@ -176,6 +189,7 @@ fn ai_snapshot(state: &AppState) -> Result<(Vec<JobSummary>, BudgetSummary)> {
                 let message = if p.settings.locale == "ja" { ja } else { en }.to_owned();
                 let processed = if skip_rejected { q.request_counts.succeeded + q.request_counts.rejected } else { q.completed_requests };
                 Ok(JobSummary {
+                    provider: q.execution.provider,
                     id: q.id,
                     media_id: Some(q.binding.media_id),
                     kind: context.map(|c| c.kind.clone()).unwrap_or(q.title),
@@ -198,29 +212,35 @@ fn ai_snapshot(state: &AppState) -> Result<(Vec<JobSummary>, BudgetSummary)> {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-    let unknown_attempts = summary
-        .unknown_attempts
+    let budgets = summaries
         .into_iter()
-        .filter(|a| a.state == "unknown")
-        .map(|a| UnknownAttemptSummary {
-            id: a.id,
-            job_id: a.job_id,
-            ordinal: a.ordinal,
-            held_usd: a
-                .held_or_charged_microusd
-                .map(|amount| amount as f64 / 1_000_000.),
-            created_at: utc_time(a.created_at_ms),
+        .map(|(provider, summary)| {
+            let unknown_attempts = summary
+                .unknown_attempts
+                .into_iter()
+                .filter(|a| a.state == "unknown")
+                .map(|a| UnknownAttemptSummary {
+                    id: a.id,
+                    job_id: a.job_id,
+                    ordinal: a.ordinal,
+                    held_usd: a
+                        .held_or_charged_microusd
+                        .map(|amount| amount as f64 / 1_000_000.),
+                    created_at: utc_time(a.created_at_ms),
+                })
+                .collect();
+            let budget = BudgetSummary {
+                spent_usd: summary.monthly_actual_charged_microusd as f64 / 1_000_000.,
+                reserved_usd: summary.monthly_held_microusd as f64 / 1_000_000.,
+                limit_usd: summary.limits.monthly_microusd as f64 / 1_000_000.,
+                unknown_attempts,
+                unpriced_attempts: summary.unpriced_attempts,
+                monetary_totals_complete: summary.monetary_totals_complete,
+            };
+            (provider, budget)
         })
         .collect();
-    let budget = BudgetSummary {
-        spent_usd: summary.monthly_actual_charged_microusd as f64 / 1_000_000.,
-        reserved_usd: summary.monthly_held_microusd as f64 / 1_000_000.,
-        limit_usd: summary.limits.monthly_microusd as f64 / 1_000_000.,
-        unknown_attempts,
-        unpriced_attempts: summary.unpriced_attempts,
-        monetary_totals_complete: summary.monetary_totals_complete,
-    };
-    Ok((jobs, budget))
+    Ok((jobs, budgets))
 }
 
 fn execution_outcome(

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import type { AiConfiguration } from './provider';
 import { call } from '../../shared/native/transport';
 import type { AiModelPreference, AiQuote } from '../../shared/contracts/ai';
 
@@ -6,9 +7,10 @@ export const aiApi = {
   runtime: (jobId: string) => call('get_ai_runtime', { jobId }),
   vertexModels: (location?: string) =>
     call('list_vertex_models', { location }),
+  openaiModels: () => call('list_openai_models'),
   vertexPrice: (modelId: string, location?: string) =>
     call('lookup_vertex_price', { modelId, location }),
-  createQuote: (request: {
+  createQuote: (request: Partial<AiConfiguration> & {
     mediaId: string;
     kind: AiQuote['kind'];
     startMs: number;
@@ -16,13 +18,14 @@ export const aiApi = {
     focusTerm?: string;
     model?: AiModelPreference;
   }) => call('create_quote', { request }),
-  prepareTranscription: (mediaId: string, startMs: number, endMs: number, wholeMedia = false, operationId?: string) =>
+  prepareTranscription: (mediaId: string, startMs: number, endMs: number, wholeMedia = false, operationId?: string, model?: AiModelPreference) =>
     call('prepare_transcription', {
       mediaId,
       startMs,
       endMs,
       wholeMedia,
       operationId,
+      model,
     }),
   transcriptionPreparations: (mediaId: string) =>
     call('list_transcription_preparations', {
@@ -31,7 +34,8 @@ export const aiApi = {
   createTranscriptionQuote: (
     preparationId: string,
     model?: AiModelPreference,
-  ) => call('create_transcription_quote', { preparationId, model }),
+    configuration?: AiConfiguration,
+  ) => call('create_transcription_quote', { preparationId, model, ...configuration }),
   prepareBoundaryRepair: (
     jobId: string,
     draftDigest: string,
@@ -46,6 +50,7 @@ export const aiApi = {
   approveQuote: (quote: AiQuote) =>
     call('approve_quote', {
       quoteId: quote.id,
+      aiConfigurationGeneration: quote.aiConfigurationGeneration ?? 0,
       digest: quote.digest || '',
       acknowledgeUnpriced: quote.unpriced === true || quote.maximumUsd == null,
       acknowledgeUnqualified: true,
@@ -54,6 +59,7 @@ export const aiApi = {
   reapproveQuote: (quote: AiQuote) =>
     call('reapprove_quote', {
       quoteId: quote.id,
+      aiConfigurationGeneration: quote.aiConfigurationGeneration ?? 0,
       digest: quote.digest || '',
       acknowledgeUnpriced: quote.unpriced === true || quote.maximumUsd == null,
       acknowledgeUnqualified: true,

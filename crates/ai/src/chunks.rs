@@ -3,10 +3,11 @@
 mod planning;
 mod reconcile;
 mod word_reconcile;
+pub(crate) use planning::split_file_chunk;
 
 pub use planning::{
-    plan_chunks, total_request_samples, AudioChunk, BoundaryKind, ChunkOptions, Pause,
-    PauseDetector,
+    plan_chunks, total_request_samples, AudioChunk, AudioChunkProfile, BoundaryKind,
+    ChunkBoundaryProvenance, ChunkOptions, Pause, PauseDetector,
 };
 pub use reconcile::{
     stitch_chunks, BoundaryConflict, BoundaryGroupJoin, ChunkTranscript, StitchedTranscript,

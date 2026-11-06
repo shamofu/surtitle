@@ -3,13 +3,14 @@ import { PausedJobs } from './PausedJobs';
 import { RecoveredInputs } from './RecoveredInputs';
 import { ToolRow } from './ToolRow';
 import { WindowSizeSettings } from './WindowSizeSettings';
-import { settingsEditor, settingsFields, settingsFromFields } from './editing';
+import { budgetFieldKey, settingsEditor, settingsFields, settingsFromFields } from './editing';
 import { useEditingSession } from '../../shared/editing/useEditingSession';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { continuationApi, type AiContinuation } from '../ai/continuations';
+import { activeProvider, providerProfile, providerLabel } from '../ai/provider';
 import { ModelSetup } from '../ai/ModelSetup';
 import {
   Archive,
@@ -31,7 +32,7 @@ import {
 import { settingsApi } from './api';
 import { aiApi } from '../ai/api';
 import { nativeAvailable } from '../../shared/native/transport';
-import type { AiPurpose, DiscoveredModel } from '../../shared/contracts/ai';
+import type { AiPurpose, AiProvider, DiscoveredModel } from '../../shared/contracts/ai';
 import type { AppSettings } from '../../shared/contracts/settings';
 
 import type { ExternalToolCandidate } from '../../shared/contracts/settings';
@@ -51,7 +52,7 @@ import { LanguageInput } from '../../shared/ui/LanguageInput';
 import { TransferDialog } from '../transfer/TransferDialog';
 
 import { ModelEditor, emptyModel, validOutputTokens, validTokenInput, type ModelInputDraft } from '../ai/ModelEditor';
-import { AnimatedValue, MotionRegion, MotionSwap, useAppMotion, useMotionEntrance } from '../../shared/motion';
+import { MotionRegion, MotionSwap, useAppMotion, useMotionEntrance } from '../../shared/motion';
 
 const learningLevels = [
   ['A1', '挨拶や簡単な自己紹介ができる', 'Greetings and simple introductions'],
@@ -94,6 +95,13 @@ export function SettingsPage() {
   const [session] = useState(() => settingsEditor(client));
   const editing = useEditingSession(session);
   const draft = editing.ready && data ? settingsFromFields(editing.fields, data.settings) : undefined;
+  const provider = activeProvider(draft);
+  const profile = providerProfile(draft);
+  const [budgetTarget, setBudgetTarget] = useState<AiProvider>();
+  const budgetProvider = budgetTarget ?? provider;
+  const budgetProfile = budgetProvider === 'openai' ? draft?.openai : draft;
+  const credentialConfigured = provider === 'openai' ? data?.settings.openai?.credentialConfigured : data?.settings.credentialConfigured;
+  const [apiKey, setApiKey] = useState('');
   const busy = editing.saving;
   const modelInputs = JSON.parse(editing.fields.modelInputs || '{}') as Partial<Record<AiPurpose, ModelInputDraft>>;
   function setDraft(update: (current: AppSettings | undefined) => AppSettings | undefined) {
@@ -172,9 +180,10 @@ export function SettingsPage() {
   const [modelsBusy, setModelsBusy] = useState(false);
   const [modelNotice, setModelNotice] = useState('');
   const catalogueKey = JSON.stringify([
+    provider, data?.settings.aiConfigurationGeneration ?? 0,
     draft?.vertexLocation || 'global',
     data?.settings.vertexProject,
-    data?.settings.credentialConfigured,
+    credentialConfigured,
     credentialRevision,
   ]);
   const catalogue = useRef({ key: catalogueKey, revision: 0, mounted: true });
@@ -202,6 +211,20 @@ export function SettingsPage() {
     };
   }, []);
   function change<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
+    const targetProvider = ['monthlyBudgetUsd', 'dailyBudgetUsd', 'perJobBudgetUsd'].includes(key) ? budgetProvider : provider;
+    if (targetProvider === 'openai' && ['aiModels', 'monthlyBudgetUsd', 'dailyBudgetUsd', 'perJobBudgetUsd'].includes(key)) {
+      setDraft(current => {
+        if (!current) return current;
+        const openai = { ...(current.openai ?? { credentialConfigured: false, dailyBudgetUsd: 0 }), [key]: value };
+        if (key === 'monthlyBudgetUsd' && typeof value === 'number' && Number.isFinite(value)) {
+          const previous = current.openai?.monthlyBudgetUsd ?? current.openai?.dailyBudgetUsd ?? 0;
+          if (openai.dailyBudgetUsd === previous) openai.dailyBudgetUsd = value;
+          if ((openai.perJobBudgetUsd ?? openai.dailyBudgetUsd) === previous) openai.perJobBudgetUsd = value;
+        }
+        return { ...current, openai };
+      });
+      return;
+    }
     setDraft((current) => {
       if (!current) return current;
       const updated = { ...current, [key]: value };
@@ -226,7 +249,7 @@ export function SettingsPage() {
   function changeNumber(key: 'retention' | 'replayContextMs' | 'monthlyBudgetUsd' | 'dailyBudgetUsd' | 'perJobBudgetUsd', raw: string) {
     const number = raw.trim() === '' ? Number.NaN : Number(raw);
     change(key, key === 'retention' ? number / 100 : number);
-    session.change({ [key === 'retention' ? 'retentionInput' : key]: raw });
+    session.change({ [key === 'retention' ? 'retentionInput' : key === 'replayContextMs' ? key : budgetFieldKey(key, budgetProvider)]: raw });
   }
   async function importCredential() {
     setCredentialBusy(true);
@@ -240,13 +263,27 @@ export function SettingsPage() {
       setCredentialBusy(false);
     }
   }
+  async function updateOpenaiKey(remove = false) {
+    if (credentialBusy || !nativeAvailable()) return;
+    const value = apiKey.trim();
+    if (!remove && !value) return;
+    setApiKey('');
+    setCredentialBusy(true);
+    try {
+      await report(async () => {
+        await mutate(() => remove ? settingsApi.removeOpenaiApiKey() : settingsApi.saveOpenaiApiKey(value), { kind: 'snapshot' });
+        setCredentialRevision(current => current + 1);
+        notify(remove ? t('APIキーを削除しました。', 'API key removed.') : t('APIキーを保存しました。', 'API key saved.'));
+      });
+    } finally { setCredentialBusy(false); }
+  }
   async function discoverModels() {
     const requestedRevision = ++catalogue.current.revision;
     const requestedKey = catalogueKey;
     setModelsBusy(true);
     setModelNotice('');
     try {
-      const result = await runTracked({ kind: 'models', label: t('AIモデルの候補', 'AI model candidates'), phase: 'discovering_models' }, () => aiApi.vertexModels(draft?.vertexLocation || 'global'));
+      const result = await runTracked({ kind: 'models', label: t('AIモデルの候補', 'AI model candidates'), phase: 'discovering_models' }, () => provider === 'openai' ? aiApi.openaiModels() : aiApi.vertexModels(draft?.vertexLocation || 'global'));
       if (!catalogue.current.mounted || catalogue.current.revision !== requestedRevision) return;
       setModelCatalogue({ key: requestedKey, models: result });
       setModelNotice(t(
@@ -278,8 +315,8 @@ export function SettingsPage() {
       setCheckingUpdates(false);
     }
   }
-  const monthlyBudget = draft?.monthlyBudgetUsd ?? draft?.dailyBudgetUsd ?? 0;
-  const perJobBudget = draft?.perJobBudgetUsd ?? draft?.dailyBudgetUsd ?? 0;
+  const monthlyBudget = budgetProfile?.monthlyBudgetUsd ?? budgetProfile?.dailyBudgetUsd ?? 0;
+  const perJobBudget = budgetProfile?.perJobBudgetUsd ?? budgetProfile?.dailyBudgetUsd ?? 0;
   const budgetError = (value: number) => draft && !(Number.isFinite(value) && value >= 0 && value <= 1000)
     ? t('0〜1000 USD の金額を入力してください。', 'Enter an amount between 0 and 1,000 USD.') : undefined;
   const errors = {
@@ -288,13 +325,13 @@ export function SettingsPage() {
     retention: draft && !(draft.retention >= 0.7 - 0.0000001 && draft.retention <= 0.97 + 0.0000001) ? t('70〜97% の保持率を入力してください。', 'Enter a retention rate between 70% and 97%.') : undefined,
     replayContextMs: draft && !(Number.isInteger(draft.replayContextMs ?? 150) && (draft.replayContextMs ?? 150) >= 0 && (draft.replayContextMs ?? 150) <= 1000) ? t('0〜1000 ms の整数を入力してください。', 'Enter a whole number between 0 and 1,000 ms.') : undefined,
     monthlyBudgetUsd: budgetError(monthlyBudget),
-    dailyBudgetUsd: budgetError(draft?.dailyBudgetUsd ?? 0),
+    dailyBudgetUsd: budgetError(budgetProfile?.dailyBudgetUsd ?? 0),
     perJobBudgetUsd: budgetError(perJobBudget),
   };
   const modelInputValid = Object.values(modelInputs).every(input => !input ||
     (input.maxOutputTokens === undefined || validTokenInput(input.maxOutputTokens, 1, 1048576)) &&
     (input.thinkingBudget === undefined || validTokenInput(input.thinkingBudget, 0, 65536)));
-  const valid = !!draft && modelInputValid && !Object.values(errors).some(Boolean) && Object.values(draft.aiModels || {}).every(model => !model || validOutputTokens(model.maxOutputTokens));
+  const valid = !!draft && modelInputValid && !Object.values(errors).some(Boolean) && Object.values(profile?.aiModels || {}).every(model => !model || validOutputTokens(model.maxOutputTokens));
   const dirty = editing.dirty || !modelInputValid;
 
   function reviewErrors() {
@@ -304,7 +341,7 @@ export function SettingsPage() {
     if (next) setCategory(next);
     setRevealTarget({ element: invalid, focus: true });
   }
-  const customBudget = !!draft && (draft.dailyBudgetUsd !== monthlyBudget || perJobBudget !== monthlyBudget);
+  const customBudget = !!draft && (budgetProfile!.dailyBudgetUsd !== monthlyBudget || perJobBudget !== monthlyBudget);
   const retentionPreset = [0.85, 0.9, 0.95].find((value) => Math.abs(value - (draft?.retention ?? 0.9)) < 0.000001);
   const continuation = continuations.find(item => item.id === resume) || continuations[0];
   if (nativeAvailable() && ((!data && snapshotError) || (!editing.ready && editing.error))) return <div ref={page} className="settings-page">
@@ -498,7 +535,9 @@ export function SettingsPage() {
           </section>
           <section id="ai" className="settings-group settings-category" data-settings-category="ai" hidden={category !== 'ai'} aria-labelledby="ai-settings-heading">
             <h2 id="ai-settings-heading">{t('AI', 'AI')}</h2>
-          <section id="vertex" className="settings-card">
+          <section className="settings-card"><Field label={t('AIプロバイダー', 'AI provider')} hint={t('新しい依頼に使います。設定と予算はプロバイダーごとに保持し、実行中の処理は元のプロバイダーで続けます。', 'Used for new requests. Each provider keeps its settings and budget; existing jobs continue with their original provider.')}><select value={provider} disabled={!draft || credentialBusy || busy} onChange={event => { change('activeProvider', event.target.value as AppSettings['activeProvider']); setApiKey(''); }}><option value="vertex">Vertex AI</option><option value="openai">OpenAI</option></select></Field></section>
+          {provider === 'openai' && <section className="settings-card"><h3>OpenAI</h3><p>{draft?.openai?.credentialConfigured ? t('APIキーを設定済み', 'API key configured') : t('APIキー未設定', 'No API key configured')}</p><Field label={t('OpenAI APIキー', 'OpenAI API key')} hint={t('このデバイスで保護して保存します。保存後にキーは表示されません。', 'Stored securely on this device. The saved key is never displayed.')}><input type="password" autoComplete="off" value={apiKey} disabled={credentialBusy || !draft} onChange={event => setApiKey(event.target.value)} /></Field><div className="inline-actions"><Button busy={credentialBusy} disabled={!apiKey.trim() || !nativeAvailable() || busy} onClick={() => void updateOpenaiKey()}>{t('APIキーを保存', 'Save API key')}</Button><Button disabled={credentialBusy || !credentialConfigured || !nativeAvailable() || busy} onClick={() => void updateOpenaiKey(true)}>{t('APIキーを削除', 'Remove API key')}</Button></div></section>}
+          <section hidden={provider !== 'vertex'} id="vertex" className="settings-card">
             <div className="settings-section-title">
               <KeyRound size={20} />
               <div>
@@ -569,7 +608,7 @@ export function SettingsPage() {
               <SlidersHorizontal size={20} />
               <div>
                 <h3>
-                  {t('用途ごとのGeminiモデル', 'Gemini models by purpose')}
+                  {provider === 'openai' ? t('用途ごとのOpenAIモデル', 'OpenAI models by purpose') : t('用途ごとのGeminiモデル', 'Gemini models by purpose')}
                 </h3>
                 <p>
                   {t(
@@ -580,16 +619,16 @@ export function SettingsPage() {
               </div>
             </div>
             <div className="model-catalogue">
-              <Button busy={modelsBusy} disabled={!draft || credentialBusy || !nativeAvailable() || !data?.settings.credentialConfigured} onClick={() => void discoverModels()}>
+              <Button busy={modelsBusy} disabled={!draft || credentialBusy || !nativeAvailable() || !credentialConfigured} onClick={() => void discoverModels()}>
                 <RefreshCw size={15} />
-                {t('Vertexからモデル候補を取得', 'Fetch Vertex model candidates')}
+                {provider === 'openai' ? t('OpenAIからモデル候補を取得', 'Fetch OpenAI model candidates') : t('Vertexからモデル候補を取得', 'Fetch Vertex model candidates')}
               </Button>
               <p>{t('一度取得すると、以下のすべての用途で選べます。モデルIDを直接入力することもできます。', 'Fetch once to use the candidates for every purpose below. You can also enter a model ID directly.')}</p>
-              <MotionRegion mode="status" open={!data?.settings.credentialConfigured}><p>{t('先にサービスアカウントのJSONを読み込んでください。', 'Import a service-account JSON key first.')}</p></MotionRegion>
+              <MotionRegion mode="status" open={!credentialConfigured}><p>{provider === 'openai' ? t('先にAPIキーを保存してください。', 'Save an API key first.') : t('先にサービスアカウントのJSONを読み込んでください。', 'Import a service-account JSON key first.')}</p></MotionRegion>
               <MotionRegion mode="status" open={!!modelNotice}><p role="status"><MotionSwap disabled as="span" stateKey={modelNotice}>{modelNotice}</MotionSwap></p></MotionRegion>
               <MotionRegion mode="status" open={modelsBusy}><ProgressStatus label={t('AIモデルの候補', 'AI model candidates')} phase="discovering_models" /></MotionRegion>
             </div>
-            <ModelSetup models={draft?.aiModels || {}} location={draft?.vertexLocation || 'global'} candidates={modelCatalogue.key === catalogueKey ? modelCatalogue.models : []} disabled={!draft || credentialBusy} onChange={aiModels => change('aiModels', aiModels)} />
+            <ModelSetup key={provider} provider={provider} models={profile?.aiModels || {}} location={draft?.vertexLocation || 'global'} candidates={modelCatalogue.key === catalogueKey ? modelCatalogue.models : []} disabled={!draft || credentialBusy} onChange={aiModels => change('aiModels', aiModels)} />
             <AnimatedDetails><summary>{t('用途ごとの詳細設定', 'Detailed settings by purpose')}</summary>
             {(
               [
@@ -611,33 +650,26 @@ export function SettingsPage() {
                   }
                 </h3>
                 <ModelEditor
-                  key={editing.ready ? purpose : `loading:${purpose}`}
+                  key={editing.ready ? `${provider}:${purpose}` : `loading:${provider}:${purpose}`}
+                  provider={provider}
+                  configurationGeneration={data?.settings.aiConfigurationGeneration}
                   purpose={purpose}
-                  value={draft?.aiModels?.[purpose] || emptyModel(purpose)}
+                  value={profile?.aiModels?.[purpose] || emptyModel(purpose)}
                   location={draft?.vertexLocation || 'global'}
                   candidates={modelCatalogue.key === catalogueKey ? modelCatalogue.models : []}
                   disabled={!draft}
                   autoApplyRates
-                  inputDraft={modelInputs[purpose]}
+                  inputDraft={(modelInputs as Record<string, ModelInputDraft>)[`${provider}:${purpose}`] ?? (provider === 'vertex' ? modelInputs[purpose] : undefined)}
                   onInputDraftChange={input => {
                     const current = JSON.parse(session.getSnapshot().fields.modelInputs || '{}');
-                    session.change({ modelInputs: JSON.stringify({ ...current, [purpose]: input }) });
+                    session.change({ modelInputs: JSON.stringify({ ...current, [`${provider}:${purpose}`]: input }) });
                   }}
                   onPricePendingChange={(pending) => {
                     if (pending) priceRequests.current.add(purpose);
                     else priceRequests.current.delete(purpose);
                     setPricing(priceRequests.current.size > 0);
                   }}
-                  onChange={(model) =>
-                    setDraft((current) =>
-                      current
-                        ? {
-                            ...current,
-                            aiModels: { ...current.aiModels, [purpose]: model },
-                          }
-                        : current,
-                    )
-                  }
+                  onChange={model => change('aiModels', { ...profile?.aiModels, [purpose]: model })}
                 />
               </section>
             ))}
@@ -656,28 +688,20 @@ export function SettingsPage() {
                 </p>
               </div>
             </div>
-            <div className="budget-summary">
-              <div>
-                <span>{t('今月の算定済み利用額', 'Calculated spending this month')}</span>
-                <strong><AnimatedValue value={data ? money(data.budget.spentUsd) : '—'} /></strong>
-              </div>
-              <div>
-                <span>{t('現在の予約額', 'Current reservations')}</span>
-                <strong><AnimatedValue value={data ? money(data.budget.reservedUsd) : '—'} /></strong>
-              </div>
-              <div>
-                <span>{t('保存済みの月額上限', 'Saved monthly limit')}</span>
-                <strong><AnimatedValue value={data ? data.budget.limitUsd === 0 ? t('上限なし', 'Unlimited') : money(data.budget.limitUsd) : '—'} /></strong>
-              </div>
-            </div>
-            <MotionRegion mode="status" open={data?.budget.monetaryTotalsComplete === false}>
-              <p className="notice warning">
-                <MotionSwap disabled as="span" stateKey={data?.budget.unpricedAttempts || 0}>{t(
-                  `料金未算定の要求が ${data?.budget.unpricedAttempts || 0} 件あります。上の金額には含まれず、請求総額ではありません。`,
-                  `${data?.budget.unpricedAttempts || 0} requests have uncalculated costs. They are excluded from the amounts above, which are not your total bill.`,
-                )}</MotionSwap>
-              </p>
-            </MotionRegion>
+            {(['vertex', 'openai'] as const).map(budgetProvider => {
+              const budget = data?.budgets[budgetProvider];
+              return <div key={budgetProvider} aria-label={`${providerLabel(budgetProvider)} budget`}><h4>{providerLabel(budgetProvider)}</h4><div className="budget-summary">
+                <div><span>{t('今月の算定済み利用額', 'Calculated spending this month')}</span><strong>{budget ? money(budget.spentUsd) : '—'}</strong></div>
+                <div><span>{t('現在の予約額', 'Current reservations')}</span><strong>{budget ? money(budget.reservedUsd) : '—'}</strong></div>
+                <div><span>{t('保存済みの月額上限', 'Saved monthly limit')}</span><strong>{budget ? budget.limitUsd === 0 ? t('上限なし', 'Unlimited') : money(budget.limitUsd) : '—'}</strong></div>
+              </div>{budget?.monetaryTotalsComplete === false && <p className="notice warning">{t(`料金未算定の要求が ${budget.unpricedAttempts || 0} 件あります。上の金額には含まれず、請求総額ではありません。`, `${budget.unpricedAttempts || 0} requests have uncalculated costs. They are excluded from the amounts above, which are not your total bill.`)}</p>}</div>;
+            })}
+            <Field label={t('予算を編集するサービス', 'Budget provider')} hint={t('予算の編集先を選んでも、新しい依頼に使うサービスは変わりません。', 'Editing a budget does not change the provider for new requests.')}>
+              <select value={budgetProvider} disabled={!draft} onChange={event => setBudgetTarget(event.target.value as AiProvider)}>
+                <option value="vertex">Vertex AI</option><option value="openai">OpenAI</option>
+              </select>
+            </Field>
+            <h4>{providerLabel(budgetProvider)} · {t('予算を編集', 'Edit budget')}</h4>
             <Field
               error={errors.monthlyBudgetUsd}
               label={t(
@@ -693,7 +717,7 @@ export function SettingsPage() {
                 <CircleDollarSign size={18} />
                 <input
                   type="text" inputMode="decimal"
-                  value={editing.fields.monthlyBudgetUsd ?? ''}
+                  value={editing.fields[budgetFieldKey('monthlyBudgetUsd', budgetProvider)] ?? ''}
                   disabled={!draft}
                   onChange={(event) =>
                     changeNumber('monthlyBudgetUsd', event.target.value)
@@ -701,9 +725,9 @@ export function SettingsPage() {
                 />
               </div>
             </Field>
-            <MotionRegion mode="status" open={customBudget}><p className="budget-custom-summary"><MotionSwap disabled as="span" stateKey={`${money(draft?.dailyBudgetUsd ?? 0)}:${money(perJobBudget)}`}>{t(
-              `詳細の上限を設定済み：1日 ${money(draft?.dailyBudgetUsd ?? 0)}、1処理 ${money(perJobBudget)}。月額と異なる上限だけを維持し、同じ上限は月額の変更に合わせます。`,
-              `Advanced limits: ${money(draft?.dailyBudgetUsd ?? 0)} per day and ${money(perJobBudget)} per job. Independent limits are kept when the monthly budget changes.`,
+            <MotionRegion mode="status" open={customBudget}><p className="budget-custom-summary"><MotionSwap disabled as="span" stateKey={`${money(budgetProfile?.dailyBudgetUsd ?? 0)}:${money(perJobBudget)}`}>{t(
+              `詳細の上限を設定済み：1日 ${money(budgetProfile?.dailyBudgetUsd ?? 0)}、1処理 ${money(perJobBudget)}。月額と異なる上限だけを維持し、同じ上限は月額の変更に合わせます。`,
+              `Advanced limits: ${money(budgetProfile?.dailyBudgetUsd ?? 0)} per day and ${money(perJobBudget)} per job. Independent limits are kept when the monthly budget changes.`,
             )}</MotionSwap></p></MotionRegion>
             <AnimatedDetails className="settings-details budget-details">
               <summary>{t('1日・1処理の上限を調整', 'Adjust daily and per-job limits')}</summary>
@@ -711,13 +735,13 @@ export function SettingsPage() {
               <div className="field-row">
                 <div className="settings-field-group">
                   <Field label={t('1日の上限（USD）', 'Daily limit (USD)')} error={errors.dailyBudgetUsd} hint={t('UTC基準の暦日ごとに集計します。', 'Usage is counted by UTC calendar day.')}>
-                    <input type="text" inputMode="decimal" value={editing.fields.dailyBudgetUsd ?? ''} disabled={!draft} onChange={(event) => changeNumber('dailyBudgetUsd', event.target.value)} />
+                    <input type="text" inputMode="decimal" value={editing.fields[budgetFieldKey('dailyBudgetUsd', budgetProvider)] ?? ''} disabled={!draft} onChange={(event) => changeNumber('dailyBudgetUsd', event.target.value)} />
                   </Field>
-                  <Button disabled={!draft || !Number.isFinite(monthlyBudget) || draft.dailyBudgetUsd === monthlyBudget} onClick={() => change('dailyBudgetUsd', monthlyBudget)}>{t('月額と同じに戻す', 'Match the monthly budget')}</Button>
+                  <Button disabled={!draft || !Number.isFinite(monthlyBudget) || budgetProfile!.dailyBudgetUsd === monthlyBudget} onClick={() => change('dailyBudgetUsd', monthlyBudget)}>{t('月額と同じに戻す', 'Match the monthly budget')}</Button>
                 </div>
                 <div className="settings-field-group">
                   <Field label={t('1処理の上限（USD）', 'Per-job limit (USD)')} error={errors.perJobBudgetUsd} hint={t('1処理には、文字起こしなどの複数のリクエストを含む場合があります。', 'One job can include multiple requests, such as transcription chunks.')}>
-                    <input type="text" inputMode="decimal" value={editing.fields.perJobBudgetUsd ?? ''} disabled={!draft} onChange={(event) => changeNumber('perJobBudgetUsd', event.target.value)} />
+                    <input type="text" inputMode="decimal" value={editing.fields[budgetFieldKey('perJobBudgetUsd', budgetProvider)] ?? ''} disabled={!draft} onChange={(event) => changeNumber('perJobBudgetUsd', event.target.value)} />
                   </Field>
                   <Button disabled={!draft || !Number.isFinite(monthlyBudget) || perJobBudget === monthlyBudget} onClick={() => change('perJobBudgetUsd', monthlyBudget)}>{t('月額と同じに戻す', 'Match the monthly budget')}</Button>
                 </div>

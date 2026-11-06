@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { AiPurpose, AiModelPreference } from './ai';
+import type { AiPurpose, AiModelPreference, AiProvider } from './ai';
 
 export type ToolId = 'ffmpeg' | 'vad';
 export type MotionPreference = 'system' | 'reduce';
@@ -28,6 +28,9 @@ export interface ExternalToolCandidate {
 }
 
 export interface AppSettings {
+  activeProvider: AiProvider;
+  aiConfigurationGeneration: number;
+  openai: OpenAiSettings;
   theme: 'dark' | 'light' | 'system';
   motionPreference?: MotionPreference;
   captionGapMode?: CaptionGapMode;
@@ -45,4 +48,12 @@ export interface AppSettings {
   replayContextMs?: number;
   proficiency?: string;
   aiModels?: Partial<Record<AiPurpose, AiModelPreference>>;
+}
+
+export interface OpenAiSettings {
+  credentialConfigured: boolean;
+  aiModels?: Partial<Record<AiPurpose, AiModelPreference>>;
+  dailyBudgetUsd: number;
+  monthlyBudgetUsd?: number;
+  perJobBudgetUsd?: number;
 }

@@ -89,7 +89,7 @@ export function parseOptions(argv) {
   return options;
 }
 
-function plainPath(path, file) {
+export function plainPath(path, file) {
   requireCheck(isAbsolute(path), 'Probe paths must be absolute');
   const absolute = resolve(path);
   let current = parse(absolute).root;
@@ -116,9 +116,9 @@ export function validateSnapshot(snapshot, fixture) {
     'Disposable application unexpectedly contains credentials or an enabled budget');
   const models = snapshot.settings.aiModels;
   requireCheck(models && typeof models === 'object' && !Array.isArray(models) && Object.keys(models).length === 0, 'Fresh production model preferences must all be unset');
-  const budget = snapshot.budget;
-  requireCheck(Array.isArray(snapshot.jobs) && snapshot.jobs.length === 0 && budget?.spentUsd === 0 && budget.reservedUsd === 0 && budget.limitUsd === 0
-    && budget.unpricedAttempts === 0 && budget.monetaryTotalsComplete === true && Array.isArray(budget.unknownAttempts) && budget.unknownAttempts.length === 0,
+  const budgets = snapshot.budgets;
+  requireCheck(Array.isArray(snapshot.jobs) && snapshot.jobs.length === 0 && budgets && ['openai', 'vertex'].every(provider => { const budget = budgets[provider]; return budget?.spentUsd === 0 && budget.reservedUsd === 0 && budget.limitUsd === 0
+    && budget.unpricedAttempts === 0 && budget.monetaryTotalsComplete === true && Array.isArray(budget.unknownAttempts) && budget.unknownAttempts.length === 0; }),
   'Production probe must not create or inherit any AI job, cost, hold or unpriced attempt');
   requireCheck(Array.isArray(snapshot.media) && snapshot.media.length === 1 && snapshot.media[0].id === fixture.mediaId
     && snapshot.media[0].path === fixture.mediaPath && snapshot.media[0].segmentCount === fixture.segmentCount
@@ -127,7 +127,7 @@ export function validateSnapshot(snapshot, fixture) {
   requireCheck(Array.isArray(snapshot.tools) && snapshot.tools.length === 2 && ['ffmpeg', 'vad'].every(id => snapshot.tools.some(tool => tool.id === id))
     && snapshot.tools.every(tool => tool.status === 'missing' && tool.provider === 'managed' && tool.path == null), 'Production playback unexpectedly acquired an external tool');
   return { mediaCount: snapshot.media.length, cardCount: snapshot.cards.length, subtitleCount: snapshot.media[0].segmentCount,
-    credentialConfigured: false, savedModelPreferenceCount: 0, budget };
+    credentialConfigured: false, savedModelPreferenceCount: 0, budgets };
 }
 
 export function validateMetadata(state) {
@@ -145,7 +145,7 @@ export function sanitizedEnvironment(environment) {
   return result;
 }
 
-async function freePort() {
+export async function freePort() {
   const server = createServer();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', done); });
   const port = server.address().port;
@@ -153,7 +153,7 @@ async function freePort() {
   return port;
 }
 
-function knownProfilePaths() {
+export function knownProfilePaths() {
   // Tauri uses Windows known folders. Environment-only paths cannot authorize a
   // substitute directory while the production app opens the real user profile.
   const powershell = join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');

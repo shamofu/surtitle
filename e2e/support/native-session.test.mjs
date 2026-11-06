@@ -4,6 +4,7 @@ import { EventEmitter, once } from 'node:events';
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { test } from 'vitest';
 import { NativeWorker, stopNativeProcess } from './native-session.mjs';
@@ -39,6 +40,7 @@ test('each spec seeds a new profile before driver launch and keeps the original 
       return child;
     },
     waitForDriver: async () => {},
+    verifyPorts: async () => {},
   };
   const first = new NativeWorker({ ...f.environment }, dependencies);
   const second = new NativeWorker({ ...f.environment }, dependencies);
@@ -53,6 +55,48 @@ test('each spec seeds a new profile before driver launch and keeps the original 
   assert.equal(readFileSync(join(f.template, 'learning.sqlite'), 'utf8'), 'do not copy an existing database');
   assert.equal(first.environment.SURTITLE_E2E_AI_RECOVERY, 'translation');
   assert.equal(first.environment.SURTITLE_E2E_TRANSCRIPT_REVIEW, 'boundary');
+});
+
+test('an occupied native driver port aborts before launching or connecting to another session', async t => {
+  const f = fixture(t);
+  const existing = createServer();
+  await new Promise((resolve, reject) => {
+    existing.once('error', reject);
+    existing.listen(0, '127.0.0.1', resolve);
+  });
+  t.onTestFinished(() => new Promise(resolve => existing.close(resolve)));
+  const nativePort = existing.address().port;
+  const launches = [];
+  let connected = false;
+  const worker = new NativeWorker({ ...f.environment, SURTITLE_WEBDRIVER_PORT: String(nativePort - 1) }, {
+    spawn: (_binary, args, _directory, label) => {
+      launches.push(label);
+      const child = Object.assign(new EventEmitter(), { pid: undefined, exitCode: null, signalCode: null });
+      if (label === 'seed') {
+        writeFileSync(join(args[0], 'fixture.json'), JSON.stringify({ mediaPath: args[1] }));
+        queueMicrotask(() => { child.exitCode = 0; child.emit('exit', 0); });
+      }
+      return child;
+    },
+    waitForDriver: async () => { connected = true; },
+  });
+  t.onTestFinished(() => worker.stop());
+  await assert.rejects(worker.start(['e2e/native/study.e2e.js'], '0-4'), /driver port .* unavailable/i);
+  assert(!launches.includes('driver'));
+  assert.equal(connected, false);
+  assert(existing.listening, 'The unrelated listener must stay untouched');
+});
+
+test('profile attestation rejects a different application before settings can be changed', async t => {
+  const f = fixture(t);
+  const worker = new NativeWorker(f.environment);
+  worker.profile = f.template;
+  let settingsChanged = false;
+  assert.throws(() => {
+    worker.assertProfile({ jobs: [] });
+    settingsChanged = true;
+  }, /offline fixtures|database|unable to open/i);
+  assert.equal(settingsChanged, false);
 });
 
 test('owned child termination is awaited before the next native session can start', async () => {
@@ -116,6 +160,7 @@ test('driver startup failure preserves its cause and stage and removes its exit 
       return child;
     },
     waitForDriver: async () => { throw cause; },
+    verifyPorts: async () => {},
   });
   await assert.rejects(worker.start(['e2e/native/study.e2e.js'], '0-3'), error => error === cause);
   assert.equal(process.listenerCount('exit'), listeners);
@@ -128,7 +173,7 @@ test('driver startup failure preserves its cause and stage and removes its exit 
 test('the native registry covers every authored spec and selects only applicable OS cases', () => {
   const actual = readdirSync(new URL('../native/', import.meta.url)).filter(name => name.endsWith('.e2e.js')).sort();
   assert.deepEqual(actual, nativeSpecs.map(item => `${item.name}.e2e.js`).sort());
-  assert.equal(nativeSpecsForPlatform('win32').length, 14);
+  assert.equal(nativeSpecsForPlatform('win32').length, 15);
   assert.equal(nativeSpecsForPlatform('linux').length, 5);
   assert.equal(nativePlatformName('win32'), 'windows');
   assert.equal(nativePlatformName('linux'), 'linux');

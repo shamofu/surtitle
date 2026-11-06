@@ -124,6 +124,26 @@ pub struct ReviewChunk {
     pub no_speech_detected: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vad_pause_evidence: Option<VadPauseEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary_provenance: Option<crate::ChunkBoundaryProvenance>,
+}
+
+impl ReviewChunk {
+    fn audio_chunk(&self) -> AudioChunk {
+        if let Some(provenance) = &self.boundary_provenance {
+            return provenance.as_chunk(self.ordinal);
+        }
+        AudioChunk {
+            index: self.ordinal,
+            sample_rate: 1000,
+            core_start_sample: self.core_start_ms,
+            core_end_sample: self.core_end_ms,
+            request_start_sample: self.request_start_ms,
+            request_end_sample: self.request_end_ms,
+            boundary: BoundaryKind::Forced,
+            boundary_provenance: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -312,6 +332,14 @@ pub fn build_transcript_draft_from_input(
             return Err(invalid("Invalid or discontinuous receipt timeline"));
         }
         let audio = &input.attachments[ordinal];
+        if let Some(provenance) = &chunk.boundary_provenance {
+            provenance.validate()?;
+            if provenance.as_chunk(chunk.index) != *chunk {
+                return Err(invalid(
+                    "Prepared boundary evidence differs from chunk timeline",
+                ));
+            }
+        }
         if audio.source_start_ms != chunk.request_start_ms()
             || audio.duration_ms != chunk.request_duration_ms()
         {
@@ -379,6 +407,7 @@ pub fn build_transcript_draft_from_input(
                 .vad_pause_evidence
                 .as_ref()
                 .and_then(|evidence| evidence.for_chunk(chunk)),
+            boundary_provenance: chunk.boundary_provenance.clone(),
         });
     }
     let start_ms = chunks[0].core_start_ms;
@@ -516,15 +545,7 @@ fn assemble(chunks: &[ReviewChunk]) -> Result<AssembledDraft> {
         let run = chunks[start..position]
             .iter()
             .map(|c| ChunkTranscript {
-                chunk: AudioChunk {
-                    index: c.ordinal,
-                    sample_rate: 1000,
-                    core_start_sample: c.core_start_ms,
-                    core_end_sample: c.core_end_ms,
-                    request_start_sample: c.request_start_ms,
-                    request_end_sample: c.request_end_ms,
-                    boundary: BoundaryKind::Forced,
-                },
+                chunk: c.audio_chunk(),
                 segments: c.segments.clone().into_iter().map(Into::into).collect(),
             })
             .collect();
@@ -628,6 +649,35 @@ fn refresh(draft: &mut TranscriptDraft) -> Result<()> {
     let mut vad_provenance: Option<&VadPauseEvidence> = None;
     for (index, chunk) in draft.chunks.iter().enumerate() {
         manual::validate_chunk_source(draft, chunk)?;
+        if let Some(provenance) = &chunk.boundary_provenance {
+            provenance.validate()?;
+            let original = chunk.audio_chunk();
+            let end_ms = if index + 1 == draft.chunks.len() {
+                original.request_start_ms() + original.request_duration_ms()
+            } else {
+                original.core_end_ms()
+            };
+            if original.core_start_ms() != chunk.core_start_ms
+                || end_ms != chunk.core_end_ms
+                || original.request_start_ms() != chunk.request_start_ms
+                || original.request_start_ms() + original.request_duration_ms()
+                    != chunk.request_end_ms
+                || (provenance.kind == BoundaryKind::EndOfSelection)
+                    != (index + 1 == draft.chunks.len())
+                || index > 0
+                    && draft.chunks[index - 1]
+                        .boundary_provenance
+                        .as_ref()
+                        .is_some_and(|previous| {
+                            previous.sample_rate != provenance.sample_rate
+                                || previous.boundary_sample != provenance.core_start_sample
+                        })
+            {
+                return Err(invalid(
+                    "Stored boundary provenance differs from review timeline",
+                ));
+            }
+        }
         if chunk.ordinal as usize != index
             || chunk.core_start_ms >= chunk.core_end_ms
             || chunk.request_start_ms > chunk.core_start_ms
@@ -785,7 +835,32 @@ fn refresh(draft: &mut TranscriptDraft) -> Result<()> {
 
 fn warnings_for_chunks(chunks: &[ReviewChunk]) -> Vec<ReviewWarning> {
     let mut warnings = Vec::new();
-    for chunk in chunks {
+    for (index, chunk) in chunks.iter().enumerate() {
+        if let Some(provenance) = chunk
+            .boundary_provenance
+            .as_ref()
+            .filter(|p| p.kind == BoundaryKind::Forced)
+        {
+            if let Some(next) = chunks.get(index + 1) {
+                let at_ms =
+                    provenance.boundary_sample.saturating_mul(1000) / provenance.sample_rate as u64;
+                warnings.push(ReviewWarning {
+                    id: sha256_bytes(
+                        &serde_json::to_vec(&(
+                            "forced-chunk-boundary-v1",
+                            chunk.ordinal,
+                            provenance,
+                        ))
+                        .expect("Boundary provenance is serializable"),
+                    ),
+                    kind: "forced_chunk_boundary".into(),
+                    ordinal: chunk.ordinal,
+                    start_ms: at_ms.saturating_sub(1000).max(chunk.core_start_ms),
+                    end_ms: at_ms.saturating_add(1000).min(next.core_end_ms),
+                    acknowledged: false,
+                });
+            }
+        }
         if chunk.segments.is_empty() {
             continue;
         }

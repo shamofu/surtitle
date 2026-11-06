@@ -12,11 +12,12 @@ pub struct AppSnapshot {
     tools: Vec<crate::application::tool_runtime::ToolStatus>,
     settings: surtitle_core::AppSettings,
     jobs: Vec<JobSummary>,
-    budget: BudgetSummary,
+    budgets: std::collections::BTreeMap<surtitle_core::AiProvider, BudgetSummary>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobSummary {
+    provider: surtitle_core::AiProvider,
     id: String,
     media_id: Option<String>,
     kind: String,
@@ -71,6 +72,10 @@ pub struct UnknownAttemptSummary {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuoteRequest {
+    #[serde(default)]
+    provider: Option<surtitle_core::AiProvider>,
+    #[serde(default)]
+    ai_configuration_generation: Option<u64>,
     media_id: String,
     kind: String,
     start_ms: u64,
@@ -83,6 +88,8 @@ pub struct QuoteRequest {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiQuote {
+    ai_configuration_generation: u64,
+    provider: surtitle_core::AiProvider,
     id: String,
     media_id: String,
     kind: String,
@@ -152,6 +159,11 @@ pub struct VocabularyCandidate {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreparationSummary {
+    provider: surtitle_core::AiProvider,
+    ai_configuration_generation: u64,
+    compatible: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chunk_profile: Option<surtitle_ai::AudioChunkProfile>,
     id: String,
     media_id: String,
     start_ms: u64,

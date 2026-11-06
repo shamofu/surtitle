@@ -8,7 +8,6 @@ mod window_fit;
 
 pub use startup::report_startup_failure;
 
-use application::Services;
 use tauri::{Emitter, Manager};
 
 pub fn run() -> tauri::Result<()> {
@@ -17,17 +16,10 @@ pub fn run() -> tauri::Result<()> {
             // Tauri panics on a returned setup error inside its event loop,
             // so report initialization failures before handing control back.
             let startup = (|| -> Result<(), Box<dyn std::error::Error>> {
-                let root = app.path().app_local_data_dir()?;
-                #[cfg(feature = "e2e-test")]
-                let root = std::env::var_os("SURTITLE_E2E_DATA_DIR")
-                    .map(std::path::PathBuf::from)
-                    .unwrap_or(root);
-                let services = Services::open(root.clone()).map_err(|error| {
-                    format!(
-                        "Could not open Surtitle data at {}:\n{error:#}",
-                        root.display()
-                    )
-                })?;
+                let (root, services) =
+                    startup::open_services(std::env::var_os("SURTITLE_E2E_DATA_DIR"), || {
+                        Ok(app.path().app_local_data_dir()?)
+                    })?;
                 let changes_handle = app.handle().clone();
                 services.changes.install(move |change| {
                     let _ = changes_handle.emit("data-changed", change);
@@ -122,6 +114,9 @@ pub fn run() -> tauri::Result<()> {
             commands::ai::get_app_snapshot,
             commands::ai::get_ai_runtime,
             commands::models::list_vertex_models,
+            commands::models::list_openai_models,
+            commands::models::save_openai_api_key,
+            commands::models::remove_openai_api_key,
             commands::models::update_appearance,
             commands::models::lookup_vertex_price,
             commands::ai::import_credential,

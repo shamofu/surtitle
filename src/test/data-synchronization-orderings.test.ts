@@ -8,7 +8,7 @@ import { queryKeys } from '../shared/query/keys';
 import { controlled, legalOrders, settle } from './legal-orderings';
 
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
-const baseline = { media: [], cards: [], jobs: [], tools: [], settings: { locale: 'en' }, budget: {} } as unknown as AppSnapshot;
+const baseline = { media: [], cards: [], jobs: [], tools: [], settings: { locale: 'en' }, budgets: {} } as unknown as AppSnapshot;
 const readOrders = legalOrders({ captureOld: [], notify: ['captureOld'], startNew: ['notify'], captureNew: ['startNew'], finishOld: ['captureOld'], finishNew: ['captureNew'] } as const);
 const restoreOrders = legalOrders({ captureCheckpoint: [], restore: ['captureCheckpoint'], finishPatch: ['restore'], finishCheckpoint: ['captureCheckpoint'], drain: ['finishPatch', 'finishCheckpoint'] } as const);
 const eventOrders = legalOrders({ latest: [], duplicate: ['latest'], older: [], failed: ['latest'], recover: ['failed', 'duplicate', 'older'] } as const);

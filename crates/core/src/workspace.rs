@@ -70,6 +70,11 @@ fn validate_fields(kind: &str, fields: &BTreeMap<String, String>) -> Result<()> 
             "replayContextMs",
             "proficiency",
             "vertexLocation",
+            "activeProvider",
+            "openaiModels",
+            "openaiDailyBudgetUsd",
+            "openaiMonthlyBudgetUsd",
+            "openaiPerJobBudgetUsd",
             "dailyBudgetUsd",
             "monthlyBudgetUsd",
             "perJobBudgetUsd",
@@ -118,7 +123,7 @@ fn validate_fields(kind: &str, fields: &BTreeMap<String, String>) -> Result<()> 
     }
     // These fields contain structured, non-secret model form values. Reject
     // credential-shaped properties rather than accepting arbitrary nested JSON.
-    for name in ["aiModels", "modelInputs"] {
+    for name in ["aiModels", "openaiModels", "modelInputs"] {
         if let Some(value) = fields.get(name) {
             let json: serde_json::Value =
                 serde_json::from_str(value).context("Invalid model draft data")?;
@@ -134,7 +139,13 @@ fn validate_model_fields(value: &serde_json::Value, purposes: bool) -> Result<()
         if purposes {
             ensure!(
                 ["transcription", "translation", "vocabulary", "explanation"]
-                    .contains(&key.as_str()),
+                    .contains(&key.as_str())
+                    || key
+                        .split_once(':')
+                        .is_some_and(|(provider, purpose)| ["vertex", "openai"]
+                            .contains(&provider)
+                            && ["transcription", "translation", "vocabulary", "explanation"]
+                                .contains(&purpose)),
                 "Unknown model draft purpose"
             );
             if !value.is_null() {
@@ -153,7 +164,8 @@ fn validate_model_fields(value: &serde_json::Value, purposes: bool) -> Result<()
                     "input",
                     "output",
                     "inputRate",
-                    "outputRate"
+                    "outputRate",
+                    "audio"
                 ]
                 .contains(&key.as_str()),
                 "Unknown or private model draft field"
@@ -166,7 +178,8 @@ fn validate_model_fields(value: &serde_json::Value, purposes: bool) -> Result<()
                         "source",
                         "observedAtMs",
                         "inputMicrousdPerMillion",
-                        "outputMicrousdPerMillion"
+                        "outputMicrousdPerMillion",
+                        "audioMicrousdPerMinute"
                     ]
                     .contains(&key.as_str()))
                         && price

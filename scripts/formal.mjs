@@ -12,6 +12,11 @@ const cases = [
   ['PacingSeparateSafety', null], ['PacingStopSafety', null], ['PacingRestartSafety', null], ['HealthyProgress', null],
   ['MissingGenerationGuard', 'NoStaleAuthority'], ['UnknownRefund', 'UnknownHoldPreserved'],
   ['RetryFloorIgnored', 'RetryFloorRespected'],
+  ['ProviderScopeSafety', null, 'ProviderLedger.tla'],
+  ['ProviderActiveAccounting', 'ProviderAccounting', 'ProviderLedger.tla'],
+  ['ProviderSeparateOutbound', 'OneOutbound', 'ProviderLedger.tla'],
+  ['ProviderUnknownIgnored', 'ProviderUnknownGuard', 'ProviderLedger.tla'],
+  ['ProviderActiveBudget', 'ProviderBudgetAdmission', 'ProviderLedger.tla'],
 ];
 
 /** TLC 1.7.4 returns 12 for a safety violation. An arbitrary nonzero exit is not a negative-control pass. */
@@ -112,13 +117,13 @@ async function main() {
   const started = Date.now();
   const deadline = Date.now() + toolchain.timeoutMs;
   try {
-    for (const [name, expected] of cases) {
+    for (const [name, expected, model = 'AiLedger.tla'] of cases) {
       if (Date.now() >= deadline) throw new Error('Formal verification aggregate deadline exceeded; unchecked cases remain');
       const metadata = join(root, 'work/formal-states', runId, name);
       await mkdir(metadata, { recursive: true });
       const caseStarted = Date.now();
       const result = await execute('java', [`-Xmx${toolchain.memoryMiB}m`, '-XX:+UseParallelGC', '-cp', jar,
-        'tlc2.TLC', '-workers', '1', '-tool', '-config', `${name}.cfg`, '-metadir', metadata, 'AiLedger.tla'],
+        'tlc2.TLC', '-workers', '1', '-tool', '-config', `${name}.cfg`, '-metadir', metadata, model],
       sources, deadline - Date.now());
       await writeFile(join(output, `${name}.log`), result.stdout + result.stderr);
       const assessment = { name, ...assessTlc(result, expected), durationMs: Date.now() - caseStarted, outputExceeded: result.outputExceeded };

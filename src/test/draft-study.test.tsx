@@ -245,7 +245,7 @@ beforeEach(() => {
     cards: [],
     tools: [],
     jobs: [
-      {
+      { provider: 'vertex',
         id: 'job',
         mediaId: media.id,
         kind: 'transcribe',
@@ -256,6 +256,7 @@ beforeEach(() => {
       },
     ],
     settings: {
+      activeProvider: 'vertex', aiConfigurationGeneration: 0, openai: { credentialConfigured: false, dailyBudgetUsd: 0, aiModels: {} },
       theme: 'dark',
       locale: 'en',
       learningLanguage: 'en',
@@ -267,7 +268,7 @@ beforeEach(() => {
       retention: 0.9,
       aiModels: { vocabulary: model, explanation: model },
     },
-    budget: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 },
+    budgets: { vertex: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 }, openai: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 } },
   };
   vi.mocked(studyApi.transcriptReview).mockResolvedValue(review);
   vi.mocked(aiApi.approveQuote).mockResolvedValue(undefined);
@@ -575,7 +576,7 @@ describe('study from independently saved draft excerpts', () => {
   it('automatically estimates checked text and sends only with the single Start action', async () => {
     context.data!.settings.credentialConfigured = true;
     context.data!.settings.vertexProject = 'project';
-    const quote: AiQuote = {
+    const quote: AiQuote = { aiConfigurationGeneration: 0, provider: 'vertex',
       id: 'quote',
       mediaId: media.id,
       kind: 'vocabulary',
@@ -604,7 +605,7 @@ describe('study from independently saved draft excerpts', () => {
       { target: { value: 'beagle' } },
     );
     await waitFor(() =>
-      expect(draftStudyApi.createQuote).toHaveBeenCalledExactlyOnceWith({
+      expect(draftStudyApi.createQuote).toHaveBeenCalledExactlyOnceWith({ provider: 'vertex', aiConfigurationGeneration: 0,
         selectionId: 'selection',
         version: 2,
         focusTerm: 'beagle',

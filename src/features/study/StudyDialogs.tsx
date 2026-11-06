@@ -126,6 +126,8 @@ export function EditDialog({
         {segment.reviewIssues.map(issue => <div key={issue.id}>
           <p>{timestamp(issue.startMs)}–{timestamp(issue.endMs)} · {issue.kind === 'boundary_conflict'
             ? t('境界で内容が一致しない候補があります。', 'Alternatives disagree at this boundary.')
+            : issue.kind === 'forced_chunk_boundary'
+              ? t('休止を検出できない位置で音声を分割しました。境界の前後を聴いて、字幕の欠落や重複を確認してください。', 'Audio was split without a detected pause. Listen around the boundary and check for missing or repeated words.')
             : t('生成結果の確認が必要な箇所です。', 'This part of the generated result needs attention.')}</p>
           {issue.alternatives.map((alternative, index) => <blockquote key={index}>
             <small>{timestamp(alternative.startMs)}–{timestamp(alternative.endMs)}</small>

@@ -27,12 +27,12 @@ fn legacy_floor_migration_preserves_unknown_holds_and_observed_lane_history() {
     let future = f.store.now_ms() + 90_000;
     let conn = f.store.connect().unwrap();
     conn.execute(
-        "INSERT INTO ai_transcription_pacing VALUES ('observed','m','global',20000,1,123,?,2)",
+        "INSERT INTO ai_transcription_pacing(project_id,model_id,location,interval_ms,success_streak,last_dispatch_ms,cooldown_until_ms,policy_version) VALUES ('observed','m','global',20000,1,123,?,2)",
         [future],
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO ai_transcription_pacing VALUES ('recovered','m','global',10000,2,456,?,2)",
+        "INSERT INTO ai_transcription_pacing(project_id,model_id,location,interval_ms,success_streak,last_dispatch_ms,cooldown_until_ms,policy_version) VALUES ('recovered','m','global',10000,2,456,?,2)",
         [future],
     )
     .unwrap();

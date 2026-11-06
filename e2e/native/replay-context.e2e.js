@@ -103,15 +103,15 @@ describe('source replay context and retained native card clips', () => {
     const initial = await snapshot();
     assert.equal(initial.settings.credentialConfigured, false, 'Refusing a profile with credentials');
     assert.equal(initial.settings.dailyBudgetUsd, 0);
-    assert.equal(initial.budget.spentUsd, 0);
-    assert.equal(initial.budget.reservedUsd, 0);
-    assert.equal(initial.budget.limitUsd, 0);
-    assert.equal(initial.budget.unknownAttempts?.length ?? 0, 0);
-    assert.equal(initial.budget.unpricedAttempts ?? 0, 0);
+    assert.equal(initial.budgets.vertex.spentUsd, 0);
+    assert.equal(initial.budgets.vertex.reservedUsd, 0);
+    assert.equal(initial.budgets.vertex.limitUsd, 0);
+    assert.equal(initial.budgets.vertex.unknownAttempts?.length ?? 0, 0);
+    assert.equal(initial.budgets.vertex.unpricedAttempts ?? 0, 0);
     assert(initial.media.some(item => item.id === mediaId && item.path === fixture.mediaPath), 'Expected the exact disposable media fixture');
     ledgerBefore = ledger();
     assertOfflineFixtureLedger(initial, ledgerBefore);
-    budgetBefore = initial.budget;
+    budgetBefore = initial.budgets.vertex;
     originalSettings = initial.settings;
     originalTool = initial.tools.find(tool => tool.id === 'ffmpeg');
     verified = true;
@@ -141,7 +141,7 @@ describe('source replay context and retained native card clips', () => {
     if (originalTool) await invoke('set_tool_provider', { request: { toolId: 'ffmpeg', provider: originalTool.provider, ...(originalTool.provider === 'external' ? { path: originalTool.path } : {}) } });
     await invoke('update_settings', { settings: originalSettings });
     assert.deepEqual(ledger(), ledgerBefore, 'Replay and card extraction changed the fee or approval ledger');
-    assert.deepEqual((await snapshot()).budget, budgetBefore, 'Replay and card extraction changed AI usage');
+    assert.deepEqual((await snapshot()).budgets.vertex, budgetBefore, 'Replay and card extraction changed AI usage');
   });
 
   it('persists the default, zero and maximum context and applies it without retiming subtitles', async () => {

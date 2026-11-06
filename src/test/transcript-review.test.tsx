@@ -79,6 +79,30 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 const source = { startMs: 1000, endMs: 2000, text: 'I said no, no.' };
+
+it.each(['provider', 'manual'] as const)('reviews a forced speech boundary without claiming silence for %s subtitles', async sourceKind => {
+  const warning = { id: 'forced-1', kind: 'forced_chunk_boundary' as const, ordinal: 0, startMs: 1000, endMs: 3000, acknowledged: false };
+  const flagged: TranscriptReview = { ...received, draft: { ...received.draft, conflicts: [], warnings: [warning], chunks: [{
+    ordinal: 0, coreStartMs: 0, coreEndMs: 2000, requestStartMs: 0, requestEndMs: 3000, status: 'received', source: sourceKind,
+    segments: [source], boundaryProvenance: { sample_rate: 16000, core_start_sample: 0, boundary_sample: 32000,
+      request_start_sample: 0, request_end_sample: 48000, kind: 'forced', supporting_pause: null },
+  }] } };
+  vi.mocked(studyApi.transcriptReview).mockResolvedValue(flagged);
+  vi.mocked(studyApi.acknowledgeTranscriptWarning).mockResolvedValue({ ...flagged, draft: { ...flagged.draft, warnings: [{ ...warning, acknowledged: true }] } });
+  vi.mocked(playerApi.playerState).mockResolvedValue({ ready: true } as PlayerState);
+  render(<TranscriptReviewDialog jobId="job-1" onClose={() => {}} />);
+  await screen.findByText(/Audio was split without a detected pause/);
+  expect(screen.queryByText(/where VAD detected none|where no speech was detected/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Listen to this range' }));
+  await waitFor(() => expect(playerApi.player).toHaveBeenCalledExactlyOnceWith({ action: 'seek', startMs: 1000, endMs: 3000 }));
+  expect(studyApi.acknowledgeTranscriptWarning).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'I checked the audio and subtitles' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'I checked the audio and subtitles' }));
+  await screen.findByRole('button', { name: 'Reviewed' });
+  expect(studyApi.acknowledgeTranscriptWarning).toHaveBeenCalledExactlyOnceWith('job-1', 'digest-original', warning.id);
+  expect(studyApi.applyTranscriptReview).not.toHaveBeenCalled();
+});
+
 const received: TranscriptReview = {
   jobId: 'job-1',
   mediaId: 'media-1',
@@ -750,7 +774,7 @@ describe('transcript review and local adoption', () => {
 
   it('requests a bounded repair quote without granting a paid execution', async () => {
     vi.mocked(studyApi.transcriptReview).mockResolvedValue(received);
-    vi.mocked(aiApi.prepareBoundaryRepair).mockResolvedValue({
+    vi.mocked(aiApi.prepareBoundaryRepair).mockResolvedValue({ aiConfigurationGeneration: 0, provider: 'vertex',
       id: 'repair-job',
       mediaId: 'media-1',
       kind: 'transcribe',

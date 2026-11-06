@@ -462,6 +462,10 @@ pub async fn save_draft_selection_card(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SelectionQuote {
+    #[serde(default)]
+    provider: Option<surtitle_core::AiProvider>,
+    #[serde(default)]
+    ai_configuration_generation: Option<u64>,
     selection_id: String,
     version: u64,
     focus_term: Option<String>,
@@ -525,13 +529,22 @@ pub async fn create_draft_selection_quote(
     let state = state.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = lock(&state.ai_session.transcript_review)?;
+        let _transition = state.preferences.settings_transition()?;
         let (selected, cue) =
             confirmed_selection(&state, &request.selection_id, request.version, true)?;
         let media = lock(&state.db)?.media(&selected.media_id)?;
         let p = state.preferences.read()?.clone();
+        crate::application::models::verify_ai_selection(
+            &p.settings,
+            request.provider,
+            request.ai_configuration_generation,
+        )?;
+        let provider = p.settings.active_provider;
+        let generation = p.settings.ai_configuration_generation;
         let credential = p
-            .credential_id
-            .context("Import a service-account key in Settings")?;
+            .credential_for(provider)
+            .context("Configure this service in Settings")?
+            .to_owned();
         let cues = vec![SourceCue {
             id: cue.id,
             start_ms: cue.start_ms,
@@ -571,7 +584,7 @@ pub async fn create_draft_selection_quote(
         let quote = state.ai.prepare(
             PreparedJob::new(
                 format!("{} · study excerpt", media.title),
-                p.settings.vertex_project.clone(),
+                p.settings.project_for(provider).to_owned(),
                 credential,
                 PreparationBinding {
                     media_id: media.id.clone(),
@@ -591,6 +604,7 @@ pub async fn create_draft_selection_quote(
         )?;
         {
             state.preferences.update(|p| {
+                p.quote_generations.insert(quote.id.clone(), generation);
                 p.quotes.insert(
                     quote.id.clone(),
                     QuoteContext {

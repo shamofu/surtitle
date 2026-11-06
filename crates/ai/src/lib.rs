@@ -6,6 +6,7 @@ mod discovery;
 mod execution;
 mod ledger;
 mod models;
+mod openai;
 mod prepare;
 mod transcribe;
 mod transcript_review;
@@ -13,7 +14,9 @@ mod vad;
 mod vertex;
 
 pub use chunks::*;
-pub use credentials::{CredentialMetadata, CredentialVault};
+pub use credentials::{CredentialMetadata, CredentialVault, OpenAiCredentialMetadata};
+pub use surtitle_core::AiProvider;
+pub type ProviderService = VertexService;
 pub use discovery::*;
 pub use execution::*;
 pub use ledger::*;
@@ -65,8 +68,10 @@ pub enum AiError {
     Credentials,
     #[error("The request may have been billed; automatic retry is disabled")]
     UnknownOutcome,
+    #[error("OpenAI credit or quota is exhausted; acknowledge the unresolved hold and approve a new request after funding the account")]
+    CreditExhausted,
     #[error(
-        "Vertex rejected the request (HTTP {0}); inspect project, model availability, and permissions"
+        "The provider rejected the request (HTTP {0}); inspect project, model availability, and permissions"
     )]
     Provider(u16),
     #[error("Prepared input changed; prepare and approve a new job")]

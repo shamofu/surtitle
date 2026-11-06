@@ -12,6 +12,7 @@ fn receipt(count: usize) -> AudioPreparationReceipt {
             request_start_sample: (i as u64 * 120_000).saturating_sub(3000),
             request_end_sample: ((i + 1) as u64 * 120_000 + 3000).min(end),
             boundary: BoundaryKind::Forced,
+            boundary_provenance: None,
         })
         .collect();
     let requests = chunks
@@ -48,6 +49,8 @@ fn receipt(count: usize) -> AudioPreparationReceipt {
             probe: None,
         },
         chunks,
+        chunk_profile: None,
+        preparation_context: None,
         vad_no_speech_ordinals: vec![],
         vad_pause_evidence: None,
         prepared_job: PreparedJob::fixture(
@@ -86,6 +89,169 @@ fn contradictory() -> Vec<ChunkResponse> {
         response(0, &[(119000, 119500, "Yes."), (120000, 120800, "wrong")]),
         response(1, &[(119000, 119500, "Yes."), (120000, 120800, "correct")]),
     ]
+}
+
+#[test]
+fn quality_forced_boundaries_remain_reviewable_without_transport_overlap() {
+    let mut source = receipt(1);
+    source.chunks = crate::plan_chunks(
+        0,
+        65_000 * 16,
+        &[],
+        crate::ChunkOptions {
+            minimum_ms: 15_000,
+            target_ms: 25_000,
+            search_end_ms: 30_000,
+            hard_maximum_ms: 30_000,
+            context_ms: 0,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let template = source.prepared_job.requests[0].clone();
+    source.prepared_job.requests = source
+        .chunks
+        .iter()
+        .map(|chunk| {
+            let mut request = template.clone();
+            let RequestTask::TranscribePreview { audio, .. } = &mut request else {
+                unreachable!()
+            };
+            audio.source_start_ms = chunk.request_start_ms();
+            audio.duration_ms = chunk.request_duration_ms();
+            request
+        })
+        .collect();
+    let draft = build_transcript_draft(
+        &source,
+        &[
+            response(0, &[(29_000, 30_000, "before")]),
+            response(1, &[(30_000, 31_000, "after")]),
+            response(2, &[]),
+        ],
+    )
+    .unwrap();
+    assert!(draft.can_adopt);
+    assert!(draft.conflicts.is_empty());
+    assert_eq!(draft.warnings.len(), 2);
+    assert!(draft
+        .warnings
+        .iter()
+        .all(|warning| warning.kind == "forced_chunk_boundary"));
+    assert_eq!(
+        (draft.warnings[0].start_ms, draft.warnings[0].end_ms),
+        (29_000, 31_000)
+    );
+    let saved = serde_json::to_value(&draft).unwrap();
+    assert_eq!(
+        saved["chunks"][0]["boundaryProvenance"]["boundary_sample"],
+        480_000
+    );
+    assert_eq!(saved["chunks"][0]["boundaryProvenance"]["kind"], "forced");
+    let accepted =
+        acknowledge_transcript_warning(&draft, &draft.digest, &draft.warnings[0].id).unwrap();
+    assert_eq!(accepted.chunks, draft.chunks);
+    assert_eq!(
+        accepted
+            .segments
+            .iter()
+            .map(|cue| cue.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["before", "after"]
+    );
+    validate_transcript_draft(&accepted).unwrap();
+}
+
+#[test]
+fn legacy_review_serialization_stays_digest_compatible() {
+    let source = receipt(1);
+    let draft = build_transcript_draft(&source, &[response(0, &[(100, 500, "legacy")])]).unwrap();
+    assert_eq!(
+        draft.digest,
+        "54c5fcb6cd5de2fa60f2ac9f778331563259e73270b9d181f3e107645d093c5c"
+    );
+    let serialized = serde_json::to_string(&draft).unwrap();
+    assert!(!serialized.contains("boundaryProvenance"));
+    let restored = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(draft, restored);
+    validate_transcript_draft(&restored).unwrap();
+    let serialized_receipt = serde_json::to_string(&source).unwrap();
+    assert!(!serialized_receipt.contains("chunk_profile"));
+    assert!(!serialized_receipt.contains("preparation_context"));
+    let restored_receipt: AudioPreparationReceipt =
+        serde_json::from_str(&serialized_receipt).unwrap();
+    assert_eq!(
+        serialized_receipt,
+        serde_json::to_string(&restored_receipt).unwrap()
+    );
+}
+
+#[test]
+fn quality_review_round_trip_preserves_sample_exact_pause_boundary_without_false_conflict() {
+    let chunks = crate::plan_chunks(
+        0,
+        45_000 * 16 + 7,
+        &[crate::Pause {
+            start_sample: 24_900 * 16,
+            end_sample: 25_101 * 16,
+        }],
+        crate::ChunkOptions::for_profile(crate::AudioChunkProfile::Quality30Seconds),
+    )
+    .unwrap();
+    let attachments = chunks
+        .iter()
+        .map(|chunk| AudioAttachment {
+            path: "unused.flac".into(),
+            sha256: sha256_bytes(b"audio"),
+            byte_len: 5,
+            mime_type: "audio/flac".into(),
+            source_start_ms: chunk.request_start_ms(),
+            duration_ms: chunk.request_duration_ms(),
+        })
+        .collect();
+    let mut input = TranscriptReviewInput {
+        id: "sample-exact".into(),
+        media_id: "media".into(),
+        source_sha256: sha256_bytes(b"source"),
+        source_revision: "revision".into(),
+        chunks,
+        attachments,
+        vad_no_speech_ordinals: vec![],
+        vad_pause_evidence: None,
+    };
+    let responses = [
+        response(0, &[(24_000, 25_001, "before")]),
+        response(1, &[(25_000, 26_000, "after")]),
+    ];
+    let draft = build_transcript_draft_from_input(&input, &responses).unwrap();
+    assert!(draft.conflicts.is_empty());
+    assert!(draft.warnings.is_empty());
+    assert_eq!(draft.segments.len(), 2);
+    let provenance = draft.chunks[0].boundary_provenance.as_ref().unwrap();
+    assert_eq!(provenance.boundary_sample, 400_008);
+    assert_eq!(provenance.kind, BoundaryKind::WeakPause);
+    assert_eq!(
+        provenance.supporting_pause,
+        Some(crate::Pause {
+            start_sample: 398_400,
+            end_sample: 401_616
+        })
+    );
+    let serialized = serde_json::to_string(&draft).unwrap();
+    let restored = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(draft, restored);
+    validate_transcript_draft(&restored).unwrap();
+
+    // Persisted evidence cannot call a cut guarded after reducing its right margin.
+    input.chunks[0]
+        .boundary_provenance
+        .as_mut()
+        .unwrap()
+        .supporting_pause
+        .as_mut()
+        .unwrap()
+        .end_sample = 401_607;
+    assert!(build_transcript_draft_from_input(&input, &responses).is_err());
 }
 
 #[test]

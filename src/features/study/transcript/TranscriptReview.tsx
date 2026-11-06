@@ -276,7 +276,12 @@ export function TranscriptReviewDialog({
           {draft.warnings?.map((warning) => (
             <section className="notice warning" key={warning.id}>
               <p>
-                {draft.chunks.find((chunk) => chunk.ordinal === warning.ordinal)
+                {warning.kind === 'forced_chunk_boundary'
+                  ? t(
+                      '休止を検出できない位置で音声を分割しました。発話の途中で分かれた可能性があります。境界の前後を聴いて、字幕の欠落や重複を確認してください。',
+                      'Audio was split without a detected pause and may divide an utterance. Listen around the boundary and check the subtitles for missing or repeated words.',
+                    )
+                  : draft.chunks.find((chunk) => chunk.ordinal === warning.ordinal)
                   ?.source === 'manual'
                   ? t(
                       'VADが発話を検出しなかった範囲に、手動字幕があります。原音と入力した字幕を確認してください。',

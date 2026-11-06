@@ -10,6 +10,7 @@ import type { TranscriptReview } from '../../../shared/contracts/transcript';
 import { parseTimestamp, timestamp } from '../../../shared/format';
 import { AnimatedValue, MotionRegion, MotionSwap } from '../../../shared/motion';
 import { Button, Field } from '../../../shared/ui';
+import { activeProvider, aiConfiguration, providerProfile, providerConfigured, providerConfigurationKey, providerLabel } from '../../ai/provider';
 import { aiApi } from '../../ai/api';
 import { continuationApi, type AiContinuation } from '../../ai/continuations';
 import { ModelEditor, emptyModel } from '../../ai/ModelEditor';
@@ -21,7 +22,7 @@ import { studyApi } from '../api';
 import { libraryApi } from '../../library/api';
 import { useActivities } from '../../../app/providers/Activities';
 import { ProgressStatus } from '../../../shared/ui/ProgressStatus';
-import { useTranscriptionRequest } from '../../ai/useTranscriptionRequest';
+import { preparationMatchesConfiguration, useTranscriptionRequest } from '../../ai/useTranscriptionRequest';
 import { PreparationProgress } from '../../ai/PreparationProgress';
 import './transcription-workspace.css';
 
@@ -35,8 +36,13 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
   const { runTracked } = useActivities();
   const navigate = useNavigate();
   const continuation = request.continuation;
-  const [modelOverride, setModel] = useState<AiModelPreference | undefined>(continuation?.models.transcription);
-  const model = modelOverride ?? data?.settings.aiModels?.transcription ?? emptyModel('transcription');
+  const provider = activeProvider(data?.settings);
+  const configuration = providerConfigurationKey(data?.settings);
+  const continuationConfigurationMatches = !continuation || (continuation.provider ?? 'vertex') === provider && (continuation.aiConfigurationGeneration ?? 0) === (data?.settings.aiConfigurationGeneration ?? 0);
+  const [modelOverride, setModel] = useState<AiModelPreference | undefined>(continuationConfigurationMatches ? continuation?.models.transcription : undefined);
+  const modelConfiguration = useRef(configuration);
+  const model = (modelConfiguration.current === configuration ? modelOverride : undefined) ?? providerProfile(data?.settings)?.aiModels?.transcription ?? emptyModel('transcription');
+  useEffect(() => { if (modelConfiguration.current !== configuration) { modelConfiguration.current = configuration; setModel(undefined); } }, [configuration]);
   const [whole, setWhole] = useState(continuation?.wholeMedia ?? !request.range);
   const [start, setStart] = useState(continuation?.start ?? timestamp(request.range?.startMs ?? 0, true));
   const [end, setEnd] = useState(continuation?.end ?? timestamp(request.range?.endMs ?? media.durationMs, true));
@@ -63,7 +69,8 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
   const to = whole ? media.durationMs : parseTimestamp(end);
   const valid = from !== null && to !== null && from >= 0 && to > from && to <= media.durationMs;
   const transcriptionRequest = useTranscriptionRequest({ mediaId: media.id, sourceSignature: signature, startMs: from ?? 0, endMs: to ?? 0, wholeMedia: whole }, model, media.title);
-  const preparedAudio = transcriptionRequest.session?.result ?? preparation;
+  const preparedCandidate = transcriptionRequest.session?.result ?? preparation;
+  const preparedAudio = preparedCandidate && preparationMatchesConfiguration(preparedCandidate, aiConfiguration(data?.settings), model) ? preparedCandidate : undefined;
   const preparationOperationId = transcriptionRequest.session?.operationId;
   useEffect(() => {
     let active = true;
@@ -77,11 +84,19 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
   const currentRevision = useRef(revision);
   currentRevision.current = revision;
   const [boundRevision, setBoundRevision] = useState(revision);
-  const configured = !!data?.settings.credentialConfigured && !!data.settings.vertexProject && !!model.modelId.trim() && model.maxOutputTokens > 0;
+  const configured = providerConfigured(data?.settings) && !!model.modelId.trim() && model.maxOutputTokens > 0;
   const busy = !!phase;
-  const scopeKey = JSON.stringify([from, to, whole, model, data?.settings.vertexLocation]);
+  const scopeKey = JSON.stringify([configuration, from, to, whole, model, data?.settings.vertexLocation]);
+  const currentScope = useRef(scopeKey); currentScope.current = scopeKey;
+  const [quoteScope, setQuoteScope] = useState('');
   const initialScopeKey = useRef(scopeKey);
   const previousScopeKey = useRef(scopeKey);
+  const preparationConfiguration = useRef(configuration);
+  useEffect(() => {
+    if (preparationConfiguration.current === configuration) return;
+    preparationConfiguration.current = configuration;
+    setPreparation(undefined); setPhase(undefined); setProblem(''); pending.current = false;
+  }, [configuration]);
   useEffect(() => {
     if (previousScopeKey.current === scopeKey) return;
     previousScopeKey.current = scopeKey;
@@ -99,7 +114,7 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
     }
   }, [signature, boundSignature]);
   function savedRequest(quoteId = quote?.id, preparationId = preparation?.id, sourceSignature = signature): AiContinuation {
-    return { id: continuation?.id ?? request.id, mediaId: media.id, kind: 'transcribe', start, end, wholeMedia: whole,
+    return { provider, aiConfigurationGeneration: data?.settings.aiConfigurationGeneration ?? 0, id: continuation?.id ?? request.id, mediaId: media.id, kind: 'transcribe', start, end, wholeMedia: whole,
       focusTerm: '', models: { transcription: model }, quoteId, preparationId, sourceMediaSignature: sourceSignature };
   }
   async function estimate(fresh = false) {
@@ -108,24 +123,24 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
     try {
       const result = await transcriptionRequest.estimate({
         fresh,
-        reusePreparation: preparation?.startMs === from && preparation.endMs === to && preparation.wholeMedia === whole ? preparation : undefined,
+        reusePreparation: preparation && preparationMatchesConfiguration(preparation, aiConfiguration(data?.settings), model) && preparation.startMs === from && preparation.endMs === to && preparation.wholeMedia === whole ? preparation : undefined,
         beforePrepare: () => report(() => continuationApi.save({ ...savedRequest(), quoteId: undefined, preparationId: undefined })),
         onPrepared: ({ preparation: prepared, sourceSignature }) => {
           setBoundSignature(sourceSignature); setAutomaticAttempted(true); setPreparation(prepared); setPhase('estimating');
         },
         persistQuote: ({ quote: result, preparation: prepared, sourceSignature }) => continuationApi.save(savedRequest(result.id, prepared.id, sourceSignature)),
       });
-      if (result && mounted.current && currentRevision.current === revision) setQuote(result.quote);
-    } catch (error) { if (mounted.current && currentRevision.current === revision) setProblem(error instanceof Error ? error.message : String(error)); }
-    finally { if (currentRevision.current === revision) { pending.current = false; if (mounted.current) setPhase(undefined); } }
+      if (result && mounted.current && currentRevision.current === revision && currentScope.current === scopeKey) { setQuote(result.quote); setQuoteScope(scopeKey); }
+    } catch (error) { if (mounted.current && currentRevision.current === revision && currentScope.current === scopeKey) setProblem(error instanceof Error ? error.message : String(error)); }
+    finally { if (currentRevision.current === revision && currentScope.current === scopeKey) { pending.current = false; if (mounted.current) setPhase(undefined); } }
   }
   useEffect(() => {
     if (revision !== boundRevision || automaticAttempted || !configured || !valid || busy || pending.current) return;
     const timer = window.setTimeout(() => {
     setAutomaticAttempted(true);
-    if (continuation?.quoteId && continuation.sourceMediaSignature === signature && scopeKey === initialScopeKey.current) {
+    if (continuationConfigurationMatches && continuation?.quoteId && continuation.sourceMediaSignature === signature && scopeKey === initialScopeKey.current) {
       setPhase('estimating'); pending.current = true;
-      void runTracked({ kind: 'estimate', label: media.title, phase: 'estimating', mediaId: media.id }, () => aiApi.reviewAiJob(continuation.quoteId!)).then(result => { if (mounted.current && currentSignature.current === signature && currentRevision.current === revision) setQuote(result); })
+      void runTracked({ kind: 'estimate', label: media.title, phase: 'estimating', mediaId: media.id }, () => aiApi.reviewAiJob(continuation.quoteId!)).then(result => { if (mounted.current && currentSignature.current === signature && currentRevision.current === revision && currentScope.current === scopeKey) { setQuote(result); setQuoteScope(scopeKey); } })
         .catch(error => { if (mounted.current && currentRevision.current === revision) setProblem(String(error)); })
         .finally(() => { if (currentRevision.current === revision) { pending.current = false; if (mounted.current) setPhase(undefined); } });
     } else void estimate();
@@ -133,7 +148,7 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
     return () => window.clearTimeout(timer);
   }, [automaticAttempted, configured, valid, busy, signature, revision, boundRevision, from, to, whole, model]);
   async function startJob() {
-    if (!quote || pending.current || revision !== boundRevision) return;
+    if (!quote || quoteScope !== scopeKey || pending.current || revision !== boundRevision) return;
     pending.current = true; setPhase('starting'); setProblem('');
     const result = await report(async () => {
       await mutate(() => quote.isRetry ? aiApi.reapproveQuote(quote) : aiApi.approveQuote(quote), { kind: 'snapshot' });
@@ -158,18 +173,18 @@ function TranscriptionSetup({ media, request, onDone, onStarted }: { media: Medi
     <p className="transcription-source"><strong>{media.title}</strong><br />{media.path.split(/[\\/]/).pop()} · {audioLabel}</p>
     <MotionRegion mode="status" open={!quote}><p>{t('Transcribeの本文を使い、届いた部分から字幕を表示します。気になる箇所はあとから修正できます。', 'Use Transcribe text as subtitles as each part arrives. You can correct any passage later.')}</p>
     <p className="transcription-scope"><strong><MotionSwap disabled as="span" stateKey={String(whole)}>{whole ? t('全編', 'Full media') : t('選択した区間', 'Selected range')}</MotionSwap></strong> · <AnimatedValue value={`${timestamp(from ?? 0)}–${timestamp(to ?? 0)}`} immediate={advanced} /> · {media.learningLanguage}</p>
-    <p>{t('モデル', 'Model')}: {model.modelId || t('未選択', 'Not selected')} · {data?.settings.vertexLocation || 'global'}</p></MotionRegion>
+    <p>{t('モデル', 'Model')}: {model.modelId || t('未選択', 'Not selected')} · {providerLabel(provider)}{provider === 'vertex' ? ` · ${data?.settings.vertexLocation || 'global'}` : ''}</p></MotionRegion>
     <MotionRegion mode="status" open={!configured}><div className="notice"><p>{t('最初に文字起こし用のモデルと認証を設定してください。戻るとこの範囲から続けられます。', 'Set up a transcription model and credentials. This scope will be kept when you return.')}</p><Button onClick={() => void setup()} busy={phase === 'setup'}>{t('設定して戻る', 'Set up and return')}</Button></div></MotionRegion>
     <AnimatedDetails open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)}>
       <summary>{t('範囲・モデルを変更', 'Change range or model')}</summary>
       <label className="check-field"><input type="checkbox" checked={whole} disabled={busy} onChange={event => changeScope(() => setWhole(event.target.checked))} />{t('全編を文字起こし', 'Transcribe the whole media')}</label>
       <MotionRegion open={!whole} keepMounted><div className="field-row"><Field label={t('開始', 'From')}><input value={start} disabled={busy} onChange={event => changeScope(() => setStart(event.target.value))} /></Field><Field label={t('終了', 'To')}><input value={end} disabled={busy} onChange={event => changeScope(() => setEnd(event.target.value))} /></Field></div></MotionRegion>
-      <ModelEditor purpose="transcription" value={model} location={data?.settings.vertexLocation || 'global'} disabled={busy} onChange={value => { setModel(value); setQuote(undefined); setAutomaticAttempted(false); }} />
+      <ModelEditor key={configuration} provider={provider} configurationGeneration={data?.settings.aiConfigurationGeneration} purpose="transcription" value={model} location={data?.settings.vertexLocation || 'global'} disabled={busy} onChange={value => { setModel(value); setQuote(undefined); setAutomaticAttempted(false); }} />
     </AnimatedDetails>
     <MotionRegion mode="status" open={!valid}><p role="status">{media.durationMs ? t('作品内の開始・終了時刻を指定してください。', 'Choose a valid range within the media.') : t('作品の長さを確認しています…', 'Checking media duration…')}</p></MotionRegion>
     <MotionRegion mode="status" open={busy}><MotionSwap disabled stateKey={phase ?? 'idle'}>{phase === 'preparing' ? <PreparationProgress operationId={transcriptionRequest.session?.operationId} label={media.title} /> : busy && <ProgressStatus label={media.title} phase={phase} status="running" />}</MotionSwap></MotionRegion>
     <MotionRegion mode="status" open={!!problem}>{problem && <p className="notice warning" role="alert">{problem}</p>}</MotionRegion>
-    <MotionRegion open={!!quote}>{quote && <QuoteApproval quote={quote} busy={busy} transcription onApprove={() => void startJob()} onRefresh={() => void estimate(true)} />}</MotionRegion>
+    <MotionRegion open={!!quote && quoteScope === scopeKey}>{quote && quoteScope === scopeKey && <QuoteApproval quote={quote} busy={busy} transcription onApprove={() => void startJob()} onRefresh={() => void estimate(true)} />}</MotionRegion>
     <MotionRegion mode="status" open={!quote && !busy && configured && valid && automaticAttempted}><Button onClick={() => void estimate()}><RefreshCw size={14} />{t('見積もりを準備', 'Prepare estimate')}</Button></MotionRegion>
     <MotionSwap disabled stateKey={phase === 'preparing' ? 'cancel' : 'close'}>{phase === 'preparing' ? <Button variant="ghost" disabled={!transcriptionRequest.session?.operationId} onClick={() => void report(() => aiApi.cancelPreparation(transcriptionRequest.session?.operationId))}>{t('準備を中止', 'Cancel preparation')}</Button> : <Button variant="ghost" disabled={busy} onClick={onDone}>{t('閉じる', 'Close')}</Button>}</MotionSwap>
   </section>;

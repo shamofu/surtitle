@@ -2,7 +2,7 @@
 import type { Media } from './media';
 import type { StudyCard } from './cards';
 import type { ToolStatus, AppSettings } from './settings';
-import type { BudgetSummary, JobSummary } from './ai';
+import type { AiProvider, BudgetSummary, JobSummary } from './ai';
 
 export interface AppSnapshot {
   media: Media[];
@@ -10,6 +10,6 @@ export interface AppSnapshot {
   tools: ToolStatus[];
   settings: AppSettings;
   jobs: JobSummary[];
-  budget: BudgetSummary;
+  budgets: Record<AiProvider, BudgetSummary>;
 }
 export type SnapshotPatch = Partial<AppSnapshot>;

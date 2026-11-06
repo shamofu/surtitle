@@ -21,7 +21,7 @@ async function installRuntimeFixture(page: Page, locale: 'ja' | 'en', kind: 'tra
       if (command === 'get_ai_runtime') return args.jobId === runtime.jobId ? structuredClone(runtime) : null;
       if (command === 'get_app_snapshot') {
         const snapshot = await fixture.call(command, args);
-        snapshot.jobs = [{ id: 'live-job', mediaId: 'visual-fixture', kind: ${JSON.stringify(kind)}, status: ${JSON.stringify(completed ? 'completed' : 'running')},
+        snapshot.jobs = [{ provider: 'vertex', id: 'live-job', mediaId: 'visual-fixture', kind: ${JSON.stringify(kind)}, status: ${JSON.stringify(completed ? 'completed' : 'running')},
           createdAt: new Date().toISOString(), progress: ${completed ? 1 : .75}, executionOutcome: ${JSON.stringify(completed ? 'complete' : 'running')},
           requestCounts: { total: 4, succeeded: ${completed ? 4 : 3}, rejected: 0, pending: 0, inFlight: ${completed ? 0 : 1} },
           automaticTranscript: ${kind === 'transcribe'}, transcriptReview: false }];
@@ -174,7 +174,7 @@ test('completed AI history loads runtime details only when its history is opened
     const fixture = window.__learningFixture;
     window.__runtimeHistoryReads = [];
     fixture.snapshot.jobs = ${JSON.stringify(jobIds)}.map((id, index) => ({
-      id, mediaId: 'visual-fixture', kind: index % 2 ? 'translate' : 'vocabulary', status: 'completed',
+      provider: 'vertex', id, mediaId: 'visual-fixture', kind: index % 2 ? 'translate' : 'vocabulary', status: 'completed',
       createdAt: '2026-10-11T01:00:00Z', progress: 1, executionOutcome: 'complete',
       requestCounts: { total: 1, succeeded: 1, rejected: 0, pending: 0, inFlight: 0 },
     }));

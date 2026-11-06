@@ -126,11 +126,16 @@ impl Services {
         let p = self.preferences.read()?;
         let mut settings = p.settings.clone();
         settings.credential_configured = p.credential_id.is_some();
+        settings.openai.credential_configured = p.openai_credential_id.is_some();
         // JSON keeps the wire field; operational spending limits belong to the ledger.
         let budget = self.ai.budget()?;
         settings.daily_budget_usd = budget.daily_microusd as f64 / 1_000_000.;
         settings.monthly_budget_usd = Some(budget.monthly_microusd as f64 / 1_000_000.);
         settings.per_job_budget_usd = Some(budget.per_job_microusd as f64 / 1_000_000.);
+        let openai_budget = self.ai.budget_for(surtitle_core::AiProvider::Openai)?;
+        settings.openai.daily_budget_usd = openai_budget.daily_microusd as f64 / 1_000_000.;
+        settings.openai.monthly_budget_usd = openai_budget.monthly_microusd as f64 / 1_000_000.;
+        settings.openai.per_job_budget_usd = openai_budget.per_job_microusd as f64 / 1_000_000.;
         Ok(settings)
     }
     pub fn player_state(&self) -> Result<PlayerState> {

@@ -17,6 +17,472 @@ const COMPLETE: &str = "11111111-1111-4111-8111-111111111111";
 const PENDING: &str = "22222222-2222-4222-8222-222222222222";
 const REPAIR: &str = "33333333-3333-4333-8333-333333333333";
 
+fn whole_openai_receipt(state: &AppState) -> AudioPreparationReceipt {
+    let mut receipt = load_receipt(state, COMPLETE).unwrap();
+    let mut media = lock(&state.db)
+        .unwrap()
+        .media(&receipt.prepared_job.binding.media_id)
+        .unwrap();
+    media.id = "whole-openai-file".into();
+    media.duration_ms = 450_000;
+    let source = state.root.join("media/whole-openai-file.wav");
+    // Source metadata uses real PCM; encoded bytes are opaque identity fixtures,
+    // as in the offline transport tests. Codec encoding is tested in surtitle-ai.
+    let bytes = fixture_wav(450);
+    fs::write(&source, &bytes).unwrap();
+    media.path = source.to_string_lossy().into_owned();
+    lock(&state.db).unwrap().put_media(&media).unwrap();
+    state
+        .preferences
+        .update(|p| {
+            p.settings.active_provider = surtitle_core::AiProvider::Openai;
+            p.settings.ai_configuration_generation += 1;
+            p.openai_credential_id = Some("unused-whole-file-fixture".into());
+            p.settings.openai.credential_configured = true;
+            let mut model = crate::application::models::preference_for(
+                &crate::application::models::fixture_execution(),
+                true,
+            );
+            model.model_id = "gpt-transcribe".into();
+            model.price.as_mut().unwrap().audio_microusd_per_minute = Some(6000);
+            p.settings
+                .openai
+                .ai_models
+                .insert("transcription".into(), model);
+            Ok(())
+        })
+        .unwrap();
+    receipt.id = uuid::Uuid::new_v4().to_string();
+    receipt.directory = state.root.join("prepared").join(&receipt.id);
+    fs::create_dir(&receipt.directory).unwrap();
+    receipt.directory = receipt.directory.canonicalize().unwrap();
+    let path = receipt.directory.join("whole.flac");
+    let mut encoded_fixture = bytes;
+    encoded_fixture[..4].copy_from_slice(b"fLaC");
+    fs::write(&path, encoded_fixture).unwrap();
+    let audio = AudioAttachment::from_file_for_provider(
+        path,
+        0,
+        media.duration_ms,
+        surtitle_core::AiProvider::Openai,
+    )
+    .unwrap();
+    assert!(audio.byte_len > 12 * 1024 * 1024 && audio.byte_len <= 25_000_000);
+    receipt.source_path = source.canonicalize().unwrap();
+    receipt.source_sha256 = hash_file(&receipt.source_path).unwrap();
+    receipt.chunk_profile = Some(policy::OPENAI_AUDIO_PROFILE);
+    receipt.preparation_context = Some(AudioPreparationContext {
+        provider: surtitle_core::AiProvider::Openai,
+        configuration_generation: state
+            .preferences
+            .read()
+            .unwrap()
+            .settings
+            .ai_configuration_generation,
+    });
+    receipt.chunks = vec![AudioChunk {
+        index: 0,
+        sample_rate: 16_000,
+        core_start_sample: 0,
+        core_end_sample: media.duration_ms * 16,
+        request_start_sample: 0,
+        request_end_sample: media.duration_ms * 16,
+        boundary: BoundaryKind::EndOfSelection,
+        boundary_provenance: None,
+    }];
+    receipt.prepared_job = PreparedJob::local_audio_draft_for_provider(
+        "Whole OpenAI file".into(),
+        PreparationBinding {
+            media_id: media.id.clone(),
+            transcript_revision: surtitle_core::store::subtitle_revision(
+                &lock(&state.db).unwrap().list_segments(&media.id).unwrap(),
+            )
+            .unwrap(),
+            source_sha256: receipt.source_sha256.clone(),
+            settings_sha256: crate::application::ai::bindings::settings_fingerprint(
+                &state.preferences.read().unwrap().settings,
+            )
+            .unwrap(),
+        },
+        vec![RequestTask::TranscribePreview {
+            language: "en".into(),
+            audio,
+        }],
+        surtitle_core::AiProvider::Openai,
+    )
+    .unwrap();
+    surtitle_core::store::write_json_atomic(&receipt.directory.join("receipt.json"), &receipt)
+        .unwrap();
+    receipt
+}
+
+fn whole_vertex_receipt(state: &AppState, mode: &str, duration_ms: u64) -> AudioPreparationReceipt {
+    let mut receipt = whole_openai_receipt(state);
+    state
+        .preferences
+        .update(|p| {
+            p.settings.active_provider = surtitle_core::AiProvider::Vertex;
+            p.settings.ai_configuration_generation += 1;
+            p.settings.vertex_project = "fixture-project".into();
+            p.credential_id = Some("unused-vertex-fixture".into());
+            p.settings
+                .ai_models
+                .get_mut("transcription")
+                .unwrap()
+                .transcription_mode = mode.into();
+            Ok(())
+        })
+        .unwrap();
+    let mut media = lock(&state.db)
+        .unwrap()
+        .media(&receipt.prepared_job.binding.media_id)
+        .unwrap();
+    media.duration_ms = duration_ms;
+    lock(&state.db).unwrap().put_media(&media).unwrap();
+    let selected_policy = policy::vertex_policy(mode, false);
+    let mut requests = receipt.prepared_job.requests.clone();
+    let audio = match &mut requests[0] {
+        RequestTask::TranscribePreview { audio, .. } => {
+            audio.duration_ms = duration_ms;
+            audio.clone()
+        }
+        _ => unreachable!(),
+    };
+    if mode != "transcribe" {
+        requests[0] = RequestTask::AudioTranscription {
+            language: "en".into(),
+            audio,
+        };
+    }
+    receipt.chunk_profile = Some(policy::profile(
+        surtitle_core::AiProvider::Vertex,
+        false,
+        mode,
+    ));
+    receipt.preparation_context = Some(AudioPreparationContext {
+        provider: surtitle_core::AiProvider::Vertex,
+        configuration_generation: state
+            .preferences
+            .read()
+            .unwrap()
+            .settings
+            .ai_configuration_generation,
+    });
+    receipt.chunks[0].core_end_sample = duration_ms * 16;
+    receipt.chunks[0].request_end_sample = duration_ms * 16;
+    receipt.prepared_job = PreparedJob::local_audio_draft_with_policy(
+        "Whole Vertex file".into(),
+        receipt.prepared_job.binding.clone(),
+        requests,
+        surtitle_core::AiProvider::Vertex,
+        selected_policy,
+    )
+    .unwrap();
+    surtitle_core::store::write_json_atomic(&receipt.directory.join("receipt.json"), &receipt)
+        .unwrap();
+    receipt
+}
+
+#[test]
+fn whole_vertex_preparation_over_four_minutes_lists_quotes_and_reloads_with_frozen_policy() {
+    let (_directory, state) = fixture();
+    let receipt = whole_vertex_receipt(&state, "transcribe", 450_000);
+    let path = receipt.directory.join("receipt.json");
+    let original = fs::read(&path).unwrap();
+    let listed = list_transcription_preparations(
+        state.clone(),
+        receipt.prepared_job.binding.media_id.clone(),
+    )
+    .unwrap();
+    assert!(
+        listed
+            .iter()
+            .find(|item| item.id == receipt.id)
+            .unwrap()
+            .compatible
+    );
+    let quote = serde_json::to_value(create_audio_quote(&state, &receipt.id).unwrap()).unwrap();
+    assert_eq!(quote["requestCount"], 1);
+    assert_eq!(quote["sendDurationMs"], 450_000);
+    let binding = load_binding(&state, quote["id"].as_str().unwrap()).unwrap();
+    let frozen = receipt_for_job(&state, &binding).unwrap();
+    assert_eq!(
+        frozen.prepared_job.execution.vertex_audio_policy,
+        Some(VertexAudioPolicy::TranscribeFileV1)
+    );
+    assert!(load_draft(&state, &binding).is_ok());
+    let mut selected =
+        state.preferences.read().unwrap().settings.ai_models["transcription"].clone();
+    selected.model_id = "another-model-with-same-transcription-mode".into();
+    assert!(create_audio_quote_selected(&state, &receipt.id, Some(selected)).is_ok());
+    assert_eq!(fs::read(path).unwrap(), original);
+}
+
+#[test]
+fn whole_vertex_audio_understanding_requires_repreparation_for_transcribe_mode() {
+    let (_directory, state) = fixture();
+    let receipt = whole_vertex_receipt(&state, "subtitles", 901_000);
+    let original = fs::read(receipt.directory.join("receipt.json")).unwrap();
+    assert!(create_audio_quote(&state, &receipt.id).is_ok());
+    let mut selected =
+        state.preferences.read().unwrap().settings.ai_models["transcription"].clone();
+    selected.transcription_mode = "transcribe".into();
+    let error = create_audio_quote_selected(&state, &receipt.id, Some(selected))
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("Prepare audio again"), "{error}");
+    // Listing is independent of a dialog override; the selected-mode quote performs the final check.
+    state
+        .preferences
+        .update(|p| {
+            p.settings
+                .ai_models
+                .get_mut("transcription")
+                .unwrap()
+                .transcription_mode = "transcribe".into();
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        list_transcription_preparations(
+            state.clone(),
+            receipt.prepared_job.binding.media_id.clone()
+        )
+        .unwrap()
+        .iter()
+        .find(|item| item.id == receipt.id)
+        .unwrap()
+        .compatible
+    );
+    assert_eq!(
+        fs::read(receipt.directory.join("receipt.json")).unwrap(),
+        original
+    );
+}
+
+#[test]
+fn legacy_vertex_preparation_remains_readable_but_cannot_create_a_new_quote() {
+    let (_directory, state) = fixture();
+    let receipt = load_receipt(&state, COMPLETE).unwrap();
+    let path = receipt.directory.join("receipt.json");
+    let original = fs::read(&path).unwrap();
+    let listed = list_transcription_preparations(
+        state.clone(),
+        receipt.prepared_job.binding.media_id.clone(),
+    )
+    .unwrap();
+    assert!(
+        !listed
+            .iter()
+            .find(|item| item.id == COMPLETE)
+            .unwrap()
+            .compatible
+    );
+    assert!(
+        create_audio_quote(&state, COMPLETE)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("Prepare audio again")
+    );
+    assert!(
+        load_draft(
+            &state,
+            &load_binding(&state, &job(&state, COMPLETE)).unwrap()
+        )
+        .is_ok()
+    );
+    assert_eq!(fs::read(path).unwrap(), original);
+}
+
+#[test]
+fn whole_openai_old_split_policy_requires_new_preparation_without_rewriting_receipt() {
+    let (_directory, state) = fixture();
+    let mut receipt = whole_openai_receipt(&state);
+    receipt.chunk_profile = Some(AudioChunkProfile::OpenAiFile);
+    let path = receipt.directory.join("receipt.json");
+    surtitle_core::store::write_json_atomic(&path, &receipt).unwrap();
+    let before = fs::read(&path).unwrap();
+    let listed = list_transcription_preparations(
+        state.clone(),
+        receipt.prepared_job.binding.media_id.clone(),
+    )
+    .unwrap();
+    let old = serde_json::to_value(listed.iter().find(|p| p.id == receipt.id).unwrap()).unwrap();
+    assert_eq!(old["provider"], "openai");
+    assert_eq!(old["compatible"], false);
+    let Err(error) = create_audio_quote(&state, &receipt.id) else {
+        panic!("old midpoint policy must require fresh preparation")
+    };
+    assert!(error.to_string().contains("Prepare audio again"), "{error}");
+    assert_eq!(fs::read(path).unwrap(), before);
+    assert!(load_receipt(&state, &receipt.id).is_ok());
+}
+
+#[test]
+fn whole_openai_preparation_lists_quotes_and_keeps_original_provider_after_switch() {
+    let (_directory, state) = fixture();
+    let receipt = whole_openai_receipt(&state);
+    let media_id = &receipt.prepared_job.binding.media_id;
+    let listed = list_transcription_preparations(state.clone(), media_id.clone()).unwrap();
+    let summary =
+        serde_json::to_value(listed.iter().find(|p| p.id == receipt.id).unwrap()).unwrap();
+    assert_eq!(summary["provider"], "openai");
+    assert_eq!(summary["compatible"], true);
+    let quote = serde_json::to_value(create_audio_quote(&state, &receipt.id).unwrap()).unwrap();
+    assert_eq!(quote["provider"], "openai");
+    assert_eq!(quote["requestCount"], 1);
+    assert_eq!(quote["sendDurationMs"], 450_000);
+    let job_id = quote["id"].as_str().unwrap();
+    let plan = state.ai.prepared_job(job_id).unwrap();
+    assert_eq!(
+        plan.execution.response_mode,
+        ResponseMode::AudioTranscriptions
+    );
+    assert_eq!(
+        plan.estimates().unwrap()[0].estimated_max_microusd,
+        Some(45_000)
+    );
+    let frozen = serde_json::to_value(&plan).unwrap();
+    state
+        .preferences
+        .update(|p| {
+            p.settings.active_provider = surtitle_core::AiProvider::Vertex;
+            p.settings.ai_configuration_generation += 1;
+            Ok(())
+        })
+        .unwrap();
+    let listed = list_transcription_preparations(state.clone(), media_id.clone()).unwrap();
+    let summary =
+        serde_json::to_value(listed.iter().find(|p| p.id == receipt.id).unwrap()).unwrap();
+    assert_eq!(summary["provider"], "openai");
+    assert_eq!(summary["compatible"], false);
+    let Err(error) = create_audio_quote(&state, &receipt.id) else {
+        panic!("provider switch must require fresh preparation")
+    };
+    assert!(error.to_string().contains("Prepare audio again"), "{error}");
+    assert_eq!(
+        serde_json::to_value(state.ai.prepared_job(job_id).unwrap()).unwrap(),
+        frozen
+    );
+    assert!(load_draft(&state, &load_binding(&state, job_id).unwrap()).is_ok());
+}
+
+#[test]
+fn whole_openai_preparation_still_checks_media_bounds_and_both_file_identities() {
+    use std::io::{Seek, SeekFrom, Write};
+    let (_directory, state) = fixture();
+    let receipt = whole_openai_receipt(&state);
+    let media_id = &receipt.prepared_job.binding.media_id;
+    let mut media = lock(&state.db).unwrap().media(media_id).unwrap();
+    media.duration_ms -= 1;
+    lock(&state.db).unwrap().put_media(&media).unwrap();
+    assert!(create_audio_quote(&state, &receipt.id).is_err());
+    media.duration_ms += 1;
+    lock(&state.db).unwrap().put_media(&media).unwrap();
+    let audio = audio_attachment(&receipt.prepared_job.requests[0]).unwrap();
+    for path in [&audio.path, &receipt.source_path] {
+        let mut file = fs::OpenOptions::new().write(true).open(path).unwrap();
+        file.seek(SeekFrom::Start(100)).unwrap();
+        file.write_all(&[1]).unwrap();
+        file.sync_all().unwrap();
+        assert!(
+            create_audio_quote(&state, &receipt.id).is_err(),
+            "changed file: {path:?}"
+        );
+        file.seek(SeekFrom::Start(100)).unwrap();
+        file.write_all(&[0]).unwrap();
+        file.sync_all().unwrap();
+    }
+    assert!(create_audio_quote(&state, &receipt.id).is_ok());
+    let mut oversized = receipt.clone();
+    if let RequestTask::TranscribePreview { audio, .. } = &mut oversized.prepared_job.requests[0] {
+        audio.byte_len = 25_000_001;
+    }
+    surtitle_core::store::write_json_atomic(&receipt.directory.join("receipt.json"), &oversized)
+        .unwrap();
+    let listed = list_transcription_preparations(state.clone(), media_id.clone()).unwrap();
+    assert!(!listed.iter().any(|p| p.id == receipt.id));
+    assert!(create_audio_quote(&state, &receipt.id).is_err());
+}
+
+#[test]
+fn stale_boundary_repair_receipts_do_not_prevent_a_fresh_preparation() {
+    let (_directory, state) = fixture();
+    let receipt = load_receipt(&state, REPAIR).unwrap();
+    let parent = repair_parent(&receipt).unwrap().unwrap();
+    state
+        .preferences
+        .update(|p| {
+            p.settings.ai_configuration_generation += 1;
+            Ok(())
+        })
+        .unwrap();
+    assert!(reusable_repair_quote(&state, &parent).unwrap().is_none());
+    assert!(state.ai.prepared_job(&job(&state, REPAIR)).is_ok());
+}
+
+#[test]
+fn boundary_repair_quote_inherits_original_model_after_the_default_is_removed() {
+    let (_directory, state) = fixture();
+    let receipt = load_receipt(&state, REPAIR).unwrap();
+    let parent = repair_parent(&receipt).unwrap().unwrap();
+    let original = state.ai.prepared_job(&parent.job_id).unwrap();
+    state
+        .preferences
+        .update(|p| {
+            p.settings.ai_models.remove("transcription");
+            Ok(())
+        })
+        .unwrap();
+    let quote = serde_json::to_value(create_audio_quote(&state, REPAIR).unwrap()).unwrap();
+    let plan = state
+        .ai
+        .prepared_job(quote["id"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(plan.execution.model_id, original.execution.model_id);
+    assert_eq!(plan.execution.vertex_audio_policy, None);
+    assert!(audio_attachment(&plan.requests[0]).unwrap().duration_ms <= 30_000);
+}
+
+#[test]
+fn new_quotes_do_not_reuse_vertex_audio_preparations_for_openai() {
+    let (_directory, state) = fixture();
+    let media_id = load_receipt(&state, COMPLETE)
+        .unwrap()
+        .prepared_job
+        .binding
+        .media_id;
+    let old = list_transcription_preparations(state.clone(), media_id.clone()).unwrap();
+    let vertex = serde_json::to_value(old.iter().find(|p| p.id == COMPLETE).unwrap()).unwrap();
+    assert_eq!(vertex["provider"], "vertex");
+    assert_eq!(vertex["compatible"], false);
+    state
+        .preferences
+        .update(|p| {
+            p.settings.active_provider = surtitle_core::AiProvider::Openai;
+            p.settings.ai_configuration_generation += 1;
+            Ok(())
+        })
+        .unwrap();
+    let changed = list_transcription_preparations(state.clone(), media_id).unwrap();
+    let old = serde_json::to_value(changed.iter().find(|p| p.id == COMPLETE).unwrap()).unwrap();
+    assert_eq!(old["provider"], "vertex");
+    assert_eq!(old["compatible"], false);
+    let Err(error) = create_audio_quote(&state, COMPLETE) else {
+        panic!("old preparation must require fresh audio");
+    };
+    assert!(error.to_string().contains("Prepare audio again"), "{error}");
+    // History remains readable using its original frozen plan.
+    assert!(
+        load_draft(
+            &state,
+            &load_binding(&state, &job(&state, COMPLETE)).unwrap()
+        )
+        .is_ok()
+    );
+}
+
 #[test]
 fn startup_preserves_orphan_transcript_metadata_without_recovering_it() {
     let directory = tempfile::tempdir().unwrap();
@@ -654,6 +1120,53 @@ fn manual_edits_require_pause_and_inflight_completion_but_survive_later_results(
     assert_ne!(updated.draft.digest, saved.draft.digest);
     assert_eq!(charge_snapshot(&charges), after_provider);
 }
+
+#[test]
+fn openai_manual_editing_waits_for_its_inflight_request_after_pause() {
+    let (_directory, state) = fixture();
+    let original = state.ai.prepared_job(&job(&state, PENDING)).unwrap();
+    let mut execution = original.execution.clone();
+    execution.provider = surtitle_core::AiProvider::Openai;
+    execution.response_mode = ResponseMode::AudioTranscriptions;
+    execution.price = None;
+    let mut requests = original.requests;
+    for task in &mut requests {
+        if let RequestTask::TranscribePreview { audio, .. }
+        | RequestTask::AudioTranscription { audio, .. } = task
+        {
+            // This test stops at reservation; it never decodes or uploads fixture bytes.
+            audio.mime_type = "audio/flac".into();
+        }
+    }
+    let plan = PreparedJob::new(
+        "OpenAI range editing".into(),
+        "openai".into(),
+        "offline-key".into(),
+        original.binding,
+        requests,
+        execution,
+    )
+    .unwrap();
+    let quote = state.ai.prepare(plan).unwrap();
+    state
+        .ai
+        .approve_scope(&quote.id, &quote.digest, true, true)
+        .unwrap();
+    let attempt = state.ai.reserve_next(&quote.id).unwrap().unwrap();
+    state.ai.pause(&quote.id).unwrap();
+    let binding = TranscriptJob {
+        job_id: quote.id.clone(),
+        job_digest: quote.digest,
+        preparation_id: PENDING.into(),
+        receipt_sha256: "unused".into(),
+        repair_parent: None,
+        progressive: false,
+        publication_detached: false,
+    };
+    assert!(super::ranges::manual_editing_allowed(&state, &binding).is_err());
+    state.ai.mark_unknown(&attempt.attempt_id).unwrap();
+    super::ranges::manual_editing_allowed(&state, &binding).unwrap();
+}
 #[test]
 fn valid_empty_provider_results_are_locally_usable_without_extra_confirmation() {
     let (directory, state) = fixture();
@@ -931,18 +1444,21 @@ fn unavailable_unrelated_preparation_and_deleted_audio_do_not_hide_received_resu
 #[test]
 fn credential_rotation_requotes_the_same_immutable_audio_without_regeneration() {
     let (_directory, state) = fixture();
-    let previous = job(&state, PENDING);
+    let receipt = whole_vertex_receipt(&state, "transcribe", 450_000);
+    let previous_quote =
+        serde_json::to_value(create_audio_quote(&state, &receipt.id).unwrap()).unwrap();
+    let previous = previous_quote["id"].as_str().unwrap();
     {
         let mut preferences = state.preferences.test_value().unwrap();
         preferences.settings.vertex_project = "another-project".into();
         preferences.credential_id = Some("c".repeat(64));
     }
-    let quote = serde_json::to_value(create_audio_quote(&state, PENDING).unwrap()).unwrap();
+    let quote = serde_json::to_value(create_audio_quote(&state, &receipt.id).unwrap()).unwrap();
     let new_id = quote["id"].as_str().unwrap();
     assert_ne!(new_id, previous);
     assert_eq!(
         state.ai.prepared_job(new_id).unwrap().requests,
-        state.ai.prepared_job(&previous).unwrap().requests
+        state.ai.prepared_job(previous).unwrap().requests
     );
     assert_eq!(quote["canApprove"], false);
     assert_eq!(state.ai.quote(new_id).unwrap().completed_requests, 0);

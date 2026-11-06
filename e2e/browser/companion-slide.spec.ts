@@ -135,7 +135,7 @@ test('activity history expansion and scroll survive transcript round trips', asy
   await installLearningFixture(page, 'en', 'light');
   await page.addInitScript(() => {
     (window as any).__learningFixture.snapshot.jobs = Array.from({ length: 20 }, (_, index) => ({
-      id: `history-${index}`, mediaId: 'visual-fixture', kind: 'translate', status: 'completed', progress: 1,
+      provider: 'vertex', id: `history-${index}`, mediaId: 'visual-fixture', kind: 'translate', status: 'completed', progress: 1,
       createdAt: '', message: `Completed translation ${index}`,
     }));
   });

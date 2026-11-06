@@ -6,7 +6,36 @@ import type { AiModelPreference, AiQuote, TranscriptionPreparation } from '../sh
 const scope: PreparationScope = { mediaId: 'media', sourceSignature: 'source', startMs: 0, endMs: 1000, wholeMedia: true };
 const preparation: TranscriptionPreparation = { id: 'prepared', mediaId: 'media', startMs: 0, endMs: 1000, wholeMedia: true, coreDurationMs: 1000, sendDurationMs: 1000, chunkCount: 1 };
 const model: AiModelPreference = { modelId: 'model', transcriptionMode: 'transcribe', maxOutputTokens: 1000 };
-const quote: AiQuote = { id: 'quote', mediaId: 'media', kind: 'transcribe', startMs: 0, endMs: 1000, model: 'model', estimatedUsd: 1, maximumUsd: 2, inputTokens: 100, maxOutputTokens: 1000, expiresAt: '2099-01-01T00:00:00Z', warnings: [], canApprove: true };
+const quote: AiQuote = { aiConfigurationGeneration: 0, provider: 'vertex', id: 'quote', mediaId: 'media', kind: 'transcribe', startMs: 0, endMs: 1000, model: 'model', estimatedUsd: 1, maximumUsd: 2, inputTokens: 100, maxOutputTokens: 1000, expiresAt: '2099-01-01T00:00:00Z', warnings: [], canApprove: true };
+
+it('isolates prepared audio and quotes across provider or configuration generations', async () => {
+  const sessions = createPreparationSessions();
+  const prepare = vi.fn(async () => preparation);
+  const estimate = vi.fn(async () => quote);
+  const vertex = { ...scope, provider: 'vertex' as const, aiConfigurationGeneration: 1 };
+  const openai = { ...scope, provider: 'openai' as const, aiConfigurationGeneration: 2 };
+  await sessions.prepare(vertex, prepare);
+  await sessions.estimate(vertex, model, estimate);
+  await sessions.prepare(openai, prepare);
+  await sessions.estimate(openai, model, estimate);
+  await sessions.prepare({ ...vertex, aiConfigurationGeneration: 3 }, prepare);
+  await sessions.estimate({ ...vertex, aiConfigurationGeneration: 3 }, model, estimate);
+  expect(prepare).toHaveBeenCalledTimes(3);
+  expect(estimate).toHaveBeenCalledTimes(3);
+});
+
+it('does not adopt a late preparation after switching away and back', async () => {
+  const sessions = createPreparationSessions();
+  let complete!: (result: TranscriptionPreparation) => void;
+  const original = { ...scope, provider: 'openai' as const, aiConfigurationGeneration: 1 };
+  const returned = { ...original, aiConfigurationGeneration: 3 };
+  const old = sessions.prepare(original, () => new Promise(resolve => { complete = resolve; }));
+  const current = await sessions.prepare(returned, async () => ({ ...preparation, id: 'current' }));
+  complete({ ...preparation, id: 'old' });
+  await old;
+  expect(current.id).toBe('current');
+  expect(sessions.get(returned)?.result?.id).toBe('current');
+});
 
 it('clears prepared audio and quotes on restore even when the same source signature remains', async () => {
   const sessions = createPreparationSessions();

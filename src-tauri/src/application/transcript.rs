@@ -35,6 +35,11 @@ struct TranscriptJob {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptionPreparation {
+    provider: surtitle_core::AiProvider,
+    ai_configuration_generation: u64,
+    compatible: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chunk_profile: Option<AudioChunkProfile>,
     id: String,
     media_id: String,
     start_ms: u64,
@@ -73,6 +78,7 @@ pub struct RepairAlternative {
 
 pub(crate) mod storage;
 use storage::*;
+pub(crate) mod policy;
 pub(crate) mod preparation;
 use preparation::*;
 pub(crate) mod ranges;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from 'react';
-import type { AiModelPreference, AiQuote, TranscriptionPreparation } from '../../shared/contracts/ai';
+import type { AiModelPreference, AiProvider, AiQuote, TranscriptionPreparation } from '../../shared/contracts/ai';
 
 export interface PreparationScope {
   mediaId: string;
@@ -8,6 +8,9 @@ export interface PreparationScope {
   startMs: number;
   endMs: number;
   wholeMedia: boolean;
+  provider?: AiProvider;
+  aiConfigurationGeneration?: number;
+  audioPolicy?: TranscriptionPreparation['chunkProfile'];
 }
 
 interface PreparationSession {
@@ -28,6 +31,8 @@ const invalidated = () => new Error('Audio preparation and estimates were invali
 
 const scopeKey = (scope: PreparationScope) => JSON.stringify([
   scope.mediaId, scope.sourceSignature, scope.startMs, scope.endMs, scope.wholeMedia,
+  scope.provider ?? 'vertex', scope.aiConfigurationGeneration ?? 0,
+  scope.audioPolicy,
 ]);
 
 function audioScope(scope: PreparationScope, streamIndex: number | null) {
@@ -78,7 +83,7 @@ export function createPreparationSessions() {
       sessions.clear(); estimates.clear(); aliases.clear(); publish();
     },
     estimate(scope: PreparationScope, model: AiModelPreference, action: () => Promise<AiQuote>, fresh = false) {
-      const key = JSON.stringify([keyFor(scope), model]);
+      const key = JSON.stringify([keyFor(scope), model, scope.provider ?? 'vertex', scope.aiConfigurationGeneration ?? 0]);
       const existing = estimates.get(key);
       if (existing && (!existing.result || (!fresh && Date.parse(existing.result.expiresAt) > Date.now()))) return existing.promise;
       let resolve!: (value: AiQuote) => void;

@@ -19,7 +19,8 @@ export const commandArguments = {
     "digest": "string",
     "acknowledgeUnpriced": "boolean",
     "acknowledgeUnqualified": "boolean",
-    "retryPolicyVersion": "number?"
+    "retryPolicyVersion": "number?",
+    "aiConfigurationGeneration": "number?"
   },
   "archive_ui_draft": {
     "request": "object"
@@ -46,7 +47,9 @@ export const commandArguments = {
   },
   "create_transcription_quote": {
     "preparationId": "string",
-    "model": "object?"
+    "model": "object?",
+    "provider": "string?",
+    "aiConfigurationGeneration": "number?"
   },
   "delete_card": {
     "cardId": "string"
@@ -133,6 +136,7 @@ export const commandArguments = {
     "mediaId": "string",
     "operationId": "string?"
   },
+  "list_openai_models": {},
   "list_operation_progress": {},
   "list_saved_ai_results": {
     "jobId": "string"
@@ -189,7 +193,8 @@ export const commandArguments = {
     "startMs": "number",
     "endMs": "number",
     "wholeMedia": "boolean?",
-    "operationId": "string?"
+    "operationId": "string?",
+    "model": "object?"
   },
   "preview_restore": {},
   "rate_card": {
@@ -201,7 +206,8 @@ export const commandArguments = {
     "digest": "string",
     "acknowledgeUnpriced": "boolean",
     "acknowledgeUnqualified": "boolean",
-    "retryPolicyVersion": "number?"
+    "retryPolicyVersion": "number?",
+    "aiConfigurationGeneration": "number?"
   },
   "rebind_editor_draft": {
     "reference": "object",
@@ -216,6 +222,7 @@ export const commandArguments = {
   "remove_media": {
     "mediaId": "string"
   },
+  "remove_openai_api_key": {},
   "reparse_transcript_evidence": {
     "jobId": "string",
     "ordinal": "number",
@@ -273,6 +280,9 @@ export const commandArguments = {
     "ordinal": "number",
     "expectedRangeVersion": "number",
     "content": "object"
+  },
+  "save_openai_api_key": {
+    "apiKey": "string"
   },
   "save_phrase_editor_draft": {
     "reference": "object",
@@ -381,6 +391,7 @@ export const commandResults = {
   "list_draft_selections": "Vec<SelectionView>",
   "list_editor_drafts": "Vec<EditorDraftView>",
   "list_media_streams": "Vec<MediaStream>",
+  "list_openai_models": "Vec<surtitle_ai::DiscoveredModel>",
   "list_operation_progress": "Vec<crate::application::operations::OperationProgress>",
   "list_saved_ai_results": "Vec<SavedAiResult>",
   "list_segments": "Vec<SubtitleSegment>",
@@ -406,6 +417,7 @@ export const commandResults = {
   "relink_media": "()",
   "remove_draft_selection": "()",
   "remove_media": "()",
+  "remove_openai_api_key": "()",
   "reparse_transcript_evidence": "TranscriptReview",
   "resolve_transcript_boundary": "TranscriptReview",
   "resolve_unknown_attempt": "()",
@@ -421,6 +433,7 @@ export const commandResults = {
   "save_draft_selection_card": "()",
   "save_editor_draft": "EditorDraftView",
   "save_manual_transcript_range": "TranscriptReview",
+  "save_openai_api_key": "()",
   "save_phrase_editor_draft": "()",
   "save_ui_draft": "UiDraft",
   "scan_external_tools": "Vec<ExternalCandidate>",
@@ -482,6 +495,7 @@ export interface CommandResults {
   list_draft_selections: (import('../../features/study/drafts/api').DraftSelection)[];
   list_editor_drafts: (import('../../features/study/editor-drafts/api').EditorDraft)[];
   list_media_streams: (import('../contracts/media').MediaStream)[];
+  list_openai_models: (import('../contracts/ai').DiscoveredModel)[];
   list_operation_progress: (import('../contracts/activity').OperationProgress)[];
   list_saved_ai_results: (import('../contracts/ai').SavedAiResult)[];
   list_segments: (import('../contracts/media').SubtitleSegment)[];
@@ -507,6 +521,7 @@ export interface CommandResults {
   relink_media: void;
   remove_draft_selection: void;
   remove_media: void;
+  remove_openai_api_key: void;
   reparse_transcript_evidence: import('../contracts/transcript').TranscriptReview;
   resolve_transcript_boundary: import('../contracts/transcript').TranscriptReview;
   resolve_unknown_attempt: void;
@@ -522,6 +537,7 @@ export interface CommandResults {
   save_draft_selection_card: void;
   save_editor_draft: import('../../features/study/editor-drafts/api').EditorDraft;
   save_manual_transcript_range: import('../contracts/transcript').TranscriptReview;
+  save_openai_api_key: void;
   save_phrase_editor_draft: void;
   save_ui_draft: import('../contracts/editing').UiDraft;
   scan_external_tools: (import('../contracts/settings').ExternalToolCandidate)[];

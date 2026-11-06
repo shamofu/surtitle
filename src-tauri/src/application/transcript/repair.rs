@@ -1,5 +1,26 @@
 use super::*;
 
+pub(super) fn reusable_repair_quote(
+    state: &AppState,
+    parent: &RepairParent,
+) -> Result<Option<crate::application::ai::AiQuote>> {
+    let settings = state.preferences.read()?.settings.clone();
+    for receipt in receipts(state)? {
+        if !super::policy::compatible(&receipt, &settings, true) {
+            continue;
+        }
+        if let Some(saved) = repair_parent(&receipt)?
+            && saved.job_id == parent.job_id
+            && saved.draft_digest == parent.draft_digest
+            && saved.boundary_id == parent.boundary_id
+        {
+            validate_repair_parent(state, &receipt, &saved)?;
+            return Ok(Some(create_audio_quote(state, &receipt.id)?));
+        }
+    }
+    Ok(None)
+}
+
 pub(super) fn validate_repair_parent(
     state: &AppState,
     receipt: &AudioPreparationReceipt,
@@ -57,28 +78,14 @@ pub async fn prepare_boundary_repair(
                 start_ms: range.start_ms,
                 end_ms: range.end_ms,
             };
-            for receipt in receipts(&state)? {
-                if let Some(saved) = repair_parent(&receipt)?
-                    && saved.job_id == parent.job_id
-                    && saved.draft_digest == parent.draft_digest
-                    && saved.boundary_id == parent.boundary_id
-                {
-                    validate_repair_parent(&state, &receipt, &saved)?;
-                    return Ok::<_, anyhow::Error>((
-                        draft.media_id,
-                        range,
-                        parent,
-                        Some(create_audio_quote(&state, &receipt.id)?),
-                    ));
-                }
-            }
-            Ok((draft.media_id, range, parent, None))
+            let reused = reusable_repair_quote(&state, &parent)?;
+            Ok::<_, anyhow::Error>((draft.media_id, range, parent, reused))
         })
         .await??;
         if let Some(quote) = reused {
             return Ok(quote);
         }
-        let receipt = crate::application::ai::preparation::prepare_transcription_receipt(
+        let receipt = crate::application::ai::preparation::prepare_repair_receipt(
             app,
             state.clone(),
             media_id,

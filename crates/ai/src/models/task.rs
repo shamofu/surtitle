@@ -1,6 +1,6 @@
 //! Task validation and provider request bodies.
-use super::{valid_sha, AudioAttachment, RequestEstimate};
-use crate::{AiError, ExecutionConfig, Result};
+use super::{AudioAttachment, RequestEstimate};
+use crate::{AiError, AiProvider, AudioRequestLimits, ExecutionConfig, Result, VertexAudioPolicy};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -87,13 +87,44 @@ impl RequestTask {
     }
 
     pub fn validate(&self) -> Result<()> {
+        self.validate_for_provider(AiProvider::Vertex)
+    }
+
+    pub fn validate_for_provider(&self, provider: AiProvider) -> Result<()> {
+        self.validate_with_limits(AudioRequestLimits::for_provider(provider))
+    }
+
+    pub fn validate_with_execution(&self, execution: &ExecutionConfig) -> Result<()> {
+        if let Some(policy) = execution.vertex_audio_policy {
+            if execution.provider != AiProvider::Vertex
+                || !matches!(
+                    (policy, self),
+                    (
+                        VertexAudioPolicy::TranscribeFileV1,
+                        Self::TranscribePreview { .. }
+                    ) | (
+                        VertexAudioPolicy::AudioUnderstandingFileV1,
+                        Self::AudioTranscription { .. }
+                    )
+                )
+            {
+                return Err(AiError::Invalid(
+                    "Vertex audio preparation policy does not match the provider and audio task"
+                        .into(),
+                ));
+            }
+        }
+        self.validate_with_limits(execution.audio_limits())
+    }
+
+    fn validate_with_limits(&self, limits: AudioRequestLimits) -> Result<()> {
         match self {
             #[cfg(feature = "development-validation")]
             Self::TranscribeDiagnostic { language, audio } => Self::TranscribePreview {
                 language: language.clone(),
                 audio: audio.clone(),
             }
-            .validate()?,
+            .validate_with_limits(limits)?,
             Self::Explanation {
                 term,
                 learning_language,
@@ -107,7 +138,7 @@ impl RequestTask {
                     cues: cues.clone(),
                     max_items: 1,
                 }
-                .validate()?;
+                .validate_with_limits(limits)?;
                 if term.trim().is_empty()
                     || term.chars().count() > 200
                     || proficiency.trim().is_empty()
@@ -184,20 +215,8 @@ impl RequestTask {
             }
             Self::AudioTranscription { language, audio }
             | Self::TranscribePreview { language, audio } => {
-                if language.trim().is_empty()
-                    || language.len() > 100
-                    || !valid_sha(&audio.sha256)
-                    || audio.duration_ms == 0
-                    || audio.duration_ms > 240_000
-                    || audio
-                        .source_start_ms
-                        .checked_add(audio.duration_ms)
-                        .is_none()
-                    || audio.byte_len == 0
-                    || audio.byte_len > 12 * 1024 * 1024
-                    || !["audio/wav", "audio/flac", "audio/mpeg"]
-                        .contains(&audio.mime_type.as_str())
-                {
+                audio.validate_with_limits(limits)?;
+                if language.trim().is_empty() || language.len() > 100 {
                     return Err(AiError::Invalid(
                         "Invalid prepared audio or language".into(),
                     ));
@@ -217,7 +236,7 @@ impl RequestTask {
         execution: &ExecutionConfig,
         body: &Value,
     ) -> Result<RequestEstimate> {
-        self.validate()?;
+        self.validate_with_execution(execution)?;
         let audio_duration_ms = self.audio_attachment().map_or(0, |audio| audio.duration_ms);
         // Approximate input estimate; neither a universal tokenizer bound nor a billing cap.
         let input_tokens_reserved =
@@ -226,7 +245,13 @@ impl RequestTask {
         let estimated_max_microusd = execution
             .price
             .as_ref()
-            .map(|price| price.cost(input_tokens_reserved, output_tokens_reserved))
+            .map(|price| {
+                if execution.provider == crate::AiProvider::Openai && audio_duration_ms > 0 {
+                    price.audio_cost(audio_duration_ms.div_ceil(1000) * 1000)
+                } else {
+                    price.cost(input_tokens_reserved, output_tokens_reserved)
+                }
+            })
             .transpose()?;
         Ok(RequestEstimate {
             ordinal,

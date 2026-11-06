@@ -26,7 +26,7 @@ export function commandDefinitions() {
         key = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
         const optional = rust.startsWith('Option<');
         if (optional) rust = rust.slice(7, -1);
-        const kind = rust === 'String' ? 'string' : rust === 'bool' ? 'boolean'
+        const kind = ['String', 'surtitle_core::AiProvider'].includes(rust) ? 'string' : rust === 'bool' ? 'boolean'
           : /^(?:[uif]\d+|usize|isize)$/.test(rust) ? 'number' : rust === 'Vec<String>' ? 'strings'
           : rust === 'Vec<crate::application::changes::ChangeDomain>' ? 'domains'
           : rust.startsWith('Vec<') ? 'array' : 'object';

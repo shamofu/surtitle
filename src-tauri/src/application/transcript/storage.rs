@@ -94,7 +94,7 @@ pub(super) fn receipts(state: &AppState) -> Result<Vec<AudioPreparationReceipt>>
             for task in &receipt.prepared_job.requests {
                 let audio =
                     audio_attachment(task).context("preparation contains a non-audio request")?;
-                task.validate()?;
+                task.validate_with_execution(&receipt.prepared_job.execution)?;
                 ensure!(
                     audio.path.is_absolute()
                         && audio

@@ -5,8 +5,13 @@ import { withReadOnlyDatabase } from './native-e2e-database.mjs';
 
 export function readFeeLedger(dataDirectory) {
   return withReadOnlyDatabase(resolve(dataDirectory, 'charges.sqlite'), database =>
-    Object.fromEntries(['ai_settings', 'ai_jobs', 'ai_requests', 'ai_attempts'].map(table =>
+    Object.fromEntries(['ai_provider_settings', 'ai_jobs', 'ai_requests', 'ai_attempts'].map(table =>
       [table, database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()])));
+}
+
+export function assertProfileJobIdentity(snapshot, stored) {
+  const listed = stored.ai_jobs.filter(job => job.state !== 'prepared');
+  assert.deepEqual(snapshot.jobs.map(job => job.id).sort(), listed.map(job => job.id).sort(), 'IPC activity must match every non-prepared job in the exact expected profile ledger');
 }
 
 export function assertOfflineFixtureLedger(snapshot, stored, environment = process.env) {
@@ -54,11 +59,9 @@ export function assertOfflineFixtureLedger(snapshot, stored, environment = proce
     assert.equal(usage.offlineFixture, true);
     assert.equal(usage.paidRequests, 0);
   }
-  assert.equal(stored.ai_settings.length, 1);
-  assert.equal(stored.ai_settings[0].id, 1);
-  assert.deepEqual(JSON.parse(stored.ai_settings[0].limits_json), { per_job_microusd: 0, daily_microusd: 0, monthly_microusd: 0 });
+  assert.deepEqual(stored.ai_provider_settings.map(row => row.provider).sort(), ['openai', 'vertex']);
+  for (const row of stored.ai_provider_settings) assert.deepEqual(JSON.parse(row.limits_json), { per_job_microusd: 0, daily_microusd: 0, monthly_microusd: 0 });
   // The activity snapshot omits estimates in `prepared` state. Their complete
   // ledger rows are still checked above and retained in before/after comparisons.
-  const listed = stored.ai_jobs.filter(job => job.state !== 'prepared');
-  assert.deepEqual(snapshot.jobs.map(job => job.id).sort(), listed.map(job => job.id).sort(), 'IPC activity must match every non-prepared job in the exact disposable ledger');
+  assertProfileJobIdentity(snapshot, stored);
 }

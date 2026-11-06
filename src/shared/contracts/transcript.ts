@@ -38,6 +38,15 @@ export interface ReviewChunk {
   originalSegments?: ReviewText[];
   source?: 'provider' | 'local_reparse' | 'manual' | 'unresolved';
   vadPauseEvidence?: VadPauseEvidence;
+  boundaryProvenance?: {
+    sample_rate: number;
+    core_start_sample: number;
+    boundary_sample: number;
+    request_start_sample: number;
+    request_end_sample: number;
+    kind: 'strong_pause' | 'weak_pause' | 'forced' | 'end_of_selection';
+    supporting_pause: { start_sample: number; end_sample: number } | null;
+  };
   originalSource?: 'provider' | 'local_reparse' | 'unresolved';
 }
 
@@ -100,7 +109,7 @@ export interface TranscriptDraft {
   conflicts: ReviewConflict[];
   warnings?: {
     id: string;
-    kind: 'speech_in_vad_no_speech_range' | 'speech_in_vad_pause_range';
+    kind: 'speech_in_vad_no_speech_range' | 'speech_in_vad_pause_range' | 'forced_chunk_boundary';
     ordinal: number;
     startMs: number;
     endMs: number;

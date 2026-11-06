@@ -97,7 +97,9 @@ fn fixture_path(
         let preferences = state.preferences.read()?;
         ensure!(
             preferences.credential_id.is_none()
+                && preferences.openai_credential_id.is_none()
                 && !preferences.settings.credential_configured
+                && !preferences.settings.openai.credential_configured
                 && preferences.settings.daily_budget_usd == 0.,
             "Transfer fixture requires a zero-budget profile without credentials"
         );
@@ -105,6 +107,11 @@ fn fixture_path(
     ensure!(
         state.ai.budget()? == surtitle_ai::BudgetLimits::default(),
         "Transfer fixture requires a zero-budget ledger"
+    );
+    ensure!(
+        state.ai.budget_for(surtitle_core::AiProvider::Openai)?
+            == surtitle_ai::BudgetLimits::default(),
+        "Transfer fixture requires a zero-budget OpenAI ledger"
     );
     ensure!(
         format.is_none_or(|value| value == "zip"),

@@ -1,6 +1,6 @@
 //! Shared transaction queries and approval/budget invariants.
 use super::BudgetLimits;
-use crate::{AiError, PreparedJob, RequestEstimate, Result};
+use crate::{AiError, AiProvider, PreparedJob, RequestEstimate, Result};
 use rusqlite::Connection;
 
 pub(super) fn sum_estimates<'a>(
@@ -18,6 +18,9 @@ pub(super) fn sum_estimates<'a>(
 }
 pub(super) fn unpriced_count(conn: &Connection, job: Option<&str>) -> Result<u64> {
     Ok(conn.query_row("SELECT COUNT(*) FROM ai_attempts WHERE reserve_microusd IS NULL AND state!='released' AND (?1 IS NULL OR job_id=?1)",[job],|r|r.get::<_,i64>(0))? as u64)
+}
+pub(super) fn unpriced_count_for(conn: &Connection, provider: AiProvider) -> Result<u64> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM ai_attempts a JOIN ai_jobs j ON j.id=a.job_id WHERE a.reserve_microusd IS NULL AND a.state!='released' AND COALESCE(json_extract(j.plan_json,'$.execution.provider'),'vertex')=?", [provider.as_str()], |r| r.get::<_, i64>(0))? as u64)
 }
 pub(super) fn validate_scope(
     conn: &Connection,
@@ -53,10 +56,12 @@ pub(super) fn validate_scope(
     }
     Ok(())
 }
-pub(super) fn limits(conn: &Connection) -> Result<BudgetLimits> {
-    let s: String = conn.query_row("SELECT limits_json FROM ai_settings WHERE id=1", [], |r| {
-        r.get(0)
-    })?;
+pub(super) fn limits(conn: &Connection, provider: AiProvider) -> Result<BudgetLimits> {
+    let s: String = conn.query_row(
+        "SELECT limits_json FROM ai_provider_settings WHERE provider=?",
+        [provider.as_str()],
+        |r| r.get(0),
+    )?;
     Ok(serde_json::from_str(&s)?)
 }
 pub(super) fn read_job(conn: &Connection, id: &str) -> Result<(PreparedJob, String, String, i64)> {
@@ -69,28 +74,32 @@ pub(super) fn read_job(conn: &Connection, id: &str) -> Result<(PreparedJob, Stri
 }
 pub(super) fn has_blocking_attempt(conn: &Connection) -> Result<bool> {
     Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM ai_attempts WHERE state IN ('reserved','unknown'))",
+        "SELECT EXISTS(SELECT 1 FROM ai_attempts WHERE state='reserved')",
         [],
         |r| r.get(0),
     )?)
 }
-pub(super) fn has_unknown_attempt(conn: &Connection) -> Result<bool> {
+pub(super) fn has_unknown_attempt(conn: &Connection, provider: AiProvider) -> Result<bool> {
     Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM ai_attempts WHERE state='unknown')",
-        [],
+        "SELECT EXISTS(SELECT 1 FROM ai_attempts a JOIN ai_jobs j ON j.id=a.job_id WHERE a.state='unknown' AND COALESCE(json_extract(j.plan_json,'$.execution.provider'),'vertex')=?)",
+        [provider.as_str()],
         |row| row.get(0),
     )?)
 }
 pub(super) fn job_spend(conn: &Connection, id: &str) -> Result<u64> {
     Ok(conn.query_row("SELECT COALESCE(SUM(COALESCE(charged_microusd,reserve_microusd)),0) FROM ai_attempts WHERE job_id=?",[id],|r|r.get::<_,i64>(0))? as u64)
 }
-pub(super) fn period_spend(conn: &Connection, start: i64) -> Result<u64> {
-    Ok(conn.query_row("SELECT COALESCE(SUM(COALESCE(charged_microusd,reserve_microusd)),0) FROM ai_attempts WHERE COALESCE(dispatched_at_ms,created_at_ms)>=? OR charged_microusd IS NULL",[start],|r|r.get::<_,i64>(0))? as u64)
+pub(super) fn period_spend(conn: &Connection, start: i64, provider: AiProvider) -> Result<u64> {
+    Ok(conn.query_row("SELECT COALESCE(SUM(COALESCE(a.charged_microusd,a.reserve_microusd)),0) FROM ai_attempts a JOIN ai_jobs j ON j.id=a.job_id WHERE (COALESCE(a.dispatched_at_ms,a.created_at_ms)>=? OR a.charged_microusd IS NULL) AND COALESCE(json_extract(j.plan_json,'$.execution.provider'),'vertex')=?", rusqlite::params![start, provider.as_str()],|r|r.get::<_,i64>(0))? as u64)
 }
-pub(super) fn period_breakdown(conn: &Connection, start: i64) -> Result<(u64, u64)> {
+pub(super) fn period_breakdown(
+    conn: &Connection,
+    start: i64,
+    provider: AiProvider,
+) -> Result<(u64, u64)> {
     // An unresolved hold remains conservative capacity in later periods, including
     // after explicit acknowledgement. Calendar rollover never proves it was free.
-    Ok(conn.query_row("SELECT COALESCE(SUM(COALESCE(charged_microusd,0)),0),COALESCE(SUM(CASE WHEN charged_microusd IS NULL THEN reserve_microusd ELSE 0 END),0) FROM ai_attempts WHERE COALESCE(dispatched_at_ms,created_at_ms)>=? OR charged_microusd IS NULL",[start],|r|Ok((r.get::<_,i64>(0)? as u64,r.get::<_,i64>(1)? as u64)))?)
+    Ok(conn.query_row("SELECT COALESCE(SUM(COALESCE(a.charged_microusd,0)),0),COALESCE(SUM(CASE WHEN a.charged_microusd IS NULL THEN a.reserve_microusd ELSE 0 END),0) FROM ai_attempts a JOIN ai_jobs j ON j.id=a.job_id WHERE (COALESCE(a.dispatched_at_ms,a.created_at_ms)>=? OR a.charged_microusd IS NULL) AND COALESCE(json_extract(j.plan_json,'$.execution.provider'),'vertex')=?",rusqlite::params![start, provider.as_str()],|r|Ok((r.get::<_,i64>(0)? as u64,r.get::<_,i64>(1)? as u64)))?)
 }
 pub(super) fn period_starts(at: i64) -> Result<(i64, i64)> {
     use chrono::Datelike;
@@ -108,12 +117,21 @@ pub(super) fn period_starts(at: i64) -> Result<(i64, i64)> {
     Ok((day, month))
 }
 pub(super) fn check_budget(conn: &Connection, job: &str, additional: u64, at: i64) -> Result<()> {
-    let b = limits(conn)?;
+    let provider = read_job(conn, job)?.0.execution.provider;
+    let b = limits(conn, provider)?;
     let (day, month) = period_starts(at)?;
     for (used, cap, label) in [
         (job_spend(conn, job)?, b.per_job_microusd, "job"),
-        (period_spend(conn, day)?, b.daily_microusd, "daily"),
-        (period_spend(conn, month)?, b.monthly_microusd, "monthly"),
+        (
+            period_spend(conn, day, provider)?,
+            b.daily_microusd,
+            "daily",
+        ),
+        (
+            period_spend(conn, month, provider)?,
+            b.monthly_microusd,
+            "monthly",
+        ),
     ] {
         if cap != 0 && used.checked_add(additional).is_none_or(|n| n > cap) {
             return Err(AiError::BudgetExceeded(label));

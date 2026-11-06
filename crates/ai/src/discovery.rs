@@ -248,6 +248,7 @@ impl VertexDiscovery {
                 observed_at_ms,
                 input_microusd_per_million: input,
                 output_microusd_per_million: output,
+                audio_microusd_per_minute: None,
             }),
             _ => None,
         };
@@ -477,5 +478,91 @@ mod tests {
         sku["serviceRegions"] = json!(["us-central1"]);
         assert!(parse_price(&sku, "global", now).is_none());
         assert!(parse_price(&sku, "us-central1", now).is_some());
+    }
+}
+
+/// Read-only discovery from the credential's accessible OpenAI model inventory.
+/// No generation probe, inferred capabilities, pricing, or application allowlist.
+pub async fn list_openai_models(
+    vault: &CredentialVault,
+    credential_id: &str,
+) -> Result<Vec<DiscoveredModel>> {
+    let key = vault.load_openai_key(credential_id)?;
+    let client = reqwest::Client::builder()
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|_| AiError::Invalid("Unable to initialize OpenAI metadata client".into()))?;
+    let mut response = client
+        .get("https://api.openai.com/v1/models")
+        .bearer_auth(&*key)
+        .send()
+        .await
+        .map_err(|_| AiError::Invalid("OpenAI model lookup failed".into()))?;
+    drop(key);
+    if !response.status().is_success() {
+        return Err(AiError::Invalid(format!(
+            "OpenAI model lookup returned HTTP {}",
+            response.status().as_u16()
+        )));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| AiError::Invalid("OpenAI model lookup was interrupted".into()))?
+    {
+        if chunk.len() > 8 * 1024 * 1024 - bytes.len() {
+            return Err(AiError::Invalid(
+                "OpenAI model inventory exceeded its size limit".into(),
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let value: Value = serde_json::from_slice(&bytes)
+        .map_err(|_| AiError::Invalid("Invalid OpenAI model inventory".into()))?;
+    parse_openai_models(&value)
+}
+fn parse_openai_models(value: &Value) -> Result<Vec<DiscoveredModel>> {
+    let data = value["data"]
+        .as_array()
+        .ok_or_else(|| AiError::Invalid("Invalid OpenAI model inventory".into()))?;
+    let mut models = std::collections::BTreeMap::new();
+    for model in data {
+        if let Some(id) = model["id"]
+            .as_str()
+            .filter(|id| crate::execution::valid_provider_model_id(crate::AiProvider::Openai, id))
+        {
+            models.insert(
+                id.to_owned(),
+                DiscoveredModel {
+                    id: id.into(),
+                    display_name: id.into(),
+                    launch_stage: None,
+                    version: None,
+                },
+            );
+        }
+    }
+    Ok(models.into_values().collect())
+}
+#[cfg(test)]
+mod openai_discovery_tests {
+    use super::*;
+    #[test]
+    fn inventory_is_not_a_gpt_allowlist_and_cannot_supply_an_endpoint() {
+        let models=parse_openai_models(&serde_json::json!({"data":[{"id":"future-model"},{"id":"gpt-transcribe"},{"id":"ft:gpt-4.1-2025-04-14:org:suffix:id"},{"id":"https://evil.invalid"},{"id":"future-model"}]})).unwrap();
+        assert_eq!(
+            models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec![
+                "ft:gpt-4.1-2025-04-14:org:suffix:id",
+                "future-model",
+                "gpt-transcribe"
+            ]
+        );
+        assert!(parse_openai_models(&serde_json::json!({"error":{"message":"secret"}})).is_err());
     }
 }

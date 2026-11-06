@@ -52,7 +52,7 @@ describe('real native learning workflow (no cloud requests)', () => {
     assert.equal(imported.path, existing.path);
     assert(imported.title.includes('日本語 & sample'));
     assert.equal(imported.status, 'ready');
-    assert.equal(after.budget.spentUsd, 0);
+    assert.equal(after.budgets.vertex.spentUsd, 0);
     await browser.refresh();
     assert((await snapshot()).media.some(media => media.id === existing.id && media.path === existing.path));
   });
@@ -79,9 +79,9 @@ describe('real native learning workflow (no cloud requests)', () => {
   it('checks tool updates without changing AI usage and resets page scroll through normal navigation', async () => {
     const before = await snapshot();
     assert.equal(before.settings.credentialConfigured, false, 'Expected the disposable profile without credentials');
-    assert.equal(before.budget.spentUsd, 0);
-    assert.equal(before.budget.reservedUsd, 0);
-    assert.equal(before.budget.limitUsd, 0);
+    assert.equal(before.budgets.vertex.spentUsd, 0);
+    assert.equal(before.budgets.vertex.reservedUsd, 0);
+    assert.equal(before.budgets.vertex.limitUsd, 0);
     assert(before.media.some(media => media.id === mediaId && media.path === fixture.mediaPath), 'Expected the exact disposable media fixture');
     const assertNoManagedCli = tools => {
       const cli = tools.filter(tool => tool.id === 'ffmpeg');
@@ -106,7 +106,7 @@ describe('real native learning workflow (no cloud requests)', () => {
       assertNoManagedCli(after.tools);
       assert.deepEqual(after.tools, before.tools, 'Checking metadata must not install tools or change their provider, path, or version');
       assert.deepEqual(after.settings, before.settings, 'Checking metadata must not change saved settings');
-      assert.deepEqual(after.budget, before.budget, 'Checking metadata must leave AI usage and reservations unchanged');
+      assert.deepEqual(after.budgets.vertex, before.budgets.vertex, 'Checking metadata must leave AI usage and reservations unchanged');
       assert.deepEqual(after.jobs, before.jobs, 'Checking metadata must not create, send, or change AI jobs');
       // Tools can fit without scrolling after optional tools are removed.
       // The AI category has enough content to exercise navigation from below.
@@ -224,8 +224,8 @@ describe('real native learning workflow (no cloud requests)', () => {
     if (result.rejectionMessage) assert.match(result.rejectionMessage, /budget|credential|service.account|price|pricing|auth|model|予算|認証|料金/i);
     else assert.equal(result.canApprove, false);
     const state = await snapshot();
-    assert.equal(state.budget.spentUsd, 0);
-    assert.equal(state.budget.reservedUsd, 0);
+    assert.equal(state.budgets.vertex.spentUsd, 0);
+    assert.equal(state.budgets.vertex.reservedUsd, 0);
   });
   it('opens a real six-hour audio file and seeks past five hours without installing FFmpeg', async function () {
     const path = resolve(dirname(fixture.mediaPath), 'six-hour-silence.flac');

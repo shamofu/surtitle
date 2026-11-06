@@ -7,6 +7,7 @@ import { registerCloseTask } from '../../../shared/native/window';
 import { useEffect, useRef, useState } from 'react';
 import { AnimatedDetails } from '../../../shared/ui/AnimatedDetails';
 
+import { activeProvider, aiConfiguration, providerProfile, providerConfigured, providerConfigurationKey } from '../../ai/provider';
 import { aiApi } from '../../ai/api';
 
 import type { AiModelPreference } from '../../../shared/contracts/ai';
@@ -147,6 +148,8 @@ export function DraftAiDialog({
   const { mutate } = useDataActions();
   const { t } = useAppearance();
   const { data } = useSnapshot();
+  const provider = activeProvider(data?.settings);
+  const configuration = providerConfigurationKey(data?.settings);
   const { report } = useNotifications();
   const { runTracked } = useActivities();
   const mounted = useMounted();
@@ -154,19 +157,22 @@ export function DraftAiDialog({
   const [models, setModels] = useState<
     Partial<Record<AiPurpose, AiModelPreference>>
   >({});
+  const modelConfiguration = useRef(configuration);
+  const effectiveModels = modelConfiguration.current === configuration ? models : {};
+  useEffect(() => { if (modelConfiguration.current !== configuration) { modelConfiguration.current = configuration; setModels({}); } }, [configuration]);
   const purpose: AiPurpose = focusTerm.trim() ? 'explanation' : 'vocabulary';
   const model =
-    models[purpose] ||
-    data?.settings.aiModels?.[purpose] ||
+    effectiveModels[purpose] ||
+    providerProfile(data?.settings)?.aiModels?.[purpose] ||
     emptyModel(purpose);
   const [quote, setQuote] = useState<AiQuote>();
   const [busy, setBusy] = useState(false);
   const locked = useRef(false);
   const lastAttempt = useRef('');
   const [quoteKey, setQuoteKey] = useState('');
-  const inputKey = JSON.stringify([selection.id, selection.version, focusTerm.trim(), model, data?.settings.vertexLocation]);
+  const inputKey = JSON.stringify([configuration, selection.id, selection.version, focusTerm.trim(), model, data?.settings.vertexLocation]);
   const currentInput = useRef(inputKey); currentInput.current = inputKey;
-  const configured = !!data?.settings.credentialConfigured && !!data.settings.vertexProject;
+  const configured = providerConfigured(data?.settings);
   const valid = !!model.modelId.trim() && Number.isInteger(model.maxOutputTokens) && model.maxOutputTokens > 0;
   const estimateAction = useRef(() => {});
   useEffect(() => {
@@ -189,6 +195,7 @@ export function DraftAiDialog({
       mutate(
         () =>
           draftStudyApi.createQuote({
+            ...aiConfiguration(data?.settings),
             selectionId: selection.id,
             version: selection.version,
             focusTerm: focusTerm.trim() || undefined,
@@ -245,7 +252,7 @@ export function DraftAiDialog({
             />
           </Field>
           <AnimatedDetails open={!valid}><summary>{t('モデルを変更', 'Change model')}</summary>
-          <ModelEditor
+          <ModelEditor key={configuration} provider={provider} configurationGeneration={data?.settings.aiConfigurationGeneration}
             value={model}
             onChange={(value) =>
               setModels((items) => ({ ...items, [purpose]: value }))

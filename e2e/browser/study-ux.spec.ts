@@ -318,8 +318,8 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
         export const call = async (command, args = {}) => {
           const value = await window.__learningFixture.call(command, args);
           if (command === 'get_app_snapshot') value.jobs = [
-            { id: 'active', mediaId: 'visual-fixture', kind: 'translate', status: 'running', progress: .5, createdAt: '', message: 'Translation in progress' },
-            ...Array.from({ length: 12 }, (_, index) => ({ id: 'history-' + index, mediaId: 'visual-fixture', kind: 'translate', status: 'completed', progress: 1, createdAt: '', message: 'Completed translation ' + index }))
+            { provider: 'vertex', id: 'active', mediaId: 'visual-fixture', kind: 'translate', status: 'running', progress: .5, createdAt: '', message: 'Translation in progress' },
+            ...Array.from({ length: 12 }, (_, index) => ({ provider: 'vertex', id: 'history-' + index, mediaId: 'visual-fixture', kind: 'translate', status: 'completed', progress: 1, createdAt: '', message: 'Completed translation ' + index }))
           ];
           if (command === 'list_ai_continuations') return Array.from({ length: 3 }, (_, index) => ({
             id: 'pending-' + index, mediaId: 'visual-fixture', kind: 'vocabulary', start: '0:00', end: '0:07', wholeMedia: false, focusTerm: 'phrase', models: {}

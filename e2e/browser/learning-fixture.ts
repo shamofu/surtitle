@@ -49,10 +49,10 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
       sourceTitle: media.title, createdAt: '2026-09-01T00:00:00Z', dueAt: '2026-09-01T00:00:00Z',
       reviewCount: 2, suspended: false, audioPath: 'test-phrase.wav',
     }],
-    settings: { locale, theme, learningLanguage: 'en', explanationLanguage: 'ja', dailyBudgetUsd: 0,
+    settings: { activeProvider: 'vertex', aiConfigurationGeneration: 0, openai: { credentialConfigured: false, dailyBudgetUsd: 0, aiModels: {} }, locale, theme, learningLanguage: 'en', explanationLanguage: 'ja', dailyBudgetUsd: 0,
       vertexProject: '', vertexLocation: 'global', credentialConfigured: false, retention: 0.9,
       replayContextMs: 150, sentencePause: false, proficiency: 'B1', aiModels: {}, },
-    jobs: [], budget: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 },
+    jobs: [], budgets: { vertex: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 }, openai: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 } },
     tools: [{ id: 'ffmpeg', name: 'FFmpeg', provider: 'external', status: 'ready', canRollback: false, version: '8.0' }],
   };
   if (options.cardCount !== undefined) {
@@ -171,15 +171,24 @@ export async function installLearningFixture(page: Page, locale: 'ja' | 'en', th
         calls.push({ command, args });
         if (command === 'get_app_snapshot') return structuredClone(snapshot);
         if (command === 'get_change_checkpoint') return { version: 1, epoch: 'fixture', revision, domains: [...domains].map(([domain, revision]) => ({ domain, revision })) };
-        if (command === 'get_snapshot_patch') return Object.fromEntries((args.domains as (keyof AppSnapshot)[]).map(domain => [domain, structuredClone(snapshot[domain])]));
+        if (command === 'get_snapshot_patch') return Object.fromEntries((args.domains as string[]).map(domain => { const field = domain === 'budget' ? 'budgets' : domain as keyof AppSnapshot; return [field, structuredClone(snapshot[field])]; }));
         if (command === 'get_settings_state') return { settings: structuredClone(snapshot.settings), revision: comparable(snapshot.settings) };
         if (command === 'update_settings_patch') {
           if (args.expectedRevision !== comparable(snapshot.settings)) throw new Error('Settings changed; keep your input and reload');
-          Object.assign(snapshot.settings, structuredClone(args.patch.budgets ?? args.patch));
-          if (args.patch.budgets) snapshot.budget.limitUsd = args.patch.budgets.monthlyBudgetUsd;
+          const { budgets, openaiModels, ...normal } = args.patch;
+          if (openaiModels) snapshot.settings.openai.aiModels = structuredClone(openaiModels);
+          if (budgets) { const { provider, ...limits } = budgets; Object.assign(provider === 'openai' ? snapshot.settings.openai : snapshot.settings, structuredClone(limits)); }
+          if (['activeProvider', 'aiModels', 'vertexLocation', 'openaiModels'].some(key => key in args.patch)) snapshot.settings.aiConfigurationGeneration += 1;
+          Object.assign(snapshot.settings, structuredClone(normal));
+          if (args.patch.budgets) snapshot.budgets[args.patch.budgets.provider ?? 'vertex'].limitUsd = args.patch.budgets.monthlyBudgetUsd;
           persist();
           return { settings: structuredClone(snapshot.settings), revision: comparable(snapshot.settings) };
         }
+        if (command === 'save_openai_api_key' || command === 'remove_openai_api_key') {
+          snapshot.settings.openai.credentialConfigured = command === 'save_openai_api_key';
+          snapshot.settings.aiConfigurationGeneration += 1; persist(); return;
+        }
+        if (command === 'list_openai_models') return [{ id: 'gpt-fixture', displayName: 'Fixture text' }, { id: 'gpt-fixture-transcribe', displayName: 'Fixture audio' }];
         if (command === 'get_ui_draft') return structuredClone(uiDrafts.get(`${args.kind}:${args.entityId}`) ?? null);
         if (command === 'list_ui_drafts') return structuredClone([...uiDrafts.values(), ...recoveredDrafts.values()]);
         if (command === 'archive_ui_draft') {

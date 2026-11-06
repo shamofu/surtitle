@@ -78,13 +78,15 @@ impl AiStore {
         )
     }
 
-    pub(crate) fn record_model_version(&self, attempt_id: &str, value: Option<&str>) -> Result<()> {
-        if let Some(version) = value.filter(|v| {
-            !v.is_empty()
-                && v.len() <= 200
-                && v.bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b"-._@".contains(&b))
-        }) {
+    pub(crate) fn record_model_version(
+        &self,
+        provider: crate::AiProvider,
+        attempt_id: &str,
+        value: Option<&str>,
+    ) -> Result<()> {
+        if let Some(version) =
+            value.filter(|v| crate::execution::valid_provider_model_id(provider, v))
+        {
             self.connect()?.execute(
                 "UPDATE ai_attempts SET model_version=? WHERE id=? AND state='reserved'",
                 params![version, attempt_id],
@@ -168,31 +170,21 @@ impl AiStore {
         }
         tx.execute("UPDATE ai_requests SET state=?,response_json=?,error_code=? WHERE job_id=? AND ordinal=?",params![if success {"completed"} else if state == "unknown" {"unknown"} else {"failed"},response.map(serde_json::to_string).transpose()?,error,job_id,ordinal])?;
         let over_reservation = charged.zip(reserve).is_some_and(|(n, r)| n > r);
-        let output_within_limit = usage
-            .and_then(|usage| {
-                let candidate = match usage.get("candidatesTokenCount") {
-                    Some(value) => value.as_u64()?,
-                    None if usage
-                        .get("totalTokenCount")
-                        .and_then(serde_json::Value::as_u64)
-                        == usage
-                            .get("promptTokenCount")
-                            .and_then(serde_json::Value::as_u64) =>
-                    {
-                        0
-                    }
-                    None => return None,
-                };
-                let thoughts = match usage.get("thoughtsTokenCount") {
-                    Some(value) => value.as_u64()?,
-                    None => 0,
-                };
-                usage
-                    .get("promptTokenCount")
-                    .and_then(serde_json::Value::as_u64)?;
-                candidate.checked_add(thoughts)
-            })
-            .is_some_and(|tokens| tokens <= u64::from(plan.execution.max_output_tokens));
+        // Both adapters normalize text usage before settlement. In particular,
+        // OpenAI output_tokens already includes reasoning; the shared parser
+        // must never add its provider-specific details a second time.
+        // OpenAI transcription is priced and bounded by submitted duration,
+        // with any excess monetary charge handled by over_reservation above.
+        let duration_usage = plan.execution.provider == crate::AiProvider::Openai
+            && plan
+                .requests
+                .get(ordinal as usize)
+                .and_then(|task| task.audio_attachment())
+                .is_some();
+        let output_within_limit = duration_usage
+            || usage
+                .and_then(|usage| crate::vertex::usage_counts(usage).ok())
+                .is_some_and(|(_, tokens)| tokens <= u64::from(plan.execution.max_output_tokens));
         let skip_rejection = !success
             && state == "settled"
             && dispatched

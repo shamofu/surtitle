@@ -35,7 +35,7 @@ function accounting() {
   return readDatabase('charges.sqlite', db => ({
     attempts: db.prepare('SELECT * FROM ai_attempts ORDER BY id').all(),
     jobs: db.prepare('SELECT id,digest,state,approved_at_ms,approval_json FROM ai_jobs ORDER BY id').all(),
-    limits: db.prepare('SELECT limits_json FROM ai_settings WHERE id=1').get().limits_json,
+    limits: db.prepare('SELECT provider, limits_json FROM ai_provider_settings ORDER BY provider').all(),
   }));
 }
 function responseHashes() {
@@ -136,7 +136,7 @@ async function assertOriginals() {
   for (const [id, original] of originalSegments) assert.deepEqual(await segments(id), original);
   const state = await snapshot();
   assert.equal(state.settings.credentialConfigured, false);
-  assert.equal(state.budget.spentUsd, 0); assert.equal(state.budget.reservedUsd, 0); assert.equal(state.budget.limitUsd, 0);
+  assert.equal(state.budgets.vertex.spentUsd, 0); assert.equal(state.budgets.vertex.reservedUsd, 0); assert.equal(state.budgets.vertex.limitUsd, 0);
 }
 function assertPcm(path, expectedMilliseconds) {
   const root = resolve(process.env.SURTITLE_E2E_DATA_DIR, 'card-audio');

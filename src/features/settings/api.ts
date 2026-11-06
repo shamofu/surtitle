@@ -8,6 +8,8 @@ export const settingsApi = {
   patch: (expectedRevision: string, patch: Record<string, unknown>) =>
     call('update_settings_patch', { expectedRevision, patch }),
   importCredential: () => call('import_credential'),
+  saveOpenaiApiKey: (apiKey: string) => call('save_openai_api_key', { apiKey }),
+  removeOpenaiApiKey: () => call('remove_openai_api_key'),
   updateSettings: (settings: AppSettings) =>
     call('update_settings', { settings }),
   updateAppearance: (appearance: {

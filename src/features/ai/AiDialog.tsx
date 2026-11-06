@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { activeProvider, aiConfiguration, providerProfile, providerConfigured, providerConfigurationKey } from './provider';
 import { QuoteApproval } from './QuoteApproval';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
@@ -29,7 +30,7 @@ import { AnimatedDetails } from '../../shared/ui/AnimatedDetails';
 import { ModelEditor, emptyModel } from './ModelEditor';
 import { useActivities } from '../../app/providers/Activities';
 import { ProgressStatus } from '../../shared/ui/ProgressStatus';
-import { useTranscriptionRequest } from './useTranscriptionRequest';
+import { preparationMatchesConfiguration, useTranscriptionRequest } from './useTranscriptionRequest';
 import { PreparationProgress } from './PreparationProgress';
 import { AnimatedValue, MotionRegion } from '../../shared/motion';
 import { SelectionIndicator } from '../../shared/motion/SelectionIndicator';
@@ -60,6 +61,9 @@ export function AiDialog({
   const { mutate } = useDataActions();
   const { t } = useAppearance();
   const { data } = useSnapshot();
+  const provider = activeProvider(data?.settings);
+  const configuration = providerConfigurationKey(data?.settings);
+  const continuationConfigurationMatches = !continuation || (continuation.provider ?? 'vertex') === provider && (continuation.aiConfigurationGeneration ?? 0) === (data?.settings.aiConfigurationGeneration ?? 0);
   const { report } = useNotifications();
   const { runTracked } = useActivities();
   const navigate = useNavigate();
@@ -70,7 +74,10 @@ export function AiDialog({
   const [focusTerm, setFocusTerm] = useState(continuation?.focusTerm ?? initialTerm ?? '');
   const [models, setModels] = useState<
     Partial<Record<AiPurpose, AiModelPreference>>
-  >(continuation?.models || {});
+  >(continuationConfigurationMatches ? continuation?.models || {} : {});
+  const modelConfiguration = useRef(configuration);
+  const effectiveModels = modelConfiguration.current === configuration ? models : {};
+  useEffect(() => { if (modelConfiguration.current !== configuration) { modelConfiguration.current = configuration; setModels({}); } }, [configuration]);
   const mediaSignature = JSON.stringify([media.path, media.audioStreamIndex, media.learningLanguage, media.explanationLanguage]);
   const currentSignature = useRef(mediaSignature);
   currentSignature.current = mediaSignature;
@@ -89,8 +96,8 @@ export function AiDialog({
           ? 'explanation'
           : 'vocabulary';
   const selectedModel =
-    models[purpose] ||
-    data?.settings.aiModels?.[purpose] ||
+    effectiveModels[purpose] ||
+    providerProfile(data?.settings)?.aiModels?.[purpose] ||
     emptyModel(purpose);
   const invalidSource = (sourceInvalid || mediaChanged) && kind !== 'transcribe';
   const modelValid =
@@ -115,6 +122,12 @@ export function AiDialog({
   const [preparations, setPreparations] = useState<TranscriptionPreparation[]>(
     [],
   );
+  const preparationConfiguration = useRef(configuration);
+  useEffect(() => {
+    if (preparationConfiguration.current === configuration) return;
+    preparationConfiguration.current = configuration;
+    setQuote(null); setPreparation(undefined); setPreparations([]); setBusy(false); pending.current = false;
+  }, [configuration]);
   useEffect(() => {
     if (mediaChanged) { setQuote(null); setPreparation(undefined); setPreparations([]); }
   }, [mediaSignature, mediaChanged]);
@@ -136,12 +149,13 @@ export function AiDialog({
     let active = true;
     void report(() => aiApi.transcriptionPreparations(media.id)).then(items => {
       if (active && items) {
-        setPreparations(continuationMediaChanged ? [] : items);
-        if (revision === initialRevision.current && !continuationMediaChanged && continuation?.preparationId) setPreparation(items.find(item => item.id === continuation.preparationId));
+        const compatible = items.filter(item => preparationMatchesConfiguration(item, aiConfiguration(data?.settings), selectedModel));
+        setPreparations(continuationMediaChanged ? [] : compatible);
+        if (revision === initialRevision.current && continuationConfigurationMatches && !continuationMediaChanged && continuation?.preparationId) setPreparation(compatible.find(item => item.id === continuation.preparationId));
       }
     });
     return () => { active = false; };
-  }, [kind, media.id, mediaSignature, mediaChanged, continuationMediaChanged, report, revision]);
+  }, [kind, media.id, mediaSignature, mediaChanged, continuationMediaChanged, continuationConfigurationMatches, configuration, selectedModel.transcriptionMode, report, revision]);
   const preparing = kind === 'transcribe' && (transcriptionRequest.phase === 'preparing' || transcriptionRequest.session?.status === 'running');
   const valid =
     startMs !== null &&
@@ -152,13 +166,13 @@ export function AiDialog({
   useEffect(() => {
     if (transcriptionRequest.session?.result && kind === 'transcribe') setPreparation(transcriptionRequest.session.result);
   }, [transcriptionRequest.session?.result, kind]);
-  const requestKey = JSON.stringify([revision, kind, startMs, endMs, wholeMedia, focusTerm.trim(), selectedModel, data?.settings.vertexLocation]);
+  const requestKey = JSON.stringify([configuration, revision, kind, startMs, endMs, wholeMedia, focusTerm.trim(), selectedModel, data?.settings.vertexLocation]);
   const inputKey = JSON.stringify([mediaSignature, requestKey]);
   const currentRequestKey = useRef(requestKey); currentRequestKey.current = requestKey;
   const currentInputKey = useRef(inputKey);
   currentInputKey.current = inputKey;
   const estimateAction = useRef(() => {});
-  const configured = !!data?.settings.credentialConfigured && !!data?.settings.vertexProject;
+  const configured = providerConfigured(data?.settings);
   useEffect(() => {
     if (quoteKey !== inputKey) setQuote(null);
     if (!valid || !modelValid || invalidSource || !configured || busy || preparing || lastAttempt.current === inputKey) return;
@@ -166,13 +180,13 @@ export function AiDialog({
     return () => window.clearTimeout(timer);
   }, [inputKey, quoteKey, valid, modelValid, invalidSource, configured, busy, preparing]);
   async function estimate() {
-    if (!valid || !modelValid || invalidSource || pending.current || busy || preparing || exit.exiting || !data?.settings.credentialConfigured)
+    if (!valid || !modelValid || invalidSource || pending.current || busy || preparing || exit.exiting || !configured)
       return;
     pending.current = true; setBusy(true); setBusyPhase('estimating'); setRestored(false); setQuote(null);
     try {
       if (kind === 'transcribe') {
         setBoundMediaSignature(mediaSignature);
-        const reusePreparation = !mediaChanged && preparation && preparation.startMs === startMs && preparation.endMs === endMs && !!preparation.wholeMedia === wholeMedia ? preparation : undefined;
+        const reusePreparation = !mediaChanged && preparation && preparationMatchesConfiguration(preparation, aiConfiguration(data?.settings), selectedModel) && preparation.startMs === startMs && preparation.endMs === endMs && !!preparation.wholeMedia === wholeMedia ? preparation : undefined;
         const result = await report(() => transcriptionRequest.estimate({
           fresh: true,
           reusePreparation,
@@ -195,18 +209,18 @@ export function AiDialog({
         return;
       }
       await report(() => saveContinuation());
-      if (currentRevision.current !== revision) return;
+      if (currentRevision.current !== revision || currentRequestKey.current !== requestKey) return;
       const preparedSignature = currentSignature.current;
       if (!mounted.current || preparedSignature !== mediaSignature || currentRevision.current !== revision) return;
       const result = await report(() => runTracked({ kind: 'estimate', label: media.title, phase: 'estimating', mediaId: media.id },
-        () => mutate(() => aiApi.createQuote({ mediaId: media.id, kind, startMs, endMs,
+        () => mutate(() => aiApi.createQuote({ ...aiConfiguration(data?.settings), mediaId: media.id, kind, startMs, endMs,
           focusTerm: kind === 'vocabulary' ? focusTerm.trim() || undefined : undefined, model: selectedModel }), { kind: 'snapshot' })));
-      if (result && currentSignature.current === preparedSignature && currentRevision.current === revision) {
+      if (result && currentSignature.current === preparedSignature && currentRevision.current === revision && currentRequestKey.current === requestKey) {
         await report(() => saveContinuation(result.id, undefined, preparedSignature));
         if (mounted.current && currentRevision.current === revision && currentRequestKey.current === requestKey) { const acceptedKey = JSON.stringify([preparedSignature, requestKey]); lastAttempt.current = acceptedKey; setQuote(result); setQuoteKey(acceptedKey); }
       }
     } finally {
-      if (currentRevision.current === revision) { pending.current = false; if (mounted.current) setBusy(false); }
+      if (currentRevision.current === revision && currentRequestKey.current === requestKey) { pending.current = false; if (mounted.current) setBusy(false); }
     }
   }
   estimateAction.current = () => { void estimate(); };
@@ -224,7 +238,7 @@ export function AiDialog({
     setBusy(false);
   }
   function saveContinuation(quoteId = quote?.id, preparationId = preparation?.id, sourceSignature = mediaSignature) {
-    return continuationApi.save({ id: continuationId, mediaId: media.id, kind, start, end, wholeMedia, focusTerm, models, preparationId, quoteId,
+    return continuationApi.save({ provider, aiConfigurationGeneration: data?.settings.aiConfigurationGeneration ?? 0, id: continuationId, mediaId: media.id, kind, start, end, wholeMedia, focusTerm, models: effectiveModels, preparationId, quoteId,
       sourceCueIds: sourceContext?.sourceCueIds ?? continuation?.sourceCueIds,
       sourceRevision: sourceContext?.sourceRevision ?? continuation?.sourceRevision,
       sourceMediaSignature: kind === 'transcribe' ? sourceSignature : boundMediaSignature });
@@ -237,12 +251,12 @@ export function AiDialog({
     if (saved) await report(() => exit.close(async () => { onClose(); await navigate({ to: '/settings', search: { resume: saved.id } }); }));
   }
   useEffect(() => {
-    if (!continuation?.quoteId || continuationMediaChanged || !nativeAvailable() || revision !== initialRevision.current) return;
+    if (!continuationConfigurationMatches || !continuation?.quoteId || continuationMediaChanged || !nativeAvailable() || revision !== initialRevision.current) return;
     let active = true;
     lastAttempt.current = inputKey;
     void report(() => runTracked({ kind: 'estimate', label: media.title, phase: 'estimating', mediaId: media.id }, () => aiApi.reviewAiJob(continuation.quoteId!))).then(result => { if (active && result && currentInputKey.current === inputKey) { setQuote(result); setQuoteKey(inputKey); } });
     return () => { active = false; };
-  }, [continuation?.quoteId, continuationMediaChanged, report, runTracked, revision]);
+  }, [continuation?.quoteId, continuationConfigurationMatches, configuration, continuationMediaChanged, report, runTracked, revision]);
   async function reselectSource() {
     if (busy || preparing || exit.exiting || !onReselectSource) return;
     setBusy(true); setBusyPhase('setup');
@@ -306,7 +320,7 @@ export function AiDialog({
               </button>
             ))}
           </div>
-          <MotionRegion mode="status" open={!data?.settings.credentialConfigured || !modelValid || !data?.settings.vertexProject}><div className="notice warning">
+          <MotionRegion mode="status" open={!configured || !modelValid}><div className="notice warning">
             <p>{t('AIを使うための設定が必要です。入力と対象範囲を残して設定へ進めます。', 'Finish AI setup. Your input and selected scope will be kept.')}</p>
             <Button disabled={busy || preparing} onClick={() => void openSettings()}>{t('設定してこの操作に戻る', 'Set up and return here')}</Button>
           </div></MotionRegion>
@@ -469,7 +483,7 @@ export function AiDialog({
           </MotionRegion>
           <AnimatedDetails className="ai-model-settings" open={!modelValid}>
             <summary>{modelValid ? `${t('使用するモデル', 'Model')}: ${selectedModel.modelId}` : t('モデルを選ぶ', 'Choose a model')}</summary>
-            <ModelEditor
+            <ModelEditor key={configuration} provider={provider} configurationGeneration={data?.settings.aiConfigurationGeneration}
               purpose={purpose}
               value={selectedModel}
               location={data?.settings.vertexLocation || 'global'}
@@ -479,11 +493,11 @@ export function AiDialog({
               }
             />
           </AnimatedDetails>
-          <MotionRegion mode="status" open={!data?.settings.credentialConfigured && !preparing}>
+          <MotionRegion mode="status" open={!configured && !preparing}>
             <p className="helper-text">
               {t(
-                'AI を使うにはサービスアカウントの設定が必要です。',
-                'Set up your service account to use AI.',
+                provider === 'openai' ? 'AI を使うにはAPIキーの設定が必要です。' : 'AI を使うにはサービスアカウントの設定が必要です。',
+                provider === 'openai' ? 'Set up your API key to use AI.' : 'Set up your service account to use AI.',
               )}{' '}
               <Button onClick={() => void openSettings()}>{t('設定を開く', 'Open settings')} →</Button>
             </p>

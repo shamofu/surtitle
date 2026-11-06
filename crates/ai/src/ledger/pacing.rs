@@ -26,32 +26,39 @@ pub(super) fn initialize(conn: &Connection) -> Result<()> {
             success_streak INTEGER NOT NULL DEFAULT 0 CHECK(success_streak BETWEEN 0 AND 2),
             last_dispatch_ms INTEGER, cooldown_until_ms INTEGER NOT NULL DEFAULT 0,
             policy_version INTEGER NOT NULL DEFAULT 2 CHECK(policy_version=2),
-            PRIMARY KEY(project_id,model_id,location));";
-    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
-    tx.execute_batch(SCHEMA)?;
-    let current: bool = tx.query_row(
+            provider TEXT NOT NULL DEFAULT 'vertex' CHECK(provider IN ('vertex','openai')),
+            PRIMARY KEY(provider,project_id,model_id,location));";
+    // The caller owns the schema transaction, including the v2 -> v3 version.
+    conn.execute_batch(SCHEMA)?;
+    let current: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('ai_transcription_pacing') WHERE name='policy_version')",
         [], |row| row.get(0),
     )?;
-    if !current {
+    let scoped: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('ai_transcription_pacing') WHERE name='provider')",
+        [], |row| row.get(0),
+    )?;
+    if !current || !scoped {
         // Remove only the old unconditional floor. A lane that has observed a
         // rejection retains its interval and server cooldown, even after expiry.
         // Approval retry floors, reservations, unknown holds and charges are in
         // separate tables and are never rewritten by this atomic migration.
-        tx.execute_batch(
+        conn.execute_batch(
             "ALTER TABLE ai_transcription_pacing RENAME TO ai_transcription_pacing_fixed_floor;",
         )?;
-        tx.execute_batch(SCHEMA)?;
-        tx.execute_batch(
+        conn.execute_batch(SCHEMA)?;
+        let interval = if current {
+            "interval_ms"
+        } else {
+            "CASE WHEN interval_ms=10000 AND cooldown_until_ms=0 THEN 0 ELSE interval_ms END"
+        };
+        conn.execute_batch(&format!(
             "INSERT INTO ai_transcription_pacing(project_id,model_id,location,interval_ms,success_streak,last_dispatch_ms,cooldown_until_ms)
-             SELECT project_id,model_id,location,
-                CASE WHEN interval_ms=10000 AND cooldown_until_ms=0 THEN 0 ELSE interval_ms END,
-                success_streak,last_dispatch_ms,cooldown_until_ms
+             SELECT project_id,model_id,location,{interval},success_streak,last_dispatch_ms,cooldown_until_ms
              FROM ai_transcription_pacing_fixed_floor;
-             DROP TABLE ai_transcription_pacing_fixed_floor;",
-        )?;
+             DROP TABLE ai_transcription_pacing_fixed_floor;"
+        ))?;
     }
-    tx.commit()?;
     Ok(())
 }
 
@@ -80,11 +87,12 @@ fn lane(conn: &Connection, plan: &PreparedJob) -> Result<Lane> {
     Ok(conn
         .query_row(
             "SELECT interval_ms,last_dispatch_ms,cooldown_until_ms FROM ai_transcription_pacing
-         WHERE project_id=? AND model_id=? AND location=?",
+         WHERE project_id=? AND model_id=? AND location=? AND provider=?",
             params![
                 plan.project_id,
                 plan.execution.model_id,
-                plan.execution.location
+                plan.execution.location,
+                plan.execution.provider.as_str()
             ],
             |row| {
                 Ok(Lane {
@@ -190,10 +198,10 @@ impl AiStore {
         self.check_pacing(conn, plan, ordinal, at)?;
         if self.pacing_applies(plan, ordinal) {
             conn.execute(
-                "INSERT INTO ai_transcription_pacing(project_id,model_id,location,interval_ms,last_dispatch_ms)
-                 VALUES (?,?,?,0,?) ON CONFLICT(project_id,model_id,location)
+                "INSERT INTO ai_transcription_pacing(project_id,model_id,location,interval_ms,last_dispatch_ms,provider)
+                 VALUES (?,?,?,0,?,?) ON CONFLICT(provider,project_id,model_id,location)
                  DO UPDATE SET last_dispatch_ms=excluded.last_dispatch_ms",
-                params![plan.project_id,plan.execution.model_id,plan.execution.location,at],
+                params![plan.project_id,plan.execution.model_id,plan.execution.location,at,plan.execution.provider.as_str()],
             )?;
         }
         Ok(())
@@ -219,10 +227,10 @@ impl AiStore {
             .max(timing.at.saturating_add(interval + jitter))
             .max(timing.server_floor.unwrap_or(0));
         conn.execute(
-            "INSERT INTO ai_transcription_pacing(project_id,model_id,location,interval_ms,last_dispatch_ms,cooldown_until_ms)
-             VALUES (?,?,?,?,?,?) ON CONFLICT(project_id,model_id,location)
+            "INSERT INTO ai_transcription_pacing(project_id,model_id,location,interval_ms,last_dispatch_ms,cooldown_until_ms,provider)
+             VALUES (?,?,?,?,?,?,?) ON CONFLICT(provider,project_id,model_id,location)
              DO UPDATE SET interval_ms=excluded.interval_ms,success_streak=0,cooldown_until_ms=excluded.cooldown_until_ms",
-            params![plan.project_id,plan.execution.model_id,plan.execution.location,interval,lane.last_dispatch,next],
+            params![plan.project_id,plan.execution.model_id,plan.execution.location,interval,lane.last_dispatch,next,plan.execution.provider.as_str()],
         )?;
         Ok(Some(next))
     }
@@ -239,8 +247,8 @@ impl AiStore {
                 "UPDATE ai_transcription_pacing SET
                  interval_ms=CASE WHEN ? AND success_streak=2 THEN MAX(0,interval_ms-5000) ELSE interval_ms END,
                  success_streak=CASE WHEN ? THEN (success_streak+1)%3 ELSE 0 END
-                 WHERE project_id=? AND model_id=? AND location=?",
-                params![success,success,plan.project_id,plan.execution.model_id,plan.execution.location],
+                 WHERE project_id=? AND model_id=? AND location=? AND provider=?",
+                params![success,success,plan.project_id,plan.execution.model_id,plan.execution.location,plan.execution.provider.as_str()],
             )?;
         }
         Ok(())

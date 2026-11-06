@@ -8,7 +8,7 @@ import type { ChangeCheckpoint, DataChangeEvent } from '../shared/contracts/sync
 
 const disposers: (() => void)[] = [];
 afterEach(() => { disposers.splice(0).forEach(dispose => dispose()); vi.useRealTimers(); });
-const baseline = { media: [], cards: [], jobs: [], tools: [], settings: { locale: 'en' }, budget: {} } as unknown as AppSnapshot;
+const baseline = { media: [], cards: [], jobs: [], tools: [], settings: { locale: 'en' }, budgets: {} } as unknown as AppSnapshot;
 function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(queryKeys.snapshot, baseline);
@@ -25,7 +25,7 @@ function setup() {
 it('updates only a notified snapshot domain and preserves unrelated object identity', async () => {
   const { client, source, sync, event } = setup();
   const old = client.getQueryData<AppSnapshot>(queryKeys.snapshot)!;
-  source.patch.mockResolvedValue({ jobs: [{ id: 'job', kind: 'translate', status: 'completed', progress: 1, createdAt: '' }] });
+  source.patch.mockResolvedValue({ jobs: [{ provider: 'vertex', id: 'job', kind: 'translate', status: 'completed', progress: 1, createdAt: '' }] });
   event('jobs', 1, 'job');
   await sync.flush();
   expect(source.patch).toHaveBeenCalledExactlyOnceWith(['jobs']);
@@ -34,6 +34,19 @@ it('updates only a notified snapshot domain and preserves unrelated object ident
   expect(next.settings).toBe(old.settings);
   expect(next.cards).toBe(old.cards);
   expect(next.media).toBe(old.media);
+});
+
+it('refreshes both provider budgets from a singular budget domain notification', async () => {
+  const { client, source, sync, event } = setup();
+  const budgets = {
+    vertex: { spentUsd: 1, reservedUsd: 2, limitUsd: 10 },
+    openai: { spentUsd: 3, reservedUsd: 4, limitUsd: 20 },
+  };
+  source.patch.mockResolvedValue({ budgets });
+  event('budget', 1);
+  await sync.flush();
+  expect(source.patch).toHaveBeenCalledExactlyOnceWith(['budget']);
+  expect(client.getQueryData<AppSnapshot>(queryKeys.snapshot)?.budgets).toEqual(budgets);
 });
 
 it('coalesces progress bursts and never invalidates data domains for unrelated activity', async () => {

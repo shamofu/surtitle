@@ -318,13 +318,13 @@ fn summary_separates_actual_and_unresolved_without_refunding_unknown() {
     let r = s.reserve_next_at(&q.id, AT).unwrap().unwrap();
     let conn = s.connect().unwrap();
     assert_eq!(
-        period_breakdown(&conn, AT).unwrap(),
+        period_breakdown(&conn, AT, crate::AiProvider::Vertex).unwrap(),
         (0, r.reserved_microusd.unwrap())
     );
     s.mark_unknown(&r.attempt_id).unwrap();
     s.acknowledge_unknown(&r.attempt_id).unwrap();
     assert_eq!(
-        period_breakdown(&conn, AT).unwrap(),
+        period_breakdown(&conn, AT, crate::AiProvider::Vertex).unwrap(),
         (0, r.reserved_microusd.unwrap())
     );
     assert!(s

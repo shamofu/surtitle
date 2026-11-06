@@ -96,10 +96,10 @@ pub(super) fn manual_editing_allowed(state: &AppState, binding: &TranscriptJob) 
     ensure!(
         !state
             .ai
-            .summary()?
+            .summary_for(quote.execution.provider)?
             .unknown_attempts
             .iter()
-            .any(|a| a.job_id == binding.job_id && a.state == "reserved"),
+            .any(|attempt| attempt.job_id == binding.job_id && attempt.state == "reserved"),
         "Wait for the in-flight request to finish after pausing, then refresh"
     );
     Ok(())

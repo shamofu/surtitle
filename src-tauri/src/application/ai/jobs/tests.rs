@@ -92,6 +92,8 @@ impl Fixture {
         let quote = create_quote(
             state.clone(),
             QuoteRequest {
+                provider: None,
+                ai_configuration_generation: None,
                 media_id: "offline-app-media".into(),
                 kind: "translate".into(),
                 start_ms: 0,
@@ -302,6 +304,8 @@ async fn another_job_can_start_during_a_request_and_gets_the_next_dispatch_turn(
     let quote = create_quote(
         fixture.state.clone(),
         QuoteRequest {
+            provider: None,
+            ai_configuration_generation: None,
             media_id: "offline-app-media".into(),
             kind: "translate".into(),
             start_ms: 0,
@@ -369,6 +373,8 @@ async fn queued_pause_cancel_or_new_unknown_outcome_never_dispatches_waiting_wor
         let quote = create_quote(
             fixture.state.clone(),
             QuoteRequest {
+                provider: None,
+                ai_configuration_generation: None,
                 media_id: "offline-app-media".into(),
                 kind: "translate".into(),
                 start_ms: 0,
@@ -699,6 +705,245 @@ async fn source_or_settings_change_during_auth_prevents_the_first_send() {
             (0, 0)
         );
     }
+}
+
+#[tokio::test]
+async fn provider_switch_during_auth_keeps_approved_vertex_work_and_charges_on_vertex() {
+    let fixture = Fixture::new().await;
+    let service = fixture.offline(Scenario::Translation);
+    let mut checkpoint = service.checkpoint(Stage::BeforeDispatch, 0);
+    let worker = fixture.start(fixture.approve(), service.clone());
+    reached(&mut checkpoint).await;
+    fixture
+        .state
+        .preferences
+        .update(|p| {
+            p.settings.active_provider = surtitle_core::AiProvider::Openai;
+            p.openai_credential_id = Some("new-openai-key".into());
+            p.settings.ai_configuration_generation += 1;
+            Ok(())
+        })
+        .unwrap();
+    checkpoint.resume();
+    finished(worker).await.unwrap();
+    assert_eq!(service.sent_ordinals(), [0, 1]);
+    fixture.assert_attempts(&["settled", "settled"]);
+    assert!(
+        fixture
+            .state
+            .ai
+            .summary_for(surtitle_core::AiProvider::Vertex)
+            .unwrap()
+            .monthly_actual_charged_microusd
+            > 0
+    );
+    assert_eq!(
+        fixture
+            .state
+            .ai
+            .summary_for(surtitle_core::AiProvider::Openai)
+            .unwrap()
+            .monthly_actual_charged_microusd,
+        0
+    );
+    assert!(fixture.translations().iter().all(Option::is_some));
+}
+
+#[tokio::test]
+async fn provider_round_trip_requires_reviewing_an_unapproved_quote_again() {
+    let fixture = Fixture::new().await;
+    fixture
+        .state
+        .preferences
+        .update(|p| {
+            p.settings.active_provider = surtitle_core::AiProvider::Openai;
+            p.settings.ai_configuration_generation += 1;
+            Ok(())
+        })
+        .unwrap();
+    fixture
+        .state
+        .preferences
+        .update(|p| {
+            p.settings.active_provider = surtitle_core::AiProvider::Vertex;
+            p.settings.ai_configuration_generation += 1;
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        approve_for_execution(
+            &fixture.state,
+            &fixture.quote.id,
+            &fixture.quote.digest,
+            false,
+            false,
+            true
+        )
+        .is_err()
+    );
+    assert_eq!(
+        fixture.state.ai.quote(&fixture.quote.id).unwrap().state,
+        "prepared"
+    );
+    let stale_request = create_quote(
+        fixture.state.clone(),
+        QuoteRequest {
+            provider: Some(surtitle_core::AiProvider::Vertex),
+            ai_configuration_generation: Some(0),
+            media_id: "offline-app-media".into(),
+            kind: "translate".into(),
+            start_ms: 0,
+            end_ms: 31_000,
+            focus_term: None,
+            model: None,
+        },
+    )
+    .await;
+    assert!(stale_request.err().unwrap().contains("AI settings changed"));
+    assert!(
+        approve_for_execution(
+            &fixture.state,
+            &fixture.quote.id,
+            &fixture.quote.digest,
+            true,
+            false,
+            true
+        )
+        .is_err(),
+        "Calling the retry endpoint must not bypass a stale unapproved estimate"
+    );
+    let renewed = create_quote(
+        fixture.state.clone(),
+        QuoteRequest {
+            provider: None,
+            ai_configuration_generation: None,
+            media_id: "offline-app-media".into(),
+            kind: "translate".into(),
+            start_ms: 0,
+            end_ms: 31_000,
+            focus_term: None,
+            model: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(renewed.can_approve, "{:?}", renewed.blocked_reason);
+    assert_eq!(
+        renewed.id, fixture.quote.id,
+        "Equivalent input keeps the saved plan identity"
+    );
+    assert!(
+        approve_for_execution_with_retry(
+            &fixture.state,
+            &fixture.quote.id,
+            &fixture.quote.digest,
+            false,
+            false,
+            true,
+            ApprovalReview {
+                ai_configuration_generation: Some(fixture.quote.ai_configuration_generation),
+                ..Default::default()
+            }
+        )
+        .is_err(),
+        "Renewing the same plan must not revive the stale reviewed view"
+    );
+    approve_for_execution_with_retry(
+        &fixture.state,
+        &renewed.id,
+        &renewed.digest,
+        false,
+        false,
+        true,
+        ApprovalReview {
+            ai_configuration_generation: Some(renewed.ai_configuration_generation),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn changing_frozen_provider_credential_stops_dispatch_after_switching_away() {
+    let fixture = Fixture::new().await;
+    let service = fixture.offline(Scenario::Translation);
+    let mut checkpoint = service.checkpoint(Stage::BeforeDispatch, 0);
+    let worker = fixture.start(fixture.approve(), service.clone());
+    reached(&mut checkpoint).await;
+    fixture
+        .state
+        .preferences
+        .update(|p| {
+            p.settings.active_provider = surtitle_core::AiProvider::Openai;
+            p.credential_id = Some("replacement-vertex-credential".into());
+            p.settings.ai_configuration_generation += 1;
+            Ok(())
+        })
+        .unwrap();
+    checkpoint.resume();
+    assert!(finished(worker).await.is_err());
+    assert!(service.sent_ordinals().is_empty());
+    fixture.assert_attempts(&["released"]);
+}
+
+#[tokio::test]
+async fn openai_unknown_acknowledgement_keeps_its_hold_and_releases_its_blocker() {
+    let fixture = Fixture::new().await;
+    let original = fixture.state.ai.prepared_job(&fixture.quote.id).unwrap();
+    let mut execution = original.execution.clone();
+    execution.provider = surtitle_core::AiProvider::Openai;
+    execution.response_mode = ResponseMode::Responses;
+    let plan = PreparedJob::new(
+        "OpenAI unknown recovery".into(),
+        "openai".into(),
+        "offline-openai-key".into(),
+        original.binding,
+        original.requests,
+        execution,
+    )
+    .unwrap();
+    let quote = fixture.state.ai.prepare(plan).unwrap();
+    fixture.state.ai.approve(&quote.id, &quote.digest).unwrap();
+    let attempt = fixture.state.ai.reserve_next(&quote.id).unwrap().unwrap();
+    fixture.state.ai.mark_unknown(&attempt.attempt_id).unwrap();
+    let before = fixture
+        .state
+        .ai
+        .summary_for(surtitle_core::AiProvider::Openai)
+        .unwrap();
+    assert!(before.monthly_held_microusd > 0);
+    resolve_unknown_attempt(fixture.state.clone(), attempt.attempt_id.clone()).unwrap();
+    let after = fixture
+        .state
+        .ai
+        .summary_for(surtitle_core::AiProvider::Openai)
+        .unwrap();
+    assert_eq!(after.monthly_held_microusd, before.monthly_held_microusd);
+    assert!(
+        after
+            .unknown_attempts
+            .iter()
+            .all(|attempt| attempt.state != "unknown")
+    );
+    assert_eq!(
+        fixture
+            .state
+            .ai
+            .summary_for(surtitle_core::AiProvider::Vertex)
+            .unwrap()
+            .monthly_held_microusd,
+        0
+    );
+    assert_eq!(
+        fixture
+            .state
+            .ai
+            .job_issue(&quote.id)
+            .unwrap()
+            .unwrap()
+            .next_action,
+        "resume"
+    );
 }
 
 #[tokio::test]

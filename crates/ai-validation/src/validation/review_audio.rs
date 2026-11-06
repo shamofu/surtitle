@@ -214,6 +214,7 @@ fn review(manifest: &ReviewManifest, results: &Value) -> Result<Value> {
                 } else {
                     BoundaryKind::Forced
                 },
+                boundary_provenance: None,
             });
             if part.no_speech_detected {
                 no_speech.push(part.ordinal);

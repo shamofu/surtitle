@@ -15,7 +15,7 @@ import { PreparationSessionsProvider, useClearPreparationSessions } from '../fea
 
 const render = (ui: ReactElement) => renderView(ui, { wrapper: PreparationSessionsProvider });
 function RestoreData() { const clear = useClearPreparationSessions(); return <button onClick={clear}>Restore data</button>; }
-const fixture = vi.hoisted(() => ({ configured: true, jobs: [] as JobSummary[], activities: [] as Activity[], navigate: vi.fn(), locale: 'en' as 'ja' | 'en' }));
+const fixture = vi.hoisted(() => ({ configured: true, generation: 0, jobs: [] as JobSummary[], activities: [] as Activity[], navigate: vi.fn(), locale: 'en' as 'ja' | 'en' }));
 vi.mock('../app/providers/Activities', () => {
   const runTracked = async (_descriptor: unknown, action: () => Promise<unknown>) => action();
   return { useActivities: () => ({ activities: fixture.activities, runTracked }) };
@@ -33,16 +33,16 @@ vi.mock('../app/runtime', () => {
   const t = (ja: string, en: string) => fixture.locale === 'ja' ? ja : en;
   const report = async (action: () => Promise<unknown>) => { try { return await action(); } catch { return undefined; } };
   const runtime = () => ({ t, report, mutate: (action: () => Promise<unknown>) => action(),
-    data: { settings: { credentialConfigured: fixture.configured, vertexProject: 'project', vertexLocation: 'global', aiModels: {
+    data: { settings: { aiConfigurationGeneration: fixture.generation, credentialConfigured: fixture.configured, vertexProject: 'project', vertexLocation: 'global', aiModels: {
       transcription: { modelId: 'gemini-transcribe', transcriptionMode: 'transcribe', maxOutputTokens: 12288 },
-    } }, jobs: fixture.jobs, budget: { unknownAttempts: [] } } });
+    } }, jobs: fixture.jobs, budgets: { vertex: { unknownAttempts: [] }, openai: { unknownAttempts: [] } } } });
   return { useAppearance: runtime, useSnapshot: runtime, useDataActions: runtime, useNotifications: runtime };
 });
 const media: Media = { id: 'media', title: 'Recording', path: 'C:/audio.wav', kind: 'audio', durationMs: 300000, learningLanguage: 'en', explanationLanguage: 'ja', createdAt: '', lastPositionMs: 0, segmentCount: 0, cardCount: 0, status: 'ready' };
 const preparation = { id: 'prepared', mediaId: 'media', startMs: 0, endMs: 300000, wholeMedia: true, coreDurationMs: 300000, sendDurationMs: 306000, chunkCount: 3 };
-const quote: AiQuote = { id: 'quote', mediaId: 'media', kind: 'transcribe', startMs: 0, endMs: 300000, model: 'gemini-transcribe', estimatedUsd: .1, maximumUsd: .2, inputTokens: 100, maxOutputTokens: 12288, expiresAt: '2099-01-01T00:00:00Z', warnings: [], canApprove: true, applyPolicy: 'auto' };
+const quote: AiQuote = { aiConfigurationGeneration: 0, provider: 'vertex', id: 'quote', mediaId: 'media', kind: 'transcribe', startMs: 0, endMs: 300000, model: 'gemini-transcribe', estimatedUsd: .1, maximumUsd: .2, inputTokens: 100, maxOutputTokens: 12288, expiresAt: '2099-01-01T00:00:00Z', warnings: [], canApprove: true, applyPolicy: 'auto' };
 beforeEach(() => {
-  fixture.configured = true; fixture.jobs = []; fixture.activities = []; fixture.locale = 'en';
+  fixture.configured = true; fixture.generation = 0; fixture.jobs = []; fixture.activities = []; fixture.locale = 'en';
   vi.mocked(libraryApi.mediaStreams).mockResolvedValue([]);
   vi.mocked(aiApi.prepareTranscription).mockResolvedValue(preparation);
   vi.mocked(aiApi.createTranscriptionQuote).mockResolvedValue(quote);
@@ -53,11 +53,26 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.resetAllMocks(); });
 
+it('reprepares after the configuration changes while an old preparation is pending', async () => {
+  let finish!: (value: typeof preparation) => void;
+  vi.mocked(aiApi.prepareTranscription).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  const view = render(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledOnce());
+  fixture.generation = 1;
+  view.rerender(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={vi.fn()} />);
+  await screen.findByRole('button', { name: 'Start transcription' });
+  expect(aiApi.prepareTranscription).toHaveBeenCalledTimes(2);
+  await act(async () => finish({ ...preparation, id: 'stale-preparation' }));
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledExactlyOnceWith(preparation.id, expect.any(Object), { provider: 'vertex', aiConfigurationGeneration: 1 });
+  expect(vi.mocked(continuationApi.save).mock.calls.some(([saved]) => saved.preparationId === 'stale-preparation')).toBe(false);
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+});
+
 it('prepares and estimates on entry, then starts only after one explicit priced action', async () => {
   const done = vi.fn();
   render(<TranscriptionWorkspace media={media} request={{ id: 'new' }} onRequest={vi.fn()} onDone={done} />);
   const start = await screen.findByRole('button', { name: 'Start transcription' });
-  expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith('media', 0, 300000, true, expect.any(String));
+  expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith('media', 0, 300000, true, expect.any(String), expect.any(Object));
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(screen.queryByRole('checkbox', { name: /approve this job/i })).not.toBeInTheDocument();
@@ -112,7 +127,7 @@ it('shows the source file and selected audio track using its position among audi
 it('prepares a selected repair range without a boundary-review or adoption step', async () => {
   render(<TranscriptionWorkspace media={media} request={{ id: 'repair', range: { startMs: 30000, endMs: 55000 } }} onRequest={vi.fn()} onDone={vi.fn()} />);
   await screen.findByRole('button', { name: 'Start transcription' });
-  expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith('media', 30000, 55000, false, expect.any(String));
+  expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith('media', 30000, 55000, false, expect.any(String), expect.any(Object));
   expect(screen.queryByRole('button', { name: 'Adopt these subtitles' })).not.toBeInTheDocument();
 });
 
@@ -162,7 +177,7 @@ it('keeps the exact range in a continuation when setup is needed', async () => {
 });
 
 it('shows ongoing received and failed ranges without requiring a draft review', () => {
-  fixture.jobs = [{ id: 'running', mediaId: 'media', kind: 'transcribe', status: 'running', createdAt: '', progress: .5,
+  fixture.jobs = [{ provider: 'vertex', id: 'running', mediaId: 'media', kind: 'transcribe', status: 'running', createdAt: '', progress: .5,
     message: 'Subtitles are appearing as results arrive', automaticTranscript: true,
     transcriptionRanges: [{ startMs: 0, endMs: 100000, state: 'received' }, { startMs: 100000, endMs: 200000, state: 'failed' }, { startMs: 200000, endMs: 300000, state: 'pending' }] }];
   const request = vi.fn();
@@ -317,7 +332,7 @@ it('ignores a pending estimate after data restore without starting another reque
 });
 
 it('uses compatible saved results with one local action and no new paid request', async () => {
-  fixture.jobs = [{ id: 'old', mediaId: 'media', kind: 'transcribe', status: 'completed', createdAt: '', progress: 1, hasTranscriptResult: true }];
+  fixture.jobs = [{ provider: 'vertex', id: 'old', mediaId: 'media', kind: 'transcribe', status: 'completed', createdAt: '', progress: 1, hasTranscriptResult: true }];
   const review: TranscriptReview = { jobId: 'old', mediaId: 'media', applied: false, canApply: true, repairAlternatives: [],
     draft: { id: 'draft', mediaId: 'media', sourceSha256: 'audio', sourceRevision: 'revision', digest: 'saved-digest', startMs: 0, endMs: 300000,
       canAdopt: true, segments: [], chunks: [], conflicts: [{ id: 'boundary', atMs: 1000, startMs: 0, endMs: 2000, leftOrdinal: 0, rightOrdinal: 1,
@@ -338,7 +353,7 @@ it('uses compatible saved results with one local action and no new paid request'
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
 });
 
-const waitingJob: JobSummary = {
+const waitingJob: JobSummary = { provider: 'vertex',
   id: 'waiting', mediaId: 'media', kind: 'transcribe', status: 'running', createdAt: '', progress: 1 / 3,
   message: 'Old generic provider message', automaticTranscript: true,
   retry: { state: 'waiting', ordinal: 1, retryNumber: 1, maxRetries: 2, nextRetryAt: '2026-10-10T00:00:30Z' },

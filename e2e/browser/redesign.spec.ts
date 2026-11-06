@@ -18,7 +18,7 @@ for (const locale of ['ja', 'en'] as const) for (const theme of ['light', 'dark'
       await expect(page.locator('.study-auxiliary')).toBeHidden();
       await page.evaluate(() => {
         const fixture = (window as any).__learningFixture;
-        fixture.snapshot.jobs = Array.from({ length: 20 }, (_, index) => ({ id: `progress-${index}`, kind: 'vocabulary', mediaId: 'visual-fixture', status: 'running', progress: .5, message: 'running', createdAt: new Date().toISOString() }));
+        fixture.snapshot.jobs = Array.from({ length: 20 }, (_, index) => ({ provider: 'vertex', id: `progress-${index}`, kind: 'vocabulary', mediaId: 'visual-fixture', status: 'running', progress: .5, message: 'running', createdAt: new Date().toISOString() }));
         fixture.publish('data-changed', { version: 1, epoch: 'fixture', revision: 1, domain: 'jobs' });
       });
       await expect.poll(() => page.evaluate(() => (window as any).__learningFixture.calls.filter((call: any) => call.command === 'get_snapshot_patch' && call.args.domains.includes('jobs')).length)).toBeGreaterThan(0);

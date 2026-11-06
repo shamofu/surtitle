@@ -1623,3 +1623,685 @@ async fn killed_worker_after_dispatch_retains_unknown_at_each_response_stage() {
         );
     }
 }
+
+fn openai_harness(
+    tasks: Vec<RequestTask>,
+    replies: Vec<std::result::Result<FakeResponse, SendFailure>>,
+) -> Harness {
+    let mut h = Harness::with_approval(tasks, replies, false);
+    h.store
+        .set_budget_for(
+            crate::AiProvider::Openai,
+            BudgetLimits {
+                per_job_microusd: 1_000_000,
+                daily_microusd: 1_000_000,
+                monthly_microusd: 1_000_000,
+            },
+        )
+        .unwrap();
+    let mut plan = h.store.prepared_job(&h.quote.id).unwrap();
+    plan.project_id = "openai".into();
+    let mut execution = plan.execution.clone();
+    execution.provider = crate::AiProvider::Openai;
+    execution.location = "global".into();
+    execution.model_id = "gpt-future".into();
+    execution.response_mode = if plan.requests[0].audio_attachment().is_some() {
+        ResponseMode::AudioTranscriptions
+    } else {
+        ResponseMode::Responses
+    };
+    if let Some(price) = &mut execution.price {
+        price.audio_microusd_per_minute = Some(6000);
+    }
+    h.quote = h
+        .store
+        .prepare(plan.with_execution(execution).unwrap())
+        .unwrap();
+    h.store.approve(&h.quote.id, &h.quote.digest).unwrap();
+    h
+}
+fn openai_response() -> Value {
+    json!({"status":"completed","model":"gpt-future","usage":{"input_tokens":10,"output_tokens":5,"output_tokens_details":{"reasoning_tokens":3}},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":valid_response()["candidates"][0]["content"]["parts"][0]["text"]}]}]})
+}
+
+#[tokio::test]
+async fn openai_whole_audio_over_legacy_limits_survives_reopen_and_dispatches_exact_bytes() {
+    use base64::Engine;
+    let directory = tempfile::tempdir().unwrap();
+    let mut h = openai_harness(
+        vec![transcript_task(directory.path())],
+        vec![Ok(FakeResponse::json(
+            json!({"text":"Hello, hello.","usage":{"type":"duration","seconds":360.001}}),
+        ))],
+    );
+    let path = directory.path().join("whole.flac");
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(12 * 1024 * 1024 + 1).unwrap();
+    drop(file);
+    let audio =
+        AudioAttachment::from_file_for_provider(path, 5000, 360_001, crate::AiProvider::Openai)
+            .unwrap();
+    let expected_sha = audio.sha256.clone();
+    let expected_bytes = audio.byte_len;
+    let mut plan = h.store.prepared_job(&h.quote.id).unwrap();
+    plan.requests = vec![RequestTask::AudioTranscription {
+        language: "en".into(),
+        audio,
+    }];
+    let execution = plan.execution.clone();
+    h.quote = h
+        .store
+        .prepare(plan.with_execution(execution).unwrap())
+        .unwrap();
+    h.store.approve(&h.quote.id, &h.quote.digest).unwrap();
+    let before = h.store.prepared_job(&h.quote.id).unwrap();
+    h.store.pause(&h.quote.id).unwrap();
+    let reopened = AiStore::open(&h.transport.db_path).unwrap();
+    reopened.recover_interrupted().unwrap();
+    let persisted = reopened.prepared_job(&h.quote.id).unwrap();
+    assert_eq!(persisted.digest().unwrap(), before.digest().unwrap());
+    assert_eq!(
+        serde_json::to_vec(&persisted).unwrap(),
+        serde_json::to_vec(&before).unwrap()
+    );
+    reopened.approve(&h.quote.id, &h.quote.digest).unwrap();
+    let result = execute_with_io(&reopened, &h.auth, &h.transport, &h.quote.id, || Ok(()))
+        .await
+        .unwrap()
+        .unwrap();
+    let ParsedOutput::Transcript { cues } = result.output else {
+        panic!("Expected transcript")
+    };
+    assert_eq!((cues[0].start_ms, cues[0].end_ms), (5000, 365_001));
+    let requests = h.transport.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(requests[0].body["file"]["data"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(bytes.len() as u64, expected_bytes);
+    assert_eq!(sha256_bytes(&bytes), expected_sha);
+}
+
+#[tokio::test]
+async fn vertex_file_audio_policy_survives_reopen_and_sends_verified_whole_file() {
+    use base64::Engine;
+    let directory = tempfile::tempdir().unwrap();
+    let mut h = Harness::with_tasks(
+        vec![transcript_task(directory.path())],
+        vec![Ok(FakeResponse::json(transcript_response()))],
+    );
+    let policy = crate::VertexAudioPolicy::AudioUnderstandingFileV1;
+    let path = directory.path().join("whole-vertex.flac");
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(12 * 1024 * 1024 + 1).unwrap();
+    drop(file);
+    let audio =
+        AudioAttachment::from_file_with_limits(path.clone(), 5000, 360_001, policy.limits())
+            .unwrap();
+    assert!(AudioAttachment::from_file(path, 5000, 360_001).is_err());
+    let expected_sha = audio.sha256.clone();
+    let expected_bytes = audio.byte_len;
+    let mut plan = h.store.prepared_job(&h.quote.id).unwrap();
+    plan.requests = vec![RequestTask::AudioTranscription {
+        language: "en".into(),
+        audio,
+    }];
+    let mut execution = plan.execution.clone();
+    execution.vertex_audio_policy = Some(policy);
+    h.quote = h
+        .store
+        .prepare(plan.with_execution(execution).unwrap())
+        .unwrap();
+    h.store.approve(&h.quote.id, &h.quote.digest).unwrap();
+    h.store.pause(&h.quote.id).unwrap();
+    let reopened = AiStore::open(&h.transport.db_path).unwrap();
+    reopened.recover_interrupted().unwrap();
+    let persisted = reopened.prepared_job(&h.quote.id).unwrap();
+    assert_eq!(persisted.execution.vertex_audio_policy, Some(policy));
+    assert_eq!(persisted.digest().unwrap(), h.quote.digest);
+    reopened.approve(&h.quote.id, &h.quote.digest).unwrap();
+    execute_with_io(&reopened, &h.auth, &h.transport, &h.quote.id, || Ok(()))
+        .await
+        .unwrap()
+        .unwrap();
+    let requests = h.transport.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    let body = &requests[0].body;
+    assert!(
+        serde_json::to_vec(body).unwrap().len() as u64
+            <= crate::VertexAudioPolicy::MAX_REQUEST_BYTES
+    );
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(
+            body["contents"][0]["parts"][0]["inlineData"]["data"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(bytes.len() as u64, expected_bytes);
+    assert_eq!(sha256_bytes(&bytes), expected_sha);
+}
+
+#[tokio::test]
+async fn oversized_vertex_expanded_json_is_rejected_before_authentication() {
+    let directory = tempfile::tempdir().unwrap();
+    let h = Harness::with_tasks(vec![transcript_task(directory.path())], vec![]);
+    let mut reservation = h.store.reserve_next(&h.quote.id).unwrap().unwrap();
+    reservation.execution.vertex_audio_policy =
+        Some(crate::VertexAudioPolicy::AudioUnderstandingFileV1);
+    reservation.body_snapshot["systemInstruction"]["parts"][0]["text"] =
+        json!("x".repeat(crate::VertexAudioPolicy::MAX_REQUEST_BYTES as usize));
+    assert!(matches!(
+        prepare_authenticated(&h.auth, &reservation).await,
+        Err(AiError::Invalid(_))
+    ));
+    assert_eq!(h.auth.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(h.sends(), 0);
+}
+
+#[tokio::test]
+async fn openai_audio_multipart_forwards_only_frozen_chunking_and_language_fields() {
+    use base64::Engine;
+    use http_body_util::BodyExt;
+
+    let audio = b"fLaC\x00\x01\x80\xff\r\nverified fixture audio";
+    let client = reqwest::Client::new();
+    let prompt = "This recording contains spoken language that may include deliberate repetition, false starts, and incomplete sentences.";
+    for ((language, chunking, plural), prompt) in [
+        (None, None, false),
+        (Some("en"), None, false),
+        (None, Some("auto"), false),
+        (Some("en"), Some("auto"), false),
+        (None, None, true),
+        (Some("en"), None, true),
+        (None, Some("auto"), true),
+        (Some("en"), Some("auto"), true),
+    ]
+    .into_iter()
+    .flat_map(|options| [None, Some(prompt)].map(move |prompt| (options, prompt)))
+    {
+        let mut body = json!({
+            "model":"gpt-future-transcribe", "response_format":"json",
+            "file":{"mime_type":"audio/flac","data":base64::engine::general_purpose::STANDARD.encode(audio)}
+        });
+        if let Some(language) = language {
+            if plural {
+                body["languages"] = json!([language]);
+            } else {
+                body["language"] = json!(language);
+            }
+        }
+        if let Some(chunking) = chunking {
+            body["chunking_strategy"] = json!(chunking);
+        }
+        if let Some(prompt) = prompt {
+            body["prompt"] = json!(prompt);
+        }
+        let mut request = build_provider_request(
+            &client,
+            "https://api.openai.com/v1/audio/transcriptions",
+            FAKE_TOKEN,
+            &body,
+        )
+        .unwrap();
+        assert_eq!(request.method(), reqwest::Method::POST);
+        assert_eq!(
+            request.url().as_str(),
+            "https://api.openai.com/v1/audio/transcriptions"
+        );
+        assert_eq!(
+            request.headers()[reqwest::header::AUTHORIZATION],
+            format!("Bearer {FAKE_TOKEN}")
+        );
+        let content_type = request.headers()[reqwest::header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let boundary = content_type
+            .strip_prefix("multipart/form-data; boundary=")
+            .unwrap();
+        let bytes = request
+            .body_mut()
+            .take()
+            .unwrap()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+        let mut expected = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"prepared.flac\"\r\nContent-Type: audio/flac\r\n\r\n"
+        ).into_bytes();
+        expected.extend_from_slice(audio);
+        expected.extend_from_slice(format!(
+            "\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\ngpt-future-transcribe\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\njson\r\n"
+        ).as_bytes());
+        for (field, value) in [
+            (if plural { "languages[]" } else { "language" }, language),
+            ("chunking_strategy", chunking),
+            ("prompt", prompt),
+        ] {
+            if let Some(value) = value {
+                expected.extend_from_slice(format!(
+                    "--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"\r\n\r\n{value}\r\n"
+                ).as_bytes());
+            }
+        }
+        expected.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+        assert_eq!(bytes.as_ref(), expected.as_slice());
+    }
+    let both = json!({"model":"gpt-transcribe","response_format":"json","file":{"data":"ZkxhQw=="},"language":"en","languages":["en"]});
+    assert!(build_provider_request(
+        &client,
+        "https://api.openai.com/v1/audio/transcriptions",
+        FAKE_TOKEN,
+        &both
+    )
+    .is_err());
+}
+
+#[tokio::test]
+async fn openai_audio_chunking_and_legacy_absence_survive_reopen_and_resume() {
+    let prompt = "This recording contains spoken language that may include deliberate repetition, false starts, and incomplete sentences.";
+    for ((auto, plural, automatic), prompt) in [
+        (false, false, false),
+        (true, false, false),
+        (false, true, false),
+        (true, true, false),
+        (false, false, true),
+        (true, false, true),
+        (false, true, true),
+        (true, true, true),
+    ]
+    .into_iter()
+    .flat_map(|options| [None, Some(prompt)].map(move |prompt| (options, prompt)))
+    {
+        let directory = tempfile::tempdir().unwrap();
+        let mut task = transcript_task(directory.path());
+        if automatic {
+            match &mut task {
+                RequestTask::AudioTranscription { language, .. }
+                | RequestTask::TranscribePreview { language, .. } => *language = "auto".into(),
+                _ => panic!("Expected audio fixture"),
+            }
+        }
+        let mut h = openai_harness(
+            vec![task],
+            vec![Ok(FakeResponse::json(
+                json!({"text":"Hello.","usage":{"type":"duration","seconds":1}}),
+            ))],
+        );
+        let plan = h.store.prepared_job(&h.quote.id).unwrap();
+        if auto || plural || prompt.is_some() {
+            let mut value = serde_json::to_value(&plan.execution).unwrap();
+            if auto {
+                value["openai_audio_chunking_strategy"] = json!("auto");
+            }
+            if plural {
+                value["openai_audio_language_hint_format"] = json!("languages");
+            }
+            if let Some(prompt) = prompt {
+                value["openai_audio_prompt"] = json!(prompt);
+            }
+            let execution = serde_json::from_value(value).unwrap();
+            h.quote = h
+                .store
+                .prepare(plan.with_execution(execution).unwrap())
+                .unwrap();
+            h.store.approve(&h.quote.id, &h.quote.digest).unwrap();
+        }
+        let before = h.store.prepared_job(&h.quote.id).unwrap();
+        let bytes = serde_json::to_vec(&before).unwrap();
+        h.store.pause(&h.quote.id).unwrap();
+        let reopened = AiStore::open(&h.transport.db_path).unwrap();
+        reopened.recover_interrupted().unwrap();
+        let persisted = reopened.prepared_job(&h.quote.id).unwrap();
+        assert_eq!(serde_json::to_vec(&persisted).unwrap(), bytes);
+        assert_eq!(persisted.digest().unwrap(), h.quote.digest);
+        reopened.approve(&h.quote.id, &h.quote.digest).unwrap();
+        execute_with_io(&reopened, &h.auth, &h.transport, &h.quote.id, || Ok(()))
+            .await
+            .unwrap()
+            .unwrap();
+        let requests = h.transport.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].body.get("chunking_strategy"),
+            auto.then_some(&json!("auto"))
+        );
+        assert_eq!(
+            requests[0].body.get("language"),
+            (!plural && !automatic).then_some(&json!("en"))
+        );
+        assert_eq!(
+            requests[0].body.get("languages"),
+            (plural && !automatic).then_some(&json!(["en"]))
+        );
+        assert_eq!(requests[0].body["model"], "gpt-future");
+        assert_eq!(
+            requests[0].body.get("prompt"),
+            prompt.map(|value| json!(value)).as_ref()
+        );
+        assert!(requests[0].body.get("max_output_tokens").is_none());
+    }
+}
+#[tokio::test]
+async fn openai_uses_the_same_durable_path_and_frozen_structured_wire_body() {
+    let h = openai_harness(
+        vec![task()],
+        vec![Ok(FakeResponse::json(openai_response()))],
+    );
+    let frozen = h
+        .store
+        .prepared_job(&h.quote.id)
+        .unwrap()
+        .request_body_snapshot(0)
+        .unwrap()
+        .clone();
+    let result = h.execute().await.unwrap().unwrap();
+    assert_eq!(result.charged_microusd, Some(16));
+    let requests = h.transport.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].url, "https://api.openai.com/v1/responses");
+    assert_eq!(requests[0].body, frozen);
+    assert_eq!(requests[0].body["store"], false);
+    assert_eq!(
+        requests[0].body["text"]["format"]["schema"]["additionalProperties"],
+        false
+    );
+    drop(requests);
+    assert_eq!(
+        h.store
+            .budget_summary_for(crate::AiProvider::Openai)
+            .unwrap()
+            .daily_actual_charged_microusd,
+        16
+    );
+    assert_eq!(h.store.summary().unwrap().daily_actual_charged_microusd, 0);
+}
+#[tokio::test]
+async fn openai_credit_exhaustion_keeps_hold_and_never_enters_rate_limit_retry() {
+    for (status, code) in [
+        (429, "insufficient_quota"),
+        (402, "credit_balance_exhausted"),
+    ] {
+        let h = openai_harness(
+            vec![task()],
+            vec![Ok(FakeResponse::bytes(
+                status,
+                serde_json::to_vec(&json!({"error":{"code":code,"message":FAKE_PROVIDER_SECRET}}))
+                    .unwrap(),
+            ))],
+        );
+        assert!(matches!(h.execute().await, Err(AiError::CreditExhausted)));
+        assert!(h.execute().await.is_err());
+        assert_eq!(h.sends(), 1);
+        let summary = h
+            .store
+            .budget_summary_for(crate::AiProvider::Openai)
+            .unwrap();
+        assert_eq!(summary.unknown_attempts.len(), 1);
+        assert!(summary.daily_held_microusd > 0);
+        assert!(!serde_json::to_string(&summary)
+            .unwrap()
+            .contains(FAKE_PROVIDER_SECRET));
+    }
+}
+
+#[tokio::test]
+async fn openai_duration_settles_fractional_usage_and_retains_only_source_block_timing() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut task = transcript_task(directory.path());
+    if let RequestTask::AudioTranscription { audio, .. } = &mut task {
+        audio.duration_ms = 2000;
+        audio.source_start_ms = 5000;
+    }
+    let h = openai_harness(
+        vec![task],
+        vec![Ok(FakeResponse::json(
+            json!({"text":"Hello, hello.","model":"ft:gpt-4.1-2025-04-14:org:suffix:id","usage":{"type":"duration","seconds":1.2345},"private":FAKE_PROVIDER_SECRET}),
+        ))],
+    );
+    assert_eq!(h.quote.requests[0].estimated_max_microusd, Some(200));
+    let result = h.execute().await.unwrap().unwrap();
+    assert_eq!(result.charged_microusd, Some(124));
+    let ParsedOutput::Transcript { cues } = result.output else {
+        panic!("expected transcript")
+    };
+    assert_eq!(cues.len(), 1);
+    assert_eq!(cues[0].start_ms, 5000);
+    assert_eq!(cues[0].end_ms, 7000);
+    assert_eq!(cues[0].timing_precision, "source_block");
+    assert!(cues[0].word_anchors.is_empty());
+    let review = h.store.transcript_result_detail(&h.quote.id, 0).unwrap();
+    assert_eq!(
+        review.evidence.as_ref().unwrap().response["modelVersion"],
+        "ft:gpt-4.1-2025-04-14:org:suffix:id"
+    );
+    let recorded_version: String = Connection::open(&h.transport.db_path)
+        .unwrap()
+        .query_row(
+            "SELECT model_version FROM ai_attempts WHERE id=?",
+            [&result.attempt_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(recorded_version, "ft:gpt-4.1-2025-04-14:org:suffix:id");
+
+    assert!(!serde_json::to_string(&review)
+        .unwrap()
+        .contains(FAKE_PROVIDER_SECRET));
+    let reparsed = h
+        .store
+        .reparse_transcript_evidence(&h.quote.id, 0, review.evidence_sha256.as_ref().unwrap())
+        .unwrap();
+    let Some(ParsedOutput::Transcript { cues }) = reparsed.output else {
+        panic!("expected local source block")
+    };
+    assert_eq!(cues[0].timing_precision, "source_block");
+}
+
+#[tokio::test]
+async fn openai_audio_missing_or_token_only_usage_retains_unknown_hold_without_retry() {
+    for usage in [
+        json!(null),
+        json!({"type":"tokens","input_tokens":20,"output_tokens":5}),
+        json!({"type":"duration","seconds":-1}),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let h = openai_harness(
+            vec![transcript_task(directory.path())],
+            vec![Ok(FakeResponse::json(
+                json!({"text":"Hello.","usage":usage}),
+            ))],
+        );
+        assert!(matches!(h.execute().await, Err(AiError::UnknownOutcome)));
+        let summary = h
+            .store
+            .budget_summary_for(crate::AiProvider::Openai)
+            .unwrap();
+        assert_eq!(summary.unknown_attempts.len(), 1);
+        assert!(summary.daily_held_microusd > 0);
+        assert!(h.store.response(&h.quote.id, 0).unwrap().is_none());
+        assert!(h.execute().await.is_err());
+        assert_eq!(h.sends(), 1);
+    }
+}
+
+#[tokio::test]
+async fn openai_sse_uses_shared_reservation_validation_and_settlement() {
+    let response = openai_response();
+    let delta = response["output"][0]["content"][0]["text"].clone();
+    let terminal = json!({"type":"response.completed","response":response});
+    let wire = format!(
+        "event: response.output_text.delta\ndata: {}\n\nevent: response.completed\ndata: {terminal}\n\n",
+        json!({"type":"response.output_text.delta","delta":delta})
+    );
+    let mut reply = FakeResponse::bytes(200, Vec::new());
+    reply.chunks = wire
+        .as_bytes()
+        .chunks(1)
+        .map(|bytes| Ok(bytes.to_vec()))
+        .collect();
+    let mut h = openai_harness(vec![task()], vec![Ok(reply)]);
+    let plan = h.store.prepared_job(&h.quote.id).unwrap();
+    let mut execution = plan.execution.clone();
+    execution.response_mode = ResponseMode::StreamResponses;
+    h.quote = h
+        .store
+        .prepare(plan.with_execution(execution).unwrap())
+        .unwrap();
+    h.store.approve(&h.quote.id, &h.quote.digest).unwrap();
+    let result = h.execute().await.unwrap().unwrap();
+    assert_eq!(result.charged_microusd, Some(16));
+    assert!(matches!(result.output, ParsedOutput::Vocabulary { .. }));
+    assert!(h.store.response(&h.quote.id, 0).unwrap().is_some());
+    let requests = h.transport.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].body["stream"], true);
+    assert_eq!(requests[0].url, "https://api.openai.com/v1/responses");
+}
+
+fn openai_text_purpose_cases() -> Vec<(RequestTask, Value)> {
+    let RequestTask::Vocabulary { cues, .. } = task() else {
+        unreachable!()
+    };
+    let explanation = serde_json::from_str(
+        valid_response()["candidates"][0]["content"]["parts"][0]["text"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    vec![
+        (
+            RequestTask::Translation {
+                target_language: "ja".into(),
+                cues: cues.clone(),
+            },
+            json!({"translations":[{"id":"cue-one","translation":"ゆっくりで大丈夫"}]}),
+        ),
+        (
+            RequestTask::Explanation {
+                term: "take your time".into(),
+                learning_language: "en".into(),
+                explanation_language: "ja".into(),
+                proficiency: "B1".into(),
+                cues,
+            },
+            explanation,
+        ),
+    ]
+}
+
+#[tokio::test]
+async fn openai_translation_and_explanation_preserve_validated_results_in_both_response_modes() {
+    for mode in [ResponseMode::Responses, ResponseMode::StreamResponses] {
+        for (request, generated) in openai_text_purpose_cases() {
+            let translation_task = matches!(request, RequestTask::Translation { .. });
+            let mut response = openai_response();
+            response["output"][0]["content"][0]["text"] = generated.to_string().into();
+            let reply = if mode == ResponseMode::StreamResponses {
+                FakeResponse::bytes(
+                    200,
+                    format!(
+                        "data: {}\n\n",
+                        json!({"type":"response.completed","response":response})
+                    )
+                    .into_bytes(),
+                )
+            } else {
+                FakeResponse::json(response)
+            };
+            let mut h = openai_harness(vec![request], vec![Ok(reply)]);
+            if mode == ResponseMode::StreamResponses {
+                let plan = h.store.prepared_job(&h.quote.id).unwrap();
+                let mut execution = plan.execution.clone();
+                execution.response_mode = mode;
+                h.quote = h
+                    .store
+                    .prepare(plan.with_execution(execution).unwrap())
+                    .unwrap();
+                h.store.approve(&h.quote.id, &h.quote.digest).unwrap();
+            }
+            let result = h.execute().await.unwrap().unwrap();
+            assert_eq!(result.charged_microusd, Some(16));
+            match result.output {
+                ParsedOutput::Translation { translations } if translation_task => {
+                    assert_eq!(translations.len(), 1);
+                    assert_eq!(translations[0].id, "cue-one");
+                    assert_eq!(translations[0].translation, "ゆっくりで大丈夫");
+                }
+                ParsedOutput::Vocabulary { items } if !translation_task => {
+                    assert_eq!(items.len(), 1);
+                    assert_eq!(items[0].term, "take your time");
+                    assert_eq!(items[0].source_cue_ids, vec!["cue-one"]);
+                    assert_eq!(items[0].meaning, "ゆっくりで大丈夫");
+                }
+                _ => panic!("wrong purpose result"),
+            }
+            assert!(h.store.response(&h.quote.id, 0).unwrap().is_some());
+            let requests = h.transport.requests.lock().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].url, "https://api.openai.com/v1/responses");
+            assert_eq!(
+                requests[0].body["stream"],
+                mode == ResponseMode::StreamResponses
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn openai_translation_and_explanation_rejections_settle_once_without_publishing_or_retry() {
+    use crate::OutputFailureReason;
+    for (request, generated) in openai_text_purpose_cases() {
+        let translation_task = matches!(request, RequestTask::Translation { .. });
+        let mut invalid_source = generated.clone();
+        let mut empty_field = generated.clone();
+        let empty = if translation_task {
+            invalid_source["translations"][0]["id"] = "invented".into();
+            empty_field["translations"][0]["translation"] = " ".into();
+            json!({"translations":[]})
+        } else {
+            invalid_source["items"][0]["sourceCueIds"] = json!(["invented"]);
+            empty_field["items"][0]["meaning"] = " ".into();
+            json!({"items":[]})
+        };
+        let empty_reason = if translation_task {
+            OutputFailureReason::InvalidSource
+        } else {
+            OutputFailureReason::InvalidFields
+        };
+        for (text, reason) in [
+            ("{".to_owned(), OutputFailureReason::InvalidJson),
+            (
+                invalid_source.to_string(),
+                OutputFailureReason::InvalidSource,
+            ),
+            (empty_field.to_string(), OutputFailureReason::InvalidFields),
+            (empty.to_string(), empty_reason),
+        ] {
+            let mut response = openai_response();
+            response["output"][0]["content"][0]["text"] = text.into();
+            let h = openai_harness(
+                vec![request.clone()],
+                vec![Ok(FakeResponse::json(response))],
+            );
+            let error = h.execute().await.unwrap_err();
+            assert!(matches!(error, AiError::OutputRejected(observed) if observed == reason));
+            assert_sanitized(&error);
+            let summary = h
+                .store
+                .budget_summary_for(crate::AiProvider::Openai)
+                .unwrap();
+            assert_eq!(summary.daily_actual_charged_microusd, 16);
+            assert_eq!(summary.daily_held_microusd, 0);
+            assert!(summary.unknown_attempts.is_empty());
+            let quote = h.store.quote(&h.quote.id).unwrap();
+            assert_eq!(quote.state, "needs_review");
+            assert_eq!(quote.request_counts.rejected, 1);
+            assert!(h.store.response(&h.quote.id, 0).unwrap().is_none());
+            assert!(h.execute().await.is_err());
+            assert_eq!(h.sends(), 1);
+        }
+    }
+}

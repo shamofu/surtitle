@@ -27,8 +27,8 @@ vi.mock('../app/runtime', () => {
   return { useSnapshot: useFixture, useDataActions: useFixture, useAppearance: useFixture, useNotifications: useFixture, useSurface: useFixture };
 });
 
-const job: JobSummary = { id: 'paused', kind: 'transcribe', status: 'paused', progress: 0.5, createdAt: '2026-09-08T00:00:00Z' };
-const quote: AiQuote = {
+const job: JobSummary = { provider: 'vertex', id: 'paused', kind: 'transcribe', status: 'paused', progress: 0.5, createdAt: '2026-09-08T00:00:00Z' };
+const quote: AiQuote = { aiConfigurationGeneration: 0, provider: 'vertex',
   id: 'retry', mediaId: 'media', kind: 'transcribe', startMs: 0, endMs: 2000,
   model: 'test', estimatedUsd: null, maximumUsd: null, unpriced: true,
   inputTokens: 100, maxOutputTokens: 100, expiresAt: '2099-01-01T00:00:00Z',

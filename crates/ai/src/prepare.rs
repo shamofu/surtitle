@@ -1,16 +1,20 @@
 //! Free, local audio preparation. This module never accesses Vertex or credentials.
 mod child;
 mod encoding;
-use encoding::{next_mature_chunk, Encoders};
+use encoding::{
+    encode_file_silence, encode_openai_file, encode_openai_file_silence, next_mature_chunk,
+    Encoders,
+};
 mod pause_evidence;
 #[cfg(test)]
 mod spoken_pause_test;
 use crate::{
-    hash_file, plan_chunks, sha256_bytes, AiError, AudioChunk, ChunkOptions, PreparationBinding,
-    PreparedJob, RequestTask, Result, SileroVad, VadAssets,
+    hash_file, plan_chunks, sha256_bytes, AiError, AudioChunk, AudioChunkProfile, ChunkOptions,
+    PreparationBinding, PreparedJob, RequestTask, Result, SileroVad, VadAssets,
 };
 use child::LocalChild;
 pub use pause_evidence::VadPauseEvidence;
+pub(crate) use pause_evidence::{BOUNDARY_GUARD_MS, MINIMUM_PAUSE_MS};
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
@@ -176,6 +180,12 @@ pub struct PreparationProgress {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioPreparationContext {
+    pub provider: crate::AiProvider,
+    pub configuration_generation: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioPreparationReceipt {
     pub id: String,
     pub directory: PathBuf,
@@ -186,6 +196,10 @@ pub struct AudioPreparationReceipt {
     pub model_sha256: String,
     pub ffmpeg: ToolSnapshot,
     pub chunks: Vec<AudioChunk>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chunk_profile: Option<AudioChunkProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preparation_context: Option<AudioPreparationContext>,
     /// VAD found no speech throughout these exact sent ranges. This is a review
     /// signal only: every sample is still prepared and sent if approved.
     #[serde(default)]
@@ -228,6 +242,14 @@ fn prepare_audio_inner(
     cancel: Arc<AtomicBool>,
     mut progress: impl FnMut(PreparationProgress),
 ) -> Result<AudioPreparationReceipt> {
+    let silence_file = options.chunks.profile() == Some(AudioChunkProfile::OpenAiFileSilence);
+    let openai_file =
+        silence_file || options.chunks.profile() == Some(AudioChunkProfile::OpenAiFile);
+    let vertex_audio_policy = options
+        .chunks
+        .profile()
+        .and_then(AudioChunkProfile::vertex_audio_policy);
+    let whole_file = openai_file || vertex_audio_policy.is_some();
     let audio_stream_index = options
         .audio_stream_index
         .ok_or_else(|| local_error("Select and verify an audio stream before preparation"))?;
@@ -235,6 +257,9 @@ fn prepare_audio_inner(
         || options.start_ms >= options.end_ms
         || options.end_ms > 7 * 24 * 60 * 60 * 1000
         || options.chunks.sample_rate != 16_000
+        || (openai_file
+            && options.end_ms.saturating_sub(options.start_ms)
+                > crate::AudioAttachment::MAX_OPENAI_DURATION_MS)
     {
         return Err(local_error("invalid audio selection or FFmpeg tool"));
     }
@@ -257,7 +282,9 @@ fn prepare_audio_inner(
     let output_root = output_root.canonicalize()?;
     let total_ms = options.end_ms - options.start_ms;
     let required = total_ms
-        .checked_mul(80)
+        // Whole-file encoding temporarily holds the spool, a PCM span copy,
+        // and the encoded candidate; legacy staging only copies bounded spans.
+        .checked_mul(if whole_file { 100 } else { 80 })
         .and_then(|v| v.checked_add(64 * 1024 * 1024))
         .ok_or_else(|| local_error("audio size overflow"))?;
     if fs2::available_space(&output_root)? < required {
@@ -337,29 +364,31 @@ fn prepare_audio_inner(
                 end_sample: p.end_sample + start_sample,
             })
             .collect::<Vec<_>>();
-        loop {
-            let next = encoded_chunks
-                .last()
-                .map_or(start_sample, |c| c.core_end_sample);
-            let Some(chunk) = next_mature_chunk(
-                start_sample,
-                next,
-                start_sample + samples,
-                &pauses,
-                options.chunks,
-                encoded_chunks.len() as u32,
-            )?
-            else {
-                break;
-            };
-            if encoded_chunks.len() >= 5000 {
-                return Err(local_error(
-                    "selection exceeds 5000 bounded requests; prepare a smaller interval",
-                ));
+        if !whole_file {
+            loop {
+                let next = encoded_chunks
+                    .last()
+                    .map_or(start_sample, |c| c.core_end_sample);
+                let Some(chunk) = next_mature_chunk(
+                    start_sample,
+                    next,
+                    start_sample + samples,
+                    &pauses,
+                    options.chunks,
+                    encoded_chunks.len() as u32,
+                )?
+                else {
+                    break;
+                };
+                if encoded_chunks.len() >= 5000 {
+                    return Err(local_error(
+                        "selection exceeds 5000 bounded requests; prepare a smaller interval",
+                    ));
+                }
+                writer.borrow_mut().flush()?;
+                encoders.enqueue(&spool_path, temporary.path(), start_sample, &chunk, ffmpeg)?;
+                encoded_chunks.push(chunk);
             }
-            writer.borrow_mut().flush()?;
-            encoders.enqueue(&spool_path, temporary.path(), start_sample, &chunk, ffmpeg)?;
-            encoded_chunks.push(chunk);
         }
         progress(PreparationProgress {
             phase: "detecting_speech".into(),
@@ -399,44 +428,102 @@ fn prepare_audio_inner(
             end_sample: p.end_sample + start_sample,
         })
         .collect::<Vec<_>>();
-    let chunks = plan_chunks(
+    let planned_chunks = plan_chunks(
         start_sample,
         start_sample + analysis.total_samples,
         &pauses,
         options.chunks,
     )?;
-    let total_chunks = chunks.len() as u32;
-    if total_chunks > 5000 {
-        return Err(local_error(
-            "selection exceeds 5000 bounded requests; prepare a smaller interval",
-        ));
-    }
-    if !chunks.starts_with(&encoded_chunks) {
-        return Err(local_error(
-            "staged boundaries differ from final VAD analysis",
-        ));
-    }
-    progress(PreparationProgress {
-        phase: "extracting".into(),
-        processed_ms: 0,
-        total_ms,
-        completed_chunks: encoders.completed(),
-        total_chunks,
-    });
-    for chunk in chunks.iter().skip(encoded_chunks.len()) {
-        encoders.enqueue(&spool_path, temporary.path(), start_sample, chunk, ffmpeg)?;
-    }
-    let audio = encoders.finish(|completed_chunks| {
+    let (chunks, audio) = if whole_file {
+        drop(encoders);
         progress(PreparationProgress {
             phase: "extracting".into(),
-            processed_ms: chunks[completed_chunks as usize - 1]
-                .core_end_ms()
-                .saturating_sub(options.start_ms),
+            processed_ms: 0,
             total_ms,
-            completed_chunks,
+            completed_chunks: 0,
+            total_chunks: 0,
+        });
+        let whole = planned_chunks
+            .into_iter()
+            .next()
+            .ok_or_else(|| local_error("missing whole-file range"))?;
+        let report = |completed_chunks: u32, end_ms: u64| {
+            progress(PreparationProgress {
+                phase: "extracting".into(),
+                processed_ms: end_ms.saturating_sub(options.start_ms),
+                total_ms,
+                completed_chunks,
+                total_chunks: 0,
+            });
+        };
+        if let Some(policy) = vertex_audio_policy {
+            encode_file_silence(
+                &spool_path,
+                temporary.path(),
+                whole,
+                &vad_pause_evidence.pauses,
+                policy.limits(),
+                ffmpeg,
+                cancel.clone(),
+                report,
+            )?
+        } else {
+            let encode_file = if silence_file {
+                encode_openai_file_silence
+            } else {
+                encode_openai_file
+            };
+            encode_file(
+                &spool_path,
+                temporary.path(),
+                whole,
+                if silence_file {
+                    &vad_pause_evidence.pauses
+                } else {
+                    &pauses
+                },
+                ffmpeg,
+                cancel.clone(),
+                report,
+            )?
+        }
+    } else {
+        let chunks = planned_chunks;
+        let total_chunks = chunks.len() as u32;
+        if total_chunks > 5000 {
+            return Err(local_error(
+                "selection exceeds 5000 bounded requests; prepare a smaller interval",
+            ));
+        }
+        if !chunks.starts_with(&encoded_chunks) {
+            return Err(local_error(
+                "staged boundaries differ from final VAD analysis",
+            ));
+        }
+        progress(PreparationProgress {
+            phase: "extracting".into(),
+            processed_ms: 0,
+            total_ms,
+            completed_chunks: encoders.completed(),
             total_chunks,
-        })
-    })?;
+        });
+        for chunk in chunks.iter().skip(encoded_chunks.len()) {
+            encoders.enqueue(&spool_path, temporary.path(), start_sample, chunk, ffmpeg)?;
+        }
+        let audio = encoders.finish(|completed_chunks| {
+            progress(PreparationProgress {
+                phase: "extracting".into(),
+                processed_ms: chunks[completed_chunks as usize - 1]
+                    .core_end_ms()
+                    .saturating_sub(options.start_ms),
+                total_ms,
+                completed_chunks,
+                total_chunks,
+            })
+        })?;
+        (chunks, audio)
+    };
+    let total_chunks = chunks.len() as u32;
     let requests = audio
         .into_iter()
         .map(|audio| match options.provider {
@@ -466,7 +553,12 @@ fn prepare_audio_inner(
     let settings_sha256 = sha256_bytes(&serde_json::to_vec(
         &serde_json::json!({"options":options,"chunks":chunks,"vadModel":assets.model_sha256,"ffmpeg":ffmpeg,"vadPauseEvidence":vad_pause_evidence}),
     )?);
-    let prepared_job = PreparedJob::local_audio_draft(
+    let validation_provider = if openai_file {
+        crate::AiProvider::Openai
+    } else {
+        crate::AiProvider::Vertex
+    };
+    let prepared_job = PreparedJob::local_audio_draft_with_policy(
         options.title,
         PreparationBinding {
             media_id: options.media_id,
@@ -475,12 +567,14 @@ fn prepare_audio_inner(
             settings_sha256,
         },
         requests,
+        validation_provider,
+        vertex_audio_policy,
     )?;
     // Local preparation is useful before credentials or billing are configured.
     // AiStore::prepare validates the completed identity binding before any quote;
     // the receipt itself grants no authority to send or to reserve paid work.
     for request in &prepared_job.requests {
-        request.validate()?;
+        request.validate_with_execution(&prepared_job.execution)?;
     }
     let directory = temporary.path().to_owned();
     let receipt = AudioPreparationReceipt {
@@ -494,6 +588,11 @@ fn prepare_audio_inner(
         vad_no_speech_ordinals: vad_no_speech_chunks(&chunks, &pauses),
         vad_pause_evidence: Some(vad_pause_evidence),
         chunks,
+        chunk_profile: options
+            .chunks
+            .profile()
+            .filter(|profile| *profile != AudioChunkProfile::Legacy),
+        preparation_context: None,
         prepared_job,
         created_at_ms: crate::now_ms(),
     };
@@ -617,6 +716,7 @@ mod tests {
             request_start_sample: 0,
             request_end_sample: 9000,
             boundary: crate::BoundaryKind::Forced,
+            boundary_provenance: None,
         }];
         let pause = |start_sample, end_sample| crate::Pause {
             start_sample,
@@ -853,6 +953,87 @@ mod tests {
             provider: AudioTranscriptionProvider::TranscribePreview,
         };
         let mut observed_progress = Vec::new();
+        let whole_file = prepare_audio(
+            &source,
+            &temp.path().join("whole-file"),
+            &ffmpeg,
+            assets.clone(),
+            AudioPreparationOptions {
+                start_ms: 0,
+                end_ms: 360_000,
+                chunks: ChunkOptions::for_profile(
+                    serde_json::from_str("\"openai_file_silence\"").unwrap(),
+                ),
+                ..options.clone()
+            },
+            Arc::new(AtomicBool::new(false)),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(whole_file.chunks.len(), 1);
+        assert_eq!(
+            whole_file.chunk_profile,
+            Some(AudioChunkProfile::OpenAiFileSilence)
+        );
+        assert!(!whole_file
+            .vad_pause_evidence
+            .as_ref()
+            .unwrap()
+            .pauses
+            .is_empty());
+        assert_eq!(whole_file.chunks[0].request_start_sample, 0);
+        assert_eq!(whole_file.chunks[0].request_end_sample, 360 * 16_000);
+        let audio = whole_file.prepared_job.requests[0]
+            .audio_attachment()
+            .unwrap();
+        assert_eq!(audio.duration_ms, 360_000);
+        assert!(audio.byte_len <= 25_000_000);
+        assert_eq!(
+            whole_file.prepared_job.provider(),
+            crate::AiProvider::Openai
+        );
+        let reopened: AudioPreparationReceipt = serde_json::from_slice(
+            &std::fs::read(whole_file.directory.join("receipt.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(reopened.chunks, whole_file.chunks);
+        assert!(!whole_file.directory.join("decoded-selection.pcm").exists());
+        let vertex_whole = prepare_audio(
+            &source,
+            &temp.path().join("vertex-whole-file"),
+            &ffmpeg,
+            assets.clone(),
+            AudioPreparationOptions {
+                start_ms: 0,
+                end_ms: 360_000,
+                chunks: ChunkOptions::for_profile(AudioChunkProfile::VertexTranscribeFileSilence),
+                ..options.clone()
+            },
+            Arc::new(AtomicBool::new(false)),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(vertex_whole.chunks.len(), 1);
+        assert_eq!(
+            vertex_whole.prepared_job.execution.vertex_audio_policy,
+            Some(crate::VertexAudioPolicy::TranscribeFileV1)
+        );
+        let vertex_audio = vertex_whole.prepared_job.requests[0]
+            .audio_attachment()
+            .unwrap();
+        assert_eq!(vertex_audio.duration_ms, 360_000);
+        vertex_audio
+            .verify_integrity_with_limits(vertex_whole.prepared_job.execution.audio_limits())
+            .unwrap();
+        let reopened_vertex: AudioPreparationReceipt = serde_json::from_slice(
+            &std::fs::read(vertex_whole.directory.join("receipt.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            reopened_vertex.prepared_job.execution,
+            vertex_whole.prepared_job.execution
+        );
+        assert_eq!(reopened_vertex.chunks, vertex_whole.chunks);
         let receipt = prepare_audio(
             &source,
             &temp.path().join("prepared"),

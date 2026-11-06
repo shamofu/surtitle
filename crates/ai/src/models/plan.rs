@@ -77,11 +77,33 @@ impl PreparedJob {
         binding: PreparationBinding,
         requests: Vec<RequestTask>,
     ) -> Result<Self> {
+        Self::local_audio_draft_for_provider(title, binding, requests, crate::AiProvider::Vertex)
+    }
+
+    pub fn local_audio_draft_for_provider(
+        title: String,
+        binding: PreparationBinding,
+        requests: Vec<RequestTask>,
+        provider: crate::AiProvider,
+    ) -> Result<Self> {
+        Self::local_audio_draft_with_policy(title, binding, requests, provider, None)
+    }
+
+    pub fn local_audio_draft_with_policy(
+        title: String,
+        binding: PreparationBinding,
+        requests: Vec<RequestTask>,
+        provider: crate::AiProvider,
+        vertex_audio_policy: Option<crate::VertexAudioPolicy>,
+    ) -> Result<Self> {
         if requests.is_empty() || requests.len() > 5000 {
             return Err(AiError::Invalid(
                 "Empty or oversized local audio draft".into(),
             ));
         }
+        let mut execution = ExecutionConfig::for_task(&requests[0]);
+        execution.provider = provider;
+        execution.vertex_audio_policy = vertex_audio_policy;
         for task in &requests {
             if !matches!(
                 task,
@@ -91,9 +113,8 @@ impl PreparedJob {
                     "A local audio draft only holds audio attachments".into(),
                 ));
             }
-            task.validate()?;
+            task.validate_with_execution(&execution)?;
         }
-        let execution = ExecutionConfig::for_task(&requests[0]);
         Ok(Self {
             title,
             project_id: String::new(),
@@ -119,8 +140,12 @@ impl PreparedJob {
         execution.validate()?;
         let mut frozen_requests = Vec::with_capacity(requests.len());
         for task in &requests {
-            task.validate()?;
-            let mut body = task.body(Some(&[]))?;
+            task.validate_with_execution(&execution)?;
+            let mut body = if execution.provider == crate::AiProvider::Openai {
+                crate::openai::frozen_body(task, &execution)?
+            } else {
+                task.body(Some(&[]))?
+            };
             execution.apply(&mut body)?;
             frozen_requests.push(body);
         }
@@ -185,6 +210,9 @@ impl PreparedJob {
         self.frozen_requests
             .get(ordinal as usize)
             .ok_or(AiError::PreparationChanged)
+    }
+    pub fn provider(&self) -> crate::AiProvider {
+        self.execution.provider
     }
     pub fn total_output_tokens(&self) -> u64 {
         self.requests.len() as u64 * self.execution.max_output_tokens as u64
@@ -285,7 +313,7 @@ impl PreparedJob {
             .zip(&self.frozen_requests)
             .zip(&self.frozen_task_digests)
         {
-            task.validate()?;
+            task.validate_with_execution(&self.execution)?;
             if &sha256_bytes(&serde_json::to_vec(task)?) != task_digest {
                 return Err(AiError::PreparationChanged);
             }
@@ -294,6 +322,28 @@ impl PreparedJob {
             self.execution.apply(&mut checked)?;
             if checked != *body
                 || body.as_object().is_none_or(|o| {
+                    if self.execution.provider == crate::AiProvider::Openai {
+                        return o.keys().any(|k| {
+                            ![
+                                "model",
+                                "max_output_tokens",
+                                "store",
+                                "stream",
+                                "instructions",
+                                "input",
+                                "text",
+                                "response_format",
+                                "file",
+                                "language",
+                                "languages",
+                                "chunking_strategy",
+                                "prompt",
+                            ]
+                            .contains(&k.as_str())
+                        }) || (self.execution.response_mode
+                            == crate::ResponseMode::AudioTranscriptions)
+                            != task.audio_attachment().is_some();
+                    }
                     o.keys().any(|k| {
                         !["contents", "systemInstruction", "generationConfig"].contains(&k.as_str())
                     })
@@ -301,6 +351,33 @@ impl PreparedJob {
                 || serde_json::to_vec(body)?.len() > 2 * 1024 * 1024
             {
                 return Err(AiError::PreparationChanged);
+            }
+            if self.execution.provider == crate::AiProvider::Openai {
+                if let Some(audio) = task.audio_attachment() {
+                    match self.execution.openai_audio_language_hint_format {
+                        Some(crate::OpenAiAudioLanguageHintFormat::Languages) => {
+                            let expected = crate::openai::audio_language_hint(task)?
+                                .map(|hint| serde_json::json!([hint]));
+                            if body.get("language").is_some()
+                                || body.get("languages") != expected.as_ref()
+                            {
+                                return Err(AiError::PreparationChanged);
+                            }
+                        }
+                        None if body.get("languages").is_some() => {
+                            return Err(AiError::PreparationChanged);
+                        }
+                        None => {}
+                    }
+                    if body.pointer("/file/data").and_then(Value::as_str) != Some("")
+                        || body.pointer("/file/mime_type").and_then(Value::as_str)
+                            != Some(&audio.mime_type)
+                        || body["response_format"] != "json"
+                    {
+                        return Err(AiError::PreparationChanged);
+                    }
+                }
+                continue;
             }
             let inline = body.pointer("/contents/0/parts/0/inlineData");
             match task.audio_attachment() {
@@ -312,6 +389,9 @@ impl PreparedJob {
                             != Some(&audio.mime_type)
                     {
                         return Err(AiError::PreparationChanged);
+                    }
+                    if let Some(policy) = self.execution.vertex_audio_policy {
+                        policy.validate_frozen_request(body, audio.byte_len)?;
                     }
                 }
                 _ if inline.is_some() => return Err(AiError::PreparationChanged),

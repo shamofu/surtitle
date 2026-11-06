@@ -54,7 +54,7 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-const job: JobSummary = {
+const job: JobSummary = { provider: 'vertex',
   id: 'saved-job',
   kind: 'translate',
   status: 'completed',

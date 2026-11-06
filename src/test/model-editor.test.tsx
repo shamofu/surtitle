@@ -39,16 +39,19 @@ function Harness({
   initial = emptyModel('vocabulary'),
   purpose = 'vocabulary',
   candidates,
+  provider = 'vertex',
 }: {
   initial?: AiModelPreference;
   purpose?: AiPurpose;
   candidates?: DiscoveredModel[];
+  provider?: 'vertex' | 'openai';
 }) {
   const [value, setValue] = useState(initial);
   return (
     <>
       <ModelEditor
         value={value}
+        provider={provider}
         onChange={setValue}
         purpose={purpose}
         location="global"
@@ -433,4 +436,21 @@ describe('arbitrary model and price selection', () => {
     expect(state().price).toBeNull();
     expect(aiApi.vertexPrice).toHaveBeenCalledWith('gemini-any', 'global');
   });
+});
+
+it('uses duration prices for OpenAI transcription and clears them when the model changes', () => {
+  render(<Harness provider="openai" purpose="transcription" initial={{ ...emptyModel('transcription'), modelId: 'gpt-transcribe' }} />);
+  fireEvent.click(screen.getByText('Pricing'));
+  fireEvent.click(screen.getByRole('button', { name: 'Set rates manually' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Audio USD / minute' }), { target: { value: '0.006' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply these rates' }));
+  expect(state().price).toMatchObject({ source: 'user', audioMicrousdPerMinute: 6000, inputMicrousdPerMillion: 0, outputMicrousdPerMillion: 0 });
+  expect(screen.queryByRole('combobox', { name: /^How to create subtitles/ })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('combobox', { name: 'OpenAI model ID' }), { target: { value: 'gpt-next-transcribe' } });
+  expect(state().price).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Set rates manually' }));
+  expect(screen.getByRole('textbox', { name: 'Audio USD / minute' })).toHaveValue('');
+  fireEvent.change(screen.getByRole('textbox', { name: 'Audio USD / minute' }), { target: { value: '0.01' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply these rates' }));
+  expect(state().price?.audioMicrousdPerMinute).toBe(10000);
 });

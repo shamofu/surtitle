@@ -135,6 +135,9 @@ pub(super) fn stitch(transcripts: &[ChunkTranscript]) -> Result<StitchedTranscri
     for pair in 0..transcripts.len().saturating_sub(1) {
         let left = &transcripts[pair];
         let right = &transcripts[pair + 1];
+        if left.chunk.request_end_sample <= right.chunk.request_start_sample {
+            continue;
+        }
         let lo = right.chunk.request_start_ms();
         let hi = left.chunk.request_start_ms() + left.chunk.request_duration_ms();
         let indices = |side| {
@@ -311,6 +314,7 @@ mod tests {
                     request_start_sample: if i == 0 { 0 } else { 7000 },
                     request_end_sample: if i == 0 { 13000 } else { 20000 },
                     boundary: BoundaryKind::Forced,
+                    boundary_provenance: None,
                 },
                 segments,
             })

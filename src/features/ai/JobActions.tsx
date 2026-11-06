@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { activeProvider, providerLabel } from './provider';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, FileCheck2, Pause, RotateCw, Square } from 'lucide-react';
 import { aiApi } from './api';
@@ -33,6 +34,7 @@ export function JobActions({
   const { data } = useSnapshot();
   const [busy, setBusy] = useState(false);
   const [quote, setQuote] = useState<AiQuote>();
+  const quoteStale = !!quote && !quote.isRetry && !!data?.settings && (quote.provider !== activeProvider(data.settings) || quote.aiConfigurationGeneration !== (data.settings.aiConfigurationGeneration ?? 0));
   const [saved, setSaved] = useState<SavedAiResult[]>();
   const savedExit = useModalExit(!!saved);
   const quoteExit = useModalExit(!!quote);
@@ -64,7 +66,7 @@ export function JobActions({
     setBusy(false);
   }
   async function approve() {
-    if (!quote || busy || exiting) return;
+    if (!quote || quoteStale || busy || exiting) return;
     setBusy(true);
     const success = await report(async () => {
       await mutate(() => quote.isRetry ? aiApi.reapproveQuote(quote) : aiApi.approveQuote(quote), { kind: 'snapshot' });
@@ -98,6 +100,7 @@ export function JobActions({
   }
   return (
     <>
+      <span className="helper-text">{providerLabel(job.provider)}</span>
       <MotionSwap disabled className="job-actions-motion" stateKey={`${job.status}:${job.issue?.nextAction ?? ''}:${!!(job.hasTranscriptResult ?? job.transcriptReview)}:${!!job.pendingResults}:${job.progress < 1}:${job.retry?.state ?? ''}:${job.resultState ?? ''}`}><div className="inline-actions job-actions" inert={exiting}>
         {job.issue?.nextAction === 'retry_local' && <Button busy={busy} onClick={() => void perform(() => mutate(() => aiApi.retryAiApplication(job.id), { kind: 'snapshot' }))}>{t('保存結果の反映を再試行', 'Retry applying saved results')}</Button>}
         {job.status === 'queued' && <Button busy={busy} onClick={() => void openQuote()}>{t('見積もりを開く', 'Open estimate')}</Button>}
@@ -219,13 +222,13 @@ export function JobActions({
               'This new approval covers unfinished work only. Unknown attempts must be accounted for before retrying.',
             )}
           </p></MotionRegion>
-          <MotionSwap disabled stateKey={(data?.budget.unknownAttempts || []).map(attempt => attempt.id).join('|')}>{(data?.budget.unknownAttempts || []).map(attempt => <div key={attempt.id}>
+          <MotionSwap disabled stateKey={(data?.budgets[job.provider]?.unknownAttempts || []).map(attempt => attempt.id).join('|')}>{(data?.budgets[job.provider]?.unknownAttempts || []).map(attempt => <div key={attempt.id}>
             {attempt.jobId !== job.id && <p>{t('別の処理の結果確認が必要です。', 'Another job has an unknown outcome to acknowledge.')}</p>}
             <UnknownAttempt attempt={attempt} onResolved={() => void openQuote()} />
           </div>)}</MotionSwap>
-          <Button variant="ghost" busy={busy} disabled={quoteExit.exiting} onClick={() => void openQuote()}>{t('見積もりを更新', 'Refresh estimate')}</Button>
+          <Button variant="ghost" busy={busy} disabled={quoteExit.exiting || quoteStale} onClick={() => void openQuote()}>{t('見積もりを更新', 'Refresh estimate')}</Button>
           <MotionSwap stateKey={quote.id}><QuoteApproval
-            quote={quote}
+            quote={quoteStale ? { ...quote, canApprove: false, blockedReason: t('AI設定が変わりました。この見積もりを閉じて、元の操作から新しく見積もってください。', 'AI settings changed. Close this estimate and prepare a new estimate from your original request.') } : quote}
             busy={busy || quoteExit.exiting}
             transcription={inlineTranscription}
             onApprove={() => void approve()}

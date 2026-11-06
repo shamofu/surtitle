@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
 import { afterEach, test, vi } from 'vitest';
-import { invokeNative, NativeIpcError, expectNativeRejection, restartNativeSession, nativeScriptTimeout, clickNative, replaceNativeValue } from './native-app.mjs';
+import { invokeNative, NativeIpcError, expectNativeRejection, restartNativeSession, prepareNativeSession, setNativeProfileVerifier, nativeScriptTimeout, clickNative, replaceNativeValue } from './native-app.mjs';
 import { Key } from 'webdriverio';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -39,6 +39,23 @@ test('a native restart restores the long IPC timeout before waiting on the new a
   };
   await restartNativeSession(session);
   assert.deepEqual(events, ['restart', { script: nativeScriptTimeout }, 'wait-ipc', 'h1']);
+});
+
+test('readiness and restart reject a foreign profile before a caller can change settings', async () => {
+  let checks = 0, settingsChanged = false;
+  const session = {
+    reloadSession: async () => {}, setTimeout: async () => {},
+    waitUntil: async predicate => assert(await predicate()), execute: async () => true,
+    $: () => ({ waitForDisplayed: async () => {} }),
+  };
+  setNativeProfileVerifier(session, async () => { if (++checks === 2) throw new Error('Foreign profile'); });
+  await prepareNativeSession(session);
+  await assert.rejects(async () => {
+    await restartNativeSession(session);
+    settingsChanged = true;
+  }, /Foreign profile/);
+  assert.equal(checks, 2);
+  assert.equal(settingsChanged, false);
 });
 
 test('native input waits for stable geometry and replaces controlled text using element key events', async () => {

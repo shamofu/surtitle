@@ -14,6 +14,9 @@ use std::{
 };
 use surtitle_tools::ToolSnapshot;
 
+mod silence;
+pub(super) use silence::{encode_file_silence, encode_openai_file_silence};
+
 /// Only closed pause evidence inside a fully observed decision window is final.
 /// A still-growing pause may change duration tie breaks, so wait for its end.
 /// The final tail is always planned after EOF by the authoritative full analysis.
@@ -91,17 +94,7 @@ impl Encoders {
         while self.active.len() >= self.limit {
             self.reap_one()?;
         }
-        let mut input = std::fs::File::open(spool)?;
-        input.seek(SeekFrom::Start(
-            (chunk.request_start_sample - selection_start) * 2,
-        ))?;
-        let byte_count = (chunk.request_end_sample - chunk.request_start_sample) * 2;
-        let mut pcm = tempfile::NamedTempFile::new_in(directory)?;
-        let copied = std::io::copy(&mut input.take(byte_count), pcm.as_file_mut())?;
-        if copied != byte_count {
-            return Err(local_error("decoded PCM ended before the prepared span"));
-        }
-        pcm.flush()?;
+        let pcm = copy_pcm_span(spool, directory, selection_start, chunk, &self.cancel)?;
         let output = directory.join(format!("chunk-{:05}.flac", chunk.index));
         let tool = tool.clone();
         let chunk = chunk.clone();
@@ -138,6 +131,49 @@ fn encode(
     tool: &ToolSnapshot,
     cancel: Arc<AtomicBool>,
 ) -> Result<AudioAttachment> {
+    encode_flac(pcm, &output, tool, cancel)?;
+    AudioAttachment::from_file(
+        output,
+        chunk.request_start_ms(),
+        chunk.request_duration_ms(),
+    )
+}
+
+fn copy_pcm_span(
+    spool: &Path,
+    directory: &Path,
+    selection_start: u64,
+    chunk: &AudioChunk,
+    cancel: &AtomicBool,
+) -> Result<tempfile::NamedTempFile> {
+    let mut input = std::fs::File::open(spool)?;
+    input.seek(SeekFrom::Start(
+        (chunk.request_start_sample - selection_start) * 2,
+    ))?;
+    let byte_count = (chunk.request_end_sample - chunk.request_start_sample) * 2;
+    let mut pcm = tempfile::NamedTempFile::new_in(directory)?;
+    let mut input = input.take(byte_count);
+    let mut copied = 0;
+    let mut buffer = [0_u8; 65_536];
+    while copied < byte_count {
+        check_cancel(cancel)?;
+        let count = input.read(&mut buffer)?;
+        if count == 0 {
+            return Err(local_error("decoded PCM ended before the prepared span"));
+        }
+        pcm.write_all(&buffer[..count])?;
+        copied += count as u64;
+    }
+    pcm.flush()?;
+    Ok(pcm)
+}
+
+fn encode_flac(
+    pcm: tempfile::NamedTempFile,
+    output: &Path,
+    tool: &ToolSnapshot,
+    cancel: Arc<AtomicBool>,
+) -> Result<()> {
     let args = vec![
         "-nostdin".into(),
         "-hide_banner".into(),
@@ -160,12 +196,60 @@ fn encode(
         LocalChild::start(tool, &args, false, cancel.clone(), Duration::from_secs(600))?;
     child.finish()?;
     check_cancel(&cancel)?;
-    AudioAttachment::from_file(
-        output,
-        chunk.request_start_ms(),
-        chunk.request_duration_ms(),
-    )
+    Ok(())
 }
+
+/// The full selection is encoded first. Only a measured oversized FLAC causes
+/// splitting; candidates and PCM copies stay on disk and are processed serially.
+pub(super) fn encode_openai_file(
+    spool: &Path,
+    directory: &Path,
+    whole: AudioChunk,
+    pauses: &[Pause],
+    tool: &ToolSnapshot,
+    cancel: Arc<AtomicBool>,
+    mut progress: impl FnMut(u32, u64),
+) -> Result<(Vec<AudioChunk>, Vec<AudioAttachment>)> {
+    let selection_start = whole.request_start_sample;
+    let mut pending = vec![whole];
+    let mut chunks = Vec::new();
+    let mut audio = Vec::new();
+    while let Some(mut chunk) = pending.pop() {
+        check_cancel(&cancel)?;
+        let candidate = directory.join("candidate.flac");
+        let pcm = copy_pcm_span(spool, directory, selection_start, &chunk, &cancel)?;
+        encode_flac(pcm, &candidate, tool, cancel.clone())?;
+        if candidate.metadata()?.len() > AudioAttachment::MAX_OPENAI_FILE_BYTES {
+            std::fs::remove_file(&candidate)?;
+            if chunks.len() + pending.len() + 2 > 5000 {
+                return Err(local_error("selection exceeds 5000 byte-bounded requests"));
+            }
+            let (left, right) = crate::chunks::split_file_chunk(&chunk, pauses)?;
+            pending.push(right);
+            pending.push(left);
+            continue;
+        }
+        chunk.index = chunks.len() as u32;
+        let output = directory.join(format!("chunk-{:05}.flac", chunk.index));
+        if output.exists() {
+            return Err(local_error("prepared audio destination already exists"));
+        }
+        std::fs::rename(candidate, &output)?;
+        audio.push(AudioAttachment::from_file_for_provider(
+            output,
+            chunk.request_start_ms(),
+            chunk.request_duration_ms(),
+            crate::AiProvider::Openai,
+        )?);
+        let end_ms = chunk.core_end_ms();
+        chunks.push(chunk);
+        progress(chunks.len() as u32, end_ms);
+    }
+    Ok((chunks, audio))
+}
+
+#[cfg(test)]
+mod file_tests;
 
 #[cfg(test)]
 mod tests {
@@ -243,5 +327,56 @@ mod tests {
         drop(encoders);
         assert!(cancel.load(Ordering::Relaxed));
         assert!(stopped.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn quality_staged_boundaries_and_evidence_equal_final_plan_after_eof() {
+        let start = 37_000 * 16;
+        let end = start + 65_000 * 16 + 7;
+        for profile in [
+            crate::AudioChunkProfile::Quality30Seconds,
+            crate::AudioChunkProfile::Quality15Seconds,
+        ] {
+            let options = ChunkOptions::for_profile(profile);
+            for spans in [
+                vec![],
+                vec![(0, 65_001)],
+                vec![(11_900, 12_101), (24_900, 25_101), (29_950, 30_600)],
+            ] {
+                let pauses = spans
+                    .iter()
+                    .map(|&(a, b)| Pause {
+                        start_sample: start + a * 16,
+                        end_sample: (start + b * 16).min(end),
+                    })
+                    .collect::<Vec<_>>();
+                let final_plan = plan_chunks(start, end, &pauses, options).unwrap();
+                let mut staged = Vec::<AudioChunk>::new();
+                for elapsed_ms in (1000..65_000).step_by(1000) {
+                    let observed = start + elapsed_ms * 16;
+                    let partial = pauses
+                        .iter()
+                        .filter(|pause| pause.start_sample < observed)
+                        .map(|pause| Pause {
+                            start_sample: pause.start_sample,
+                            end_sample: pause.end_sample.min(observed),
+                        })
+                        .collect::<Vec<_>>();
+                    while let Some(chunk) = next_mature_chunk(
+                        start,
+                        staged.last().map_or(start, |chunk| chunk.core_end_sample),
+                        observed,
+                        &partial,
+                        options,
+                        staged.len() as u32,
+                    )
+                    .unwrap()
+                    {
+                        staged.push(chunk);
+                    }
+                    assert_eq!(staged, final_plan[..staged.len()]);
+                }
+            }
+        }
     }
 }

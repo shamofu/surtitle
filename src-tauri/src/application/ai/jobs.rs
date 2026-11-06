@@ -6,6 +6,12 @@ pub(super) struct ApprovedExecution {
     approval_id: String,
 }
 
+#[derive(Default)]
+struct ApprovalReview {
+    retry_policy_version: Option<u32>,
+    ai_configuration_generation: Option<u64>,
+}
+
 pub async fn approve_quote(
     state: AppState,
     quote_id: String,
@@ -13,6 +19,7 @@ pub async fn approve_quote(
     acknowledge_unpriced: bool,
     acknowledge_unqualified: bool,
     retry_policy_version: Option<u32>,
+    ai_configuration_generation: Option<u64>,
 ) -> std::result::Result<(), String> {
     approve_and_start(
         state.clone(),
@@ -21,19 +28,22 @@ pub async fn approve_quote(
         false,
         acknowledge_unpriced,
         acknowledge_unqualified,
-        retry_policy_version,
+        ApprovalReview {
+            retry_policy_version,
+            ai_configuration_generation,
+        },
     )
     .map_err(err)
 }
 
-pub(super) fn approve_and_start(
+fn approve_and_start(
     state: AppState,
     quote_id: String,
     digest: &str,
     retry: bool,
     acknowledge_unpriced: bool,
     acknowledge_unqualified: bool,
-    retry_policy_version: Option<u32>,
+    review: ApprovalReview,
 ) -> Result<()> {
     let plan = approve_for_execution_with_retry(
         &state,
@@ -42,7 +52,7 @@ pub(super) fn approve_and_start(
         retry,
         acknowledge_unpriced,
         acknowledge_unqualified,
-        retry_policy_version,
+        review,
     )?;
     tauri::async_runtime::spawn(async move {
         let _ = run_approved(state, quote_id, plan).await;
@@ -66,7 +76,7 @@ fn approve_for_execution(
         retry,
         acknowledge_unpriced,
         acknowledge_unqualified,
-        None,
+        ApprovalReview::default(),
     )
 }
 
@@ -77,13 +87,26 @@ fn approve_for_execution_with_retry(
     retry: bool,
     acknowledge_unpriced: bool,
     acknowledge_unqualified: bool,
-    retry_policy_version: Option<u32>,
+    review: ApprovalReview,
 ) -> Result<ApprovedExecution> {
+    let ApprovalReview {
+        retry_policy_version,
+        ai_configuration_generation,
+    } = review;
     // Serialize approval against local transcript correction/adoption. A paused
     // job cannot become dispatchable between the editor's check and its write.
     let review_guard = lock(&state.ai_session.transcript_review)?;
+    let settings_guard = state.preferences.settings_transition()?;
     let quote = state.ai.quote(quote_id)?;
     let plan = state.ai.prepared_job(quote_id)?;
+    if quote.state == "prepared" {
+        let preferences = state.preferences.read()?;
+        ensure!(
+            ai_configuration_generation.unwrap_or(0)
+                == preferences.settings.ai_configuration_generation,
+            "AI settings changed. Review a new estimate."
+        );
+    }
     ensure!(
         quote.digest == digest,
         "The reviewed preparation changed. Review the current quote."
@@ -133,12 +156,13 @@ fn approve_for_execution_with_retry(
         }
     }
     drop(review_guard);
+    drop(settings_guard);
     state.ai.clear_job_issue_scoped(quote_id, &approval_id)?;
     let _ = super::runtime::begin(state, quote_id, &approval_id);
     Ok(ApprovedExecution { plan, approval_id })
 }
 
-// This seam stays inside the application. Production creates only VertexService;
+// This seam stays inside the application. Production creates the shared provider service;
 // integration tests use the same AI worker with offline authorization/transport.
 trait JobExecutor: Send + Sync {
     fn execute_next_with_guard(
@@ -149,14 +173,15 @@ trait JobExecutor: Send + Sync {
     ) -> impl std::future::Future<Output = surtitle_ai::Result<Option<ExecutionResult>>> + Send;
 }
 
-impl JobExecutor for VertexService {
+impl JobExecutor for ProviderService {
     async fn execute_next_with_guard(
         &self,
         job_id: &str,
         approval_id: &str,
         before_send: impl FnMut() -> surtitle_ai::Result<()> + Send,
     ) -> surtitle_ai::Result<Option<ExecutionResult>> {
-        VertexService::execute_next_scoped_with_guard(self, job_id, approval_id, before_send).await
+        ProviderService::execute_next_scoped_with_guard(self, job_id, approval_id, before_send)
+            .await
     }
 }
 
@@ -166,7 +191,7 @@ pub(super) async fn run_approved(
     approved: ApprovedExecution,
 ) -> Result<()> {
     run_approved_with(state, quote_id, approved, |state| {
-        Ok(VertexService::new(
+        Ok(ProviderService::new(
             state.ai.clone(),
             CredentialVault::new(state.root.join("credentials"))?,
         )?
@@ -492,6 +517,7 @@ pub(crate) fn record_failure(
 fn failure_issue(phase: &str, error: &anyhow::Error) -> (&'static str, Option<u16>, &'static str) {
     match error.downcast_ref::<AiError>() {
         Some(AiError::Credentials) => ("credentials", None, "settings"),
+        Some(AiError::CreditExhausted) => ("credit_exhausted", Some(429), "review_unknown"),
         Some(AiError::BudgetDisabled | AiError::BudgetExceeded(_)) => ("budget", None, "settings"),
         Some(AiError::Provider(429)) => ("provider", Some(429), "resume"),
         Some(AiError::Provider(status)) => ("provider", Some(*status), "settings"),
@@ -513,6 +539,7 @@ pub async fn reapprove_quote(
     acknowledge_unpriced: bool,
     acknowledge_unqualified: bool,
     retry_policy_version: Option<u32>,
+    ai_configuration_generation: Option<u64>,
 ) -> std::result::Result<(), String> {
     approve_and_start(
         state.clone(),
@@ -521,7 +548,10 @@ pub async fn reapprove_quote(
         true,
         acknowledge_unpriced,
         acknowledge_unqualified,
-        retry_policy_version,
+        ApprovalReview {
+            retry_policy_version,
+            ai_configuration_generation,
+        },
     )
     .map_err(err)
 }
@@ -568,18 +598,24 @@ pub fn resolve_unknown_attempt(
     attempt_id: String,
 ) -> std::result::Result<(), String> {
     (|| {
-        let job_id = state
-            .ai
-            .summary()?
-            .unknown_attempts
-            .into_iter()
-            .find(|attempt| attempt.id == attempt_id)
-            .context("Unknown request is no longer pending")?
-            .job_id;
+        let mut pending = None;
+        for provider in [AiProvider::Vertex, AiProvider::Openai] {
+            if let Some(attempt) = state
+                .ai
+                .summary_for(provider)?
+                .unknown_attempts
+                .into_iter()
+                .find(|attempt| attempt.id == attempt_id)
+            {
+                pending = Some((provider, attempt.job_id));
+                break;
+            }
+        }
+        let (provider, job_id) = pending.context("Unknown request is no longer pending")?;
         state.ai.acknowledge_unknown(&attempt_id)?;
         if !state
             .ai
-            .summary()?
+            .summary_for(provider)?
             .unknown_attempts
             .iter()
             .any(|attempt| attempt.job_id == job_id && attempt.state == "unknown")

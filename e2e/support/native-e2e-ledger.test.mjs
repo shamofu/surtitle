@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
-import { assertOfflineFixtureLedger } from './native-e2e-ledger.mjs';
+import { assertOfflineFixtureLedger, assertProfileJobIdentity } from './native-e2e-ledger.mjs';
 
 function fixture({ translation = false, boundary = false } = {}) {
   const environment = {
@@ -10,7 +10,7 @@ function fixture({ translation = false, boundary = false } = {}) {
   };
   const stored = {
     ai_jobs: [], ai_requests: [], ai_attempts: [],
-    ai_settings: [{ id: 1, limits_json: JSON.stringify({ per_job_microusd: 0, daily_microusd: 0, monthly_microusd: 0 }) }],
+    ai_provider_settings: ['vertex', 'openai'].map(provider => ({ provider, limits_json: JSON.stringify({ per_job_microusd: 0, daily_microusd: 0, monthly_microusd: 0 }) })),
   };
   const add = (id, title, media_id, kind, count, received, state) => {
     stored.ai_jobs.push({ id, state, approved_at_ms: null, approval_json: null, plan_json: JSON.stringify({ title, project_id: 'e2e-project', credential_id: 'unused-e2e-fixture', binding: { media_id }, requests: Array.from({ length: count }, () => ({ kind })) }) });
@@ -29,6 +29,16 @@ function fixture({ translation = false, boundary = false } = {}) {
   return { snapshot, stored, environment };
 }
 const check = ({ snapshot, stored, environment }) => assertOfflineFixtureLedger(snapshot, stored, environment);
+
+test('profile identity rejects a different seeded profile even when its fixture names match', () => {
+  const data = fixture({ translation: true, boundary: true });
+  const foreign = { jobs: data.snapshot.jobs.map(job => ({ id: `other-profile-${job.id}` })) };
+  assert.throws(() => assertProfileJobIdentity(foreign, data.stored), /exact expected profile ledger/);
+  assertProfileJobIdentity(data.snapshot, data.stored);
+  // Restarts may follow legitimate local application; identity does not reset it.
+  data.stored.ai_jobs[0].state = 'cancelled';
+  assertProfileJobIdentity(data.snapshot, data.stored);
+});
 
 test.each([{}, { translation: true }, { boundary: true }, { translation: true, boundary: true }])('validates the entire offline ledger and its activity projection for %j', options => {
   const data = fixture(options), before = structuredClone(data);
@@ -65,7 +75,8 @@ test('rejects provider dispatch, nonzero fees or limits, and orphan request reco
     data => { data.stored.ai_attempts[0].reserve_microusd = 1; },
     data => { data.stored.ai_attempts[0].charged_microusd = 1; },
     data => { data.stored.ai_attempts[0].usage_json = '{"offlineFixture":true,"paidRequests":1}'; },
-    data => { data.stored.ai_settings[0].limits_json = '{"per_job_microusd":0,"daily_microusd":1,"monthly_microusd":0}'; },
+    data => { data.stored.ai_provider_settings[0].limits_json = '{"per_job_microusd":0,"daily_microusd":1,"monthly_microusd":0}'; },
+    data => { data.stored.ai_provider_settings[1].limits_json = '{"per_job_microusd":1,"daily_microusd":0,"monthly_microusd":0}'; },
     data => { data.stored.ai_requests.push({ ...data.stored.ai_requests[0], job_id: 'foreign' }); },
   ];
   for (const mutate of mutations) {

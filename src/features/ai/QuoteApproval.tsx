@@ -5,6 +5,7 @@ import { Play, CircleDollarSign } from 'lucide-react';
 
 import type { AiQuote } from '../../shared/contracts/ai';
 
+import { providerLabel } from './provider';
 import { useAppearance } from '../../app/runtime';
 import { money, quoteCanBeApproved, timestamp } from '../../shared/format';
 import { Button } from '../../shared/ui/index';
@@ -40,7 +41,7 @@ export function QuoteApproval({
       <div className="quote-cost">
         <span>
           <CircleDollarSign size={18} />
-          {t('この実行の見積もり', 'Estimate for this job')}
+          {t('この実行の見積もり', 'Estimate for this job')} · {providerLabel(quote.provider)}
         </span>
         <strong>
           <AnimatedValue value={unpriced
@@ -75,7 +76,7 @@ export function QuoteApproval({
         <div>
           <dt>{t('モデル', 'Model')}</dt>
           <dd>
-            {quote.model} · {quote.location || 'global'}
+            {quote.model}{quote.provider === 'vertex' ? ` · ${quote.location || 'global'}` : ''}
           </dd>
         </div>
       </dl>
@@ -101,14 +102,14 @@ export function QuoteApproval({
           <dt>{t('再試行込みの最大送信音声', 'Maximum audio including retries')}</dt>
           <dd><AnimatedValue value={timestamp(quote.maximumSendDurationMs, true)} /></dd>
         </div>}
-        <div>
+        {!(quote.provider === 'openai' && transcription) && <div>
           <dt>{automaticRetries ? t('1要求 / 再試行前の出力上限', 'Output limit per request / before retries') : t('1要求 / 全要求の出力上限', 'Output limit per request / total')}</dt>
           <dd>
             <AnimatedValue value={`${quote.maxOutputTokens.toLocaleString()} / ${(quote.totalOutputTokens ?? quote.maxOutputTokens).toLocaleString()}`} />{' '}
             tokens
           </dd>
-        </div>
-        {automaticRetries && quote.maximumTotalOutputTokens != null && <div>
+        </div>}
+        {automaticRetries && quote.maximumTotalOutputTokens != null && !(quote.provider === 'openai' && transcription) && <div>
           <dt>{t('再試行込みの最大出力', 'Maximum output including retries')}</dt>
           <dd><AnimatedValue value={quote.maximumTotalOutputTokens.toLocaleString()} /> tokens</dd>
         </div>}

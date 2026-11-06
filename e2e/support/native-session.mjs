@@ -4,9 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { spawnWebDriver, waitForWebDriver } from './webdriver-process.mjs';
+import { availableWebDriverPorts, spawnWebDriver, waitForWebDriver } from './webdriver-process.mjs';
 import { artifactIdentity } from './native-artifacts.mjs';
 import { nativeSpecs } from './native-suite.mjs';
+import { assertOfflineFixtureLedger, assertProfileJobIdentity, readFeeLedger } from './native-e2e-ledger.mjs';
 
 export function validateNativeEnvironment(environment = process.env) {
   const binary = environment.SURTITLE_E2E_BINARY;
@@ -120,6 +121,17 @@ export class NativeWorker {
     this.environment = environment;
     this.spawn = dependencies.spawn ?? spawnLogged;
     this.waitForDriver = dependencies.waitForDriver ?? waitForWebDriver;
+    this.verifyPorts = dependencies.verifyPorts ?? availableWebDriverPorts;
+  }
+
+  assertProfile(snapshot) {
+    assert(this.environment.SURTITLE_E2E_AI_RECOVERY === 'translation'
+      && this.environment.SURTITLE_E2E_TRANSCRIPT_REVIEW === 'boundary', 'Native profile attestation requires both offline fixtures');
+    const stored = readFeeLedger(this.profile);
+    assert(stored.ai_jobs.some(job => job.state !== 'prepared'), 'Native profile attestation requires persisted offline fixtures');
+    if (!this.profileVerified) assertOfflineFixtureLedger(snapshot, stored, this.environment);
+    else assertProfileJobIdentity(snapshot, stored);
+    this.profileVerified = true;
   }
 
   async start(specs, cid) {
@@ -167,10 +179,16 @@ export class NativeWorker {
       assert(existsSync(join(this.profile, 'fixture.json')), 'The native seed did not produce fixture.json');
       Object.assign(environment, workerEnvironment);
       const port = Number(environment.SURTITLE_WEBDRIVER_PORT || 4444);
-      const args = ['--port', String(port)];
+      // The intermediary and its native driver need distinct ports for this
+      // session. Leaving the native default can connect to another run's driver.
+      const nativePort = port + 1;
+      await this.verifyPorts(port, nativePort);
+      const args = ['--port', String(port), '--native-port', String(nativePort)];
       if (environment.SURTITLE_NATIVE_DRIVER) args.push('--native-driver', environment.SURTITLE_NATIVE_DRIVER);
       this.driver = this.spawn(environment.SURTITLE_TAURI_DRIVER || 'tauri-driver', args, this.directory, 'driver', environment);
       this.metadata.driverPid = this.driver.pid;
+      this.metadata.port = port;
+      this.metadata.nativePort = nativePort;
       this.metadata.phase = 'starting-driver'; save();
       await this.waitForDriver(this.driver, { port, timeoutMs: 15000 });
       this.metadata.phase = 'ready'; save();

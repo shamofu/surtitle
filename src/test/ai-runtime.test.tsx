@@ -8,7 +8,7 @@ import type { AiRuntimeSnapshot, JobSummary } from '../shared/contracts/ai';
 
 vi.mock('../app/runtime', () => ({ useAppearance: () => ({ t: (_ja: string, en: string) => en }) }));
 afterEach(cleanup);
-const job: JobSummary = { id: 'job', kind: 'vocabulary', status: 'running', progress: 0, createdAt: '' };
+const job: JobSummary = { provider: 'vertex', id: 'job', kind: 'vocabulary', status: 'running', progress: 0, createdAt: '' };
 const snapshot: AiRuntimeSnapshot = { jobId: 'job', approvalId: 'approval', revision: 5,
   events: ['preparing', 'sending', 'receiving', 'validating'].map((phase, index) => ({ id: String(index), phase, ordinal: 0, timestamp: `2026-10-11T01:00:0${index}Z` })),
   preview: { attemptId: 'attempt', ordinal: 0, text: '{"items":[{"term":"look forward to","meaning":"楽しみにする","explanation":"Used when', state: 'streaming' },

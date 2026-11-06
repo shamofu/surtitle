@@ -12,7 +12,7 @@ import { PreparationSessionsProvider, useClearPreparationSessions } from '../fea
 
 const render = (ui: ReactElement) => renderView(ui, { wrapper: PreparationSessionsProvider });
 function RestoreData() { const clear = useClearPreparationSessions(); return <button onClick={clear}>Restore data</button>; }
-const fixture = vi.hoisted(() => ({ credentialConfigured: true, navigate: vi.fn(), errors: [] as unknown[] }));
+const fixture = vi.hoisted(() => ({ provider: 'vertex' as 'vertex' | 'openai', generation: 0, credentialConfigured: true, navigate: vi.fn(), errors: [] as unknown[] }));
 vi.mock('../app/providers/Activities', () => {
   const runTracked = async (_descriptor: unknown, action: () => Promise<unknown>) => action();
   return { useActivities: () => ({ activities: [], runTracked }) };
@@ -35,11 +35,11 @@ vi.mock('../app/runtime', () => {
   const useFixture = () => ({
     t, report, registerModal, mutate: (action: () => Promise<unknown>) => action(),
     data: {
-      settings: { credentialConfigured: fixture.credentialConfigured, vertexProject: 'test-project', vertexLocation: 'global', aiModels: {
+      settings: { activeProvider: fixture.provider, aiConfigurationGeneration: fixture.generation, openai: { credentialConfigured: true, dailyBudgetUsd: 0, aiModels: { transcription: { modelId: 'gpt-transcribe', transcriptionMode: 'transcribe', maxOutputTokens: 12288 } } }, credentialConfigured: fixture.credentialConfigured, vertexProject: 'test-project', vertexLocation: 'global', aiModels: {
         transcription: { modelId: 'gemini-test-transcribe', transcriptionMode: 'transcribe', maxOutputTokens: 12288 },
         vocabulary: { modelId: 'gemini-test-flash', transcriptionMode: 'subtitles', maxOutputTokens: 8192 },
       } },
-      budget: { unknownAttempts: [] },
+      budgets: { vertex: { unknownAttempts: [] }, openai: { unknownAttempts: [] } },
     },
   });
   return { useDataActions: useFixture, useAppearance: useFixture, useSnapshot: useFixture, useNotifications: useFixture, useSurface: useFixture };
@@ -48,12 +48,13 @@ const model: AiModelPreference = { modelId: 'gemini-test-transcribe', transcript
 const media: Media = { id: 'video', title: 'Full media', path: 'C:/video.mkv', kind: 'video', durationMs: 2161234, learningLanguage: 'en', explanationLanguage: 'ja', createdAt: '', lastPositionMs: 123456, segmentCount: 2, cardCount: 0, status: 'ready' };
 const mediaSignature = JSON.stringify([media.path, media.audioStreamIndex, media.learningLanguage, media.explanationLanguage]);
 const preparation: TranscriptionPreparation = { id: 'prepared', mediaId: media.id, startMs: 0, endMs: media.durationMs, coreDurationMs: media.durationMs, sendDurationMs: media.durationMs + 2000, chunkCount: 8, wholeMedia: true };
-const quote: AiQuote = { id: 'quote', mediaId: media.id, kind: 'transcribe', startMs: 0, endMs: media.durationMs, model: model.modelId, estimatedUsd: 0.1, maximumUsd: 0.2, inputTokens: 100, maxOutputTokens: model.maxOutputTokens, expiresAt: '2099-01-01T00:00:00Z', warnings: [], canApprove: true, applyPolicy: 'auto' };
+const quote: AiQuote = { aiConfigurationGeneration: 0, provider: 'vertex', id: 'quote', mediaId: media.id, kind: 'transcribe', startMs: 0, endMs: media.durationMs, model: model.modelId, estimatedUsd: 0.1, maximumUsd: 0.2, inputTokens: 100, maxOutputTokens: model.maxOutputTokens, expiresAt: '2099-01-01T00:00:00Z', warnings: [], canApprove: true, applyPolicy: 'auto' };
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   HTMLDialogElement.prototype.close = function () { this.open = false; };
 });
 beforeEach(() => {
+  fixture.provider = 'vertex'; fixture.generation = 0;
   fixture.credentialConfigured = true;
   fixture.errors = [];
   vi.mocked(aiApi.transcriptionPreparations).mockResolvedValue([]);
@@ -73,12 +74,12 @@ it('uses the exact complete video despite a selected cue and automatically prepa
   const close = vi.fn();
   render(<AiDialog media={media} initialRange={{ startMs: 1234, endMs: 3456 }} sourceContext={{ sourceCueIds: ['a', 'b'], sourceRevision: 'frozen source' }} onClose={close} />);
   expect(screen.queryByLabelText(/^From/)).not.toBeInTheDocument();
-  await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith(media.id, 0, 2161234, true, expect.any(String)));
+  await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith(media.id, 0, 2161234, true, expect.any(String), expect.any(Object)));
   expect(aiApi.createTranscriptionQuote).not.toHaveBeenCalled();
   expect(screen.queryByRole('button', { name: 'Start transcription' })).not.toBeInTheDocument();
   await act(async () => finish(preparation));
   await screen.findByText('Apply subtitles automatically');
-  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledExactlyOnceWith('prepared', model);
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledExactlyOnceWith('prepared', model, { provider: 'vertex', aiConfigurationGeneration: 0 });
   expect(continuationApi.save).toHaveBeenCalledWith(expect.objectContaining({ sourceCueIds: ['a', 'b'], sourceRevision: 'frozen source' }));
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
   expect(close).not.toHaveBeenCalled();
@@ -129,7 +130,7 @@ it('waits for a real duration and then uses its exact milliseconds without a gue
   expect(screen.queryByRole('button', { name: 'Start transcription' })).not.toBeInTheDocument();
   expect(aiApi.prepareTranscription).not.toHaveBeenCalled();
   view.rerender(<AiDialog media={{ ...media, durationMs: 7200123 }} initialRange={{ startMs: 1234, endMs: 3456 }} onClose={() => {}} />);
-  await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith(media.id, 0, 7200123, true, expect.any(String)));
+  await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith(media.id, 0, 7200123, true, expect.any(String), expect.any(Object)));
 });
 
 it('uses the selected cue only after explicitly choosing a range', async () => {
@@ -138,7 +139,7 @@ it('uses the selected cue only after explicitly choosing a range', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Choose a range' }));
   expect(screen.getByLabelText(/^From/)).toHaveValue('0:01.234');
   expect(screen.getByLabelText(/^To/)).toHaveValue('0:03.456');
-  await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith(media.id, 1234, 3456, false, expect.any(String)));
+  await waitFor(() => expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith(media.id, 1234, 3456, false, expect.any(String), expect.any(Object)));
 });
 
 it('does not create a quote or send a job after local preparation fails', async () => {
@@ -259,7 +260,7 @@ it('keeps the chosen range and model override when navigating to setup', async (
 it.each([false, true])('opens a queued estimate and uses the recorded retry status (%s) for approval', async isRetry => {
   const reviewed = { ...quote, isRetry };
   vi.mocked(aiApi.reviewAiJob).mockResolvedValue(reviewed);
-  render(<JobActions job={{ id: quote.id, mediaId: media.id, kind: 'transcribe', status: 'queued', progress: 0, createdAt: '' }} />);
+  render(<JobActions job={{ provider: 'vertex', id: quote.id, mediaId: media.id, kind: 'transcribe', status: 'queued', progress: 0, createdAt: '' }} />);
   fireEvent.click(screen.getByRole('button', { name: 'Open estimate' }));
   await screen.findByRole('button', { name: 'Start transcription' });
   expect(aiApi.reviewAiJob).toHaveBeenCalledExactlyOnceWith(quote.id);
@@ -305,7 +306,7 @@ it('blocks even a previously displayed quote when its restored source becomes in
 it('re-estimates remaining paused work and requires a fresh approval', async () => {
   const retry = { ...quote, isRetry: true };
   vi.mocked(aiApi.createRetryQuote).mockResolvedValue(retry);
-  render(<JobActions job={{ id: quote.id, mediaId: media.id, kind: 'transcribe', status: 'paused', progress: 0.5, createdAt: '' }} />);
+  render(<JobActions job={{ provider: 'vertex', id: quote.id, mediaId: media.id, kind: 'transcribe', status: 'paused', progress: 0.5, createdAt: '' }} />);
   fireEvent.click(screen.getByRole('button', { name: 'Estimate remaining work' }));
   await screen.findByRole('button', { name: 'Start transcription' });
   expect(aiApi.createRetryQuote).toHaveBeenCalledExactlyOnceWith(quote.id);
@@ -325,8 +326,60 @@ it.each([undefined, '["C:/old-video.mkv",2,"fr","de"]'])('invalidates old whole-
   expect(aiApi.reviewAiJob).not.toHaveBeenCalled();
   expect(aiApi.prepareTranscription).not.toHaveBeenCalled();
   await screen.findByRole('button', { name: 'Start transcription' });
-  expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith(media.id, 0, media.durationMs, true, expect.any(String));
+  expect(aiApi.prepareTranscription).toHaveBeenCalledExactlyOnceWith(media.id, 0, media.durationMs, true, expect.any(String), expect.any(Object));
   expect(continuationApi.save).toHaveBeenCalledWith(expect.objectContaining({ sourceMediaSignature: mediaSignature, quoteId: quote.id }));
   expect(aiApi.approveQuote).not.toHaveBeenCalled();
   expect(aiApi.reapproveQuote).not.toHaveBeenCalled();
+});
+
+it('ignores a delayed estimate after switching providers away and back to a new generation', async () => {
+  let finish!: (value: AiQuote) => void;
+  vi.mocked(aiApi.createTranscriptionQuote).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  vi.mocked(aiApi.createTranscriptionQuote).mockResolvedValue({ ...quote, id: 'fresh', model: 'current-model' });
+  const view = render(<AiDialog media={media} onClose={() => {}} />);
+  await waitFor(() => expect(aiApi.createTranscriptionQuote).toHaveBeenCalledOnce());
+  fixture.provider = 'openai'; fixture.generation = 1;
+  view.rerender(<AiDialog media={media} onClose={() => {}} />);
+  fixture.provider = 'vertex'; fixture.generation = 2;
+  view.rerender(<AiDialog media={media} onClose={() => {}} />);
+  await act(async () => finish({ ...quote, id: 'stale', model: 'stale-model' }));
+  expect(screen.queryByText('stale-model')).not.toBeInTheDocument();
+  expect(vi.mocked(continuationApi.save).mock.calls.some(([saved]) => saved.quoteId === 'stale')).toBe(false);
+  await screen.findByText(/current-model/);
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+  expect(aiApi.prepareTranscription).toHaveBeenCalledTimes(2);
+});
+it('rebuilds a continuation quote and model after its configuration generation changed', async () => {
+  fixture.generation = 3;
+  render(<AiDialog media={media} continuation={{ id: 'resumed', mediaId: media.id, kind: 'transcribe', start: '00:00', end: '10:00', wholeMedia: true, focusTerm: '', provider: 'vertex', aiConfigurationGeneration: 1, quoteId: 'old-quote', models: { transcription: { ...model, modelId: 'old-override' } }, sourceMediaSignature: mediaSignature }} onClose={() => {}} />);
+  await screen.findByRole('button', { name: 'Start transcription' });
+  expect(aiApi.reviewAiJob).not.toHaveBeenCalled();
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledWith(preparation.id, model, { provider: 'vertex', aiConfigurationGeneration: 3 });
+});
+
+it.each([
+  { compatible: false, provider: 'vertex' as const, aiConfigurationGeneration: 0 },
+  { compatible: true, provider: 'openai' as const, aiConfigurationGeneration: 0 },
+  { compatible: true, provider: 'vertex' as const, aiConfigurationGeneration: 1 },
+])('reprepares an incompatible saved receipt instead of quoting it: %j', async context => {
+  const stale = { ...preparation, ...context, id: 'stale-preparation' };
+  vi.mocked(aiApi.transcriptionPreparations).mockResolvedValue([stale]);
+  render(<AiDialog media={media} continuation={{ id: 'resume', mediaId: media.id, kind: 'transcribe', start: '0:00', end: '0:01',
+    wholeMedia: true, focusTerm: '', models: {}, preparationId: stale.id, sourceMediaSignature: mediaSignature }} onClose={() => {}} />);
+  await screen.findByRole('button', { name: 'Start transcription' });
+  expect(aiApi.prepareTranscription).toHaveBeenCalledOnce();
+  expect(aiApi.createTranscriptionQuote).toHaveBeenCalledExactlyOnceWith(preparation.id, model, { provider: 'vertex', aiConfigurationGeneration: 0 });
+  expect(vi.mocked(continuationApi.save).mock.calls.some(([saved]) => saved.preparationId === stale.id)).toBe(false);
+});
+
+it('rejects an incompatible native preparation receipt and retries with a fresh operation', async () => {
+  vi.mocked(aiApi.prepareTranscription).mockResolvedValueOnce({ ...preparation, compatible: false });
+  render(<AiDialog media={media} onClose={() => {}} />);
+  await waitFor(() => expect(fixture.errors).toHaveLength(1));
+  expect(aiApi.createTranscriptionQuote).not.toHaveBeenCalled();
+  expect(aiApi.approveQuote).not.toHaveBeenCalled();
+  fireEvent.click(await screen.findByRole('button', { name: 'Retry estimate' }));
+  await screen.findByRole('button', { name: 'Start transcription' });
+  expect(aiApi.prepareTranscription).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(aiApi.prepareTranscription).mock.calls[1][4]).not.toBe(vi.mocked(aiApi.prepareTranscription).mock.calls[0][4]);
 });

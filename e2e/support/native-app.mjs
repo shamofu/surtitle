@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import { Key } from 'webdriverio';
 
 export const nativeScriptTimeout = 180000;
+const profileVerifiers = new WeakMap();
+
+export function setNativeProfileVerifier(session, verify) {
+  profileVerifiers.set(session, verify);
+}
 
 export class NativeIpcError extends Error {
   constructor(command, reason) {
@@ -46,6 +51,9 @@ export async function prepareNativeSession(session = globalThis.browser) {
   await session.waitUntil(() => session.execute(() => typeof window.__TAURI_INTERNALS__?.invoke === 'function'),
     { timeout: 15000, timeoutMsg: 'Native IPC did not become ready' });
   await session.$('h1').waitForDisplayed();
+  // The main suite installs a read-only ledger identity check. It runs again
+  // after reloadSession, before callers can change settings or learning data.
+  await profileVerifiers.get(session)?.();
 }
 
 export async function restartNativeSession(session = globalThis.browser) {

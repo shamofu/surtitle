@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { createServer, request } from 'node:http';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { spawnWebDriver, waitForWebDriver } from './webdriver-process.mjs';
+import { availableWebDriverPorts, spawnWebDriver, waitForWebDriver } from './webdriver-process.mjs';
 
 const marker = 'SURTITLE_TEST_CHILD_JSON:';
 const directTimeoutMs = 10_000;
@@ -143,6 +143,30 @@ const assertOnlyStatusRequests = requests => {
   assert.ok(requests.every(([method, path]) => method === 'GET' && path === '/status'),
     `Readiness must not create sessions or replay WebDriver operations: ${JSON.stringify(requests)}`);
 };
+
+test('WebDriver port allocation selects two distinct free ports without touching an existing session', async t => {
+  const existing = readinessServer(t, respondReady);
+  const occupied = await existing.listen();
+  const { port, nativePort } = await availableWebDriverPorts();
+  assert.notEqual(port, nativePort);
+  assert(![port, nativePort].includes(occupied));
+  const intermediary = readinessServer(t, respondReady);
+  const native = readinessServer(t, respondReady);
+  assert.equal(await intermediary.listen(port), port);
+  assert.equal(await native.listen(nativePort), nativePort);
+  assert.deepEqual(existing.requests, [], 'Allocation must not contact an existing session');
+});
+
+test('WebDriver port checks release a reserved native port when the intermediary is already occupied', async t => {
+  const existing = readinessServer(t, respondReady);
+  const occupied = await existing.listen();
+  const candidate = readinessServer(t, respondReady);
+  const nativePort = await candidate.listen();
+  await candidate.close();
+  await assert.rejects(availableWebDriverPorts(occupied, nativePort), /driver port .* unavailable/i);
+  assert.equal(await candidate.listen(nativePort), nativePort);
+  assert.deepEqual(existing.requests, []);
+});
 
 test('WebDriver readiness waits for the backend when the proxy port opens first', async t => {
   const backend = readinessServer(t, respondReady);

@@ -1,7 +1,7 @@
 //! Preparation, explicit approval, and job lifecycle changes.
 use super::accounting::{check_budget, has_unknown_attempt, read_job};
 use super::{audit, AiStore, BudgetLimits, JobQuote};
-use crate::{AiError, PreparedJob, Result};
+use crate::{AiError, AiProvider, PreparedJob, Result};
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 struct ApprovalOptions {
@@ -13,6 +13,10 @@ struct ApprovalOptions {
 
 impl AiStore {
     pub fn set_budget(&self, value: BudgetLimits) -> Result<()> {
+        self.set_budget_for(AiProvider::Vertex, value)
+    }
+
+    pub fn set_budget_for(&self, provider: AiProvider, value: BudgetLimits) -> Result<()> {
         for n in [
             value.per_job_microusd,
             value.daily_microusd,
@@ -22,18 +26,20 @@ impl AiStore {
                 return Err(AiError::Invalid("Budget exceeds supported range".into()));
             }
         }
-        let conn = self.connect()?;
-        conn.execute(
-            "UPDATE ai_settings SET limits_json=? WHERE id=1",
-            [serde_json::to_string(&value)?],
+        let mut conn = self.connect()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            "UPDATE ai_provider_settings SET limits_json=? WHERE provider=?",
+            params![serde_json::to_string(&value)?, provider.as_str()],
         )?;
         audit(
-            &conn,
+            &tx,
             self.now_ms(),
             "budget_changed",
             None,
-            &serde_json::to_string(&value)?,
+            &serde_json::to_string(&serde_json::json!({"provider":provider,"limits":value}))?,
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -251,7 +257,7 @@ impl AiStore {
             return Err(AiError::ApprovalRequired);
         }
         self.check_model_permission(&plan, job_id, at)?;
-        if has_unknown_attempt(&tx)? {
+        if has_unknown_attempt(&tx, plan.execution.provider)? {
             return Err(AiError::UnknownOutcome);
         }
         // Other approved jobs may join the native dispatch queue. A currently

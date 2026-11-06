@@ -1,7 +1,9 @@
 import { call } from '../../shared/native/transport';
-import type { AiModelPreference, AiPurpose, AiQuote } from '../../shared/contracts/ai';
+import type { AiModelPreference, AiProvider, AiPurpose, AiQuote } from '../../shared/contracts/ai';
 
 export interface AiContinuation {
+  provider?: AiProvider;
+  aiConfigurationGeneration?: number;
   id: string;
   mediaId: string;
   kind: AiQuote['kind'];

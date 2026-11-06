@@ -26,7 +26,7 @@ function ledger() {
   return withLedger(database => ({
     attempts: database.prepare('SELECT id,job_id,ordinal,state,reserve_microusd,charged_microusd,usage_json FROM ai_attempts ORDER BY id').all(),
     approvals: database.prepare('SELECT id,approved_at_ms FROM ai_jobs WHERE approved_at_ms IS NOT NULL ORDER BY id').all(),
-    limits: database.prepare('SELECT limits_json FROM ai_settings WHERE id=1').get().limits_json,
+    limits: database.prepare('SELECT provider, limits_json FROM ai_provider_settings ORDER BY provider').all(),
   }));
 }
 function storedJob(id) {
@@ -233,7 +233,7 @@ describe('local transcript review and adoption in the real desktop', () => {
     await expectNativeRejection(invoke('prepare_boundary_repair', { jobId, draftDigest: adoptedDigest, boundaryId: originalConflict.id }), /adopted transcripts do not accept automatic repair/i);
     assert.deepEqual(ledger(), ledgerBefore);
     const afterReapply = await snapshot();
-    assert.equal(afterReapply.budget.spentUsd, 0); assert.equal(afterReapply.budget.reservedUsd, 0); assert.equal(afterReapply.budget.limitUsd, 0);
+    assert.equal(afterReapply.budgets.vertex.spentUsd, 0); assert.equal(afterReapply.budgets.vertex.reservedUsd, 0); assert.equal(afterReapply.budgets.vertex.limitUsd, 0);
     assert.equal(afterReapply.settings.credentialConfigured, false);
   });
 
@@ -284,8 +284,8 @@ describe('local transcript review and adoption in the real desktop', () => {
   it('learns and reviews an adopted manual recovery with a retained PATH-FFmpeg audio clip and no AI usage', async () => {
     const initial = await snapshot();
     assert.equal(initial.settings.credentialConfigured, false);
-    assert.equal(initial.budget.spentUsd, 0); assert.equal(initial.budget.reservedUsd, 0);
-    assert.equal(initial.budget.limitUsd, 0);
+    assert.equal(initial.budgets.vertex.spentUsd, 0); assert.equal(initial.budgets.vertex.reservedUsd, 0);
+    assert.equal(initial.budgets.vertex.limitUsd, 0);
     const repaired = (await segments(pendingMediaId)).find(cue => cue.text === 'Recovered locally.');
     assert(repaired && ['confirmed', 'generated'].includes(repaired.status), 'The previous manual recovery must be applied first');
     const adopted = await review(pendingJobId);
@@ -353,7 +353,7 @@ describe('local transcript review and adoption in the real desktop', () => {
     }
     assert.deepEqual(ledger(), ledgerBefore);
     const after = await snapshot();
-    assert.equal(after.budget.spentUsd, 0); assert.equal(after.budget.reservedUsd, 0); assert.equal(after.budget.limitUsd, 0);
+    assert.equal(after.budgets.vertex.spentUsd, 0); assert.equal(after.budgets.vertex.reservedUsd, 0); assert.equal(after.budgets.vertex.limitUsd, 0);
     assert.equal(after.settings.credentialConfigured, false);
     assert.equal(after.tools.find(tool => tool.id === 'ffmpeg').provider, 'external');
     await browser.saveScreenshot(nativeArtifact('transcript-manual-learning-chain.png'));
@@ -364,7 +364,7 @@ describe('local transcript review and adoption in the real desktop', () => {
     const transferRoot = resolve(dataRoot, 'e2e-transfer'), zipPath = resolve(transferRoot, 'learning.zip');
     assert(!existsSync(transferRoot), 'Use a fresh disposable transfer fixture');
     const before = await snapshot();
-    assert.equal(before.settings.credentialConfigured, false); assert.equal(before.budget.limitUsd, 0);
+    assert.equal(before.settings.credentialConfigured, false); assert.equal(before.budgets.vertex.limitUsd, 0);
     const card = before.cards.find(item => item.mediaId === pendingMediaId && item.term === 'Recovered locally');
     assert(card?.audioPath && card.reviewCount === 1, 'The preceding manual learning chain must pass first');
     const originalCue = (await segments(pendingMediaId)).find(cue => cue.id === card.segmentId);
@@ -480,7 +480,7 @@ describe('local transcript review and adoption in the real desktop', () => {
     const after = await snapshot();
     assert.equal(after.settings.replayContextMs, 1000); assert.equal(after.settings.credentialConfigured, false);
     assert.equal(after.tools.find(tool => tool.id === 'ffmpeg').provider, 'external');
-    assert.equal(after.budget.spentUsd, 0); assert.equal(after.budget.reservedUsd, 0); assert.equal(after.budget.limitUsd, 0);
+    assert.equal(after.budgets.vertex.spentUsd, 0); assert.equal(after.budgets.vertex.reservedUsd, 0); assert.equal(after.budgets.vertex.limitUsd, 0);
     await browser.saveScreenshot(nativeArtifact('transcript-portable-learning-restore.png'));
     console.info('Portable ZIP export/preview/confirmed restore uses a guarded test file-selection boundary; OS file-dialog UI is not covered.');
   });

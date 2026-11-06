@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+export type AiProvider = 'vertex' | 'openai';
 export type AiPurpose =
   | 'transcription'
   | 'vocabulary'
@@ -11,6 +12,7 @@ export interface AiPricePreference {
   observedAtMs: number;
   inputMicrousdPerMillion: number;
   outputMicrousdPerMillion: number;
+  audioMicrousdPerMinute?: number | null;
 }
 export interface PriceLookup {
   price: AiPricePreference | null;
@@ -51,6 +53,7 @@ export interface BudgetSummary {
 }
 
 export interface JobSummary {
+  provider: AiProvider;
   id: string;
   mediaId?: string;
   kind: string;
@@ -114,6 +117,10 @@ export interface AiRuntimeSnapshot {
 
 export interface TranscriptionPreparation {
   id: string;
+  compatible?: boolean;
+  provider?: AiProvider;
+  aiConfigurationGeneration?: number;
+  chunkProfile?: 'legacy' | 'quality_30_seconds' | 'quality_15_seconds' | 'quality_240_seconds' | 'openai_file' | 'openai_file_silence' | 'vertex_transcribe_file_silence' | 'vertex_audio_file_silence';
   mediaId: string;
   startMs: number;
   endMs: number;
@@ -142,6 +149,8 @@ export interface SavedAiResult {
 }
 
 export interface AiQuote {
+  aiConfigurationGeneration: number;
+  provider: AiProvider;
   id: string;
   mediaId: string;
   kind: 'transcribe' | 'translate' | 'vocabulary';

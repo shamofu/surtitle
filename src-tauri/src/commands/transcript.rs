@@ -24,11 +24,15 @@ pub async fn create_transcription_quote(
     state: State<'_, AppState>,
     preparation_id: String,
     model: Option<surtitle_core::AiModelPreference>,
+    provider: Option<surtitle_core::AiProvider>,
+    ai_configuration_generation: Option<u64>,
 ) -> std::result::Result<crate::application::ai::AiQuote, String> {
     crate::application::transcript::preparation::create_transcription_quote(
         state.inner().clone(),
         preparation_id,
         model,
+        provider,
+        ai_configuration_generation,
     )
     .await
 }

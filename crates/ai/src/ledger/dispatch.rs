@@ -43,7 +43,7 @@ impl AiStore {
         if state != "approved" || plan.digest()? != digest {
             return Err(AiError::ApprovalRequired);
         }
-        if has_unknown_attempt(&tx)? {
+        if has_unknown_attempt(&tx, plan.execution.provider)? {
             return Err(AiError::UnknownOutcome);
         }
         if has_blocking_attempt(&tx)? {

@@ -408,6 +408,7 @@ mod tests {
                 request_end_sample: ((ordinal as u64 + 1) * 10_000 + 1000)
                     .min(count as u64 * 10_000),
                 boundary: BoundaryKind::Forced,
+                boundary_provenance: None,
             })
             .collect::<Vec<_>>();
         let attachments = chunks

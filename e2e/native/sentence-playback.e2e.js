@@ -34,12 +34,12 @@ describe('sentence pauses in the real native study page', () => {
     await browser.waitUntil(async () => browser.execute(() => !!window.__TAURI_INTERNALS__));
     const initial = await invoke('get_app_snapshot');
     assert.equal(initial.settings.credentialConfigured, false, 'Refusing to mutate a profile with credentials');
-    assert.equal(initial.budget.spentUsd, 0, 'Expected a fresh disposable ledger');
-    assert.equal(initial.budget.reservedUsd, 0, 'Expected no pending reservations');
-    assert.equal(initial.budget.limitUsd, 0, 'Expected the disposable zero budget');
+    assert.equal(initial.budgets.vertex.spentUsd, 0, 'Expected a fresh disposable ledger');
+    assert.equal(initial.budgets.vertex.reservedUsd, 0, 'Expected no pending reservations');
+    assert.equal(initial.budgets.vertex.limitUsd, 0, 'Expected the disposable zero budget');
     assert.equal(initial.settings.dailyBudgetUsd, 0, 'Expected the disposable zero budget setting');
-    assert.equal(initial.budget.unknownAttempts?.length ?? 0, 0, 'Expected no unknown attempts');
-    assert.equal(initial.budget.unpricedAttempts ?? 0, 0, 'Expected no unpriced attempts');
+    assert.equal(initial.budgets.vertex.unknownAttempts?.length ?? 0, 0, 'Expected no unknown attempts');
+    assert.equal(initial.budgets.vertex.unpricedAttempts ?? 0, 0, 'Expected no unpriced attempts');
     assert(initial.media.some(media => media.id === mediaId && media.path === fixture.mediaPath), 'Refusing to mutate a profile without the exact disposable fixture');
     ledgerBefore = ledger();
     assertOfflineFixtureLedger(initial, ledgerBefore);

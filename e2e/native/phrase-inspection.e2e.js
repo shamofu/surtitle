@@ -25,8 +25,8 @@ describe('watch, inspect, and return with the Windows native surface', () => {
     }
     const snapshot = await invoke('get_app_snapshot');
     assert.equal(snapshot.settings.credentialConfigured, false);
-    assert.equal(snapshot.budget.spentUsd, 0);
-    assert.equal(snapshot.budget.reservedUsd, 0);
+    assert.equal(snapshot.budgets.vertex.spentUsd, 0);
+    assert.equal(snapshot.budgets.vertex.reservedUsd, 0);
     assert(snapshot.media.some(media => media.id === mediaId && media.path === fixture.mediaPath));
     originalSettings = snapshot.settings;
     await invoke('update_settings', { settings: { ...originalSettings, locale: 'en', sentencePause: false } });
@@ -97,7 +97,7 @@ describe('watch, inspect, and return with the Windows native surface', () => {
     await browser.waitUntil(async () => { const state = await player(); return !state.paused && state.positionMs >= returnPosition; });
     await browser.waitUntil(async () => (await player()).positionMs > 1600, { timeout: 6000, timeoutMsg: 'Returning retained the old range stop or repeat' });
     await control({ action: 'pause' });
-    assert.equal((await invoke('get_app_snapshot')).budget.spentUsd, 0);
+    assert.equal((await invoke('get_app_snapshot')).budgets.vertex.spentUsd, 0);
   });
   it('keeps video and controls inside a compact window with long subtitles and export management expanded', async () => {
     const original = (await invoke('list_segments', { mediaId }))[0];

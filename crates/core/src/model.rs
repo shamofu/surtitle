@@ -162,9 +162,44 @@ pub struct Review {
     pub scheduled_days: u32,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum AiProvider {
+    #[default]
+    Vertex,
+    Openai,
+}
+impl AiProvider {
+    pub fn is_vertex(&self) -> bool {
+        *self == Self::Vertex
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Vertex => "vertex",
+            Self::Openai => "openai",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct OpenAiSettings {
+    pub credential_configured: bool,
+    pub ai_models: std::collections::BTreeMap<String, AiModelPreference>,
+    pub daily_budget_usd: f64,
+    pub monthly_budget_usd: f64,
+    pub per_job_budget_usd: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
+    #[serde(default)]
+    pub active_provider: AiProvider,
+    #[serde(default)]
+    pub ai_configuration_generation: u64,
+    #[serde(default)]
+    pub openai: OpenAiSettings,
     pub theme: String,
     #[serde(default = "default_motion_preference")]
     pub motion_preference: String,
@@ -213,9 +248,28 @@ pub struct AiPricePreference {
     pub observed_at_ms: i64,
     pub input_microusd_per_million: u64,
     pub output_microusd_per_million: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_microusd_per_minute: Option<u64>,
 }
 fn default_proficiency() -> String {
     "B1".into()
+}
+impl AppSettings {
+    pub fn models_for(
+        &self,
+        provider: AiProvider,
+    ) -> &std::collections::BTreeMap<String, AiModelPreference> {
+        match provider {
+            AiProvider::Vertex => &self.ai_models,
+            AiProvider::Openai => &self.openai.ai_models,
+        }
+    }
+    pub fn project_for(&self, provider: AiProvider) -> &str {
+        match provider {
+            AiProvider::Vertex => &self.vertex_project,
+            AiProvider::Openai => "openai",
+        }
+    }
 }
 fn default_replay_context() -> u16 {
     150
@@ -229,6 +283,9 @@ fn default_caption_gap_mode() -> String {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            active_provider: AiProvider::Vertex,
+            ai_configuration_generation: 0,
+            openai: OpenAiSettings::default(),
             theme: "dark".into(),
             motion_preference: default_motion_preference(),
             caption_gap_mode: default_caption_gap_mode(),

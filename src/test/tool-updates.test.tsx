@@ -35,6 +35,7 @@ function mount(locale: 'ja' | 'en', check: () => Promise<void>) {
   HTMLElement.prototype.scrollIntoView = vi.fn();
   const data: AppSnapshot = {
     settings: {
+      activeProvider: 'vertex', aiConfigurationGeneration: 0, openai: { credentialConfigured: false, dailyBudgetUsd: 0, aiModels: {} },
       theme: 'dark',
       locale,
       learningLanguage: 'en',
@@ -51,7 +52,7 @@ function mount(locale: 'ja' | 'en', check: () => Promise<void>) {
     media: [],
     cards: [],
     jobs: [],
-    budget: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 },
+    budgets: { vertex: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 }, openai: { spentUsd: 0, reservedUsd: 0, limitUsd: 0 } },
     tools: [
       {
         id: 'ffmpeg',

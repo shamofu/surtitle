@@ -2,8 +2,8 @@ use crate::{AiError, AudioChunk, Pause, Result, VadAssets};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const PAUSE_POLICY: &str = "silero-low-posterior-0.35-2s-250ms-v1";
-const MINIMUM_PAUSE_MS: u64 = 2000;
-const BOUNDARY_GUARD_MS: u64 = 250;
+pub(crate) const MINIMUM_PAUSE_MS: u64 = 2000;
+pub(crate) const BOUNDARY_GUARD_MS: u64 = 250;
 const MAX_PAUSES: usize = 50_000;
 
 /// Review evidence from sustained low-posterior frames, not proof of silence.

@@ -8,9 +8,9 @@ Surtitle is a Windows 11 x64 desktop application built with Tauri, React, TypeSc
 | Tauri application | Typed IPC, application services, resource events and the native video window |
 | `surtitle-core` | Learning data, subtitle parsing, FSRS scheduling and portable archives |
 | `surtitle-tools` | Executable discovery, selection, bounded processes and managed updates |
-| `surtitle-ai` | Request preparation, Vertex adapters, encrypted credentials and charge accounting |
+| `surtitle-ai` | Shared request/approval lifecycle, Vertex and OpenAI adapters, encrypted credentials and per-service charge accounting |
 
-The renderer cannot execute shell commands, read service-account keys, run SQL or send Vertex requests. Only the local Tauri window is an IPC client; remote documents are never loaded into its WebView. Commands delegate to application services and the core crates.
+The renderer cannot execute shell commands, read saved credentials, run SQL or send provider requests. Only the local Tauri window is an IPC client; remote documents are never loaded into its WebView. Commands delegate to application services and the core crates.
 
 ## Data and IPC
 

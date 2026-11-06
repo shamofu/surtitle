@@ -4,6 +4,44 @@ use crate::application::models::PriceLookup;
 use tauri::State;
 
 #[tauri::command]
+pub fn save_openai_api_key(
+    state: State<'_, AppState>,
+    api_key: String,
+) -> std::result::Result<(), String> {
+    let result = crate::application::models::save_openai_api_key(state.inner().clone(), api_key);
+    if result.is_ok() {
+        state
+            .changes
+            .publish(crate::application::changes::ChangeDomain::Settings, None);
+        state
+            .changes
+            .publish(crate::application::changes::ChangeDomain::Jobs, None);
+    }
+    result
+}
+
+#[tauri::command]
+pub fn remove_openai_api_key(state: State<'_, AppState>) -> std::result::Result<(), String> {
+    let result = crate::application::models::remove_openai_api_key(state.inner().clone());
+    if result.is_ok() {
+        state
+            .changes
+            .publish(crate::application::changes::ChangeDomain::Settings, None);
+        state
+            .changes
+            .publish(crate::application::changes::ChangeDomain::Jobs, None);
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn list_openai_models(
+    state: State<'_, AppState>,
+) -> std::result::Result<Vec<surtitle_ai::DiscoveredModel>, String> {
+    crate::application::models::list_openai_models(state.inner().clone()).await
+}
+
+#[tauri::command]
 pub fn update_appearance(
     state: State<'_, AppState>,
     locale: Option<String>,

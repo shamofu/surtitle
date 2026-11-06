@@ -113,6 +113,12 @@ trait ResponseBody {
 
 impl Authorization for CredentialVault {
     async fn access_token(&self, request: &ReservedRequest) -> Result<Zeroizing<String>> {
+        if request.execution.provider == crate::AiProvider::Openai {
+            if request.project_id != "openai" {
+                return Err(AiError::Credentials);
+            }
+            return self.load_openai_key(&request.credential_id);
+        }
         let (key, metadata) = self.load_json(&request.credential_id)?;
         if metadata.project_id != request.project_id {
             return Err(AiError::Credentials);
@@ -137,13 +143,62 @@ impl Transport for reqwest::Client {
         token: &str,
         body: &Value,
     ) -> std::result::Result<Self::Response, ()> {
-        self.post(url)
-            .bearer_auth(token)
-            .json(body)
-            .send()
+        self.execute(build_provider_request(self, url, token, body)?)
             .await
             .map_err(|_| ())
     }
+}
+
+fn build_provider_request(
+    client: &reqwest::Client,
+    url: &str,
+    token: &str,
+    body: &Value,
+) -> std::result::Result<reqwest::Request, ()> {
+    let request = client.post(url).bearer_auth(token);
+    let request = if url == "https://api.openai.com/v1/audio/transcriptions" {
+        use base64::Engine;
+        if body.get("language").is_some() && body.get("languages").is_some() {
+            return Err(());
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(
+                body.pointer("/file/data")
+                    .and_then(Value::as_str)
+                    .ok_or(())?,
+            )
+            .map_err(|_| ())?;
+        let part = reqwest::multipart::Part::bytes(bytes)
+            .file_name("prepared.flac")
+            .mime_str("audio/flac")
+            .map_err(|_| ())?;
+        let mut form = reqwest::multipart::Form::new()
+            .part("file", part)
+            .text("model", body["model"].as_str().ok_or(())?.to_owned())
+            .text("response_format", "json");
+        if let Some(language) = body.get("language").and_then(Value::as_str) {
+            form = form.text("language", language.to_owned());
+        }
+        if let Some(languages) = body.get("languages") {
+            let languages = languages.as_array().ok_or(())?;
+            if languages.is_empty() {
+                return Err(());
+            }
+            for language in languages {
+                form = form.text("languages[]", language.as_str().ok_or(())?.to_owned());
+            }
+        }
+        if let Some(chunking) = body.get("chunking_strategy").and_then(Value::as_str) {
+            form = form.text("chunking_strategy", chunking.to_owned());
+        }
+        if let Some(prompt) = body.get("prompt") {
+            form = form.text("prompt", prompt.as_str().ok_or(())?.to_owned());
+        }
+        request.multipart(form)
+    } else {
+        request.json(body)
+    };
+    request.build().map_err(|_| ())
 }
 
 impl ResponseBody for reqwest::Response {
@@ -192,7 +247,7 @@ impl VertexService {
             .connect_timeout(Duration::from_secs(20))
             .timeout(Duration::from_secs(300))
             .build()
-            .map_err(|_| AiError::Invalid("Unable to initialize Vertex HTTPS client".into()))?;
+            .map_err(|_| AiError::Invalid("Unable to initialize provider HTTPS client".into()))?;
         Ok(Self {
             store,
             vault,
@@ -377,9 +432,38 @@ async fn execute_observed_with_io(
     );
     if !(200..300).contains(&response.status()) {
         let status = response.status();
+        let retry_after = response
+            .retry_after()
+            .filter(|value| value.len() <= 128)
+            .map(str::to_owned);
+        if reservation.execution.provider == crate::AiProvider::Openai {
+            let mut error_bytes = Vec::new();
+            loop {
+                match response.chunk().await {
+                    Ok(Some(chunk)) if chunk.len() <= 64 * 1024 - error_bytes.len() => {
+                        error_bytes.extend_from_slice(&chunk)
+                    }
+                    Ok(None) => break,
+                    _ => {
+                        store.mark_unknown(&reservation.attempt_id)?;
+                        return Err(AiError::UnknownOutcome);
+                    }
+                }
+            }
+            if crate::openai::quota_exhausted(&error_bytes) {
+                store.mark_unknown(&reservation.attempt_id)?;
+                observe(
+                    observer,
+                    &reservation,
+                    ExecutionStage::Unknown,
+                    None,
+                    Some(status),
+                );
+                return Err(AiError::CreditExhausted);
+            }
+        }
         if status == 429 {
-            let retry_after = response.retry_after().filter(|value| value.len() <= 128);
-            let retry = store.handle_429(&reservation, retry_after)?;
+            let retry = store.handle_429(&reservation, retry_after.as_deref())?;
             if retry.state == "waiting" {
                 let next = retry
                     .next_retry_at
@@ -406,6 +490,8 @@ async fn execute_observed_with_io(
     let mut bytes = Vec::new();
     let mut stream = (reservation.execution.response_mode == ResponseMode::StreamGenerateContent)
         .then(streaming::StreamResponse::default);
+    let mut openai_stream = (reservation.execution.response_mode == ResponseMode::StreamResponses)
+        .then(crate::openai::ResponseStream::default);
     let mut received_bytes = 0usize;
     loop {
         let chunk = response.chunk().await;
@@ -413,7 +499,26 @@ async fn execute_observed_with_io(
         match chunk {
             Ok(Some(chunk)) if chunk.len() <= MAX_RESPONSE_BYTES - received_bytes => {
                 received_bytes += chunk.len();
-                if let Some(stream) = &mut stream {
+                if let Some(stream) = &mut openai_stream {
+                    match stream.push(&chunk) {
+                        Ok(deltas) => {
+                            for text in deltas {
+                                observe(
+                                    observer,
+                                    &reservation,
+                                    ExecutionStage::Receiving,
+                                    Some(text),
+                                    None,
+                                );
+                            }
+                        }
+                        Err(()) => {
+                            store.mark_unknown(&reservation.attempt_id)?;
+                            observe(observer, &reservation, ExecutionStage::Unknown, None, None);
+                            return Err(AiError::UnknownOutcome);
+                        }
+                    }
+                } else if let Some(stream) = &mut stream {
                     match stream.push(&chunk) {
                         Ok(deltas) => {
                             for text in deltas {
@@ -444,9 +549,27 @@ async fn execute_observed_with_io(
             }
         }
     }
-    let decoded = match stream {
-        Some(stream) => stream.finish(),
-        None => serde_json::from_slice(&bytes).map_err(|_| ()),
+    let decoded = if let Some(stream) = openai_stream {
+        stream.finish()
+    } else {
+        match stream {
+            Some(stream) => stream.finish(),
+            None => serde_json::from_slice(&bytes).map_err(|_| ()),
+        }
+    };
+    let decoded = if reservation.execution.provider == crate::AiProvider::Openai {
+        decoded.and_then(|raw| {
+            crate::openai::normalize_response(
+                &raw,
+                reservation
+                    .task
+                    .audio_attachment()
+                    .map(|audio| audio.duration_ms.div_ceil(1000)),
+            )
+            .map_err(|_| ())
+        })
+    } else {
+        decoded
     };
     let value: Value = match decoded {
         Ok(v) => v,
@@ -479,6 +602,7 @@ async fn execute_observed_with_io(
         return Err(AiError::UnknownOutcome);
     }
     store.record_model_version(
+        reservation.execution.provider,
         &reservation.attempt_id,
         value.get("modelVersion").and_then(Value::as_str),
     )?;
@@ -508,7 +632,19 @@ async fn execute_observed_with_io(
         .execution
         .price
         .as_ref()
-        .map(|price| price.cost(input_tokens, output_tokens))
+        .map(|price| {
+            if reservation.execution.provider == crate::AiProvider::Openai
+                && reservation.task.audio_attachment().is_some()
+            {
+                usage
+                    .get("audioDurationMillis")
+                    .and_then(Value::as_u64)
+                    .ok_or(AiError::UnknownOutcome)
+                    .and_then(|duration| price.audio_cost(duration))
+            } else {
+                price.cost(input_tokens, output_tokens)
+            }
+        })
         .transpose()
     {
         Ok(cost) => cost,
@@ -624,25 +760,36 @@ async fn prepare_authenticated(
 }
 
 fn prepare_body(r: &ReservedRequest) -> Result<Value> {
+    r.task
+        .validate_with_execution(&r.execution)
+        .map_err(|_| AiError::PreparationChanged)?;
     let audio = r
         .task
         .audio_attachment()
-        .map(|audio| audio.verified_bytes())
+        .map(|audio| audio.verified_bytes_with_limits(r.execution.audio_limits()))
         .transpose()?;
     let mut body = r.body_snapshot.clone();
     if let Some(bytes) = audio {
         use base64::Engine;
+        let pointer = if r.execution.provider == crate::AiProvider::Openai {
+            "/file/data"
+        } else {
+            "/contents/0/parts/0/inlineData/data"
+        };
         let data = body
-            .pointer_mut("/contents/0/parts/0/inlineData/data")
+            .pointer_mut(pointer)
             .ok_or(AiError::PreparationChanged)?;
         *data = base64::engine::general_purpose::STANDARD
             .encode(bytes)
             .into();
     }
+    if let Some(policy) = r.execution.vertex_audio_policy {
+        policy.validate_request_size(serde_json::to_vec(&body)?.len() as u64)?;
+    }
     Ok(body)
 }
 
-fn usage_counts(usage: &Value) -> Result<(u64, u64)> {
+pub(crate) fn usage_counts(usage: &Value) -> Result<(u64, u64)> {
     let input = usage
         .get("promptTokenCount")
         .and_then(Value::as_u64)
@@ -671,6 +818,8 @@ pub(crate) fn sanitized_usage(usage: &Value) -> Value {
         "totalTokenCount",
         "cachedContentTokenCount",
         "toolUsePromptTokenCount",
+        "audioDurationMillis",
+        "audioSubmittedSeconds",
     ] {
         if let Some(n) = usage.get(name).and_then(Value::as_u64) {
             result.insert(name.into(), n.into());
@@ -783,6 +932,11 @@ pub(crate) fn parse_response(task: &RequestTask, response: &Value) -> Result<Par
     }
     if let RequestTask::TranscribePreview { audio, .. } = task {
         return crate::transcribe::parse_transcribe_parts(audio, parts);
+    }
+    if let RequestTask::AudioTranscription { audio, .. } = task {
+        if parts.iter().any(|p| p.get("audioTranscription").is_some()) {
+            return crate::transcribe::parse_transcribe_parts(audio, parts);
+        }
     }
     let text = parts
         .iter()

@@ -36,32 +36,57 @@ pub async fn prepare_transcription(
     end_ms: u64,
     whole_media: bool,
 ) -> std::result::Result<PreparationSummary, String> {
-    prepare_transcription_with_operation(app, state, media_id, start_ms, end_ms, whole_media, None)
-        .await
+    prepare_transcription_with_operation(
+        app,
+        state,
+        media_id,
+        start_ms..end_ms,
+        whole_media,
+        None,
+        None,
+    )
+    .await
 }
 
 pub async fn prepare_transcription_with_operation(
     app: tauri::AppHandle,
     state: AppState,
     media_id: String,
-    start_ms: u64,
-    end_ms: u64,
+    range: std::ops::Range<u64>,
     whole_media: bool,
     operation_id: Option<String>,
+    model: Option<surtitle_core::AiModelPreference>,
 ) -> std::result::Result<PreparationSummary, String> {
     let receipt = prepare_transcription_receipt_with_operation(
         app,
         state.clone(),
         media_id,
-        start_ms,
-        end_ms,
+        range,
         whole_media,
         operation_id,
+        PreparationSelection {
+            boundary_repair: false,
+            model,
+        },
     )
     .await
     .map_err(err)?;
     let range = build_transcript_draft(&receipt, &[]).map_err(|e| e.to_string())?;
+    let context = receipt
+        .preparation_context
+        .as_ref()
+        .context("preparation context missing")
+        .map_err(err)?;
+    let compatible = crate::application::transcript::policy::compatible(
+        &receipt,
+        &state.preferences.read().map_err(err)?.settings,
+        false,
+    );
     Ok(PreparationSummary {
+        provider: context.provider,
+        ai_configuration_generation: context.configuration_generation,
+        compatible,
+        chunk_profile: receipt.chunk_profile,
         id: receipt.id,
         audio_stream_index: receipt.audio_stream_index,
         media_id: receipt.prepared_job.binding.media_id,
@@ -78,7 +103,7 @@ pub async fn prepare_transcription_with_operation(
     })
 }
 
-pub(crate) async fn prepare_transcription_receipt(
+pub(crate) async fn prepare_repair_receipt(
     app: tauri::AppHandle,
     state: AppState,
     media_id: String,
@@ -90,10 +115,13 @@ pub(crate) async fn prepare_transcription_receipt(
         app,
         state,
         media_id,
-        start_ms,
-        end_ms,
+        start_ms..end_ms,
         whole_media,
         None,
+        PreparationSelection {
+            boundary_repair: true,
+            model: None,
+        },
     )
     .await
 }
@@ -116,17 +144,46 @@ impl Drop for PreparationReservation {
     }
 }
 
+struct PreparationSelection {
+    boundary_repair: bool,
+    model: Option<surtitle_core::AiModelPreference>,
+}
+
 async fn prepare_transcription_receipt_with_operation(
     app: tauri::AppHandle,
     state: AppState,
     media_id: String,
-    start_ms: u64,
-    end_ms: u64,
+    range: std::ops::Range<u64>,
     whole_media: bool,
     operation_id: Option<String>,
+    selection: PreparationSelection,
 ) -> Result<AudioPreparationReceipt> {
+    let (start_ms, end_ms) = (range.start, range.end);
     ensure!(end_ms > start_ms, "select an audio interval");
     let label = lock(&state.db)?.media(&media_id)?.title;
+    // Freeze selection before tool installation or extraction can yield to settings changes.
+    let p = state.preferences.read()?.clone();
+    let context = surtitle_ai::AudioPreparationContext {
+        provider: p.settings.active_provider,
+        configuration_generation: p.settings.ai_configuration_generation,
+    };
+    // Boundary repairs inherit their model when quoted and retain their short, legacy scope.
+    let mode = if selection.boundary_repair {
+        "transcribe".to_owned()
+    } else {
+        crate::application::transcript::policy::selected_model(&p.settings, selection.model)?
+            .transcription_mode
+    };
+    let chunk_profile = crate::application::transcript::policy::profile(
+        context.provider,
+        selection.boundary_repair,
+        &mode,
+    );
+    let transcription_provider = if mode == "transcribe" {
+        AudioTranscriptionProvider::TranscribePreview
+    } else {
+        AudioTranscriptionProvider::GeminiAudio
+    };
     let (activity, cancel) = {
         let mut current = lock(&state.ai_session.preparation)?;
         ensure!(current.is_none(), "audio preparation is already running");
@@ -195,7 +252,6 @@ async fn prepare_transcription_receipt_with_operation(
             model_path: model,
             model_sha256: SILERO_MODEL_SHA256.into(),
         };
-        let p = state.preferences.read()?.clone();
         let options = AudioPreparationOptions {
             media_id,
             transcript_revision: revision,
@@ -205,8 +261,8 @@ async fn prepare_transcription_receipt_with_operation(
             language: media.learning_language,
             start_ms,
             end_ms,
-            chunks: ChunkOptions::default(),
-            provider: AudioTranscriptionProvider::TranscribePreview,
+            chunks: ChunkOptions::for_profile(chunk_profile),
+            provider: transcription_provider,
             audio_stream_index: Some(audio_stream_index),
         };
         let root = state.root.join("prepared");
@@ -244,6 +300,7 @@ async fn prepare_transcription_receipt_with_operation(
         })
         .await??;
         reporter.progress("saving", None, None, None);
+        receipt.preparation_context = Some(context);
         receipt.prepared_job = receipt
             .prepared_job
             .with_apply_policy(TranscriptApplyPolicy::Auto)?;

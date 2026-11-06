@@ -157,6 +157,8 @@ fn audit(conn: &Connection, at: i64, event: &str, job: Option<&str>, detail: &st
 }
 
 #[cfg(test)]
+mod provider_tests;
+#[cfg(test)]
 mod tests;
 
 #[cfg(test)]

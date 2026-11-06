@@ -26,7 +26,7 @@ function files(directory) {
 
 // Exercise the installed WDIO runner and the real configuration. A hook that
 // merely logs an error must not turn this into a successful native CI run.
-for (const stage of ['success', 'testfailure', 'startup', 'readiness', 'cleanup']) {
+for (const stage of ['success', 'testfailure', 'startup', 'readiness', 'profile', 'cleanup']) {
   test(`native WDIO ${stage} propagates through the real runner and reports`, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'surtitle-wdio-status-'));
     const run = join(directory, 'run');
@@ -37,9 +37,11 @@ for (const stage of ['success', 'testfailure', 'startup', 'readiness', 'cleanup'
     writeFileSync(join(template, 'fixture.json'), JSON.stringify({ mediaPath: media }));
     const bodyMarker = join(directory, 'body-ran');
     const settledMarker = join(directory, 'test-settled');
+    const settingsMarker = join(directory, 'settings-changed');
     const spec = join(directory, 'native.e2e.mjs');
     writeFileSync(spec, `import { writeFileSync } from 'node:fs';
 describe('native runner contract', () => {
+  before(() => writeFileSync(${JSON.stringify(settingsMarker)}, 'settings mutation'));
   afterEach(() => writeFileSync(${JSON.stringify(settledMarker)}, 'settled'));
   it('runs the test body only after readiness', async () => {
     writeFileSync(${JSON.stringify(bodyMarker)}, 'started');
@@ -66,6 +68,9 @@ NativeWorker.prototype.start = async function() {
 };
 NativeWorker.prototype.stop = async function() {
   if (${JSON.stringify(stage)} === 'cleanup') throw new Error('injected cleanup failure');
+};
+NativeWorker.prototype.assertProfile = function() {
+  if (${JSON.stringify(stage)} === 'profile') throw new Error('injected profile failure');
 };
 export const config = {
   ...nativeConfig,
@@ -98,7 +103,9 @@ export const config = {
         value = { 'element-6066-11e4-a52e-4f735466cecf': 'heading' };
       } else if (request.url.endsWith('/elements')) {
         value = [{ 'element-6066-11e4-a52e-4f735466cecf': 'heading' }];
-      } else if (request.url.endsWith('/execute/sync') || request.url.endsWith('/displayed')) {
+      } else if (request.url.endsWith('/execute/sync')) {
+        value = { nativeIpc: 1, succeeded: true, payload: { jobs: [] } };
+      } else if (request.url.endsWith('/displayed')) {
         value = true;
       } else if (request.url.endsWith('/screenshot')) {
         value = '';
@@ -148,6 +155,7 @@ export const config = {
       clearTimeout(deadline);
       assert.equal(code, stage === 'success' ? 0 : 1, output);
       assert.equal(existsSync(bodyMarker), ['success', 'testfailure', 'cleanup'].includes(stage), output);
+      assert.equal(existsSync(settingsMarker), ['success', 'testfailure', 'cleanup'].includes(stage), output);
       const reportFiles = files(run).filter(path => path.endsWith('.xml'));
       assert(reportFiles.length > 0, output);
       const reports = reportFiles.map(path => {
@@ -159,10 +167,10 @@ export const config = {
         assert.match(reports, /native runner contract/, output);
       }
       const failures = files(join(run, 'failures')).map(path => JSON.parse(readFileSync(path, 'utf8')));
-      if (['startup', 'readiness', 'cleanup'].includes(stage)) {
+      if (['startup', 'readiness', 'profile', 'cleanup'].includes(stage)) {
         // Root hooks run before any test suite. Their lifecycle failure is
         // reported separately instead of inventing executed JUnit test cases.
-        assert(failures.some(item => item.stage === stage && item.failure?.message.includes(`injected ${stage} failure`)), output);
+        assert(failures.some(item => item.stage === (stage === 'profile' ? 'readiness' : stage) && item.failure?.message.includes(`injected ${stage} failure`)), output);
       } else {
         assert.equal(failures.length, 0, output);
         if (stage === 'success') {

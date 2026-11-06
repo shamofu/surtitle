@@ -12,7 +12,7 @@ import { aiApi } from '../features/ai/api';
 import type { AiQuote } from '../shared/contracts/ai';
 import type { JobSummary } from '../shared/contracts/ai';
 
-const quote: AiQuote = {
+const quote: AiQuote = { aiConfigurationGeneration: 0, provider: 'vertex',
   id: 'fresh-retry',
   mediaId: 'media',
   kind: 'translate',
@@ -71,7 +71,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 describe('fresh approval for remaining AI work', () => {
-  const job: JobSummary = {
+  const job: JobSummary = { provider: 'vertex',
     id: 'paused-job',
     kind: 'translate',
     status: 'paused',

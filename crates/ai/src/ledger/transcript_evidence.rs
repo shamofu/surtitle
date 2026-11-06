@@ -105,7 +105,7 @@ fn invalid() -> AiError {
 
 /// Only explicitly allowed wire fields survive. Oversized fields are removed
 /// whole and mark evidence incomplete; a truncated prefix is never reparsed.
-fn sanitize(response: &Value) -> (Value, bool) {
+fn sanitize(provider: crate::AiProvider, response: &Value) -> (Value, bool) {
     let mut complete = true;
     let mut remaining = MAX_TEXT_BYTES;
     fn scalar(value: &Value, max: usize, remaining: &mut usize, complete: &mut bool) -> Value {
@@ -139,12 +139,7 @@ fn sanitize(response: &Value) -> (Value, bool) {
     if let Some(version) = response
         .get("modelVersion")
         .and_then(Value::as_str)
-        .filter(|v| {
-            !v.is_empty()
-                && v.len() <= 200
-                && v.bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b"-._@".contains(&b))
-        })
+        .filter(|v| crate::execution::valid_provider_model_id(provider, v))
     {
         out["modelVersion"] = json!(version);
     }
@@ -408,7 +403,7 @@ impl AiStore {
         let Some(audio) = audio(&request.task) else {
             return Ok(());
         };
-        let (saved, mut complete) = sanitize(response);
+        let (saved, mut complete) = sanitize(request.execution.provider, response);
         let (state, reason, original) = classified(&request.task, response);
         // Removing unknown fields must never turn an invalid response into a
         // valid empty response, or otherwise change the parser's interpretation.

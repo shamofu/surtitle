@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import type { AiConfiguration } from '../../ai/provider';
 import { call } from '../../../shared/native/transport';
 import type { AiModelPreference } from '../../../shared/contracts/ai';
 
@@ -45,7 +46,7 @@ export const draftStudyApi = {
     explanation?: string;
     translation?: string;
   }, operationId?: string) => call('save_draft_selection_card', { request, operationId }),
-  createQuote: (request: {
+  createQuote: (request: Partial<AiConfiguration> & {
     selectionId: string;
     version: number;
     focusTerm?: string;

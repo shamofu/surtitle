@@ -10,7 +10,7 @@ const fixture = { mediaId: 'fixture-media', cardId: 'fixture-card', mediaPath: '
 function snapshot() {
   return {
     settings: { credentialConfigured: false, dailyBudgetUsd: 0, aiModels: {} },
-    budget: { spentUsd: 0, reservedUsd: 0, limitUsd: 0, unpricedAttempts: 0, monetaryTotalsComplete: true, unknownAttempts: [] },
+    budgets: { openai: { spentUsd: 0, reservedUsd: 0, limitUsd: 0, unpricedAttempts: 0, monetaryTotalsComplete: true, unknownAttempts: [] }, vertex: { spentUsd: 0, reservedUsd: 0, limitUsd: 0, unpricedAttempts: 0, monetaryTotalsComplete: true, unknownAttempts: [] } },
     jobs: [], media: [{ id: fixture.mediaId, path: fixture.mediaPath, segmentCount: 20000 }], cards: [{ id: fixture.cardId }],
     tools: ['ffmpeg', 'vad'].map(id => ({ id, status: 'missing', provider: 'managed', path: null, version: id === 'vad' ? '6.2' : null })),
   };
@@ -35,12 +35,12 @@ test('refuses inherited credentials, approved budgets and every nonzero/unknown 
     value => { value.settings.dailyBudgetUsd = 1; },
     value => { value.settings.aiModels.translation = { modelId: 'a-user-model' }; },
     value => { value.jobs.push({ status: 'completed' }); },
-    value => { value.budget.spentUsd = 0.000001; },
-    value => { value.budget.reservedUsd = 0.1; },
-    value => { value.budget.limitUsd = 1; },
-    value => { value.budget.unknownAttempts.push({ id: 'unknown' }); },
-    value => { value.budget.unpricedAttempts = 1; },
-    value => { value.budget.monetaryTotalsComplete = false; },
+    value => { value.budgets.openai.spentUsd = 0.000001; },
+    value => { value.budgets.openai.reservedUsd = 0.1; },
+    value => { value.budgets.openai.limitUsd = 1; },
+    value => { value.budgets.openai.unknownAttempts.push({ id: 'unknown' }); },
+    value => { value.budgets.openai.unpricedAttempts = 1; },
+    value => { value.budgets.openai.monetaryTotalsComplete = false; },
   ]) {
     const value = snapshot(); change(value);
     assert.throws(() => validateSnapshot(value, fixture), /credentials|budget|model preferences|AI job/);

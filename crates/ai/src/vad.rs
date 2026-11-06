@@ -181,8 +181,8 @@ impl SileroVad {
             };
             let probability = self.infer_frame(&frame)?;
             detector.push(probability, valid)?;
-            // Use the same inference, but end the review-only pause at any
-            // uncertain frame. Chunk planning keeps its original hysteresis.
+            // End conservative pause evidence at any uncertain frame. Review and
+            // the new OpenAI file policy use it; legacy planning keeps hysteresis.
             conservative.push(conservative_probability(probability), valid)?;
             total_samples += valid as u64;
             if total_samples >= next_progress {

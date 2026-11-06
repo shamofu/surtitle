@@ -59,6 +59,7 @@ pub(crate) fn fixture_receipt(
             )?,
         });
         chunks.push(AudioChunk {
+            boundary_provenance: None,
             index,
             sample_rate: 16000,
             core_start_sample: if index == 0 { 0 } else { 64000 },
@@ -82,6 +83,8 @@ pub(crate) fn fixture_receipt(
         ffprobe: None,
     })?;
     let receipt = AudioPreparationReceipt {
+        chunk_profile: None,
+        preparation_context: None,
         id: preparation_id.into(),
         directory: directory.clone(),
         source_path: source,
@@ -161,6 +164,7 @@ pub(crate) fn seed_fixture_data(state: &AppState) -> Result<()> {
                         observed_at_ms: price.observed_at_ms,
                         input_microusd_per_million: price.input_microusd_per_million,
                         output_microusd_per_million: price.output_microusd_per_million,
+                        audio_microusd_per_minute: price.audio_microusd_per_minute,
                     }),
                 });
             Ok(())

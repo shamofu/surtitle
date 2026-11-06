@@ -76,7 +76,7 @@ describe('saved AI translation recovery in the actual desktop', () => {
   it('applies locally without credentials or budget and persists through a process restart', async () => {
     const state = await snapshot();
     assert.equal(state.settings.credentialConfigured, false);
-    assert.equal(state.budget.limitUsd, 0);
+    assert.equal(state.budgets.vertex.limitUsd, 0);
     await settings();
     await clickNative($('button=Review saved translations'));
     await $('button=Apply this translation').waitForEnabled();
@@ -92,8 +92,8 @@ describe('saved AI translation recovery in the actual desktop', () => {
     assert.equal(saved[0].canApply, false);
     const after = await snapshot();
     assert.equal(after.jobs.find(job => job.id === jobId).pendingResults, 0);
-    assert.equal(after.budget.spentUsd, 0);
-    assert.equal(after.budget.reservedUsd, 0);
+    assert.equal(after.budgets.vertex.spentUsd, 0);
+    assert.equal(after.budgets.vertex.reservedUsd, 0);
     assert.deepEqual(attempts(), ledgerBefore);
   });
 

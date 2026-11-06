@@ -22,6 +22,13 @@ async function installTranscriptionFixture(page: Page, locale: 'ja' | 'en', exis
           Object.assign(fixture.snapshot.jobs[0], patch);
           changed('jobs', 'quote');
         };
+        window.__switchTranscriptionProvider = provider => {
+          fixture.snapshot.settings.activeProvider = provider;
+          fixture.snapshot.settings.aiConfigurationGeneration += 1;
+          Object.assign(fixture.snapshot.settings.openai, { credentialConfigured: true,
+            aiModels: { transcription: { modelId: 'gpt-fixture-transcribe', maxOutputTokens: 12288 } } });
+          changed('settings');
+        };
         const sourceBlock = { id: 'block', mediaId: 'visual-fixture', startMs: 0, endMs: 186000,
           text: 'We took the path that follows the coast.', status: 'generated_review', timingPrecision: 'source_block' };
         export const nativeAvailable = () => true;
@@ -34,6 +41,8 @@ async function installTranscriptionFixture(page: Page, locale: 'ja' | 'en', exis
           if (command === 'prepare_transcription') {
             fixture.calls.push({ command, args });
             const prepared = { id: 'preparation-' + preparations.size, mediaId: args.mediaId,
+              compatible: true, provider: fixture.snapshot.settings.activeProvider,
+              aiConfigurationGeneration: fixture.snapshot.settings.aiConfigurationGeneration, chunkProfile: 'legacy',
               startMs: args.startMs, endMs: args.endMs, wholeMedia: args.wholeMedia,
               coreDurationMs: args.endMs - args.startMs, sendDurationMs: args.endMs - args.startMs + 6000, chunkCount: 5 };
             preparations.set(prepared.id, prepared);
@@ -42,15 +51,15 @@ async function installTranscriptionFixture(page: Page, locale: 'ja' | 'en', exis
           if (command === 'create_transcription_quote') {
             fixture.calls.push({ command, args });
             const prepared = preparations.get(args.preparationId);
-            return { id: 'quote', mediaId: 'visual-fixture', kind: 'transcribe', startMs: prepared.startMs, endMs: prepared.endMs,
-              model: 'gemini-transcribe', unpriced: ${unpriced}, estimatedUsd: ${unpriced ? 'null' : '.1'}, maximumUsd: ${unpriced ? 'null' : automaticRetry ? '.6' : '.2'}, inputTokens: 100, maxOutputTokens: 12288,
+            return { aiConfigurationGeneration: prepared.aiConfigurationGeneration, provider: prepared.provider, id: 'quote', mediaId: 'visual-fixture', kind: 'transcribe', startMs: prepared.startMs, endMs: prepared.endMs,
+              model: prepared.provider === 'openai' ? 'gpt-fixture-transcribe' : 'gemini-transcribe', unpriced: ${unpriced}, estimatedUsd: ${unpriced ? 'null' : '.1'}, maximumUsd: ${unpriced ? 'null' : automaticRetry ? '.6' : '.2'}, inputTokens: 100, maxOutputTokens: 12288,
               ${automaticRetry ? 'retryPolicy: { version: 1, maxRetries: 2 }, requestCount: 5, sendDurationMs: 846000, totalOutputTokens: 61440, maximumRequestCount: 15, maximumSendDurationMs: 2538000, maximumTotalOutputTokens: 184320,' : ''}
               expiresAt: '2099-01-01T00:00:00Z', warnings: [], canApprove: true, applyPolicy: 'auto' };
           }
           if (command === 'approve_quote') {
             fixture.calls.push({ command, args }); approved = true;
             fixture.snapshot.media[0].segmentCount = 1;
-            fixture.snapshot.jobs = [{ id: 'quote', mediaId: 'visual-fixture', kind: 'transcribe', status: 'running', createdAt: '', progress: .25,
+            fixture.snapshot.jobs = [{ provider: 'vertex', id: 'quote', mediaId: 'visual-fixture', kind: 'transcribe', status: 'running', createdAt: '', progress: .25,
               message: 'Subtitles are arriving', automaticTranscript: true,
               transcriptionRanges: [{ startMs: 0, endMs: 186000, state: 'source_block' }, { startMs: 186000, endMs: 840000, state: 'pending' }] }];
             changed('jobs', 'quote'); changed('media', 'visual-fixture'); changed('subtitles', 'visual-fixture');
@@ -119,6 +128,85 @@ for (const locale of ['ja', 'en'] as const) {
     expect((await commands()).filter(command => command === 'prepare_transcription')).toHaveLength(1);
   });
 }
+
+test('provider changes and switching back prepare fresh audio before a new approval', async ({ page }) => {
+  await installTranscriptionFixture(page, 'en');
+  await page.goto('/study/visual-fixture');
+  await page.locator('.current-caption').getByRole('button', { name: 'Create subtitles from audio', exact: true }).click();
+  const start = page.getByRole('button', { name: 'Start transcription', exact: true });
+  await expect(start).toBeEnabled();
+  for (const [provider, model] of [['openai', 'gpt-fixture-transcribe'], ['vertex', 'gemini-transcribe']]) {
+    await page.evaluate(value => (window as any).__switchTranscriptionProvider(value), provider);
+    await expect(page.locator('.quote-review')).toContainText(model);
+    await expect(start).toBeEnabled();
+  }
+  const calls = await page.evaluate(() => (window as any).__learningFixture.calls);
+  expect(calls.filter((call: any) => call.command === 'prepare_transcription')).toHaveLength(3);
+  expect(calls.filter((call: any) => call.command === 'create_transcription_quote').map((call: any) => call.args.preparationId))
+    .toEqual(['preparation-0', 'preparation-1', 'preparation-2']);
+  expect(calls.filter((call: any) => ['approve_quote', 'reapprove_quote'].includes(call.command))).toHaveLength(0);
+});
+
+test('forced boundary review plays the exact marked range and retains both original subtitles', async ({ page }) => {
+  await installLearningFixture(page, 'en', 'light');
+  await page.route(/\/src\/shared\/native\/transport\.ts(?:\?|$)/, route => route.fulfill({
+    contentType: 'application/javascript', body: `
+      const fixture = window.__learningFixture;
+      const cues = [
+        { id: 'left', startMs: 29000, endMs: 30000, text: 'We crossed the', status: 'provisional' },
+        { id: 'right', startMs: 30000, endMs: 31000, text: 'bridge together.', status: 'provisional' },
+      ];
+      const review = { jobId: 'forced-job', mediaId: 'visual-fixture', applied: false, canApply: true,
+        repairAlternatives: [], draft: { id: 'forced-draft', mediaId: 'visual-fixture',
+          sourceSha256: 'source', sourceRevision: 'revision', digest: 'original-digest', startMs: 0, endMs: 60000,
+          canAdopt: true, segments: cues, pendingRanges: [], conflicts: [],
+          chunks: cues.map((cue, ordinal) => ({ ordinal, coreStartMs: ordinal * 30000,
+            coreEndMs: (ordinal + 1) * 30000, requestStartMs: ordinal * 30000,
+            requestEndMs: (ordinal + 1) * 30000, status: 'received', source: 'provider', segments: [cue],
+            boundaryProvenance: { sample_rate: 16000, core_start_sample: ordinal * 480000,
+              boundary_sample: (ordinal + 1) * 480000, request_start_sample: ordinal * 480000,
+              request_end_sample: (ordinal + 1) * 480000, kind: ordinal ? 'end_of_selection' : 'forced', supporting_pause: null } })),
+          warnings: [{ id: 'forced-boundary', kind: 'forced_chunk_boundary', ordinal: 0,
+            startMs: 29000, endMs: 31000, acknowledged: false }] } };
+      fixture.snapshot.jobs = [{ provider: 'openai', id: 'forced-job', mediaId: 'visual-fixture', kind: 'transcribe',
+        status: 'completed', progress: 1, createdAt: '', message: 'Text received', hasTranscriptResult: true, transcriptReview: true }];
+      export const nativeAvailable = () => true;
+      export const call = async (command, args = {}) => {
+        if (command === 'get_transcript_review') { fixture.calls.push({ command, args }); return structuredClone(review); }
+        if (command === 'acknowledge_transcript_warning') {
+          fixture.calls.push({ command, args });
+          if (args.jobId !== 'forced-job' || args.draftDigest !== 'original-digest' || args.warningId !== 'forced-boundary') throw new Error('Review binding changed');
+          review.draft.warnings[0].acknowledged = true; review.draft.digest = 'reviewed-digest';
+          return structuredClone(review);
+        }
+        if (command === 'get_player_state') return { ...await fixture.call(command, args), ready: true };
+        if (command === 'player_control' && args.request.action === 'seek') { fixture.calls.push({ command, args }); return; }
+        return fixture.call(command, args);
+      };`,
+  }));
+  await page.goto('/study/visual-fixture');
+  await setTranscriptOpen(page);
+  await page.getByRole('tab', { name: 'Transcription', exact: true }).click();
+  await page.locator('.transcription-workspace > details > summary').filter({ hasText: 'Transcription history' }).click();
+  await page.getByRole('button', { name: 'Open earlier drafts', exact: true }).click();
+  await page.getByRole('button', { name: 'Review or adopt the full result', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Review transcription', exact: true });
+  await expect(dialog).toContainText('Audio was split without a detected pause');
+  await expect(dialog).not.toContainText('where no speech was detected');
+  await expect(dialog.getByLabel('Subtitle draft')).toContainText('We crossed the');
+  await expect(dialog.getByLabel('Subtitle draft')).toContainText('bridge together.');
+  await dialog.getByRole('button', { name: 'Listen to this range', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).__learningFixture.calls
+    .filter((call: any) => call.command === 'player_control' && call.args.request.action === 'seek')
+    .map((call: any) => call.args.request))).toEqual([{ action: 'seek', startMs: 29000, endMs: 31000 }]);
+  await dialog.getByRole('button', { name: 'I checked the audio and subtitles', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Reviewed', exact: true })).toBeDisabled();
+  await expect(dialog.getByLabel('Subtitle draft')).toContainText('We crossed the');
+  await expect(dialog.getByLabel('Subtitle draft')).toContainText('bridge together.');
+  const calls = await page.evaluate(() => (window as any).__learningFixture.calls);
+  expect(calls.filter((call: any) => call.command === 'acknowledge_transcript_warning')).toHaveLength(1);
+  expect(calls.filter((call: any) => ['approve_quote', 'reapprove_quote', 'prepare_boundary_repair', 'apply_transcript_review'].includes(call.command))).toHaveLength(0);
+});
 
 test('transcription inputs and quote survive tab switches, inspection, and closing the panel', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 700 });

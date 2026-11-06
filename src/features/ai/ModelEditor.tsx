@@ -4,7 +4,7 @@ import { AnimatedDetails, openAnimatedDetails } from '../../shared/ui/AnimatedDe
 import { RefreshCw } from 'lucide-react';
 import { aiApi } from './api';
 import { nativeAvailable } from '../../shared/native/transport';
-import type { AiModelPreference } from '../../shared/contracts/ai';
+import type { AiModelPreference, AiProvider } from '../../shared/contracts/ai';
 import type { AiPurpose } from '../../shared/contracts/ai';
 import type { DiscoveredModel } from '../../shared/contracts/ai';
 import { useAppearance } from '../../app/runtime';
@@ -23,11 +23,13 @@ export const emptyModel = (purpose: AiPurpose): AiModelPreference => ({
 });
 
 export const validOutputTokens = (value: number) => Number.isInteger(value) && value >= 1 && value <= 1048576;
-export interface ModelInputDraft { manual: boolean; input: string; output: string; maxOutputTokens?: string; thinkingBudget?: string }
+export interface ModelInputDraft { manual: boolean; input: string; output: string; audio?: string; maxOutputTokens?: string; thinkingBudget?: string }
 export const validTokenInput = (value: string, min: number, max: number) => /^\d+$/.test(value) && Number(value) >= min && Number(value) <= max;
 
 export function ModelEditor({
   value,
+  provider = 'vertex',
+  configurationGeneration = 0,
   onChange,
   purpose,
   location,
@@ -39,6 +41,8 @@ export function ModelEditor({
   autoApplyRates = false,
 }: {
   value: AiModelPreference;
+  provider?: AiProvider;
+  configurationGeneration?: number;
   onChange: (value: AiModelPreference) => void;
   purpose: AiPurpose;
   location: string;
@@ -50,16 +54,19 @@ export function ModelEditor({
   autoApplyRates?: boolean;
 }) {
   const { t } = useAppearance();
+  const audioPricing = provider === 'openai' && purpose === 'transcription';
+  const configuration = `${provider}:${configurationGeneration}`;
   const id = useId();
-  const latest = useRef({ value, onChange, location, purpose, revision: 0 });
+  const latest = useRef({ value, onChange, location, purpose, configuration, revision: 0 });
   const revision =
     latest.current.revision +
     Number(
+      latest.current.configuration !== configuration ||
       latest.current.location !== location ||
         latest.current.purpose !== purpose ||
         latest.current.value.modelId !== value.modelId,
     );
-  latest.current = { value, onChange, location, purpose, revision };
+  latest.current = { value, onChange, location, purpose, configuration, revision };
   const mounted = useRef(true);
   const pendingPrice = useRef<(() => void) | null>(null);
   useEffect(() => {
@@ -73,7 +80,7 @@ export function ModelEditor({
   const [models, setModels] = useState<DiscoveredModel[]>([]);
   useEffect(() => {
     setModels([]);
-  }, [location]);
+  }, [location, configuration]);
   const availableModels = candidates ?? models;
   const recommendedTokens = emptyModel(purpose).maxOutputTokens;
   const [editingCustomOutput, setEditingCustomOutput] = useState(false);
@@ -88,6 +95,8 @@ export function ModelEditor({
   const [localInput, setLocalInput] = useState<ModelInputDraft>(() => ({ manual: value.price?.source === 'user',
     input: value.price ? String(value.price.inputMicrousdPerMillion / 1_000_000) : '', output: value.price ? String(value.price.outputMicrousdPerMillion / 1_000_000) : '' }));
   const { manual, input, output } = inputDraft ?? localInput;
+  const audio = (inputDraft ?? localInput).audio ?? (value.price?.audioMicrousdPerMinute != null ? String(value.price.audioMicrousdPerMinute / 1_000_000) : '');
+  const ratesValid = audioPricing ? validRate(audio) : validRate(input) && validRate(output);
   const tokensInput = (inputDraft ?? localInput).maxOutputTokens ?? (Number.isFinite(value.maxOutputTokens) ? String(value.maxOutputTokens) : '');
   const thinkingInput = (inputDraft ?? localInput).thinkingBudget ?? String(value.thinkingBudget ?? 1024);
   const inputRef = useRef(inputDraft ?? localInput); inputRef.current = inputDraft ?? localInput;
@@ -100,6 +109,7 @@ export function ModelEditor({
     const identity = [value.price?.id, value.modelId, location, purpose];
     if (inputDraft && identity.every((value, index) => value === previousPrice.current[index])) return;
     previousPrice.current = identity;
+    changeInput({ audio: value.price?.audioMicrousdPerMinute != null ? String(value.price.audioMicrousdPerMinute / 1_000_000) : '' });
     setManual(value.price?.source === 'user');
     setInput(
       value.price
@@ -113,12 +123,12 @@ export function ModelEditor({
     );
   }, [value.price?.id, value.modelId, location, purpose]);
   useEffect(() => {
-    if (!autoApplyRates || !manual || !validRate(input) || !validRate(output)) return;
+    if (!autoApplyRates || !manual || !ratesValid) return;
     const inputRate = Math.round(Number(input) * 1_000_000), outputRate = Math.round(Number(output) * 1_000_000);
-    if (value.price?.source === 'user' && value.price.inputMicrousdPerMillion === inputRate && value.price.outputMicrousdPerMillion === outputRate) return;
+    if (value.price?.source === 'user' && (audioPricing ? value.price.audioMicrousdPerMinute === Math.round(Number(audio) * 1_000_000) : value.price.inputMicrousdPerMillion === inputRate && value.price.outputMicrousdPerMillion === outputRate)) return;
     const timer = window.setTimeout(() => applyManual(), 500);
     return () => window.clearTimeout(timer);
-  }, [autoApplyRates, manual, input, output, value.price]);
+  }, [autoApplyRates, manual, input, output, audio, value.price]);
   const thinking = value.thinkingLevel
     ? 'level'
     : value.thinkingBudget != null
@@ -130,14 +140,14 @@ export function ModelEditor({
     setBusy(true);
     setNotice('');
     try {
-      const result = await aiApi.vertexModels(location);
+      const result = await (provider === 'openai' ? aiApi.openaiModels() : aiApi.vertexModels(location));
       if (!mounted.current || requestedRevision !== latest.current.revision)
         return;
       setModels(result);
       setNotice(
         t(
-          'Googleが返した候補です。掲載だけではこのプロジェクトでの実行可否を確認できません。',
-          'These are candidates returned by Google. Listing does not confirm access in this project.',
+          provider === 'openai' ? 'APIが返した候補です。掲載だけでは実行可否を確認できません。' : 'Googleが返した候補です。掲載だけではこのプロジェクトでの実行可否を確認できません。',
+          provider === 'openai' ? 'These are candidates returned by the API. Listing does not confirm access.' : 'These are candidates returned by Google. Listing does not confirm access in this project.',
         ),
       );
     } catch {
@@ -203,15 +213,16 @@ export function ModelEditor({
     }
   }
   function applyManual() {
-    if (!validRate(input) || !validRate(output)) return;
+    if (!ratesValid) return;
     onChange({
       ...value,
       price: {
         id: `user-${Date.now()}`,
         source: 'user',
         observedAtMs: Date.now(),
-        inputMicrousdPerMillion: Math.round(Number(input) * 1_000_000),
-        outputMicrousdPerMillion: Math.round(Number(output) * 1_000_000),
+        inputMicrousdPerMillion: audioPricing ? 0 : Math.round(Number(input) * 1_000_000),
+        outputMicrousdPerMillion: audioPricing ? 0 : Math.round(Number(output) * 1_000_000),
+        ...(audioPricing ? { audioMicrousdPerMinute: Math.round(Number(audio) * 1_000_000) } : {}),
       },
     });
     setNotice(
@@ -223,11 +234,11 @@ export function ModelEditor({
   }
   return (
     <div className="model-editor" onBlur={() => {
-      if (autoApplyRates && manual && validRate(input) && validRate(output) &&
-        (value.price?.inputMicrousdPerMillion !== Math.round(Number(input) * 1_000_000) || value.price?.outputMicrousdPerMillion !== Math.round(Number(output) * 1_000_000))) applyManual();
+      if (autoApplyRates && manual && ratesValid &&
+        (audioPricing ? value.price?.audioMicrousdPerMinute !== Math.round(Number(audio) * 1_000_000) : value.price?.inputMicrousdPerMillion !== Math.round(Number(input) * 1_000_000) || value.price?.outputMicrousdPerMillion !== Math.round(Number(output) * 1_000_000))) applyManual();
     }}>
       <Field
-        label={t('GeminiモデルID', 'Gemini model ID')}
+        label={provider === 'openai' ? t('OpenAIモデルID', 'OpenAI model ID') : t('GeminiモデルID', 'Gemini model ID')}
         hint={t(
           '一覧から選ぶか、任意のIDを入力できます。',
           'Choose a returned model or enter an ID.',
@@ -237,7 +248,7 @@ export function ModelEditor({
           list={id}
           value={value.modelId}
           disabled={frozen}
-          placeholder="gemini-…"
+          placeholder={provider === 'openai' ? 'gpt-…' : 'gemini-…'}
           onChange={(event) => {
             const modelId = event.target.value;
             const transcriptionMode = purpose === 'transcription'
@@ -267,11 +278,11 @@ export function ModelEditor({
             onClick={() => void discover()}
           >
             <RefreshCw size={14} />
-            {t('Vertexから候補を取得', 'Fetch Vertex candidates')}
+            {provider === 'openai' ? t('OpenAIから候補を取得', 'Fetch OpenAI candidates') : t('Vertexから候補を取得', 'Fetch Vertex candidates')}
           </Button>
         </div>
       </MotionRegion>
-      <MotionRegion open={purpose === 'transcription'} keepMounted>
+      <MotionRegion open={purpose === 'transcription' && provider === 'vertex'} keepMounted>
         <Field
           label={t('字幕の作り方', 'How to create subtitles')}
           hint={
@@ -312,7 +323,7 @@ export function ModelEditor({
           </select>
         </Field>
       </MotionRegion>
-      <Field
+      {!audioPricing && <Field
         label={t('回答の長さの上限', 'Output limit')}
         hint={
           customOutput
@@ -345,13 +356,13 @@ export function ModelEditor({
           </option>
           <option value="custom">{t('カスタム', 'Custom')}</option>
         </select>
-      </Field>
+      </Field>}
       <AnimatedDetails ref={details} className="model-editor-details">
         <summary>
-          {t('出力・思考・料金の設定', 'Output, thinking, and pricing')}
+          {audioPricing ? t('料金の設定', 'Pricing') : provider === 'openai' ? t('出力・料金の設定', 'Output and pricing') : t('出力・思考・料金の設定', 'Output, thinking, and pricing')}
         </summary>
         <div className="model-editor-detail-content">
-          <MotionRegion open={customOutput} keepMounted>
+          <MotionRegion open={customOutput && !audioPricing} keepMounted>
             <Field
               error={!validTokenInput(tokensInput, 1, 1048576) ? t('1〜1,048,576 の整数を入力してください。', 'Enter a whole number between 1 and 1,048,576.') : undefined}
               label={t(
@@ -375,7 +386,7 @@ export function ModelEditor({
               />
             </Field>
           </MotionRegion>
-          <Field label={t('思考設定', 'Thinking setting')}>
+          <div hidden={provider === 'openai'}><Field label={t('思考設定', 'Thinking setting')}>
             <select
               value={thinking}
               disabled={frozen}
@@ -392,7 +403,7 @@ export function ModelEditor({
                 {t('モデルの既定値', 'Model default')}
               </option>
               <option value="level">{t('レベルを指定', 'Set level')}</option>
-              <option value="budget">
+              <option value="budget" disabled={provider === 'openai'}>
                 {t('トークン数を指定', 'Set token budget')}
               </option>
             </select>
@@ -432,9 +443,10 @@ export function ModelEditor({
               'Unsupported settings produce an API error. Settings are never changed and retried automatically.',
             )}
           </p>
+          </div>
           <div className="inline-actions">
             <Button
-              disabled={frozen || !nativeAvailable() || !value.modelId.trim()}
+              disabled={frozen || provider === 'openai' || !nativeAvailable() || !value.modelId.trim()}
               onClick={() => void price()}
             >
               {t('公式料金を取得', 'Retrieve public prices')}
@@ -454,8 +466,10 @@ export function ModelEditor({
               </Button>
             </MotionRegion>
           </div>
+          {provider === 'openai' && <p className="helper-text">{t('APIから料金は取得できません。公式料金を確認して手動で設定してください。', 'The API does not provide prices. Check official pricing and enter rates manually.')}</p>}
+          {audioPricing && <p className="notice">{t('単語時刻は生成せず、テキストを区間単位の原文として確認できます。料金は送信音声の長さで算定します。', 'Text is kept as source blocks without invented word timing. Pricing uses submitted audio duration.')}</p>}
           <MotionRegion open={manual} keepMounted>
-              <div className="field-row">
+              {audioPricing ? <Field label={t('音声 USD / 分', 'Audio USD / minute')}><input inputMode="decimal" value={audio} disabled={frozen} onChange={event => changeInput({ audio: event.target.value })} /></Field> : <div className="field-row">
                 <Field
                   label={t(
                     '入力 USD / 100万トークン',
@@ -482,9 +496,9 @@ export function ModelEditor({
                     onChange={(event) => setOutput(event.target.value)}
                   />
                 </Field>
-              </div>
+              </div>}
               {!autoApplyRates && <Button
-                disabled={frozen || !validRate(input) || !validRate(output)}
+                disabled={frozen || !ratesValid}
                 onClick={applyManual}
               >
                 {t('この単価を適用', 'Apply these rates')}
@@ -494,7 +508,7 @@ export function ModelEditor({
       </AnimatedDetails>
       <p className="helper-text">
         <AnimatedValue value={value.price
-          ? t(
+          ? audioPricing && value.price.audioMicrousdPerMinute != null ? t(`利用者設定 · 音声 $${value.price.audioMicrousdPerMinute / 1_000_000} / 分`, `User rates · Audio $${value.price.audioMicrousdPerMinute / 1_000_000} / minute`) : t(
               `${value.price.source === 'user' ? '利用者設定' : '公式SKU'} · 入力 $${value.price.inputMicrousdPerMillion / 1_000_000} / 出力 $${value.price.outputMicrousdPerMillion / 1_000_000}（100万トークンあたり）`,
               `${value.price.source === 'user' ? 'User rates' : 'Public SKU rates'} · Input $${value.price.inputMicrousdPerMillion / 1_000_000} / output $${value.price.outputMicrousdPerMillion / 1_000_000} per million tokens`,
             )

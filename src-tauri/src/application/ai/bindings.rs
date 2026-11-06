@@ -7,6 +7,16 @@ pub(crate) fn transcript_fingerprint(
 }
 
 pub(crate) fn settings_fingerprint(settings: &surtitle_core::AppSettings) -> Result<String> {
+    settings_fingerprint_for(settings, settings.active_provider)
+}
+
+pub(crate) fn settings_fingerprint_for(
+    settings: &surtitle_core::AppSettings,
+    provider: surtitle_core::AiProvider,
+) -> Result<String> {
+    if provider == surtitle_core::AiProvider::Openai {
+        return Ok(sha256_bytes(b"surtitle:openai:api.openai.com:v1"));
+    }
     Ok(sha256_bytes(&serde_json::to_vec(&(
         &settings.vertex_project,
         &settings.vertex_location,
@@ -103,9 +113,10 @@ pub(super) fn verify_task_sources(db: &surtitle_core::Store, plan: &PreparedJob)
 pub(super) fn verify_current_binding(state: &AppState, plan: &PreparedJob) -> Result<()> {
     let p = state.preferences.read()?;
     ensure!(
-        settings_fingerprint(&p.settings)? == plan.binding.settings_sha256
-            && p.credential_id.as_deref() == Some(plan.credential_id.as_str()),
-        "Vertex project or credential changed; create a new quote"
+        settings_fingerprint_for(&p.settings, plan.execution.provider)?
+            == plan.binding.settings_sha256
+            && p.credential_for(plan.execution.provider) == Some(plan.credential_id.as_str()),
+        "Provider connection or credential changed; create a new quote"
     );
     for task in &plan.requests {
         if let RequestTask::Explanation { proficiency, .. } = task {

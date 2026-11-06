@@ -6,6 +6,7 @@ pub fn list_transcription_preparations(
 ) -> std::result::Result<Vec<TranscriptionPreparation>, String> {
     (|| {
         let bindings = job_bindings(&state)?;
+        let settings = state.preferences.read()?.settings.clone();
         receipts(&state)?
             .into_iter()
             .filter(|receipt| receipt.prepared_job.binding.media_id == media_id)
@@ -13,6 +14,16 @@ pub fn list_transcription_preparations(
                 let parent = repair_parent(&receipt)?;
                 let range = build_transcript_draft(&receipt, &[])?;
                 Ok(TranscriptionPreparation {
+                    provider: receipt
+                        .preparation_context
+                        .as_ref()
+                        .map_or(surtitle_core::AiProvider::Vertex, |c| c.provider),
+                    ai_configuration_generation: receipt
+                        .preparation_context
+                        .as_ref()
+                        .map_or(0, |c| c.configuration_generation),
+                    compatible: super::policy::compatible(&receipt, &settings, parent.is_some()),
+                    chunk_profile: receipt.chunk_profile,
                     id: receipt.id.clone(),
                     audio_stream_index: receipt.audio_stream_index,
                     media_id: media_id.clone(),
@@ -56,38 +67,61 @@ pub(super) fn create_audio_quote_selected(
 ) -> Result<crate::application::ai::AiQuote> {
     let receipt = load_receipt(state, preparation_id)?;
     verify_source(state, &receipt, true)?;
-    for task in &receipt.prepared_job.requests {
-        audio_attachment(task)
-            .context("audio request missing")?
-            .verify_integrity()?;
-    }
     let parent = repair_parent(&receipt)?;
     if let Some(parent) = &parent {
         validate_repair_parent(state, &receipt, parent)?;
     }
     let p = state.preferences.read()?.clone();
+    ensure!(
+        super::policy::compatible(&receipt, &p.settings, parent.is_some()),
+        "Prepare audio again for the selected service and current configuration"
+    );
+    let provider = p.settings.active_provider;
+    let generation = p.settings.ai_configuration_generation;
     let inherited = parent
         .as_ref()
         .map(|parent| -> Result<_> {
             let original = state.ai.prepared_job(&parent.job_id)?;
-            Ok(crate::application::models::preference_for(
-                &original.execution,
-                matches!(
-                    original.requests.first(),
-                    Some(RequestTask::TranscribePreview { .. })
-                ),
-            ))
+            Ok((original.execution.provider == provider).then(|| {
+                crate::application::models::preference_for(
+                    &original.execution,
+                    matches!(
+                        original.requests.first(),
+                        Some(RequestTask::TranscribePreview { .. })
+                    ),
+                )
+            }))
         })
-        .transpose()?;
-    let selected = selected
-        .or(inherited)
-        .or_else(|| p.settings.ai_models.get("transcription").cloned())
-        .context("Choose a Gemini model and transcription API mode")?;
-    let execution = crate::application::models::execution_for(
+        .transpose()?
+        .flatten();
+    let selected = super::policy::selected_model(&p.settings, selected.or(inherited))?;
+    ensure!(
+        super::policy::compatible_selected(&receipt, &p.settings, parent.is_some(), &selected),
+        "Prepare audio again for the selected transcription mode"
+    );
+    let mut execution = crate::application::models::execution_for(
         &p.settings,
         "transcription",
         Some(selected.clone()),
     )?;
+    if provider == surtitle_core::AiProvider::Vertex {
+        execution.vertex_audio_policy =
+            super::policy::vertex_policy(&selected.transcription_mode, parent.is_some());
+    }
+    if provider == surtitle_core::AiProvider::Openai {
+        execution.openai_audio_chunking_strategy = super::policy::OPENAI_CHUNKING_STRATEGY;
+        execution.openai_audio_language_hint_format = (execution.model_id == "gpt-transcribe")
+            .then_some(surtitle_ai::OpenAiAudioLanguageHintFormat::Languages);
+        execution.openai_audio_prompt = (execution.model_id == "gpt-transcribe")
+            .then_some(super::policy::OPENAI_AUDIO_PROMPT)
+            .flatten()
+            .map(str::to_owned);
+    }
+    for task in &receipt.prepared_job.requests {
+        audio_attachment(task)
+            .context("audio request missing")?
+            .verify_integrity_with_limits(execution.audio_limits())?;
+    }
     let requests = receipt
         .prepared_job
         .requests
@@ -118,10 +152,10 @@ pub(super) fn create_audio_quote_selected(
         );
         if existing.prepared_job.execution == execution
             && existing.prepared_job.requests == requests
-            && (p.credential_id.is_none()
-                || (p.credential_id.as_deref()
+            && (p.credential_for(provider).is_none()
+                || (p.credential_for(provider)
                     == Some(existing.prepared_job.credential_id.as_str())
-                    && existing.prepared_job.project_id == p.settings.vertex_project
+                    && existing.prepared_job.project_id == p.settings.project_for(provider)
                     && existing.prepared_job.binding.settings_sha256
                         == crate::application::ai::bindings::settings_fingerprint(&p.settings)?))
         {
@@ -146,6 +180,12 @@ pub(super) fn create_audio_quote_selected(
                 )?;
             }
             let retry = quote.state != "prepared";
+            if !retry {
+                state.preferences.update(|p| {
+                    p.quote_generations.insert(quote.id.clone(), generation);
+                    Ok(())
+                })?;
+            }
             return crate::application::ai::quotes::quote_for_ui(state, quote, retry);
         }
     }
@@ -158,9 +198,10 @@ pub(super) fn create_audio_quote_selected(
     };
     let plan = PreparedJob::new(
         receipt.prepared_job.title.clone(),
-        p.settings.vertex_project.clone(),
-        p.credential_id
-            .context("Import a service-account key before creating a cloud quote")?,
+        p.settings.project_for(provider).to_owned(),
+        p.credential_for(provider)
+            .context("Configure this service before creating a cloud quote")?
+            .to_owned(),
         binding,
         requests,
         execution,
@@ -180,6 +221,10 @@ pub(super) fn create_audio_quote_selected(
         },
     )?;
     save_quote_context(state, &receipt, &quote.id)?;
+    state.preferences.update(|p| {
+        p.quote_generations.insert(quote.id.clone(), generation);
+        Ok(())
+    })?;
     if policy == TranscriptApplyPolicy::Auto {
         let range = build_transcript_draft(&receipt, &[])?;
         let mut db = lock(&state.db)?;
@@ -219,10 +264,18 @@ pub async fn create_transcription_quote(
     state: AppState,
     preparation_id: String,
     model: Option<surtitle_core::AiModelPreference>,
+    provider: Option<surtitle_core::AiProvider>,
+    ai_configuration_generation: Option<u64>,
 ) -> std::result::Result<crate::application::ai::AiQuote, String> {
     let state = state.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _review = lock(&state.ai_session.transcript_review)?;
+        let _transition = state.preferences.settings_transition()?;
+        crate::application::models::verify_ai_selection(
+            &state.preferences.read()?.settings,
+            provider,
+            ai_configuration_generation,
+        )?;
         create_audio_quote_selected(&state, &preparation_id, model)
     })
     .await

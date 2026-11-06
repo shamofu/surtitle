@@ -1,10 +1,10 @@
 //! Read-only job quotes, prepared plans, responses, and spend summaries.
 use super::accounting::{
     job_spend, limits, period_breakdown, period_spend, period_starts, read_job, sum_estimates,
-    unpriced_count,
+    unpriced_count, unpriced_count_for,
 };
 use super::{AiStore, AttemptSummary, BudgetLimits, JobQuote, RequestCounts, SpendSummary};
-use crate::{AiError, OutputFailureReason, ParsedOutput, PreparedJob, Result};
+use crate::{AiError, AiProvider, OutputFailureReason, ParsedOutput, PreparedJob, Result};
 use rusqlite::params;
 
 impl AiStore {
@@ -18,7 +18,11 @@ impl AiStore {
     }
 
     pub fn budget(&self) -> Result<BudgetLimits> {
-        limits(&self.connect()?)
+        self.budget_for(AiProvider::Vertex)
+    }
+
+    pub fn budget_for(&self, provider: AiProvider) -> Result<BudgetLimits> {
+        limits(&self.connect()?, provider)
     }
 
     pub fn quote(&self, job_id: &str) -> Result<JobQuote> {
@@ -124,11 +128,19 @@ impl AiStore {
     }
 
     pub fn summary(&self) -> Result<SpendSummary> {
+        self.summary_for(AiProvider::Vertex)
+    }
+
+    pub fn budget_summary_for(&self, provider: AiProvider) -> Result<SpendSummary> {
+        self.summary_for(provider)
+    }
+
+    pub fn summary_for(&self, provider: AiProvider) -> Result<SpendSummary> {
         let conn = self.connect()?;
         let (day, month) = period_starts(self.now_ms())?;
-        let mut stmt = conn.prepare("SELECT id,job_id,ordinal,state,COALESCE(charged_microusd,reserve_microusd),created_at_ms FROM ai_attempts WHERE state IN ('unknown','reserved') ORDER BY created_at_ms")?;
+        let mut stmt = conn.prepare("SELECT a.id,a.job_id,a.ordinal,a.state,COALESCE(a.charged_microusd,a.reserve_microusd),a.created_at_ms FROM ai_attempts a JOIN ai_jobs j ON j.id=a.job_id WHERE a.state IN ('unknown','reserved') AND COALESCE(json_extract(j.plan_json,'$.execution.provider'),'vertex')=? ORDER BY a.created_at_ms")?;
         let unknown_attempts = stmt
-            .query_map([], |r| {
+            .query_map([provider.as_str()], |r| {
                 Ok(AttemptSummary {
                     id: r.get(0)?,
                     job_id: r.get(1)?,
@@ -139,20 +151,21 @@ impl AiStore {
                 })
             })?
             .collect::<std::result::Result<_, _>>()?;
-        let (daily_actual_charged_microusd, daily_held_microusd) = period_breakdown(&conn, day)?;
+        let (daily_actual_charged_microusd, daily_held_microusd) =
+            period_breakdown(&conn, day, provider)?;
         let (monthly_actual_charged_microusd, monthly_held_microusd) =
-            period_breakdown(&conn, month)?;
+            period_breakdown(&conn, month, provider)?;
         Ok(SpendSummary {
-            limits: limits(&conn)?,
-            daily_charged_or_held_microusd: period_spend(&conn, day)?,
-            monthly_charged_or_held_microusd: period_spend(&conn, month)?,
+            limits: limits(&conn, provider)?,
+            daily_charged_or_held_microusd: period_spend(&conn, day, provider)?,
+            monthly_charged_or_held_microusd: period_spend(&conn, month, provider)?,
             daily_actual_charged_microusd,
             monthly_actual_charged_microusd,
             daily_held_microusd,
             monthly_held_microusd,
             unknown_attempts,
-            unpriced_attempts: unpriced_count(&conn, None)?,
-            monetary_totals_complete: unpriced_count(&conn, None)? == 0,
+            unpriced_attempts: unpriced_count_for(&conn, provider)?,
+            monetary_totals_complete: unpriced_count_for(&conn, provider)? == 0,
         })
     }
 }

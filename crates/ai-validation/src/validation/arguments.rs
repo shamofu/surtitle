@@ -98,12 +98,17 @@ pub(super) fn parse_execution(args: &mut Arguments) -> Result<ExecutionConfig> {
         })
         .transpose()?;
     let config = ExecutionConfig {
+        provider: surtitle_ai::AiProvider::Vertex,
         model_id,
         location,
         max_output_tokens,
         thinking,
         price,
         response_mode,
+        openai_audio_chunking_strategy: None,
+        openai_audio_language_hint_format: None,
+        openai_audio_prompt: None,
+        vertex_audio_policy: None,
     };
     config.validate().map_err(ai_error)?;
     Ok(config)

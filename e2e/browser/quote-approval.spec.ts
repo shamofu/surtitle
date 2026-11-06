@@ -14,14 +14,14 @@ async function installExpiredQuoteFixture(page: Page, locale: 'ja' | 'en', entry
           const snapshot = await fixture.call(command, args);
           Object.assign(snapshot.settings, { credentialConfigured: true, vertexProject: 'project',
             aiModels: { vocabulary: { modelId: 'fixture-model', maxOutputTokens: 4096 } } });
-          snapshot.jobs = ${JSON.stringify(entry)} === 'retry' ? [{ id: 'retry-job', mediaId: 'visual-fixture',
+          snapshot.jobs = ${JSON.stringify(entry)} === 'retry' ? [{ provider: 'vertex', id: 'retry-job', mediaId: 'visual-fixture',
             kind: 'vocabulary', status: 'failed', progress: .5, createdAt: '2026-10-11T00:00:00Z' }] : [];
           return snapshot;
         }
         if (['create_quote', 'create_retry_quote', 'review_ai_job'].includes(command)) {
           fixture.calls.push({ command, args });
           ++estimates;
-          return { id: 'quote-' + estimates, mediaId: 'visual-fixture', kind: 'vocabulary', model: 'fixture-model',
+          return { aiConfigurationGeneration: 0, provider: 'vertex', id: 'quote-' + estimates, mediaId: 'visual-fixture', kind: 'vocabulary', model: 'fixture-model',
             digest: 'scope-' + estimates, startMs: 0, endMs: 840000, unpriced: true, estimatedUsd: null,
             maximumUsd: null, inputTokens: 100, maxOutputTokens: 4096, requestCount: 1, totalOutputTokens: 4096,
             expiresAt: estimates === 1 ? '2000-01-01T00:00:00Z' : '2099-01-01T00:00:00Z',

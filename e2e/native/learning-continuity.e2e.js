@@ -39,7 +39,7 @@ describe('installed learning data continuity', () => {
     await ready();
     const initial = await snapshot();
     assert.equal(initial.settings.credentialConfigured, false);
-    assert.equal(initial.budget.spentUsd, 0); assert.equal(initial.budget.reservedUsd, 0);
+    assert.equal(initial.budgets.vertex.spentUsd, 0); assert.equal(initial.budgets.vertex.reservedUsd, 0);
     assert(initial.media.some(media => media.id === fixture.mediaId && media.path === fixture.mediaPath));
     const originalSettings = initial.settings;
     let saved;
@@ -110,7 +110,7 @@ describe('installed learning data continuity', () => {
       await browser.waitUntil(async () => { const state = await player(); return state.surfaceVisible && !state.paused && state.positionMs > 800; });
       await control({ action: 'pause' });
       const final = await snapshot();
-      assert.equal(final.budget.spentUsd, 0); assert.equal(final.budget.reservedUsd, 0);
+      assert.equal(final.budgets.vertex.spentUsd, 0); assert.equal(final.budgets.vertex.reservedUsd, 0);
       assert.deepEqual(final.jobs, originalJobs);
       writeFileSync(nativeArtifact('learning-continuity.json'), JSON.stringify({
         passed: true, testedAt: new Date().toISOString(), beforePid, afterPid,

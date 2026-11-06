@@ -124,6 +124,11 @@ pub fn stitch_chunks(mut transcripts: Vec<ChunkTranscript>) -> Result<StitchedTr
     for (pair_index, pair) in transcripts.windows(2).enumerate() {
         let left = &pair[0];
         let right = &pair[1];
+        // Rounded millisecond intervals may intersect even when the PCM ranges
+        // meet exactly. Such a boundary has no shared acoustic evidence.
+        if left.chunk.request_end_sample <= right.chunk.request_start_sample {
+            continue;
+        }
         let at = right.chunk.core_start_ms();
         let lo = right.chunk.request_start_ms();
         let hi = left.chunk.request_start_ms() + left.chunk.request_duration_ms();
@@ -196,7 +201,7 @@ pub fn stitch_chunks(mut transcripts: Vec<ChunkTranscript>) -> Result<StitchedTr
         }
     }
     let mut output: Vec<TimedText> = Vec::new();
-    let mut last_chunk = None;
+    let mut last_chunk: Option<&AudioChunk> = None;
     for (i, t) in transcripts.iter().enumerate() {
         for (segment_index, segment) in t.segments.iter().enumerate() {
             if context_fragments.contains(&(i, segment_index)) {
@@ -209,6 +214,8 @@ pub fn stitch_chunks(mut transcripts: Vec<ChunkTranscript>) -> Result<StitchedTr
                     .iter()
                     .find(|candidate| {
                         candidate.chunk.index != t.chunk.index
+                            && candidate.chunk.request_start_sample < t.chunk.request_end_sample
+                            && t.chunk.request_start_sample < candidate.chunk.request_end_sample
                             && midpoint >= candidate.chunk.core_start_ms()
                             && midpoint < candidate.chunk.core_end_ms()
                     })
@@ -224,15 +231,18 @@ pub fn stitch_chunks(mut transcripts: Vec<ChunkTranscript>) -> Result<StitchedTr
                 // variant provisionally and let boundary review decide.
                 continue;
             }
-            if last_chunk != Some(t.chunk.index)
-                && output
-                    .last()
-                    .is_some_and(|last| same_spoken_interval(last, segment))
+            if last_chunk.is_some_and(|previous| {
+                previous.index != t.chunk.index
+                    && previous.request_start_sample < t.chunk.request_end_sample
+                    && t.chunk.request_start_sample < previous.request_end_sample
+            }) && output
+                .last()
+                .is_some_and(|last| same_spoken_interval(last, segment))
             {
                 continue;
             }
             output.push(segment.clone());
-            last_chunk = Some(t.chunk.index);
+            last_chunk = Some(&t.chunk);
         }
     }
     output.extend(group_joins.iter().map(|join| join.joined.clone()));

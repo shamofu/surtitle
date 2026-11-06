@@ -85,7 +85,7 @@ export function PausedJobs() {
   const [reviewJob, setReviewJob] = useState<string>();
   const { data } = useSnapshot();
   const { t } = useAppearance();
-  const attempts = data?.budget.unknownAttempts || [];
+  const attempts = Object.values(data?.budgets ?? {}).flatMap(budget => budget.unknownAttempts ?? []);
   const jobs =
     data?.jobs.filter(
       (job) =>

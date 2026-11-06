@@ -2,7 +2,9 @@
 
 Vitest runs UI and script tests, Playwright checks browser behavior, WebdriverIO drives the real Tauri application, and cargo-nextest runs Rust tests. Maintained suites run in CI on their applicable OS; Windows native input runs separately and sequentially. The final `ci` job requires version validation, native build, browser, Linux, Windows and package jobs to succeed.
 
-Ordinary tests use authored fixtures and disposable data without Vertex requests. AI integration tests exercise approval, execution, accounting and result application against real SQLite databases with offline transport. They do not measure generated-language quality; use [explicitly approved live verification](vertex-verification.md) for that.
+Ordinary tests use authored fixtures and disposable data without paid provider requests. AI integration tests exercise approval, execution, accounting and result application against real SQLite databases with offline transport. Provider coverage includes transactional v2→v3 migration, legacy plan/hash preservation, separate caps and unknown holds, global dispatch serialization, quota exhaustion, token/duration settlement, and switching during execution. They do not measure generated-language quality; live Vertex or OpenAI verification requires separate approval of the exact input and spending limit. The [Vertex verification guide](vertex-verification.md) describes the existing live CLI.
+
+Audio regressions cover whole-file preparation for both services, OpenAI's 25,000,000-byte upload and 24-hour operational bounds, and Vertex's frozen mode-specific duration and JSON transport bounds. Sustained-pause tests cover two-second non-speech evidence, 250 ms inward guards, pauses crossing the duration limit, unequal compression, measured backtracking, and forced-cut review when no adequate pause fits. Required native tests encode a 360-second selection as one FLAC for each service, exercise both byte ceilings on a 900-second varying-compression fixture, and check exactly 15 minutes, longer inputs, and subtitle-mode whole files. Decoding verifies exact PCM coverage. Previous profiles and absent-policy legacy JSON/digests remain covered for saved-job compatibility. Offline transport tests inspect expanded Vertex JSON and OpenAI multipart requests, including immutable policy, reopen/resume and legacy hashes. App/UI tests cover obsolete preparation rejection without receipt changes, long-file listing/quotes, selected-mode propagation, mode-specific reuse and delayed roundtrip responses. Source/audio tampering and frozen provider history remain covered. These checks do not establish live transcription accuracy.
 
 ## Bounded formal and operation-order checks
 
@@ -23,8 +25,10 @@ Setup reuses a verified local JAR or downloads and verifies it. Checking require
 | `PacingStopSafety`, `PacingRestartSafety` | Complementary two-job retry scenarios with terminal stops/source invalidation or crash/reopen and reapproval |
 | `HealthyProgress` | Eventual completion under weak fairness, successful external operations and no permanent pause, unknown result, budget or excess-cost block |
 | `MissingGenerationGuard`, `UnknownRefund`, `RetryFloorIgnored` | Deliberate model faults detected respectively by `NoStaleAuthority`, `UnknownHoldPreserved`, `RetryFloorRespected` |
+| `ProviderScopeSafety` | Four frozen jobs (three Vertex, one OpenAI), two service profiles, one attempt per job, arbitrary active-service switches, one global lane, independent budgets, holds/charges and pacing |
+| `ProviderActiveAccounting`, `ProviderSeparateOutbound`, `ProviderUnknownIgnored`, `ProviderActiveBudget` | Deliberate faults detected respectively by `ProviderAccounting`, `OneOutbound`, `ProviderUnknownGuard`, `ProviderBudgetAdmission` |
 
-All models use at most two approval generations. Time is represented by finite expired/backoff/server-floor classes; precise UTC boundaries and monetary values belong to the implementation tests. Priced success may exceed its reservation. Acknowledging an unknown result and locally reusing evidence preserve financial holds. This is a single-process worker model under the application lock: a crash destroys workers, while a delayed completion in a live process remains a separate transition. Final authorization and HTTP start are separate, so cancellation after authorization may still allow that send. SQLite transaction internals remain atomic. The model covers the worker settlement path; the Store API's explicit settlement of a recovered unknown attempt is tested separately.
+The `AiLedger` models use at most two approval generations. Time is represented by finite expired/backoff/server-floor classes; precise UTC boundaries and monetary values belong to the implementation tests. Priced success may exceed its reservation. Acknowledging an unknown result and locally reusing evidence preserve financial holds. This is a single-process worker model under the application lock: a crash destroys workers, while a delayed completion in a live process remains a separate transition. Final authorization and HTTP start are separate, so cancellation after authorization may still allow that send. SQLite transaction internals remain atomic. The model covers the worker settlement path; the Store API's explicit settlement of a recovered unknown attempt is tested separately. `ProviderLedger` is a separate finite refinement of service isolation and the shared lane; it excludes approval generations, retries and restart, which remain covered by `AiLedger` and implementation tests.
 
 | Contract | Model/action and implementation evidence |
 | --- | --- |
@@ -84,7 +88,7 @@ pnpm build:fixtures
 pnpm test:fixtures
 ```
 
-Use disposable profiles and a separate Cargo target directory or retained E2E binary when also developing the ordinary app. Production builds reject E2E, test-support and development-validation features. Never reseed a running profile. Workers create isolated profiles; only restarts within one spec reuse them.
+Use disposable profiles and a separate Cargo target directory or retained E2E binary when also developing the ordinary app. E2E builds require an explicit absolute `SURTITLE_E2E_DATA_DIR` and refuse startup without it. Production builds reject E2E, test-support and development-validation features. Never reseed a running profile. Workers create isolated profiles; only restarts within one spec reuse them. Each worker reserves `SURTITLE_WEBDRIVER_PORT` (default 4444) and the following port, explicitly passing the latter to its underlying driver. Before settings hooks or test mutations, it compares the application's job identities with the expected fixture SQLite database; restarts repeat this check.
 
 On Windows, prepare the matching signed EdgeDriver and set absolute paths (adjust `work/target` if using `CARGO_TARGET_DIR`):
 
@@ -137,8 +141,8 @@ Some real-media tests are ignored in ordinary unit runs and selected explicitly 
 
 | Command | Required inputs and checks |
 | --- | --- |
-| `pnpm test:rust:required linux-ffmpeg` | Linux FFmpeg/ffprobe; source-clock PCM and selected audio-stream extraction |
-| `pnpm test:rust:required windows-native` | Windows FFmpeg/ffprobe, prepared DLLs and development Silero model; extraction, mpv load/restore, VAD, chunk continuity and failure cleanup |
+| `pnpm test:rust:required linux-ffmpeg` | Linux FFmpeg/ffprobe; source-clock PCM, selected audio-stream extraction and measured OpenAI/Vertex file splitting |
+| `pnpm test:rust:required windows-native` | Windows FFmpeg/ffprobe, prepared DLLs and development Silero model; extraction, mpv load/restore, VAD, whole-file preparation, byte-bound splitting, chunk continuity and failure cleanup |
 
 Set `SURTITLE_TEST_FFMPEG` to an absolute FFmpeg executable with matching ffprobe. Windows speech tests also need the pinned, hash-checked fixtures:
 
@@ -150,6 +154,18 @@ pnpm test:rust:required windows-native
 ```
 
 The runner validates nextest discovery against exact package/test names before serial execution. Missing inputs, changed discovery and failed or unexecuted groups fail the command. Update the registry in [run-required-rust-tests.mjs](../e2e/support/run-required-rust-tests.mjs) when moving an integration test. Ordinary workspace tests invoke their own crash helpers; do not register those helpers as standalone integrations.
+
+## Opt-in live OpenAI evaluation
+
+Paid validation uses a normal Windows build (without `e2e-test`), a separate application identifier, and a user-entered DPAPI-protected API key. Offline fixtures and null-audio runs do not establish live service quality. Keep source audio, references, rubric, hashes and response evidence under ignored `work/`; do not send reference answers or the quality rubric to the model.
+
+The campaign-specific [live session helper](../e2e/support/live-api-session.mjs) requires explicit opt-in, the evaluation identity `app.surtitle.evaluation.openai20261029`, and a persistent `work/live-openai` campaign. Its USD 60 lifetime ceiling includes every charged attempt and unreleased reservation in the original SQLite ledger, across dates and restarts. Do not reset or replace that profile during a campaign. A new campaign needs its own reviewed identity and spending authorization.
+
+Live sessions also reserve distinct application/underlying driver ports and compare the application's job identities with the campaign's original SQLite ledger before exposing commands and after restart. This check requires an existing nonempty campaign; an empty new profile needs a separately reviewed identity check before live work.
+
+Use only `session.approve(Object.freeze(nativeQuote))` for paid approvals. The [budget guard](../e2e/support/live-api-budget.mjs) rejects unpriced or stale work, unknown outcomes, overlapping approvals and scope outside the approved bounds; SQLite contention fails closed after a bounded wait. The underlying WebDriver is privileged and must not bypass this guard. Restart the controller after changing its imported guard/session modules. Never inject, read back, log or place credentials in command arguments or evidence files.
+
+Record source linkage and semantic accuracy separately from request completion. Verify saved-result reuse, pause/restart, provider switching and local learning/export behavior against the same ledger. Quota exhaustion, missing usage and transport failures remain offline fault checks unless an explicitly authorized live case observes them; do not deliberately exhaust credits.
 
 ## Results and failure evidence
 

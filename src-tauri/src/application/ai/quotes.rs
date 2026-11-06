@@ -23,7 +23,17 @@ pub(super) fn quote_for_ui_with_policy(
         .context("quote context is missing")?
         .clone();
     let japanese = p.settings.locale == "ja";
-    let credential_configured = p.settings.credential_configured && p.credential_id.is_some();
+    let provider = quote.execution.provider;
+    let ai_configuration_generation = p.quote_generations.get(&quote.id).copied().unwrap_or(0);
+    let credential_configured = p.credential_for(provider).is_some()
+        && match provider {
+            surtitle_core::AiProvider::Vertex => p.settings.credential_configured,
+            surtitle_core::AiProvider::Openai => p.settings.openai.credential_configured,
+        };
+    let selection_changed = quote.state == "prepared"
+        && (p.settings.active_provider != provider
+            || p.quote_generations.get(&quote.id).copied().unwrap_or(0)
+                != p.settings.ai_configuration_generation);
     drop(p);
     let tr = |ja: &str, en: &str| {
         if japanese {
@@ -32,7 +42,7 @@ pub(super) fn quote_for_ui_with_policy(
             en.to_owned()
         }
     };
-    let summary = state.ai.summary()?;
+    let summary = state.ai.summary_for(provider)?;
     let limits = summary.limits;
     let now = chrono::Utc::now().timestamp_millis();
     let retry_not_before = state.ai.retry_not_before(&quote.id)?;
@@ -65,10 +75,15 @@ pub(super) fn quote_for_ui_with_policy(
             "このジョブの字幕は採用済みです。追加送信は行いません。",
             "Subtitles from this job have been adopted. Further sending is disabled.",
         ))
+    } else if selection_changed {
+        Some(tr(
+            "AI設定が変更されました。新しい見積もりを確認してください。",
+            "AI settings changed. Review a new estimate.",
+        ))
     } else if !credential_configured {
         Some(tr(
-            "設定でサービスアカウント鍵を読み込んでください。",
-            "Import a service-account key in Settings.",
+            "設定でこのサービスの認証情報を登録してください。",
+            "Configure credentials for this service in Settings.",
         ))
     } else if now > quote.quote_expires_at_ms {
         Some(tr(
@@ -157,6 +172,8 @@ pub(super) fn quote_for_ui_with_policy(
         });
     let apply_policy = state.ai.prepared_job(&quote.id)?.apply_policy;
     Ok(AiQuote {
+        ai_configuration_generation,
+        provider,
         id: quote.id,
         digest: quote.digest,
         media_id: context.media_id,
@@ -201,6 +218,7 @@ pub async fn create_quote(
     request: QuoteRequest,
 ) -> std::result::Result<AiQuote, String> {
     async {
+        let _transition = state.preferences.settings_transition()?;
         ensure!(request.end_ms>request.start_ms,"select a nonempty time range");
         ensure!(request.kind != "transcribe", "Prepare local audio before creating a transcription quote");
         let (media,all)={let db=lock(&state.db)?;(db.media(&request.media_id)?,db.list_segments(&request.media_id)?)};
@@ -208,7 +226,10 @@ pub async fn create_quote(
         ensure!(!cues.is_empty()&&cues.len()<=1000,"select 1–1000 subtitle cues");
         ensure!(all.iter().filter(|s|cues.iter().any(|c|c.id==s.id)).all(|s|surtitle_core::is_usable_subtitle_status(&s.status)),"selected subtitles are not usable");
         let p=state.preferences.read()?.clone();
-        let credential=p.credential_id.context("設定でサービスアカウント鍵を読み込んでください / Import a service-account key in Settings")?;
+        crate::application::models::verify_ai_selection(&p.settings, request.provider, request.ai_configuration_generation)?;
+        let provider = p.settings.active_provider;
+        let generation = p.settings.ai_configuration_generation;
+        let credential=p.credential_for(provider).context("設定でこのサービスの認証情報を登録してください / Configure this service in Settings")?.to_owned();
         let mut requests=Vec::new();
         // Keep responses bounded; each translation request includes a small immutable set.
         if let Some(term)=request.focus_term.as_deref().map(str::trim).filter(|s|!s.is_empty()) {
@@ -222,11 +243,11 @@ pub async fn create_quote(
         let settings_hash=settings_fingerprint(&p.settings)?;
         // Text jobs bind to the exact selected textual input, not an expensive video hash.
         let source_hash=sha256_bytes(&serde_json::to_vec(&cues)?);
-        let plan=PreparedJob::new(format!("{} · {}",media.title,request.kind),p.settings.vertex_project,credential,PreparationBinding{media_id:media.id.clone(),transcript_revision:transcript_fingerprint(&all)?,source_sha256:source_hash,settings_sha256:settings_hash},requests,execution)?;
+        let plan=PreparedJob::new(format!("{} · {}",media.title,request.kind),p.settings.project_for(provider).to_owned(),credential,PreparationBinding{media_id:media.id.clone(),transcript_revision:transcript_fingerprint(&all)?,source_sha256:source_hash,settings_sha256:settings_hash},requests,execution)?;
         let plan=if request.kind=="vocabulary" {plan.with_text_failure_policy(TextFailurePolicy::SkipRejected)?} else {plan};
         let quote=state.ai.prepare(plan)?;
         let context=QuoteContext{media_id:media.id.clone(),kind:request.kind.clone(),start_ms:request.start_ms,end_ms:request.end_ms};
-        {state.preferences.update(|p| {p.quotes.insert(quote.id.clone(),context);Ok(()) }) ?;}
+        {state.preferences.update(|p| {p.quotes.insert(quote.id.clone(),context);p.quote_generations.insert(quote.id.clone(),generation);Ok(()) }) ?;}
         let quote=if quote.state=="prepared"&&quote.quote_expires_at_ms<=chrono::Utc::now().timestamp_millis(){state.ai.refresh_quote(&quote.id)?}else{quote};
         let is_retry=quote.state!="prepared"||quote.already_charged_or_held_microusd>0;
         quote_for_ui(&state,quote,is_retry)

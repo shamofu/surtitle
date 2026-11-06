@@ -314,3 +314,104 @@ mod tests {
         assert!(unprotect(&corrupt).is_err());
     }
 }
+
+#[cfg(all(test, windows))]
+mod openai_tests {
+    use super::*;
+    #[test]
+    fn openai_keys_are_protected_separated_and_never_returned_in_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = CredentialVault::new(dir.path()).unwrap();
+        for key in ["", "sk-test\nAuthorization: bad", "Bearer sk-test", " x "] {
+            assert!(vault.save_openai_key(key).is_err());
+        }
+        let key = "sk-test-openai-secret";
+        let metadata = vault.save_openai_key(key).unwrap();
+        assert!(!serde_json::to_string(&metadata).unwrap().contains(key));
+        assert!(vault.metadata(&metadata.id).is_err());
+        assert_eq!(&*vault.load_openai_key(&metadata.id).unwrap(), key);
+        let bytes = fs::read(vault.openai_path(&metadata.id).unwrap()).unwrap();
+        assert!(!bytes.windows(key.len()).any(|w| w == key.as_bytes()));
+        vault.remove_openai_key(&metadata.id).unwrap();
+        assert!(vault.openai_metadata(&metadata.id).is_err());
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OpenAiCredentialMetadata {
+    pub id: String,
+    pub imported_at_ms: i64,
+}
+impl CredentialVault {
+    fn openai_path(&self, id: &str) -> Result<PathBuf> {
+        self.credential_path(id)?;
+        Ok(self.directory.join(format!("openai-{id}.dpapi")))
+    }
+    pub fn save_openai_key(&self, key: &str) -> Result<OpenAiCredentialMetadata> {
+        validate_openai_key(key)?;
+        let id = openai_key_id(key);
+        let encrypted = protect(key.as_bytes())?;
+        let path = self.openai_path(&id)?;
+        let temp = self.directory.join(format!("{}.tmp", uuid::Uuid::new_v4()));
+        let mut output = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)?;
+        output.write_all(&encrypted)?;
+        output.sync_all()?;
+        drop(output);
+        if path.exists() {
+            fs::remove_file(&temp)?;
+        } else {
+            fs::rename(&temp, &path)?;
+        }
+        Ok(OpenAiCredentialMetadata {
+            id,
+            imported_at_ms: file_time(&path),
+        })
+    }
+    pub fn openai_metadata(&self, id: &str) -> Result<OpenAiCredentialMetadata> {
+        let _key = self.load_openai_key(id)?;
+        Ok(OpenAiCredentialMetadata {
+            id: id.into(),
+            imported_at_ms: file_time(&self.openai_path(id)?),
+        })
+    }
+    pub fn remove_openai_key(&self, id: &str) -> Result<()> {
+        fs::remove_file(self.openai_path(id)?).map_err(|_| AiError::Credentials)
+    }
+    pub(crate) fn load_openai_key(&self, id: &str) -> Result<Zeroizing<String>> {
+        let encrypted = fs::read(self.openai_path(id)?).map_err(|_| AiError::Credentials)?;
+        if encrypted.len() > 16_384 {
+            return Err(AiError::Credentials);
+        }
+        let plaintext = unprotect(&encrypted)?;
+        let key = Zeroizing::new(
+            String::from_utf8(plaintext.to_vec()).map_err(|_| AiError::Credentials)?,
+        );
+        validate_openai_key(&key)?;
+        if openai_key_id(&key) != id {
+            return Err(AiError::Credentials);
+        }
+        Ok(key)
+    }
+}
+fn validate_openai_key(key: &str) -> Result<()> {
+    if !(8..=4096).contains(&key.len())
+        || !key.starts_with("sk-")
+        || !key
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+    {
+        return Err(AiError::Credentials);
+    }
+    Ok(())
+}
+
+fn openai_key_id(key: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(b"openai\n");
+    hash.update(key.as_bytes());
+    format!("{:x}", hash.finalize())
+}

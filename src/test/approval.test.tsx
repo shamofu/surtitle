@@ -17,7 +17,7 @@ vi.mock('../app/runtime', () => {
     useSurface: useFixture,
   };
 });
-const fixture: AiQuote = {
+const fixture: AiQuote = { aiConfigurationGeneration: 0, provider: 'vertex',
   id: 'test-quote',
   mediaId: 'fixture-media',
   kind: 'vocabulary',

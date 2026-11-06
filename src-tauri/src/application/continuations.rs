@@ -8,6 +8,10 @@ use surtitle_core::AiModelPreference;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AiContinuation {
+    #[serde(default)]
+    pub provider: surtitle_core::AiProvider,
+    #[serde(default)]
+    pub ai_configuration_generation: u64,
     pub id: String,
     pub media_id: String,
     pub kind: String,
@@ -121,6 +125,8 @@ mod tests {
         let path = d.path().join("preferences.json");
         let p = super::super::PreferencesStore::open(path.clone()).unwrap();
         let item = AiContinuation {
+            provider: surtitle_core::AiProvider::Vertex,
+            ai_configuration_generation: 0,
             id: "resume".into(),
             media_id: "media".into(),
             kind: "transcribe".into(),

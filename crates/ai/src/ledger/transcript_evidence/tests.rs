@@ -46,7 +46,7 @@ fn allowlist_drops_thoughts_secrets_and_oversized_fields_without_prefixes() {
         .push(json!({"thought":true,"text":"secret"}));
     raw["candidates"][0]["content"]["parts"][0]["audioTranscription"]["words"][0]["diagnostic"] =
         json!("secret");
-    let (saved, complete) = sanitize(&raw);
+    let (saved, complete) = sanitize(crate::AiProvider::Vertex, &raw);
     assert!(complete);
     assert!(!saved.to_string().contains("secret"));
     assert_eq!(
@@ -54,7 +54,7 @@ fn allowlist_drops_thoughts_secrets_and_oversized_fields_without_prefixes() {
         "Hello."
     );
     raw["candidates"][0]["content"]["parts"][0]["text"] = json!("x".repeat(MAX_TEXT_BYTES + 1));
-    let (saved, complete) = sanitize(&raw);
+    let (saved, complete) = sanitize(crate::AiProvider::Vertex, &raw);
     assert!(!complete);
     assert!(saved.to_string().len() < 2000);
 }
@@ -266,9 +266,23 @@ fn provider_metadata_cannot_smuggle_arbitrary_diagnostics() {
     let mut raw = response();
     raw["modelVersion"] = json!("token: secret");
     raw["candidates"][0]["finishReason"] = json!("token: secret");
-    let (saved, complete) = sanitize(&raw);
+    let (saved, complete) = sanitize(crate::AiProvider::Vertex, &raw);
     assert!(complete);
     assert!(!saved.to_string().contains("secret"));
     assert!(saved.get("modelVersion").is_none());
     assert_eq!(saved["candidates"][0]["finishReason"], "UNRECOGNIZED");
+}
+
+#[test]
+fn fine_tuned_model_identity_is_retained_only_for_openai_evidence() {
+    let mut raw = response();
+    raw["modelVersion"] = json!("ft:gpt-4.1-2025-04-14:org:suffix:id");
+    let (openai, complete) = sanitize(crate::AiProvider::Openai, &raw);
+    assert!(complete);
+    assert_eq!(
+        openai["modelVersion"],
+        "ft:gpt-4.1-2025-04-14:org:suffix:id"
+    );
+    let (vertex, _) = sanitize(crate::AiProvider::Vertex, &raw);
+    assert!(vertex.get("modelVersion").is_none());
 }

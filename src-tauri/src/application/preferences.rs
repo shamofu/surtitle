@@ -23,6 +23,10 @@ pub struct Preferences {
     pub tools: ToolSelections,
     pub credential_id: Option<String>,
     #[serde(default)]
+    pub openai_credential_id: Option<String>,
+    #[serde(default)]
+    pub quote_generations: HashMap<String, u64>,
+    #[serde(default)]
     pub quotes: HashMap<String, QuoteContext>,
     #[serde(default)]
     pub probes: HashMap<String, surtitle_tools::ProbeReport>,
@@ -40,6 +44,12 @@ fn serialize_settings<S: serde::Serializer>(
     let fields = value.as_object_mut().expect("AppSettings is an object");
     for key in ["dailyBudgetUsd", "monthlyBudgetUsd", "perJobBudgetUsd"] {
         fields.remove(key);
+        if let Some(openai) = fields
+            .get_mut("openai")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            openai.remove(key);
+        }
     }
     value.serialize(serializer)
 }
@@ -55,7 +65,23 @@ fn deserialize_settings<'de, D: serde::Deserializer<'de>>(
     fields.insert("dailyBudgetUsd".into(), serde_json::json!(0));
     fields.remove("monthlyBudgetUsd");
     fields.remove("perJobBudgetUsd");
+    if let Some(openai) = fields
+        .get_mut("openai")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for key in ["dailyBudgetUsd", "monthlyBudgetUsd", "perJobBudgetUsd"] {
+            openai.remove(key);
+        }
+    }
     serde_json::from_value(value).map_err(serde::de::Error::custom)
+}
+impl Preferences {
+    pub fn credential_for(&self, provider: surtitle_core::AiProvider) -> Option<&str> {
+        match provider {
+            surtitle_core::AiProvider::Vertex => self.credential_id.as_deref(),
+            surtitle_core::AiProvider::Openai => self.openai_credential_id.as_deref(),
+        }
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaybackPreferences {
