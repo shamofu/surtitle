@@ -72,6 +72,7 @@ test.skipIf(process.platform !== 'win32')('offline production profile audit reje
   const script = String.raw`
 import json, os, runpy, sqlite3
 from pathlib import Path
+from unittest.mock import patch
 root = Path(os.environ['SURTITLE_GUARD_ROOT'])
 fixture = root / '日本語 & sample.mp4'
 fixture.write_bytes(b'synthetic media; never decoded')
@@ -88,6 +89,34 @@ with sqlite3.connect(root / 'charges.sqlite') as db:
 audit = runpy.run_path('native/windows/production-profile.py')['audit']
 before = audit(root,fixture,False)
 assert audit(root,fixture,True) == before
+# Rust canonicalize emits a Windows verbatim path; PowerShell resolves the same
+# fixture to a normal DOS path. Both metadata and database must identify it.
+extended='\\\\?\\'+str(fixture)
+identity=json.loads((root/'fixture.json').read_text(encoding='utf-8'))
+identity['mediaPath']=extended
+(root/'fixture.json').write_text(json.dumps(identity),encoding='utf-8')
+with sqlite3.connect(root/'learning.sqlite') as db:
+    db.execute('UPDATE media SET data=?',(json.dumps(dict(path=extended)),))
+assert audit(root,fixture,False) == before
+wrong=root/'different.mp4'; wrong.write_bytes(fixture.read_bytes())
+for field in ('metadata','database'):
+    for invalid in (str(wrong),str(root/'missing.mp4'),fixture.name,None,17,'bad\0path'):
+        if field=='metadata':
+            identity['mediaPath']=invalid
+            (root/'fixture.json').write_text(json.dumps(identity),encoding='utf-8')
+        else:
+            with sqlite3.connect(root/'learning.sqlite') as db: db.execute('UPDATE media SET data=?',(json.dumps(dict(path=invalid)),))
+        try: audit(root,fixture,False)
+        except ValueError: pass
+        else: raise AssertionError('An invalid media source was accepted: '+field+repr(invalid))
+        identity['mediaPath']=extended
+        (root/'fixture.json').write_text(json.dumps(identity),encoding='utf-8')
+        with sqlite3.connect(root/'learning.sqlite') as db: db.execute('UPDATE media SET data=?',(json.dumps(dict(path=extended)),))
+assert audit(root,fixture,True) == before
+with patch.object(type(fixture),'samefile',side_effect=PermissionError('synthetic inaccessible source')):
+    try: audit(root,fixture,False)
+    except ValueError: pass
+    else: raise AssertionError('An inaccessible media source was accepted')
 with sqlite3.connect(root / 'charges.sqlite') as db: db.execute('INSERT INTO ai_attempts VALUES (1)')
 try: audit(root,fixture,True)
 except ValueError: pass

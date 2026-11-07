@@ -16,15 +16,29 @@ def database(path):
     return sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)
 
 
+def same_media_source(value, expected):
+    if not isinstance(value, str):
+        return False
+    try:
+        path = Path(value)
+        return path.is_absolute() and path.samefile(expected)
+    except (OSError, ValueError):
+        return False
+
+
 def audit(root, fixture_path, after):
     fixture = json.loads((root / 'fixture.json').read_text(encoding='utf-8-sig'))
-    require(fixture == dict(mediaId='fixture-media', cardId='fixture-card', segmentCount=20000,
-                            mediaPath=str(fixture_path)), 'Unexpected seeded fixture identity')
+    require(isinstance(fixture, dict) and fixture == dict(mediaId='fixture-media', cardId='fixture-card', segmentCount=20000,
+                            mediaPath=fixture.get('mediaPath')), 'Unexpected seeded fixture identity')
     require(fixture_path.is_file(), 'Local media fixture missing')
+    # Rust canonicalize uses verbatim Windows paths; compare the existing file
+    # rather than its spelling while retaining absolute-source requirements.
+    require(same_media_source(fixture['mediaPath'], fixture_path), 'Unexpected seeded fixture media source')
     with database(root / 'learning.sqlite') as db:
         media = db.execute('SELECT id,data FROM media').fetchall()
         require(len(media) == 1 and media[0][0] == 'fixture-media', 'Unexpected media')
-        require(json.loads(media[0][1])['path'] == str(fixture_path), 'Unexpected media source')
+        source = json.loads(media[0][1])
+        require(isinstance(source, dict) and same_media_source(source.get('path'), fixture_path), 'Unexpected media source')
         cards = db.execute('SELECT id,data FROM cards ORDER BY id').fetchall()
         segments = db.execute('SELECT id,media_id,start_ms,data FROM segments ORDER BY id').fetchall()
         require(len(cards) == 1 and cards[0][0] == 'fixture-card', 'Unexpected cards')
