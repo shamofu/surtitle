@@ -211,6 +211,73 @@ pub(crate) fn muted(text: impl Into<gpui_kit::SharedString>) -> gpui_kit::Div {
     div().text_size(px(13.)).opacity(0.75).child(text.into())
 }
 
+/// Reserve the widest localized state without changing a control's hit target.
+/// The measuring labels never paint or enter the accessibility tree; callers
+/// name their Button with the current action through `accessibility_label`.
+pub(crate) fn state_label(current: impl Into<SharedString>, alternatives: &[&str]) -> Div {
+    let current = current.into();
+    div()
+        .relative()
+        .grid()
+        .grid_cols_max_content(1)
+        .whitespace_nowrap()
+        .children(alternatives.iter().map(|text| {
+            div()
+                .col_start(1)
+                .row_start(1)
+                .invisible()
+                .child((*text).to_owned())
+        }))
+        .child(
+            div()
+                .col_start(1)
+                .row_start(1)
+                .invisible()
+                .child(current.clone()),
+        )
+        .child(
+            div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(current),
+        )
+}
+
+/// Keep routine status changes from resizing a form's footer. Unlike labels,
+/// these alternatives wrap at the available width, including narrow windows.
+pub(crate) fn state_message(current: impl Into<SharedString>, alternatives: &[&str]) -> Div {
+    let current = current.into();
+    div()
+        .relative()
+        .grid()
+        .grid_cols(1)
+        .w_full()
+        .min_w_0()
+        .whitespace_normal()
+        .children(alternatives.iter().map(|text| {
+            div()
+                .col_start(1)
+                .row_start(1)
+                .invisible()
+                .child((*text).to_owned())
+        }))
+        .child(
+            div()
+                .col_start(1)
+                .row_start(1)
+                .invisible()
+                .child(current.clone()),
+        )
+        .child(div().absolute().inset_0().child(current))
+}
+
+pub(crate) fn tabular_numbers() -> gpui_kit::FontFeatures {
+    gpui_kit::FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)]))
+}
+
 pub(crate) fn language_name(code: &str, ja: bool) -> String {
     match (code, ja) {
         ("en", true) => "英語",

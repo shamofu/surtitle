@@ -11,7 +11,7 @@ mod review;
 use super::{
     editors::{EditorRegistry, FlushFuture, FlushPurpose},
     session::{Route, Session, UiEvent, run},
-    style::{column, row},
+    style::{column, row, state_label, tabular_numbers},
 };
 use crate::{
     application::{ai::AiQuote, continuations::AiContinuation, operations::OperationProgress},
@@ -724,20 +724,52 @@ impl AiView {
             .border_1()
             .border_color(theme.border)
             .when(compact, |card| card.ml_4())
-            .child(summary)
+            .child(
+                column()
+                    .id(format!("operation-details-{}", operation.id))
+                    .test_support()
+                    .h(px(60.))
+                    .flex_shrink_0()
+                    .overflow_y_scroll()
+                    .gap_1()
+                    .font_features(tabular_numbers())
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .child(gpui_kit::base::SelectableText::new(
+                                format!("operation-summary-{}", operation.id),
+                                summary,
+                            )),
+                    )
+                    .when_some(operation.error.clone(), |body, error| {
+                        body.child(
+                            div()
+                                .id(format!("operation-error-body-{}", operation.id))
+                                .test_support()
+                                .flex_shrink_0()
+                                .text_color(theme.danger)
+                                .child(gpui_kit::base::SelectableText::new(
+                                    format!("operation-error-{}", operation.id),
+                                    error,
+                                )),
+                        )
+                    }),
+            )
             .child(operation.updated_at.clone());
-        if let Some(error) = &operation.error {
-            card = card.child(div().text_color(theme.danger).child(error.clone()));
-        }
         if !compact {
             let mut actions = row();
-            if operation.status == "running" && operation.kind == "preparation" {
+            if operation.kind == "preparation" {
                 let id = operation.id.clone();
                 actions =
                     actions.child(
                         Button::new(format!("cancel-operation-{id}"))
                             .label(localized(cx, "中止 / Cancel"))
-                            .disabled(frozen || self.cancelling_operations.contains(&id))
+                            .disabled(
+                                frozen
+                                    || operation.status != "running"
+                                    || self.cancelling_operations.contains(&id),
+                            )
+                            .when(operation.status != "running", |button| button.invisible())
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.cancel_operation(id.clone(), cx)
                             })),
@@ -924,14 +956,14 @@ impl Render for AiView {
                         other => other,
                     },
                 );
-                let mut card = column()
+                let card = column()
                     .p_4()
                     .border_1()
                     .border_color(theme.border)
                     .child(
                         row()
                             .justify_between()
-                            .child(div().text_size(px(18.)).child(format!(
+                            .child(div().id(format!("job-summary-{id}")).flex_1().min_w_0().h(px(48.)).overflow_y_scroll().text_size(px(18.)).child(format!(
                                 "{} · {} · {}",
                                 media_title.unwrap_or(model.text(
                                     "元の教材が見つかりません",
@@ -957,7 +989,7 @@ impl Render for AiView {
                         job.provider.as_str(),
                         job.id
                     )))
-                    .child(locale_format!(
+                    .child(column().id(format!("job-progress-{}", job.id)).h(px(48.)).flex_shrink_0().overflow_y_scroll().gap_1().font_features(tabular_numbers()).child(div().flex_shrink_0().child(locale_format!(
                         cx,
                         "{:.0}% · {} / {} 成功 · {} 実行中 · {} 拒否 · {} 未処理",
                         "{:.0}% · {} / {} succeeded · {} in flight · {} rejected · {} pending",
@@ -967,8 +999,8 @@ impl Render for AiView {
                         requests.in_flight,
                         requests.rejected,
                         requests.pending
-                    ))
-                    .child(locale_format!(
+                    )))
+                    .child(div().flex_shrink_0().child(locale_format!(
                         cx,
                         "{} · 保存結果 {} · 実行結果 {}",
                         "{} · result {} · outcome {}",
@@ -977,15 +1009,32 @@ impl Render for AiView {
                         job.execution_outcome
                             .as_deref()
                             .unwrap_or(model.text("未確定", "pending"))
-                    ));
+                    ))));
+                let mut details = column()
+                    .id(format!("job-details-{}", job.id))
+                    .h(px(48.))
+                    .flex_shrink_0()
+                    .overflow_y_scroll()
+                    .gap_1()
+                    .font_features(tabular_numbers());
                 if let Some(message) = &job.message {
-                    card = card.child(message.clone());
+                    details = details.child(div().flex_shrink_0().child(
+                        gpui_kit::base::SelectableText::new(
+                            format!("job-message-{}", job.id),
+                            message.clone(),
+                        ),
+                    ));
                 }
                 if let Some(issue) = &job.issue {
-                    card = card.child(locale_format!(cx, "問題: {:?}", "Issue: {:?}", issue));
+                    details = details.child(div().flex_shrink_0().child(locale_format!(
+                        cx,
+                        "問題: {:?}",
+                        "Issue: {:?}",
+                        issue
+                    )));
                 }
                 if let Some(retry) = &job.retry {
-                    card = card.child(locale_format!(
+                    details = details.child(div().flex_shrink_0().child(locale_format!(
                         cx,
                         "再試行 {} / {} · {} · 次回 {}",
                         "Retry {} / {} · {} · next {}",
@@ -993,10 +1042,10 @@ impl Render for AiView {
                         retry.max_retries,
                         retry.state,
                         retry.next_retry_at.as_deref().unwrap_or("—")
-                    ));
+                    )));
                 }
                 if let Some(pacing) = &job.pacing {
-                    card = card.child(locale_format!(
+                    details = details.child(div().flex_shrink_0().child(locale_format!(
                         cx,
                         "次の要求 {} · 間隔 {} ミリ秒 · {}",
                         "Next request {} · interval {} ms · {}",
@@ -1010,9 +1059,9 @@ impl Render for AiView {
                         } else {
                             model.text("通常", "normal")
                         }
-                    ));
+                    )));
                 }
-                content = content.child(card);
+                content = content.child(card.child(details));
             }
         }
         if !self.continuations.is_empty() {
@@ -1026,6 +1075,13 @@ impl Render for AiView {
                 let discard_id = id.clone();
                 let resume_id = id.clone();
                 let confirming = self.discard_confirmation.as_ref() == Some(&id);
+                let discard_label = localized(cx, "入力を破棄 / Discard input");
+                let confirmation_label = localized(cx, "入力を完全に破棄 / Confirm discard input");
+                let current_label = if confirming {
+                    &confirmation_label
+                } else {
+                    &discard_label
+                };
                 content = content.child(
                     row()
                         .child(format!(
@@ -1042,11 +1098,11 @@ impl Render for AiView {
                         )
                         .child(
                             Button::new(format!("discard-{id}"))
-                                .label(if confirming {
-                                    localized(cx, "入力を完全に破棄 / Confirm discard input")
-                                } else {
-                                    localized(cx, "入力を破棄 / Discard input")
-                                })
+                                .accessibility_label(current_label.clone())
+                                .child(state_label(
+                                    current_label.clone(),
+                                    &[&discard_label, &confirmation_label],
+                                ))
                                 .disabled(frozen)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.discard_continuation(discard_id.clone(), cx)

@@ -4,12 +4,15 @@
 use super::*;
 mod activity;
 mod card_dialog;
+mod form_stability;
 mod keyboard;
+mod layout_stability;
 mod library_playback;
 mod study_accessibility;
 mod study_fullscreen;
 mod study_layout;
 mod study_toggles;
+mod study_wheel;
 use crate::{
     application::{Services, changes::ChangeDomain},
     commands,

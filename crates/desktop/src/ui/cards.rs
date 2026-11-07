@@ -811,10 +811,21 @@ impl Render for CardsView {
         let model = self.session.clone();
         let selected_language = self.language.clone();
         let language_view = cx.entity().downgrade();
+        let language_label = self.language.as_ref().map_or_else(
+            || t("すべての言語", "All languages").to_owned(),
+            |code| language_name(code, ja),
+        );
+        let language_labels = std::iter::once(t("すべての言語", "All languages").to_owned())
+            .chain(languages.iter().map(|code| language_name(code, ja)))
+            .collect::<Vec<_>>();
         let filter = button("card-language")
-            .label(self.language.as_ref().map_or_else(
-                || t("すべての言語", "All languages").to_owned(),
-                |code| language_name(code, ja),
+            .accessibility_label(language_label.clone())
+            .child(state_label(
+                language_label,
+                &language_labels
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
             ))
             .icon(IconName::ChevronDown)
             .accessibility_id("card-language")
@@ -849,11 +860,17 @@ impl Render for CardsView {
         let export = self.session.clone();
         let review = self.session.clone();
         let expanded = self.expanded.clone();
+        let review_label = if due_count > 0 {
+            format!("{}  {due_count}", t("復習する", "Start review"))
+        } else {
+            t("復習する", "Start review").into()
+        };
+        let review_capacity = format!("{}  {total}", t("復習する", "Start review"));
         let mut page=column().size_full().min_h(px(0.)).px(px(gutter)).py_6().gap_6()
             .child(row().justify_between().gap_6().flex_wrap()
                 .child(column().gap_2().child(title(t("フレーズ帳","Phrases"))).child(div().text_size(px(15.)).text_color(theme.muted_foreground).child(t("作品で出会った表現を、音声と文脈から振り返る。","Return to the phrases you saved, with their original audio and context."))))
                 .child(row().gap_2().child(button("cards-export").icon(IconName::ArrowDownToLine).label(t("書き出す","Export")).disabled(disabled).on_click(move|_,_,cx|export.update(cx,|s,cx|s.request_transfer(cx))))
-                    .child(button("cards-review").primary().icon(IconName::BookOpen).label(if due_count>0{format!("{}  {due_count}",t("復習する","Start review"))}else{t("復習する","Start review").into()}).on_click(move|_,_,cx|review.update(cx,|s,cx|s.navigate(Route::Review,cx))))))
+                    .child(button("cards-review").primary().icon(IconName::BookOpen).accessibility_label(review_label.clone()).child(state_label(review_label, &[&review_capacity]).font_features(tabular_numbers())).on_click(move|_,_,cx|review.update(cx,|s,cx|s.navigate(Route::Review,cx))))))
             .child(row().justify_between().gap_4().flex_wrap()
                 .child(row().gap_2().child(div().text_size(px(17.)).font_weight(gpui_kit::FontWeight::SEMIBOLD).child(t("保存した表現","Saved phrases"))).child(phrase_badge(count.to_string(),false,cx)))
                 .child(row().gap_3().child(filter).child(Input::new(&self.search).id("card-search").accessibility_id("card-search").aria_label(t("フレーズを検索","Search phrases")).prefix(Icon::new(IconName::Search)).w(px(310.))))) ;
@@ -1498,11 +1515,24 @@ impl Render for CardForm {
                                     .font_weight(gpui_kit::FontWeight::MEDIUM)
                                     .child(t("フレーズを編集", "Edit phrase")),
                             )
-                            .child(muted(if saving {
-                                t("保存中…", "Saving…")
-                            } else {
-                                t("変更は自動保存されます。", "Changes save automatically.")
-                            })),
+                            .child(
+                                state_message(
+                                    if saving {
+                                        t("保存中…", "Saving…")
+                                    } else {
+                                        t("変更は自動保存されます。", "Changes save automatically.")
+                                    },
+                                    &[
+                                        t("保存中…", "Saving…"),
+                                        t(
+                                            "変更は自動保存されます。",
+                                            "Changes save automatically.",
+                                        ),
+                                    ],
+                                )
+                                .text_size(px(13.))
+                                .opacity(0.75),
+                            ),
                     )
                     .child(
                         icon_button("close-card", IconName::X, t("閉じる", "Close"))

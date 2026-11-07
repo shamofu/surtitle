@@ -264,11 +264,22 @@ impl Render for TransferDialog {
                     .map(|(format, label)| {
                         Button::new(format)
                             .accessibility_id(format!("export-format-{format}"))
-                            .label(if self.format == format {
+                            .accessibility_label(if self.format == format {
                                 format!("✓ {label}")
                             } else {
                                 label.to_owned()
                             })
+                            .child(
+                                row()
+                                    .gap_1()
+                                    .child(div().w(px(14.)).child(if self.format == format {
+                                        "✓"
+                                    } else {
+                                        ""
+                                    }))
+                                    .child(label),
+                            )
+                            .toggled(self.format == format)
                             .disabled(self.busy)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.format = format;
@@ -349,18 +360,26 @@ impl Render for TransferDialog {
                     .children(warnings.iter().map(|warning| div().child(warning.clone())))
                 })
             })
-            .when(self.busy, |body| {
-                body.child(muted(t(
-                    "保存と処理が完了するまでお待ちください。",
-                    "Waiting for saving and processing to finish.",
-                )))
-            })
-            .when(self.cancelled, |body| {
-                body.child(muted(t("キャンセルしました。", "Cancelled.")))
-            })
-            .when_some(self.error.clone(), |body, error| {
-                body.child(div().text_color(cx.theme().danger).child(error))
-            })
+            .child(
+                column()
+                    .id("transfer-status")
+                    .h(px(48.))
+                    .flex_shrink_0()
+                    .overflow_y_scroll()
+                    .gap_1()
+                    .when(self.busy, |body| {
+                        body.child(muted(t(
+                            "保存と処理が完了するまでお待ちください。",
+                            "Waiting for saving and processing to finish.",
+                        )))
+                    })
+                    .when(self.cancelled, |body| {
+                        body.child(muted(t("キャンセルしました。", "Cancelled.")))
+                    })
+                    .when_some(self.error.clone(), |body, error| {
+                        body.child(div().text_color(cx.theme().danger).child(error))
+                    }),
+            )
             .child(
                 Button::new("close-transfer")
                     .accessibility_id("close-transfer")

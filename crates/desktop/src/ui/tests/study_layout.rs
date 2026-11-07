@@ -53,6 +53,115 @@ fn click_tab(harness: &Harness, label: &str, cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn transcription_progress_keeps_history_actions_in_place(cx: &mut TestAppContext) {
+    for (locale, width) in [("en", 1600.), ("ja", 1600.), ("en", 1100.), ("ja", 1100.)] {
+        let harness = Harness::open(cx);
+        let mut settings = harness.state.settings().unwrap();
+        settings.locale = locale.into();
+        commands::models::update_settings(&harness.state, settings).unwrap();
+        harness.update(cx, |root, _, cx| {
+            root.session.update(cx, |session, cx| session.refresh(cx));
+        });
+        harness.wait(cx, "requested locale", |root, app| {
+            root.session
+                .read(app)
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .settings
+                .locale
+                == locale
+        });
+        cx.simulate_window_resize(harness.window, size(px(width), px(1000.)));
+        cx.update_window(harness.window, |_, window, app| {
+            window.render_frame(app);
+            window.click(("study", 0usize), app);
+        })
+        .unwrap();
+        harness.wait_window(cx, harness.window, "study loaded", |window| {
+            window
+                .try_find("subtitle-search")
+                .is_some_and(|input| input.visible())
+        });
+        click_tab(
+            &harness,
+            if locale == "ja" {
+                "文字起こし"
+            } else {
+                "Transcription"
+            },
+            cx,
+        );
+        let mut baseline = None;
+        for (status, progress, message) in [
+            ("running", 0.09, None),
+            (
+                "paused",
+                0.99,
+                Some(
+                    "処理を一時停止しました。受信済みの字幕と費用記録は保持しています。設定を確認し、残りの処理を再開してください。 Processing is paused. Received subtitles and accounting are retained; review settings before resuming the remaining work.",
+                ),
+            ),
+            ("completed", 1.0, None),
+        ] {
+            // Project realistic service snapshots into the actual view without
+            // creating a billable AI job or introducing production test hooks.
+            let mut snapshot = commands::ai::get_app_snapshot(&harness.state).unwrap();
+            snapshot.jobs = ["progress-first", "progress-second"]
+                .into_iter()
+                .map(|id| crate::application::ai::JobSummary {
+                    provider: surtitle_core::AiProvider::Vertex,
+                    id: id.into(),
+                    media_id: Some("ui-media".into()),
+                    kind: "transcribe".into(),
+                    status: status.into(),
+                    progress,
+                    request_counts: Default::default(),
+                    execution_outcome: None,
+                    message: message.map(str::to_owned),
+                    created_at: "2026-11-07 10:00".into(),
+                    pending_results: 0,
+                    transcript_review: false,
+                    has_transcript_result: false,
+                    needs_attention: status == "paused",
+                    result_state: "none".into(),
+                    issue: None,
+                    automatic_transcript: false,
+                    transcription_ranges: Vec::new(),
+                    retry: None,
+                    pacing: None,
+                })
+                .collect();
+            harness.update(cx, |root, _, cx| {
+                root.session.update(cx, |session, cx| {
+                    session.snapshot = Some(std::sync::Arc::new(snapshot));
+                    cx.notify();
+                });
+            });
+            let positions = cx
+                .update_window(harness.window, |_, window, app| {
+                    window.render_frame(app);
+                    [
+                        "transcript-job-progress-first",
+                        "transcript-job-progress-second",
+                    ]
+                    .map(|id| window.find(id).bounds())
+                })
+                .unwrap();
+            if let Some(expected) = baseline {
+                assert_eq!(
+                    positions, expected,
+                    "{locale} at {width}px: {status} moved history actions"
+                );
+            } else {
+                baseline = Some(positions);
+            }
+        }
+        harness.close(cx);
+    }
+}
+
+#[gpui_kit::test]
 fn companion_tabs_present_real_content_and_keep_the_transcript_query(cx: &mut TestAppContext) {
     let harness = Harness::open(cx);
     cx.update_window(harness.window, |_, window, app| {

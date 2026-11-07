@@ -953,7 +953,7 @@ impl Render for DesktopView {
                                                 .flex_1()
                                                 .h_full()
                                                 .rounded(px(0.))
-                                                .px(px(12.))
+                                                .px(px(if icon_navigation { 3. } else { 12. }))
                                                 .border_b(px(3.))
                                                 .border_color(if selected {
                                                     theme.primary
@@ -972,23 +972,39 @@ impl Render for DesktopView {
                                                 })
                                                 .child(
                                                     style::row()
-                                                        .gap(px(8.))
+                                                        .gap(px(if icon_navigation {
+                                                            2.
+                                                        } else {
+                                                            8.
+                                                        }))
                                                         .text_size(px(14.))
                                                         .font_weight(FontWeight::MEDIUM)
                                                         .child(Icon::new(icon).size(px(18.)))
                                                         .when(!icon_navigation, |row| {
                                                             row.child(label)
                                                         })
-                                                        .when(id == "review" && due > 0, |row| {
+                                                        .when(id == "review", |row| {
                                                             row.child(
                                                                 div()
                                                                     .rounded(px(8.))
-                                                                    .px(px(4.))
+                                                                    .w(px(if icon_navigation {
+                                                                        24.
+                                                                    } else {
+                                                                        28.
+                                                                    }))
+                                                                    .flex_shrink_0()
+                                                                    .text_center()
                                                                     .text_size(px(11.))
+                                                                    .font_features(
+                                                                        style::tabular_numbers(),
+                                                                    )
                                                                     .bg(theme.primary)
                                                                     .text_color(
                                                                         theme.primary_foreground,
                                                                     )
+                                                                    .when(due == 0, |badge| {
+                                                                        badge.invisible()
+                                                                    })
                                                                     .child(if due > 99 {
                                                                         "99+".into()
                                                                     } else {
@@ -1044,29 +1060,37 @@ impl Render for DesktopView {
                                                 .when(!compact, |row| {
                                                     row.child(session.text("処理状況", "Activity"))
                                                 })
-                                                .when(activity.running > 0, |row| {
-                                                    row.child(
-                                                        div()
-                                                            .rounded(px(5.))
-                                                            .px(px(5.))
-                                                            .text_size(px(12.))
-                                                            .bg(theme.accent)
-                                                            .text_color(theme.primary)
-                                                            .child(if activity.running > 99 {
-                                                                "99+".into()
-                                                            } else {
-                                                                activity.running.to_string()
-                                                            }),
-                                                    )
-                                                })
-                                                .when(activity.problem.is_some(), |row| {
-                                                    row.child(
-                                                        div()
-                                                            .text_color(theme.danger)
-                                                            .font_weight(FontWeight::BOLD)
-                                                            .child("!"),
-                                                    )
-                                                }),
+                                                .child(
+                                                    div()
+                                                        .rounded(px(5.))
+                                                        .w(px(30.))
+                                                        .flex_shrink_0()
+                                                        .text_center()
+                                                        .text_size(px(12.))
+                                                        .font_features(style::tabular_numbers())
+                                                        .bg(theme.accent)
+                                                        .text_color(theme.primary)
+                                                        .when(activity.running == 0, |badge| {
+                                                            badge.invisible()
+                                                        })
+                                                        .child(if activity.running > 99 {
+                                                            "99+".into()
+                                                        } else {
+                                                            activity.running.to_string()
+                                                        }),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .w(px(8.))
+                                                        .flex_shrink_0()
+                                                        .text_center()
+                                                        .text_color(theme.danger)
+                                                        .font_weight(FontWeight::BOLD)
+                                                        .when(activity.problem.is_none(), |badge| {
+                                                            badge.invisible()
+                                                        })
+                                                        .child("!"),
+                                                ),
                                         )
                                         .accessibility_id("nav-activity")
                                         .on_click(cx.listener(|this, _, window, cx| {
@@ -1077,7 +1101,10 @@ impl Render for DesktopView {
                                     style::button("locale-toggle")
                                         .ghost()
                                         .px(px(8.))
-                                        .label(if ja { "EN" } else { "日本語" })
+                                        .child(style::state_label(
+                                            if ja { "EN" } else { "日本語" },
+                                            &["EN", "日本語"],
+                                        ))
                                         .accessibility_label(if ja {
                                             "Switch to English"
                                         } else {

@@ -27,6 +27,7 @@ use surtitle_core::SubtitleSegment;
 
 mod controls;
 mod panels;
+use controls::{PendingControl, WheelSteps};
 use panels::{BoundCandidate, CompanionTab};
 
 pub(crate) struct StudyView {
@@ -43,7 +44,11 @@ pub(crate) struct StudyView {
     error: Option<String>,
     seek: Entity<SliderState>,
     seek_target: Option<u64>,
+    seek_control: PendingControl,
     volume: Entity<SliderState>,
+    volume_control: PendingControl,
+    video_wheel: WheelSteps,
+    volume_wheel: WheelSteps,
     rate: Entity<SliderState>,
     focus: gpui_kit::FocusHandle,
     looping: Option<(u64, u64)>,
@@ -163,7 +168,7 @@ impl StudyView {
                         let state = &this.session.read(cx).player;
                         let position = state.position_ms;
                         let duration = state.duration_ms;
-                        let volume = state.volume;
+                        let volume = this.volume_control.target.unwrap_or(state.volume);
                         let rate = state.rate;
                         if this
                             .seek_target
@@ -237,7 +242,11 @@ impl StudyView {
             error: None,
             seek,
             seek_target: None,
+            seek_control: Default::default(),
             volume,
+            volume_control: Default::default(),
+            video_wheel: Default::default(),
+            volume_wheel: Default::default(),
             rate,
             focus,
             looping: None,
@@ -284,6 +293,9 @@ impl StudyView {
         this
     }
     fn load_media(&mut self, cx: &mut Context<Self>) {
+        self.seek_control.reset();
+        self.volume_control.reset();
+        self.seek_target = None;
         self.load_succeeded = false;
         self.load_error = None;
         let backend = self.session.read(cx).backend.clone();
@@ -402,6 +414,11 @@ impl StudyView {
         if self.sources.read(cx).frozen() || (action != "fullscreen" && !self.playback_ready(cx)) {
             return;
         }
+        let value = if action == "seek" {
+            value.map(|value| value.clamp(0., self.session.read(cx).player.duration_ms as f64))
+        } else {
+            value
+        };
         let backend = self.session.read(cx).backend.clone();
         let state = backend.state.clone();
         let host = backend.host.clone();
@@ -429,6 +446,21 @@ impl StudyView {
             self.loop_revision += 1;
             self.loop_source = None;
             self.looping = None;
+        }
+        if let Some(value) = value {
+            if action == "seek" {
+                self.seek_target = Some(value as u64);
+                self.seek_control.enqueue(value, Box::pin(task));
+                self.start_pending_control("seek", cx);
+                cx.notify();
+                return;
+            }
+            if action == "volume" {
+                self.volume_control.enqueue(value, Box::pin(task));
+                self.start_pending_control("volume", cx);
+                cx.notify();
+                return;
+            }
         }
         run(&backend, cx, task, move |this, result, _| {
             if result.is_ok() && clears_loop {
@@ -489,18 +521,22 @@ impl StudyView {
         let host = backend.host.clone();
         let media = self.media_id.clone();
         let task = commands::playback::player_control_for_media(host, &state, media, request);
-        run(&backend, cx, task, move |this, result, _| {
-            if this.loop_revision != revision {
-                return;
-            }
-            match result {
-                Ok(()) => this.looping = range,
-                Err(error) => {
-                    this.loop_source = None;
-                    this.error = Some(error);
+        self.queue_position_control(
+            task,
+            move |this, result, _| {
+                if this.loop_revision != revision {
+                    return;
                 }
-            }
-        });
+                match result {
+                    Ok(()) => this.looping = range,
+                    Err(error) => {
+                        this.loop_source = None;
+                        this.error = Some(error);
+                    }
+                }
+            },
+            cx,
+        );
     }
     fn play_cues(&mut self, ids: Vec<String>, cx: &mut Context<Self>) {
         if self.sources.read(cx).frozen() || !self.playback_ready(cx) {
@@ -514,13 +550,17 @@ impl StudyView {
         let host = backend.host.clone();
         let media = self.media_id.clone();
         let task = commands::playback::play_source_range(host, &state, media, ids);
-        run(&backend, cx, task, |this, result, _| {
-            if result.is_ok() {
-                this.looping = None;
-                this.loop_source = None;
-            }
-            this.error = result.err();
-        });
+        self.queue_position_control(
+            task,
+            |this, result, _| {
+                if result.is_ok() {
+                    this.looping = None;
+                    this.loop_source = None;
+                }
+                this.error = result.err();
+            },
+            cx,
+        );
     }
     fn import_subtitles(&mut self, cx: &mut Context<Self>) {
         if self.sources.read(cx).frozen() {
@@ -563,9 +603,7 @@ impl StudyView {
             self.media_id.clone(),
             request,
         );
-        run(&backend, cx, task, |this, result, _| {
-            this.error = result.err()
-        });
+        self.queue_position_control(task, |this, result, _| this.error = result.err(), cx);
     }
     fn selected_text(
         &self,
@@ -756,12 +794,14 @@ impl Render for StudyView {
         let show_surface = self.playback_ready(cx);
         let video = div()
             .id("player-viewport")
+            .test_support()
             .role(gpui_kit::accesskit::Role::Group)
             .accessibility_id("player-viewport")
             .aria_label(t("映像", "Video"))
             .w_full()
             .flex_1()
             .min_h(px(100.))
+            .on_scroll(cx.listener(|this, event, _, cx| this.scroll_video(event, cx)))
             .child(
                 canvas(
                     move |rect, window, _| {
@@ -1132,11 +1172,22 @@ impl Render for StudyView {
                             .ghost()
                             .toggled(self.show_translation)
                             .icon(IconName::Languages)
-                            .label(if self.show_translation {
+                            .accessibility_label(if self.show_translation {
                                 t("訳を隠す", "Hide translations")
                             } else {
                                 t("訳を表示", "Show translations")
                             })
+                            .child(state_label(
+                                if self.show_translation {
+                                    t("訳を隠す", "Hide translations")
+                                } else {
+                                    t("訳を表示", "Show translations")
+                                },
+                                &[
+                                    t("訳を隠す", "Hide translations"),
+                                    t("訳を表示", "Show translations"),
+                                ],
+                            ))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.show_translation = !this.show_translation;
                                 cx.notify();
@@ -1163,21 +1214,17 @@ impl Render for StudyView {
                         this.filter(cx);
                     })),
             )
-            .when(
-                self.marked_only || !self.search.read(cx).value().is_empty(),
-                |body| {
-                    body.child(
-                        compact_button("reset-subtitle-filters")
-                            .ghost()
-                            .label(t("絞り込みをリセット", "Reset filters"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.marked_only = false;
-                                this.search
-                                    .update(cx, |search, cx| search.set_value("", window, cx));
-                                this.filter(cx);
-                            })),
-                    )
-                },
+            .child(
+                compact_button("reset-subtitle-filters")
+                    .ghost()
+                    .label(t("絞り込みをリセット", "Reset filters"))
+                    .disabled(!self.marked_only && self.search.read(cx).value().is_empty())
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.marked_only = false;
+                        this.search
+                            .update(cx, |search, cx| search.set_value("", window, cx));
+                        this.filter(cx);
+                    })),
             )
             .when(!self.empty_issues.is_empty(), |body| {
                 body.child(
@@ -1243,11 +1290,22 @@ impl Render for StudyView {
                             } else {
                                 cx.theme().muted_foreground
                             })
-                            .label(if self.follow {
+                            .accessibility_label(if self.follow {
                                 t("自動追従中", "Following playback")
                             } else {
                                 t("再生位置に戻る", "Follow playback")
                             })
+                            .child(state_label(
+                                if self.follow {
+                                    t("自動追従中", "Following playback")
+                                } else {
+                                    t("再生位置に戻る", "Follow playback")
+                                },
+                                &[
+                                    t("自動追従中", "Following playback"),
+                                    t("再生位置に戻る", "Follow playback"),
+                                ],
+                            ))
                             .text_size(px(12.))
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.follow_playback(window, cx)),
@@ -1415,11 +1473,22 @@ impl Render for StudyView {
                                                     .ghost()
                                                     .toggled(self.show_translation)
                                                     .icon(IconName::Languages)
-                                                    .label(if self.show_translation {
+                                                    .accessibility_label(if self.show_translation {
                                                         t("訳を隠す", "Hide translation")
                                                     } else {
                                                         t("訳を表示", "Show translation")
                                                     })
+                                                    .child(state_label(
+                                                        if self.show_translation {
+                                                            t("訳を隠す", "Hide translation")
+                                                        } else {
+                                                            t("訳を表示", "Show translation")
+                                                        },
+                                                        &[
+                                                            t("訳を隠す", "Hide translation"),
+                                                            t("訳を表示", "Show translation"),
+                                                        ],
+                                                    ))
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         this.show_translation =
                                                             !this.show_translation;

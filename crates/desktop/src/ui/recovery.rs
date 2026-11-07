@@ -7,10 +7,10 @@ use super::{
     source_form,
     style::*,
 };
-use gpui_kit::base::Disableable;
+use gpui_kit::base::{Disableable, Selectable};
 use gpui_kit::component::{
     ActiveTheme,
-    button::{Button, ButtonVariants},
+    button::Button,
     input::{Textarea, TextareaState},
 };
 use gpui_kit::{
@@ -253,11 +253,10 @@ impl Render for RecoveryView {
             .child(muted(t("以前の入力を確認して再開できます。出典が変わった内容や保存済みの記録は自動適用されません。", "Review input before continuing; changed sources and archived text are never applied automatically.")))
             .child(row().items_start().flex_1().min_h(px(0.))
                 .child(column().id("recovery-list").w(px(300.)).h_full().overflow_y_scroll().gap_2()
-                    .when(self.loading, |body| body.child(muted(t("読み込み中…", "Loading…"))))
-                    .when(!self.loading && self.rows.is_empty(), |body| body.child(muted(t("未完了の入力はありません", "No unfinished input"))))
+                    .child(state_message(if self.loading {t("読み込み中…", "Loading…")} else {t("未完了の入力はありません", "No unfinished input")}, &[t("読み込み中…", "Loading…"),t("未完了の入力はありません", "No unfinished input")]).text_size(px(13.)).opacity(0.75).when(!self.loading && !self.rows.is_empty(), |status| status.invisible()))
                     .children(self.rows.iter().map(|item| {
                         let id = item.id(); let selected = self.selected.as_deref() == Some(&id);
-                        Button::new(id.clone()).label(item.label(ja)).accessibility_id(format!("recovery-item-{id}")).when(selected, |button| button.primary())
+                        Button::new(id.clone()).label(item.label(ja)).accessibility_id(format!("recovery-item-{id}")).selected(selected)
                             .on_click(cx.listener(move |this,_,_,cx| {this.selected=Some(id.clone());this.confirming=None;this.notice=None;cx.notify();}))
                     })))
                 .child(column().flex_1().h_full().gap_2()
@@ -270,16 +269,17 @@ impl Render for RecoveryView {
                                 .child(Button::new("recovery-copy").accessibility_id("recovery-copy").label(t("内容をコピー", "Copy text")).on_click(cx.listener(move|this,_,_,cx|{cx.write_to_clipboard(ClipboardItem::new_string(copying.text()));this.notice=Some(t("コピーしました", "Copied").into());cx.notify();})))
                                 .when(item.can_open(), |buttons| buttons.child(Button::new("recovery-open").accessibility_id("recovery-open").label(t("入力を開く", "Open input")).disabled(frozen).on_click(cx.listener(move|this,_,window,cx|this.reopen(opening.clone(),false,window,cx)))))
                                 .when(item.can_recover(), |buttons| buttons.child(Button::new("recovery-recover").accessibility_id("recovery-recover").label(t("以前の入力から続ける", "Recover input")).disabled(frozen).on_click(cx.listener(move|this,_,window,cx|this.reopen(recovering.clone(),true,window,cx)))))
-                                .when(item.can_discard(), |buttons| buttons.child(Button::new("recovery-discard").accessibility_id("recovery-discard").label(if confirm {t("破棄を確定", "Confirm discard")} else {t("下書きを破棄", "Discard draft")}).disabled(frozen || self.loading).on_click(cx.listener(move|this,_,_,cx|{
+                                .when(item.can_discard(), |buttons| buttons.child(Button::new("recovery-discard").accessibility_id("recovery-discard").accessibility_label(if confirm {t("破棄を確定", "Confirm discard")} else {t("下書きを破棄", "Discard draft")}).child(state_label(if confirm {t("破棄を確定", "Confirm discard")} else {t("下書きを破棄", "Discard draft")}, &[t("破棄を確定", "Confirm discard"), t("下書きを破棄", "Discard draft")])).disabled(frozen || self.loading).on_click(cx.listener(move|this,_,_,cx|{
                                     if this.frozen(cx) {return;}
                                     if this.confirming.as_deref() == Some(&deleting.id()) {this.busy=true;cx.emit(RecoveryAction::Discard(Box::new(deleting.clone())));} else {this.confirming=Some(deleting.id());}
                                     cx.notify();
                                 }))))
                             )
-                            .when(confirm, |body| body.child(muted(t("この下書きだけを破棄します。保存済みの教材・字幕・フレーズは削除しません。", "Only this draft is discarded; saved learning content stays."))))
+                            .child(muted(t("この下書きだけを破棄します。保存済みの教材・字幕・フレーズは削除しません。", "Only this draft is discarded; saved learning content stays.")).when(!confirm, |notice| notice.invisible()))
                     })))
-            .when_some(self.error.clone(), |body,error| body.child(div().text_color(cx.theme().danger).child(error)))
-            .when_some(self.notice.clone(), |body,notice| body.child(muted(notice)))
+            .child(column().id("recovery-status").h(px(42.)).flex_shrink_0().overflow_y_scroll().gap_1()
+                .when_some(self.error.clone(), |body,error| body.child(div().text_color(cx.theme().danger).child(error)))
+                .when_some(self.notice.clone(), |body,notice| body.child(muted(notice))))
             .child(Button::new("recovery-close").accessibility_id("recovery-close").label(t("閉じる", "Close")).disabled(self.busy).on_click(|_,window,_|window.remove_window()))
     }
 }

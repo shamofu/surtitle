@@ -573,11 +573,30 @@ impl StudyView {
                         row()
                             .justify_between()
                             .child(div().text_size(px(14.)).child(state))
-                            .child(muted(format!("{:.0}%", job.progress * 100.))),
+                            .child(
+                                muted(format!("{:.0}%", job.progress * 100.))
+                                    .w(px(40.))
+                                    .flex_shrink_0()
+                                    .text_right()
+                                    .font_features(tabular_numbers()),
+                            ),
                     )
-                    .when_some(job.message.clone(), |body, message| {
-                        body.child(muted(message))
-                    })
+                    .child(
+                        div()
+                            .id(format!("transcript-job-message-{}", id))
+                            .h(px(40.))
+                            .flex_shrink_0()
+                            .overflow_y_scroll()
+                            .text_size(px(13.))
+                            .line_height(px(20.))
+                            .text_color(cx.theme().muted_foreground)
+                            .when_some(job.message.clone(), |body, message| {
+                                body.child(gpui_kit::base::SelectableText::new(
+                                    format!("transcript-job-message-text-{}", id),
+                                    message,
+                                ))
+                            }),
+                    )
                     .child(muted(job.created_at.clone()))
                     .child(
                         compact_button(format!("transcript-job-{}", id))

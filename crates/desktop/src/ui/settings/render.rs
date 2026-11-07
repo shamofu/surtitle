@@ -455,11 +455,12 @@ impl Render for SettingsView {
                         .justify_start()
                         .h(px(50.))
                         .px_3()
+                        .border_1()
+                        .border_color(gpui_kit::hsla(0., 0., 0., 0.))
                         .when(!compact, |button| button.w_full())
                         .when(selected, |button| {
                             button
                                 .bg(cx.theme().accent)
-                                .border_1()
                                 .border_color(cx.theme().primary)
                                 .text_color(cx.theme().primary)
                         })
@@ -476,7 +477,7 @@ impl Render for SettingsView {
                 .child(div().text_size(px(15.)).text_color(cx.theme().muted_foreground).child(self.t("学習・AI・外部ツールの設定を調整できます。","Adjust your learning, AI, and external tool settings.",cx))))
             .child(row().items_start().gap_6().px_6().flex_1().min_h(px(0.)).when(compact,|body|body.flex_col().gap_4())
                 .child(nav)
-                .child(div().id("settings-scroll").flex_1().min_w(px(0.)).h_full().overflow_y_scroll().pb_6()
+                .child(div().id("settings-scroll").test_support().flex_1().min_w(px(0.)).h_full().overflow_y_scroll().pb_6()
                     .child(column().w_full().gap_4().child(content)
                         .when_some(self.notice.clone(),|body,notice|body.child(muted(notice)))
                         .when_some(editing.recovery.clone(),|body,recovery|body.child(settings_card(cx)
@@ -486,19 +487,21 @@ impl Render for SettingsView {
                                 if let Some(key)=&this.key {this.editors.update(cx,|registry,cx|registry.recover(key,cx));}
                             }))))))))
             .child(
-                column()
+                row()
+                    .flex_shrink_0()
+                    .items_start()
                     .px_6()
                     .py_3()
                     .border_t_1()
                     .border_color(cx.theme().border)
-                    .gap_2()
-                    .child(muted(status))
-                    .when_some(error, |view, error| {
-                        view.child(
-                            row()
-                                .flex_wrap()
-                                .child(div().flex_1().text_color(cx.theme().danger).child(error))
-                                .child(
+                    .gap_3()
+                    // Keep three readable lines available for asynchronous status
+                    // and errors. Longer service errors remain fully scrollable.
+                    .child(column().id("settings-status").test_support().flex_1().min_w_0().h(px(60.)).overflow_y_scroll().gap_1()
+                        .child(muted(status))
+                        .when_some(error.clone(), |body, error| body.child(div().text_color(cx.theme().danger).child(error))))
+                    .child(column().id("settings-status-actions").w(px(160.)).h(px(60.)).flex_shrink_0().overflow_y_scroll().gap_1()
+                        .when(error.is_some(), |view| view.child(
                                     button("settings-retry")
                                         .label(self.t("再試行", "Retry", cx))
                                         .disabled(frozen)
@@ -508,9 +511,7 @@ impl Render for SettingsView {
                                             this.session
                                                 .update(cx, |session, cx| session.refresh(cx));
                                         })),
-                                ),
-                        )
-                    })
+                                ))
                     .when(!editing.ready, |view| {
                         view.child(
                             button("settings-reload")
@@ -525,7 +526,7 @@ impl Render for SettingsView {
                                     this.session.update(cx, |session, cx| session.refresh(cx));
                                 })),
                         )
-                    }),
+                    })),
             )
     }
 }

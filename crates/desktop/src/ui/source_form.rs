@@ -4,7 +4,7 @@ use super::{
     source_editors::{DraftAction, DraftOutcome, SourceEditors, SourceKey, SourceOptions},
     style::*,
 };
-use gpui_kit::base::Disableable;
+use gpui_kit::base::{Disableable, TestSupportExt};
 use gpui_kit::component::{
     ActiveTheme,
     button::ButtonVariants,
@@ -492,6 +492,26 @@ impl Render for SourceForm {
                         .h(px(height))
                 }))
         };
+        let statuses = [
+            t("保存しました", "Saved"),
+            t("下書きを読み込み中…", "Loading draft…"),
+            t("下書きを保存中…", "Saving draft…"),
+            t(
+                "入力は自動保存されます。あとで続けることもできます。",
+                "Your input is saved automatically. You can continue later.",
+            ),
+        ];
+        let status = statuses[if self.done {
+            0
+        } else if !ready {
+            1
+        } else if view.is_some_and(|view| view.saving) {
+            2
+        } else {
+            3
+        }];
+        let close_labels = [t("閉じる", "Close"), t("あとで続ける", "Continue later")];
+        let close_label = close_labels[usize::from(!self.done)];
         super::keyboard::form_tab_navigation(column())
             .id("source-editor")
             .size_full()
@@ -507,7 +527,7 @@ impl Render for SourceForm {
                 } else {
                     t("音声と元の文脈を残して、覚えておきたい表現を復習します。", "Keep audio and original context with a phrase worth remembering.")
                 })))
-            .child(column().id("source-editor-scroll").flex_1().min_h_0().overflow_y_scroll().p_5().gap_4()
+            .child(column().id("source-editor-scroll").test_support().flex_1().min_h_0().overflow_y_scroll().p_5().gap_4()
             .when(is_subtitle, |body| body.child(column().gap_2().p_3().rounded(px(8.)).border_1().border_color(cx.theme().border)
                 .child(muted(t("元の字幕・出典", "Original subtitle and source")))
                 .children(source.iter().map(|cue|div().child(format!("{}–{}  {}", precise(cue.start_ms), precise(cue.end_ms), cue.text))))
@@ -584,19 +604,12 @@ impl Render for SourceForm {
             }))
             .child(
                 column().flex_shrink_0().px_5().py_4().gap_3().border_t_1().border_color(cx.theme().border)
-                    .child(muted(if self.done {
-                        t("保存しました", "Saved")
-                    } else if !ready {
-                        t("下書きを読み込み中…", "Loading draft…")
-                    } else if view.is_some_and(|view| view.saving) {
-                        t("下書きを保存中…", "Saving draft…")
-                    } else {
-                        t("入力は自動保存されます。あとで続けることもできます。", "Your input is saved automatically. You can continue later.")
-                    }))
+                    .child(state_message(status, &statuses).text_size(px(13.)).text_color(cx.theme().muted_foreground))
                     .child(row().justify_end()
                     .child(
                         button("close-source").accessibility_id("close-source")
-                            .label(if self.done { t("閉じる", "Close") } else { t("あとで続ける", "Continue later") })
+                            .child(state_label(close_label, &close_labels))
+                            .accessibility_label(close_label)
                             .disabled(self.busy)
                             .on_click(|_, window, _| window.remove_window()),
                     )

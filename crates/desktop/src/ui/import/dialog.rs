@@ -3,7 +3,7 @@ use crate::ui::{
     session::{Route, Session, UiEvent},
     style::*,
 };
-use gpui_kit::base::{Disableable, StyledExt};
+use gpui_kit::base::{Disableable, StyledExt, TestSupportExt};
 use gpui_kit::component::{
     ActiveTheme,
     button::{Button, ButtonVariants},
@@ -179,12 +179,13 @@ impl Render for ImportDialog {
             .child(muted(t("取り込みだけでは AI を実行しません。画面を閉じても取り込みと入力の保存は続きます。","Importing does not run AI. Work and autosave continue when this dialog closes.")))
             .child(row().items_start()
                 .children([("learning",t("学習する言語","Learning language"),self.learning.state.clone(),view.learning.clone()),("explanation",t("説明・翻訳の言語","Explanation language"),self.explanation.state.clone(),view.explanation.clone())].into_iter().map(|(kind,label,input,raw)|{
-                    column().flex_1().gap_1().child(muted(label))
+                    column().flex_1().min_w_0().gap_1().child(muted(label))
                         .child(Input::new(&input).accessibility_id(format!("import-{kind}-language")).aria_label(label).disabled(disabled))
-                        .child(row().flex_wrap().gap_1().children(languages::matches(&raw).into_iter().map(|(code,japanese,english)|{
+                        .child(div().id(gpui_kit::SharedString::from(format!("import-{kind}-suggestions"))).h(px(64.)).w_full().overflow_y_scroll()
+                          .child(row().flex_wrap().gap_1().children(languages::matches(&raw).into_iter().map(|(code,japanese,english)|{
                             Button::new(gpui_kit::SharedString::from(format!("import-language-{kind}-{code}"))).label(format!("{} · {code}",if ja{japanese}else{english})).accessibility_id(format!("import-{kind}-{code}")).disabled(disabled)
                                 .on_click(cx.listener(move|this,_,_,cx|{this.workspace.update(cx,|workspace,cx|workspace.languages((kind=="learning").then(||code.into()),(kind=="explanation").then(||code.into()),cx));}))
-                        })))
+                        }))))
                 })))
             .child(row().flex_wrap()
                 .child(Button::new("import-pick").primary().label(t("動画・音声を選んで追加","Choose and add files")).accessibility_id("import-pick").disabled(disabled||view.picking||!view.ready)
@@ -199,19 +200,21 @@ impl Render for ImportDialog {
                 .children(view.rows.iter().map(|item|{
                     let id=item.id;let status=match item.status {Status::Checking|Status::Validating=>t("ファイルを確認中…","Checking file…"),Status::Ready=>t("タイトルを確認し、下のボタンで追加","Review title, then add below"),Status::Queued|Status::Importing=>t("追加中…","Adding…"),Status::Imported=>t("追加しました","Added"),Status::Existing=>t("追加済み（既存の作品を維持）","Already in library · original preserved"),Status::Invalid=>t("読み込めないファイルです","This file cannot be imported"),Status::Failed=>t("追加できませんでした","Import failed")};
                     let media=item.media_id.clone();let title_input=self.titles.get(&id).map(|binding|binding.state.clone());
-                    column().id(("import-row",id as usize)).p_3().gap_1().bg(cx.theme().background).border_1().border_color(cx.theme().border)
+                    column().id(("import-row",id as usize)).test_support().flex_shrink_0().p_3().gap_1().bg(cx.theme().background).border_1().border_color(cx.theme().border)
                         .child(row().justify_between().child(div().font_semibold().child(file_name(&item.input_path)))
                             .child(Button::new(("remove-import",id as usize)).label(t("一覧から外す","Remove from list")).accessibility_id(format!("import-remove-{id}")).disabled(disabled||busy)
                                 .on_click(cx.listener(move|this,_,_,cx|{this.workspace.update(cx,|workspace,cx|workspace.remove(id,cx));}))))
                         .child(muted(item.input_path.clone()))
                         .when_some(title_input,|body,input|body.child(Input::new(&input).accessibility_id(format!("import-title-{id}")).aria_label(t("作品のタイトル","Media title")).disabled(disabled||!item.editable())))
-                        .child(muted(format!("{status}{}",item.reason.as_ref().map(|reason|format!(" · {}",reason_text(reason,ja))).unwrap_or_default())))
-                        .when_some(item.error.clone(),|body,error|body.child(div().text_color(cx.theme().danger).child(error)))
-                        .when_some(media,|body,media|body.child(Button::new(("open-import",id as usize)).label(t("開く","Open")).accessibility_id(format!("import-open-{id}")).disabled(disabled)
-                            .on_click(cx.listener(move|this,_,window,cx|{this.session.update(cx,|session,cx|session.navigate(Route::Study(media.clone()),cx));window.remove_window();}))))
+                        .child(column().id(("import-row-status",id as usize)).h(px(48.)).overflow_y_scroll().gap_1()
+                            .child(muted(format!("{status}{}",item.reason.as_ref().map(|reason|format!(" · {}",reason_text(reason,ja))).unwrap_or_default())))
+                            .when_some(item.error.clone(),|body,error|body.child(div().text_color(cx.theme().danger).child(error))))
+                        .child(div().h(px(30.)).children(media.map(|media|Button::new(("open-import",id as usize)).label(t("開く","Open")).accessibility_id(format!("import-open-{id}")).disabled(disabled)
+                            .on_click(cx.listener(move|this,_,window,cx|{this.session.update(cx,|session,cx|session.navigate(Route::Study(media.clone()),cx));window.remove_window();})))))
                 })))
             .child(muted(if busy{format!("{}  {completed} / {}",t("ファイルを追加中","Adding files"),view.rows.len())}else{format!("{} / {}",completed,view.rows.len())}))
-            .when_some(view.error.clone(),|body,error|body.child(div().text_color(cx.theme().danger).child(error)))
+            .child(div().id("import-error").h(px(36.)).flex_shrink_0().overflow_y_scroll()
+                .children(view.error.clone().map(|error|div().text_color(cx.theme().danger).child(error))))
             .child(row().justify_between()
                 .child(Button::new("close-import").label(t("閉じる","Close")).accessibility_id("import-close").on_click(|_,window,_|window.remove_window()))
                 .child(row()

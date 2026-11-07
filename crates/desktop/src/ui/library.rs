@@ -172,6 +172,7 @@ impl Render for LibraryView {
         column().id("library-view").size_full().min_h(px(0.)).overflow_y_scroll()
             .px(px(24.)).pt(px(if spacious { 40. } else { 32. })).pb(px(32.))
             .gap(px(24.)).bg(background).text_color(foreground)
+            .border_2().border_color(theme.transparent)
             .drag_over::<ExternalPaths>(|style, _, _, cx| style.border_2().border_color(cx.theme().primary))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
                 if this.imports.read(cx).view().frozen { return; }
@@ -197,9 +198,10 @@ impl Render for LibraryView {
                     .disabled(imports.frozen).on_click(cx.listener(|this, _, _, cx| {
                         this.session.update(cx, |session, cx| session.request_transfer(cx))
                     }))))
-            .when(imports.busy, |body| body.child(muted(t(
+            .child(muted(t(
                 "ファイルを追加中です。追加画面を閉じても処理は続きます。",
-                "Files are being added. Work continues when the import dialog closes."))))
+                "Files are being added. Work continues when the import dialog closes."))
+                .when(!imports.busy, |notice| notice.invisible()))
             .when(!continuing.is_empty(), |body| body.child(
                 column().flex_shrink_0().gap(px(16.)).child(div().text_size(px(17.)).font_weight(FontWeight::SEMIBOLD)
                     .child(t("視聴途中", "Continue watching")))
@@ -327,7 +329,7 @@ impl Render for LibraryView {
                                     format!("{} 件", media.card_count)
                                 } else { format!("{} saved", media.card_count) })))
                                 .child(column().w(px(150.)).gap(px(10.))
-                                    .child(row().gap(px(4.)).text_size(px(14.))
+                                    .child(row().gap(px(4.)).text_size(px(14.)).font_features(tabular_numbers())
                                         .child(div().text_color(foreground).child(timestamp(media.last_position_ms)))
                                         .child(format!("/ {}", if media.duration_ms > 0 { timestamp(media.duration_ms) } else { "—".into() })))
                                     .when(media.duration_ms > 0, |col| col.child(div().w_full().h(px(3.)).bg(border).rounded(px(2.))

@@ -6,6 +6,7 @@ use super::{
     policy::{self, RawRow},
     review::ReviewDialog,
 };
+use crate::ui::style::state_label;
 use crate::{
     commands,
     ui::{
@@ -407,6 +408,14 @@ impl Render for ManualForm {
                     ),
             );
         }
+        let silence_labels = [
+            localized(cx, "✓ 発話なしを明示確認 / No speech confirmed"),
+            localized(
+                cx,
+                "□ 原音を確認し、この区間は発話なし / Confirm no speech in this range",
+            ),
+        ];
+        let silence_label = &silence_labels[usize::from(!self.silence)];
         content = content.child(
             row()
                 .child(
@@ -428,11 +437,11 @@ impl Render for ManualForm {
                 )
                 .child(
                     Button::new("confirm-no-speech")
-                        .label(if self.silence {
-                            localized(cx, "✓ 発話なしを明示確認 / No speech confirmed")
-                        } else {
-                            localized(cx, "□ 原音を確認し、この区間は発話なし / Confirm no speech in this range")
-                        })
+                        .accessibility_label(silence_label.clone())
+                        .child(state_label(
+                            silence_label.clone(),
+                            &[&silence_labels[0], &silence_labels[1]],
+                        ))
                         .disabled(disabled || !self.inputs.is_empty())
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.silence = !this.silence;

@@ -13,6 +13,7 @@ use crate::{
     controller::editing::{EditFields, EditorView},
 };
 use gpui_kit::assets::IconName;
+use gpui_kit::base::TestSupportExt;
 use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, Selectable,
     button::ButtonVariants,
@@ -404,15 +405,15 @@ impl SettingsView {
             .then(|| forms::field_error(name, &value))
             .flatten()
             .map(|(ja, en)| self.t(ja, en, cx));
+        let error_space = forms::field_error(name, "").map(|(ja, en)| self.t(ja, en, cx));
         column()
             .gap_1()
             .child(self.input(name, (label, hint), value, disabled, window, cx))
-            .when_some(error, |view, error| {
+            .when_some(error_space, |view, error_space| {
                 view.child(
-                    div()
+                    state_message(error.unwrap_or_default(), &[error_space.as_str()])
                         .text_size(px(13.))
-                        .text_color(cx.theme().danger)
-                        .child(error),
+                        .text_color(cx.theme().danger),
                 )
             })
             .into_any_element()

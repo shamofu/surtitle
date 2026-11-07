@@ -58,7 +58,7 @@ test('keeps package feature modes separate and archives fresh reports in unique 
   const first = await runRequiredSuite('windows-native', { root: f.root, platform: 'win32', architecture: 'x64', run });
   const second = await runRequiredSuite('windows-native', { root: f.root, platform: 'win32', architecture: 'x64', run });
   assert.notEqual(first.directory, second.directory);
-  assert.equal(first.summary.expectedTests, 9);
+  assert.equal(first.summary.expectedTests, suite.tests.length);
   assert.equal(first.summary.groups.length, 3);
   for (const record of first.summary.groups) {
     assert.equal(record.status, 'passed');

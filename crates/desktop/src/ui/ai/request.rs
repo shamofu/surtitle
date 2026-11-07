@@ -6,6 +6,7 @@ use super::{
     persistence::Persistence,
     policy, quote_content,
 };
+use crate::ui::style::tabular_numbers;
 use crate::{
     application::{
         ai::{AiQuote, QuoteRequest},
@@ -715,16 +716,24 @@ impl Render for RequestDialog {
                     .on_click(cx.listener(|this, _, _, cx| this.estimate(None, cx))),
             );
             if self.preparing {
-                if let Some(progress) = &model.preparation {
-                    content = content.child(format!(
-                        "{} · {} / {} ms · {} / {} chunks",
-                        progress.phase,
-                        progress.processed_ms,
-                        progress.total_ms,
-                        progress.completed_chunks,
-                        progress.total_chunks
-                    ));
-                }
+                content = content.child(
+                    div()
+                        .id("audio-preparation-progress")
+                        .h(px(40.))
+                        .flex_shrink_0()
+                        .overflow_y_scroll()
+                        .font_features(tabular_numbers())
+                        .children(model.preparation.as_ref().map(|progress| {
+                            format!(
+                                "{} · {} / {} ms · {} / {} chunks",
+                                progress.phase,
+                                progress.processed_ms,
+                                progress.total_ms,
+                                progress.completed_chunks,
+                                progress.total_chunks
+                            )
+                        })),
+                );
                 content = content.child(
                     Button::new("cancel-preparation")
                         .label(localized(

@@ -4,6 +4,8 @@ A Windows 11 x64 desktop app for learning languages from video and audio. Read a
 
 Import local video and audio files, SRT/VTT, and embedded text subtitles. Playback uses bundled libmpv; extraction and conversion use independently managed or external [command-line tools](docs/tools.md). Study keeps video, subtitles and learning controls together. Settings and existing-card edits save automatically; new phrases and subtitle corrections have explicit Save actions.
 
+In Study, scroll up over the video to go back five seconds, or down to go forward five seconds. Over the volume icon, slider or percentage, scrolling up raises volume by five percentage points and scrolling down lowers it. These controls preserve keyboard focus.
+
 Optional Vertex AI or OpenAI API requires your own credentials and explicit approval of each job's source, model, scope and estimate. Select the service in Settings; started jobs keep their original service. Each service retains its models and independent budgets, with zero meaning unlimited. Local audio preparation sends no generation request. Transcription publishes received text progressively, retains readable **Audio range** text when word timings are unavailable, and protects subtitle edits from later results. See [AI behavior](docs/ai.md) for setup, approvals, spending and recovery.
 
 Data lives under `%LOCALAPPDATA%\app.surtitle.desktop`. Local media is referenced; removing a library item preserves its original file, saved cards and review history. [Learning backups](docs/data-transfer.md) retain portable learning data and saved audio, while credentials, paid jobs, approvals, charge ledgers and device-local workspace state stay separate.

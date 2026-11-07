@@ -2,8 +2,352 @@
 use super::*;
 use gpui_kit::component::{Icon, popover::Popover};
 use gpui_kit::{WeakEntity, size};
+use std::{future::Future, pin::Pin};
+
+type ControlTask = Pin<Box<dyn Future<Output = Result<(), String>> + Send>>;
+type ControlCompletion =
+    Box<dyn FnOnce(&mut StudyView, Result<(), String>, &mut Context<StudyView>)>;
+
+#[cfg(test)]
+mod wheel_tests {
+    use super::*;
+    use gpui_kit::{Modifiers, ScrollDelta, ScrollEvent, TouchPhase, point};
+
+    fn lines(x: f32, y: f32) -> ScrollEvent {
+        ScrollEvent {
+            delta: ScrollDelta::Lines(point(x, y)),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn wheel_steps_ignore_horizontal_modifier_and_jitter_input() {
+        let mut wheel = WheelSteps::default();
+        for delta in [1., 3., 120.] {
+            assert_eq!(wheel.step(&lines(0., delta)), Some(1.));
+            assert_eq!(wheel.step(&lines(0., -delta)), Some(-1.));
+        }
+        for event in [
+            lines(3., 0.),
+            lines(3., 0.1),
+            lines(0., 0.),
+            lines(0., f32::NAN),
+        ] {
+            assert_eq!(wheel.step(&event), None);
+        }
+        for modifiers in [
+            Modifiers {
+                control: true,
+                ..Default::default()
+            },
+            Modifiers {
+                platform: true,
+                ..Default::default()
+            },
+            Modifiers {
+                alt: true,
+                ..Default::default()
+            },
+            Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(
+                wheel.step(&ScrollEvent {
+                    modifiers,
+                    ..lines(0., 3.)
+                }),
+                None
+            );
+        }
+        for _ in 0..3 {
+            assert_eq!(wheel.step(&lines(0., 0.25)), None);
+        }
+        assert_eq!(wheel.step(&lines(0., 0.25)), Some(1.));
+        let pixels = |y| ScrollEvent {
+            delta: ScrollDelta::Pixels(point(px(0.), px(y))),
+            ..Default::default()
+        };
+        assert_eq!(wheel.step(&pixels(20.)), None);
+        assert_eq!(wheel.step(&pixels(-20.)), None);
+        assert_eq!(wheel.step(&pixels(-20.)), Some(-1.));
+        assert_eq!(wheel.step(&pixels(20.)), None);
+        assert_eq!(
+            wheel.step(&ScrollEvent {
+                touch_phase: TouchPhase::Ended,
+                ..pixels(0.)
+            }),
+            None
+        );
+        assert_eq!(wheel.step(&pixels(20.)), None);
+    }
+
+    #[test]
+    fn rapid_control_intents_execute_first_then_latest_and_failure_discards_queue() {
+        let applied = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let task = |value| {
+            let applied = applied.clone();
+            Box::pin(async move {
+                applied.lock().unwrap().push(value);
+                Ok(())
+            }) as ControlTask
+        };
+        let runtime = crate::runtime::test_runtime();
+        let mut pending = PendingControl::default();
+        pending.enqueue(75., task(75));
+        let (epoch, first, _) = pending.take().unwrap();
+        pending.enqueue(70., task(70));
+        pending.enqueue(65., task(65));
+        assert_eq!(pending.target, Some(65.));
+        assert!(pending.take().is_none());
+        runtime.block_on(first).unwrap();
+        assert!(pending.finish(epoch, false));
+        let (epoch, latest, _) = pending.take().unwrap();
+        runtime.block_on(latest).unwrap();
+        assert!(pending.finish(epoch, false));
+        assert_eq!(*applied.lock().unwrap(), [75, 65]);
+        assert!(pending.target.is_none());
+
+        pending.enqueue(60., Box::pin(async { Err("rejected".into()) }));
+        let (epoch, rejected, _) = pending.take().unwrap();
+        pending.enqueue(55., task(55));
+        assert!(runtime.block_on(rejected).is_err());
+        assert!(pending.finish(epoch, true));
+        assert!(pending.target.is_none());
+        assert!(pending.take().is_none());
+        assert_eq!(*applied.lock().unwrap(), [75, 65]);
+    }
+
+    #[test]
+    fn old_completion_after_reset_cannot_clear_the_new_media_intent() {
+        let mut pending = PendingControl::default();
+        pending.enqueue(10., Box::pin(async { Ok(()) }));
+        let (old_epoch, _, _) = pending.take().unwrap();
+        pending.reset();
+        pending.enqueue(20., Box::pin(async { Ok(()) }));
+        assert!(!pending.finish(old_epoch, true));
+        assert_eq!(pending.target, Some(20.));
+        assert!(pending.take().is_some());
+    }
+}
+
+/// Keep rapid pointer intents ordered while retaining only the latest queued
+/// value. Each future already owns the media lease captured at input time.
+#[derive(Default)]
+pub(super) struct PendingControl {
+    pub(super) target: Option<f64>,
+    next: Option<ControlTask>,
+    completion: Option<ControlCompletion>,
+    active: bool,
+    epoch: u64,
+}
+
+impl PendingControl {
+    pub(super) fn enqueue(&mut self, value: f64, task: ControlTask) {
+        self.target = Some(value);
+        self.next = Some(task);
+        self.completion = None;
+    }
+    fn take(&mut self) -> Option<(u64, ControlTask, Option<ControlCompletion>)> {
+        if self.active {
+            return None;
+        }
+        let next = self.next.take()?;
+        self.active = true;
+        Some((self.epoch, next, self.completion.take()))
+    }
+    fn finish(&mut self, epoch: u64, failed: bool) -> bool {
+        if self.epoch != epoch {
+            return false;
+        }
+        self.active = false;
+        if failed {
+            self.next = None;
+            self.completion = None;
+        }
+        if self.next.is_none() {
+            self.target = None;
+        }
+        true
+    }
+    pub(super) fn reset(&mut self) {
+        self.epoch += 1;
+        self.active = false;
+        self.target = None;
+        self.next = None;
+        self.completion = None;
+    }
+}
+
+#[derive(Default)]
+pub(super) struct WheelSteps {
+    partial: f32,
+    precise: bool,
+}
+
+impl WheelSteps {
+    fn vertical(event: &gpui_kit::ScrollEvent) -> bool {
+        if event.modifiers.control
+            || event.modifiers.platform
+            || event.modifiers.alt
+            || event.modifiers.shift
+        {
+            return false;
+        }
+        let (x, y) = match event.delta {
+            gpui_kit::ScrollDelta::Lines(delta) => (delta.x, delta.y),
+            gpui_kit::ScrollDelta::Pixels(delta) => (f32::from(delta.x), f32::from(delta.y)),
+        };
+        y.is_finite() && x.is_finite() && y.abs() > x.abs()
+    }
+    fn step(&mut self, event: &gpui_kit::ScrollEvent) -> Option<f64> {
+        if !Self::vertical(event)
+            || matches!(
+                event.touch_phase,
+                gpui_kit::TouchPhase::Cancelled | gpui_kit::TouchPhase::Ended
+            )
+        {
+            self.partial = 0.;
+            return None;
+        }
+        if event.touch_phase == gpui_kit::TouchPhase::Started {
+            self.partial = 0.;
+        }
+        let (delta, precise) = match event.delta {
+            gpui_kit::ScrollDelta::Lines(delta) => (delta.y, false),
+            // Accumulate small trackpad movements to one deliberate 40px step.
+            gpui_kit::ScrollDelta::Pixels(delta) => (f32::from(delta.y) / 40., true),
+        };
+        if !delta.is_finite() || delta == 0. {
+            return None;
+        }
+        if precise != self.precise || self.partial.signum() != delta.signum() {
+            self.partial = 0.;
+        }
+        self.precise = precise;
+        self.partial += delta;
+        if self.partial.abs() < 1. {
+            return None;
+        }
+        // The Windows value is scaled by system lines-per-notch. One event
+        // still means one step; never multiply a seek by that preference.
+        self.partial = 0.;
+        Some(f64::from(delta.signum()))
+    }
+}
 
 impl StudyView {
+    pub(super) fn queue_position_control(
+        &mut self,
+        task: impl Future<Output = Result<(), String>> + Send + 'static,
+        completion: impl FnOnce(&mut StudyView, Result<(), String>, &mut Context<StudyView>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        self.seek_target = None;
+        self.seek_control.target = None;
+        self.seek_control.next = Some(Box::pin(task));
+        self.seek_control.completion = Some(Box::new(completion));
+        self.start_pending_control("seek", cx);
+    }
+
+    fn pending_control(&mut self, action: &str) -> &mut PendingControl {
+        if action == "seek" {
+            &mut self.seek_control
+        } else {
+            &mut self.volume_control
+        }
+    }
+
+    pub(super) fn start_pending_control(&mut self, action: &'static str, cx: &mut Context<Self>) {
+        if self.sources.read(cx).frozen() || !self.playback_ready(cx) {
+            self.pending_control(action).reset();
+            if action == "seek" {
+                self.seek_target = None;
+            }
+            return;
+        }
+        let Some((epoch, task, completion)) = self.pending_control(action).take() else {
+            return;
+        };
+        let backend = self.session.read(cx).backend.clone();
+        run(&backend, cx, task, move |this, result, cx| {
+            let failed = result.is_err();
+            let superseded = action == "seek" && this.seek_control.next.is_some();
+            // A loop may be superseded by a newer queued position intent. Its
+            // rejected lease must not discard that newer intent.
+            if !this
+                .pending_control(action)
+                .finish(epoch, failed && action == "volume")
+            {
+                return;
+            }
+            if !superseded {
+                this.error = result.as_ref().err().cloned();
+                if let Some(completion) = completion {
+                    completion(this, result, cx);
+                }
+            }
+            if failed && action == "seek" && !superseded {
+                this.seek_target = None;
+            }
+            this.start_pending_control(action, cx);
+            // Resynchronize after success or rollback, including persisted-volume
+            // failures. Playback subscriptions update the real slider with its window.
+            if let Ok(player) = this.session.read(cx).backend.state.player_state() {
+                this.session.update(cx, |session, cx| {
+                    session.receive(crate::runtime::DesktopEvent::PlayerState(player), cx);
+                });
+            }
+        });
+    }
+
+    pub(super) fn scroll_video(&mut self, event: &gpui_kit::ScrollEvent, cx: &mut Context<Self>) {
+        if self.sources.read(cx).frozen() || !self.playback_ready(cx) {
+            return;
+        }
+        if WheelSteps::vertical(event) {
+            cx.stop_propagation();
+        }
+        let Some(step) = self.video_wheel.step(event) else {
+            return;
+        };
+        let player = &self.session.read(cx).player;
+        let position = self
+            .seek_control
+            .target
+            .unwrap_or(self.seek_target.unwrap_or(player.position_ms) as f64);
+        let target = (position - step * 5000.).clamp(0., player.duration_ms as f64);
+        self.control("seek", Some(target), cx);
+        cx.stop_propagation();
+    }
+
+    fn scroll_volume(
+        &mut self,
+        event: &gpui_kit::ScrollEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.sources.read(cx).frozen() || !self.playback_ready(cx) {
+            return;
+        }
+        if WheelSteps::vertical(event) {
+            cx.stop_propagation();
+        }
+        let Some(step) = self.volume_wheel.step(event) else {
+            return;
+        };
+        let current = self
+            .volume_control
+            .target
+            .unwrap_or(self.session.read(cx).player.volume);
+        let target = (current + step * 5.).clamp(0., 100.);
+        self.volume
+            .update(cx, |volume, cx| volume.set_value(target as f32, window, cx));
+        self.control("volume", Some(target), cx);
+        cx.stop_propagation();
+    }
+
     pub(super) fn transport(
         &self,
         player: &crate::player::PlayerState,
@@ -13,6 +357,14 @@ impl StudyView {
     ) -> gpui_kit::Div {
         let ja = self.session.read(cx).text("ja", "en") == "ja";
         let t = |ja_text, en_text| if ja { ja_text } else { en_text };
+        let play_label = if player.paused {
+            t("再生", "Play")
+        } else {
+            t("一時停止", "Pause")
+        };
+        let shown_position = self.seek_target.unwrap_or(player.position_ms);
+        let time_width = timestamp(player.duration_ms.max(shown_position));
+        let time_reservation = format!("{time_width} / {time_width}");
         column()
             .gap_0()
             .px_3()
@@ -66,11 +418,11 @@ impl StudyView {
                                     } else {
                                         IconName::Pause
                                     })
-                                    .label(if player.paused {
-                                        t("再生", "Play")
-                                    } else {
-                                        t("一時停止", "Pause")
-                                    })
+                                    .child(state_label(
+                                        play_label,
+                                        &[t("再生", "Play"), t("一時停止", "Pause")],
+                                    ))
+                                    .accessibility_label(play_label)
                                     .accessibility_id("play-toggle")
                                     .disabled(disabled)
                                     .on_click(cx.listener(|this, _, _, cx| {
@@ -94,36 +446,60 @@ impl StudyView {
                                         this.control("seek", Some(position as f64), cx);
                                     })),
                             )
-                            .child(div().px_2().text_size(px(12.)).child(format!(
-                                "{} / {}",
-                                timestamp(player.position_ms),
-                                timestamp(player.duration_ms)
-                            ))),
+                            .child(
+                                div()
+                                    .id("playback-time")
+                                    .test_support()
+                                    .px_2()
+                                    .text_size(px(12.))
+                                    .font_features(tabular_numbers())
+                                    .child(state_label(
+                                        format!(
+                                            "{} / {}",
+                                            timestamp(shown_position),
+                                            timestamp(player.duration_ms)
+                                        ),
+                                        &[time_reservation.as_str()],
+                                    )),
+                            ),
                     )
                     .child(
                         row()
                             .gap_2()
                             .child(self.rate_control(disabled, cx))
                             .child(
-                                Icon::new(IconName::Volume2)
-                                    .size(px(16.))
-                                    .text_color(cx.theme().muted_foreground),
-                            )
-                            .child(
-                                Slider::new(&self.volume)
-                                    .disabled(disabled)
-                                    .accessibility_label(t("音量", "Volume"))
-                                    .accessibility_value(format!(
-                                        "{:.0}%",
-                                        self.volume.read(cx).value().end()
-                                    ))
-                                    .w(px(58.)),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(12.))
-                                    .w(px(34.))
-                                    .child(format!("{:.0}%", player.volume)),
+                                row()
+                                    .id("player-volume")
+                                    .test_support()
+                                    .gap_2()
+                                    .on_scroll(cx.listener(|this, event, window, cx| {
+                                        this.scroll_volume(event, window, cx)
+                                    }))
+                                    .child(
+                                        Icon::new(IconName::Volume2)
+                                            .size(px(16.))
+                                            .text_color(cx.theme().muted_foreground),
+                                    )
+                                    .child(
+                                        Slider::new(&self.volume)
+                                            .disabled(disabled)
+                                            .accessibility_label(t("音量", "Volume"))
+                                            .accessibility_value(format!(
+                                                "{:.0}%",
+                                                self.volume.read(cx).value().end()
+                                            ))
+                                            .w(px(58.)),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(12.))
+                                            .font_features(tabular_numbers())
+                                            .w(px(34.))
+                                            .child(format!(
+                                                "{:.0}%",
+                                                self.volume_control.target.unwrap_or(player.volume)
+                                            )),
+                                    ),
                             )
                             .child(
                                 compact_button("playback-settings")

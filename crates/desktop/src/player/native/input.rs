@@ -313,4 +313,69 @@ mod tests {
         assert!(weak.upgrade().is_none());
         assert!(install(ptr::null_mut(), Arc::new(|| {})).is_err());
     }
+
+    #[test]
+    fn wheel_reaches_the_parent_once_with_screen_coordinates_and_without_clicking() {
+        // All HWNDs stay hidden. This exercises STATIC's real default wheel
+        // propagation without sending input to a user's desktop or taking focus.
+        type Messages = std::sync::Mutex<Vec<(u32, WPARAM, LPARAM)>>;
+        unsafe extern "system" fn parent_proc(
+            hwnd: HWND,
+            message: u32,
+            wparam: WPARAM,
+            lparam: LPARAM,
+        ) -> LRESULT {
+            unsafe {
+                if matches!(message, WM_MOUSEWHEEL | WM_MOUSEHWHEEL) {
+                    let messages = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const Messages;
+                    (*messages).lock().unwrap().push((message, wparam, lparam));
+                    return 0;
+                }
+                DefWindowProcW(hwnd, message, wparam, lparam)
+            }
+        }
+        let messages = Box::new(Messages::new(Vec::new()));
+        let parent = Window::new(ptr::null_mut(), WS_POPUP);
+        let host = Window::new(parent.0, WS_CHILD);
+        let clicks = Arc::new(AtomicUsize::new(0));
+        let observed = clicks.clone();
+        install(
+            host.0,
+            Arc::new(move || {
+                observed.fetch_add(1, Ordering::Relaxed);
+            }),
+        )
+        .unwrap();
+        unsafe {
+            SetWindowLongPtrW(
+                parent.0,
+                GWLP_USERDATA,
+                &*messages as *const Messages as isize,
+            );
+            let original =
+                SetWindowLongPtrW(parent.0, GWLP_WNDPROC, parent_proc as *const () as isize);
+            let focus = windows_sys::Win32::UI::Input::KeyboardAndMouse::GetFocus();
+            for (message, delta) in [
+                (WM_MOUSEWHEEL, 120i16),
+                (WM_MOUSEWHEEL, -120),
+                (WM_MOUSEHWHEEL, 120),
+            ] {
+                let wparam = ((delta as u16 as usize) << 16) | 0x0008;
+                let lparam = at(-140, 250);
+                SendMessageW(host.0, message, wparam, lparam);
+                assert_eq!(
+                    messages.lock().unwrap().last(),
+                    Some(&(message, wparam, lparam))
+                );
+            }
+            assert_eq!(messages.lock().unwrap().len(), 3);
+            assert_eq!(
+                windows_sys::Win32::UI::Input::KeyboardAndMouse::GetFocus(),
+                focus
+            );
+            SetWindowLongPtrW(parent.0, GWLP_WNDPROC, original);
+            SetWindowLongPtrW(parent.0, GWLP_USERDATA, 0);
+        }
+        assert_eq!(clicks.load(Ordering::Relaxed), 0);
+    }
 }
