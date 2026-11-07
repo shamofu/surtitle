@@ -136,10 +136,12 @@ fn import_language_search_keeps_file_controls_in_place(cx: &mut TestAppContext) 
 
 #[gpui_kit::test]
 fn source_save_completion_keeps_action_bounds(cx: &mut TestAppContext) {
-    let harness = Harness::open(cx);
     for language in ["en", "ja"] {
-        locale(&harness, language, cx);
         for width in [420., 850.] {
+            // Each geometry case owns its source writer; closing a dialog queues
+            // a final flush that can still be running when the next case starts.
+            let harness = Harness::open(cx);
+            locale(&harness, language, cx);
             let cues =
                 commands::subtitles::list_segments(&harness.state, "ui-media".into()).unwrap();
             harness.update(cx, |root, _, cx| {
@@ -187,11 +189,9 @@ fn source_save_completion_keeps_action_bounds(cx: &mut TestAppContext) {
                 bounds(cx, dialog, "source-editor-scroll"),
                 "save status resized editor viewport: {language}, {width}"
             );
-            cx.update_window(dialog, |_, window, _| window.remove_window())
-                .unwrap();
+            harness.close(cx);
         }
     }
-    harness.close(cx);
 }
 
 #[gpui_kit::test]
