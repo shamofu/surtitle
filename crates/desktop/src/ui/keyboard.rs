@@ -118,9 +118,21 @@ fn adjust(
         "home" => state.min_value(),
         "end" => state.max_value(),
         _ => return,
+    };
+    set_value(state, f64::from(value), window, cx);
+}
+
+fn set_value(
+    state: &mut SliderState,
+    value: f64,
+    window: &mut Window,
+    cx: &mut Context<SliderState>,
+) {
+    if !value.is_finite() {
+        return;
     }
-    .clamp(state.min_value(), state.max_value());
-    if value != current {
+    let value = value.clamp(f64::from(state.min_value()), f64::from(state.max_value())) as f32;
+    if value != state.value().end() {
         state.set_value(value, window, cx);
         cx.emit(SliderEvent::Change(state.value()));
     }
@@ -208,6 +220,14 @@ impl RenderOnce for Slider {
                         state.update(cx, |state, cx| adjust(state, "left", step, window, cx))
                     }
                 })
+                .on_a11y_action(gpui_kit::AccessibleAction::SetValue, {
+                    let state = self.state.clone();
+                    move |data, window, cx| {
+                        if let Some(gpui_kit::accesskit::ActionData::NumericValue(value)) = data {
+                            state.update(cx, |state, cx| set_value(state, *value, window, cx));
+                        }
+                    }
+                })
                 .on_mouse_up(
                     MouseButton::Left,
                     window.listener_for(&self.state, |state, _, _, cx| state.handle_release(cx)),
@@ -255,5 +275,55 @@ impl RenderOnce for Slider {
                             ),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui_kit::TestAppContext;
+    use std::{cell::RefCell, rc::Rc};
+
+    #[gpui_kit::test]
+    fn numeric_slider_values_emit_changes_for_volume_and_seek_ranges(cx: &mut TestAppContext) {
+        // GPUI's fake platform supplies the Window; no OS window/player is used.
+        let cx = cx.add_empty_window();
+        for (maximum, initial, requested) in [(100., 80., 0.), (10_000., 0., 1_000.)] {
+            let changes = Rc::new(RefCell::new(Vec::new()));
+            let (state, _subscription) = cx.update(|_, app| {
+                let state = app.new(|_| {
+                    SliderState::new()
+                        .min(0.)
+                        .max(maximum)
+                        .default_value(initial)
+                });
+                let observed = changes.clone();
+                let subscription = app.subscribe(&state, move |_, event: &SliderEvent, _| {
+                    if let SliderEvent::Change(value) = event {
+                        observed.borrow_mut().push(value.end());
+                    }
+                });
+                (state, subscription)
+            });
+            for (requested, expected) in [
+                (requested, requested as f32),
+                (requested, requested as f32),
+                (f64::NAN, requested as f32),
+                (f64::INFINITY, requested as f32),
+                (f64::NEG_INFINITY, requested as f32),
+                (f64::MAX, maximum),
+                (-f64::MAX, 0.),
+            ] {
+                cx.update(|window, app| {
+                    state.update(app, |state, cx| set_value(state, requested, window, cx));
+                    assert_eq!(state.read(app).value().end(), expected);
+                });
+            }
+            assert_eq!(
+                *changes.borrow(),
+                [requested as f32, maximum, 0.],
+                "valid changes reach consumers once; unchanged/nonfinite values emit nothing"
+            );
+        }
     }
 }

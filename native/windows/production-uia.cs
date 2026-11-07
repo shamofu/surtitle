@@ -57,9 +57,9 @@ public static class SurtitleProductionUia {
         }
         return false;
     }
-    public static bool RejectsInvoke(AutomationElement element) {
+    public static bool RejectsActivation(AutomationElement element) {
         // Exercise the actual provider, not this helper's Ready precondition.
-        try { ((InvokePattern)element.GetCurrentPattern(InvokePattern.Pattern)).Invoke(); }
+        try { ActivateSupportedPattern(element); }
         catch (ElementNotEnabledException) { return true; }
         return false;
     }
@@ -72,9 +72,20 @@ public static class SurtitleProductionUia {
     static void Ready(AutomationElement element) {
         if (element == null || !element.Current.IsEnabled || element.Current.IsOffscreen) throw new Exception("Unavailable accessible control");
     }
-    public static void Invoke(AutomationElement element) {
+    public static void Activate(AutomationElement element) {
         Ready(element);
-        ((InvokePattern)element.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
+        ActivateSupportedPattern(element);
+    }
+    static void ActivateSupportedPattern(AutomationElement element) {
+        object pattern;
+        if (element.TryGetCurrentPattern(InvokePattern.Pattern, out pattern)) {
+            ((InvokePattern)pattern).Invoke();
+        } else if (element.TryGetCurrentPattern(TogglePattern.Pattern, out pattern)) {
+            ((TogglePattern)pattern).Toggle();
+        } else {
+            throw new Exception("Unsupported activation patterns for AutomationId='" + element.Current.AutomationId
+                + "', ControlType='" + element.Current.ControlType.ProgrammaticName + "'");
+        }
     }
     public static string Value(AutomationElement element) {
         Ready(element);

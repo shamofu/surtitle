@@ -32,6 +32,7 @@ $before = $beforeText | ConvertFrom-Json
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase
 Add-Type -Path (Join-Path $PSScriptRoot 'production-uia.cs') -ReferencedAssemblies ([System.Windows.Automation.AutomationElement].Assembly.Location), ([System.Windows.Automation.AutomationElementIdentifiers].Assembly.Location), ([System.Windows.Rect].Assembly.Location)
 function Wait-For([scriptblock]$Condition, [string]$Stage, [int]$Seconds = 20) {
+    $script:probeStage = $Stage
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     do {
         if (& $Condition) { return }
@@ -51,12 +52,12 @@ foreach ($name in @($start.EnvironmentVariables.Keys)) {
 $app = [Diagnostics.Process]::Start($start)
 try {
     Wait-For { $null -ne (Find-Id 'nav-settings') } 'initial accessible window'
-    [SurtitleProductionUia]::Invoke((Find-Id 'nav-settings'))
+    [SurtitleProductionUia]::Activate((Find-Id 'nav-settings'))
     Wait-For { $null -ne (Find-Id 'settings-learningLanguage') } 'settings route'
     if ([SurtitleProductionUia]::Value((Find-Id 'settings-learningLanguage')) -ne 'en') { throw 'Default language differs from the seeded production profile.' }
-    [SurtitleProductionUia]::Invoke((Find-Id 'nav-library'))
+    [SurtitleProductionUia]::Activate((Find-Id 'nav-library'))
     Wait-For { $null -ne (Find-Id 'study-fixture-media') } 'seeded library media'
-    [SurtitleProductionUia]::Invoke((Find-Id 'study-fixture-media'))
+    [SurtitleProductionUia]::Activate((Find-Id 'study-fixture-media'))
     Wait-For {
         $toggle = Find-Id 'play-toggle'; $metadata = Find-Id 'player-metadata'
         $null -ne $toggle -and $toggle.Current.IsEnabled -and $null -ne $metadata -and
@@ -66,14 +67,14 @@ try {
     $volume = [SurtitleProductionUia]::Slider([SurtitleProductionUia]::Root($app), 'Volume', '音量')
     [SurtitleProductionUia]::SetRange($volume, 100, 0)
     # Seek away from the end and confirm a paused baseline before testing progress.
-    if (-not [SurtitleProductionUia]::IsPaused((Find-Id 'play-toggle'))) { [SurtitleProductionUia]::Invoke((Find-Id 'play-toggle')) }
+    if (-not [SurtitleProductionUia]::IsPaused((Find-Id 'play-toggle'))) { [SurtitleProductionUia]::Activate((Find-Id 'play-toggle')) }
     Wait-For { [SurtitleProductionUia]::IsPaused((Find-Id 'play-toggle')) } 'paused baseline'
     [SurtitleProductionUia]::SetRange((Seek-Slider), 10000, 1000)
     Wait-For { [Math]::Abs([SurtitleProductionUia]::Range((Seek-Slider),10000)-1000) -lt 200 } 'seek baseline'
     $position = [SurtitleProductionUia]::Range((Seek-Slider),10000)
-    [SurtitleProductionUia]::Invoke((Find-Id 'play-toggle'))
+    [SurtitleProductionUia]::Activate((Find-Id 'play-toggle'))
     Wait-For { -not [SurtitleProductionUia]::IsPaused((Find-Id 'play-toggle')) -and [SurtitleProductionUia]::Range((Seek-Slider),10000) -gt $position+300 } 'actual playback advancement'
-    [SurtitleProductionUia]::Invoke((Find-Id 'play-toggle'))
+    [SurtitleProductionUia]::Activate((Find-Id 'play-toggle'))
     Wait-For { [SurtitleProductionUia]::IsPaused((Find-Id 'play-toggle')) } 'pause acknowledgement'
     $paused = [SurtitleProductionUia]::Range((Seek-Slider),10000)
     $deadline = [DateTime]::UtcNow.AddMilliseconds(650)
@@ -92,6 +93,8 @@ try {
     $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($result | ConvertTo-Json -Depth 5))
     $stream = [IO.File]::Open($Output,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
     try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }
+} catch {
+    throw "Production UIA failed after stage '$probeStage': $($_.Exception.Message)"
 } finally {
     if (-not $app.HasExited) { $app.Kill(); $app.WaitForExit() }
     $app.Dispose()

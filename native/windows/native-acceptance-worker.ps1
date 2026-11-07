@@ -56,6 +56,7 @@ $observations = [ordered]@{}
 $copy=Join-Path ([IO.Path]::GetDirectoryName($Output)) 'production-smoke.json'
 $app = $null; $mainHandle = 0L; $currentCase = 'production-playback'; $paidRequests = $null
 function Wait-For([scriptblock]$Condition, [string]$Stage, [int]$Seconds=20) {
+    $script:probeStage=$Stage
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     do {
         if (& $Condition) { return }
@@ -88,9 +89,9 @@ function Close-App {
     $app.Dispose(); $script:app=$null; $script:mainHandle=0L
 }
 function Open-Study {
-    [SurtitleProductionUia]::Invoke((Find-Id 'nav-library'))
+    [SurtitleProductionUia]::Activate((Find-Id 'nav-library'))
     Wait-For { $null -ne (Find-Id 'study-fixture-media') } 'seeded library'
-    [SurtitleProductionUia]::Invoke((Find-Id 'study-fixture-media'))
+    [SurtitleProductionUia]::Activate((Find-Id 'study-fixture-media'))
     Wait-For { $toggle=Find-Id 'play-toggle'; $meta=Find-Id 'player-metadata'; $toggle -and $toggle.Current.IsEnabled -and $meta -and $meta.Current.Name -match '^0:(11|12) · 640 × 360$' } 'real fixture ready' 35
 }
 function Mark-Passed([string]$Id,[string]$Summary,$Details) {
@@ -140,32 +141,32 @@ try {
     Mark-Passed 'dpi-video-bounds' 'Accessible physical viewport agrees with its visible native child at the recorded window DPI.' $bounds
     $currentCase='fullscreen'
     $beforeFull=@(Native 'inspect')[0]
-    [SurtitleProductionUia]::Invoke((Find-Id 'player-fullscreen'))
+    [SurtitleProductionUia]::Activate((Find-Id 'player-fullscreen'))
     Wait-For { Same-Rect (@(Native 'inspect')[0]).screen $area[0].bounds } 'fullscreen monitor bounds'
     $full=Assert-Viewport
-    [SurtitleProductionUia]::Invoke((Find-Id 'player-fullscreen'))
+    [SurtitleProductionUia]::Activate((Find-Id 'player-fullscreen'))
     Wait-For { Same-Rect (@(Native 'inspect')[0]).screen $beforeFull.screen } 'fullscreen restore'
     Mark-Passed 'fullscreen' 'Native fullscreen filled its monitor, retained matching video bounds, and restored the prior window.' @{before=$beforeFull;fullscreen=$full;after=@(Native 'inspect')[0]}
     $currentCase='owned-dialog-focus'
     [SurtitleProductionUia]::Focus((Find-Id 'study-manage-media'))
-    [SurtitleProductionUia]::Invoke((Find-Id 'study-manage-media'))
+    [SurtitleProductionUia]::Activate((Find-Id 'study-manage-media'))
     Wait-For { [SurtitleProductionUia]::OwnedDialog($app.Id,$mainHandle)-ne 0 } 'native owned media dialog'
     $dialog=[SurtitleProductionUia]::OwnedDialog($app.Id,$mainHandle)
     Wait-For { -not [SurtitleProductionUia]::Enabled($mainHandle) -and [SurtitleProductionUia]::FocusWithin($dialog,$app.Id) } 'disabled parent and dialog focus'
     $underlying=Find-Id 'nav-library'
-    if($underlying.Current.IsEnabled -or -not [SurtitleProductionUia]::RejectsInvoke($underlying)){throw 'Owned dialog did not reject underlying accessible navigation'}
+    if($underlying.Current.IsEnabled -or -not [SurtitleProductionUia]::RejectsActivation($underlying)){throw 'Owned dialog did not reject underlying accessible navigation'}
     $close=[SurtitleProductionUia]::Id([SurtitleProductionUia]::FromHandle($dialog),'close-media')
-    [SurtitleProductionUia]::Invoke($close)
+    [SurtitleProductionUia]::Activate($close)
     Wait-For { [SurtitleProductionUia]::OwnedDialog($app.Id,$mainHandle)-eq 0 -and [SurtitleProductionUia]::Enabled($mainHandle) -and [SurtitleProductionUia]::FocusWithin($mainHandle,$app.Id) } 'dialog close and parent focus return'
-    Mark-Passed 'owned-dialog-focus' 'Observed native GW_OWNER, disabled parent, rejected underlying Invoke, focused dialog and focus returned after close.' @{mainHandle=$mainHandle;dialogHandle=$dialog;ownerConfirmed=$true;parentDisabled=$true;underlyingInvokeRejected=$true;focusReturned=$true}
+    Mark-Passed 'owned-dialog-focus' 'Observed native GW_OWNER, disabled parent, rejected underlying activation, focused dialog and focus returned after close.' @{mainHandle=$mainHandle;dialogHandle=$dialog;ownerConfirmed=$true;parentDisabled=$true;underlyingInvokeRejected=$true;focusReturned=$true}
     $currentCase='raw-input-restart'
-    [SurtitleProductionUia]::Invoke((Find-Id 'nav-settings'))
+    [SurtitleProductionUia]::Activate((Find-Id 'nav-settings'))
     Wait-For { $null -ne  (Find-Id 'settings-learningLanguage') } 'settings raw input'
     $raw='   '
     [SurtitleProductionUia]::SetValue((Find-Id 'settings-learningLanguage'),$raw)
     Wait-For { [SurtitleProductionUia]::Value((Find-Id 'settings-learningLanguage'))-ceq $raw } 'unfinished input acknowledgement'
     Close-App; Start-App
-    [SurtitleProductionUia]::Invoke((Find-Id 'nav-settings'))
+    [SurtitleProductionUia]::Activate((Find-Id 'nav-settings'))
     Wait-For { $field=Find-Id 'settings-learningLanguage'; $field -and [SurtitleProductionUia]::Value($field)-ceq $raw } 'actual raw input restored after clean restart'
     [SurtitleProductionUia]::SetValue((Find-Id 'settings-learningLanguage'),'en')
     Wait-For { [SurtitleProductionUia]::Value((Find-Id 'settings-learningLanguage'))-eq 'en' } 'restored disposable setting'
@@ -173,8 +174,8 @@ try {
     Mark-Passed 'raw-input-restart' 'Unfinished whitespace language input survived a real clean process restart and was restored through ValuePattern.' @{field='settings-learningLanguage';rawLength=$raw.Length;exactRawMatched=$true;restartCount=1;restoredValue='en';inputMethod='UIAutomation ValuePattern, not physical typing or IME'}
 } catch {
     $records[$currentCase].status='failed'
-    $records[$currentCase].observations=@{summary=$_.Exception.Message}
-    $observations['failure']=@{case=$currentCase;message=$_.Exception.Message}
+    $records[$currentCase].observations=@{summary="After stage '$probeStage': $($_.Exception.Message)"}
+    $observations['failure']=@{case=$currentCase;stage=$probeStage;message=$_.Exception.Message}
 } finally {
     if($app){if(-not $app.HasExited){$app.Kill();$null=$app.WaitForExit(5000)};$app.Dispose()}
 }
