@@ -80,7 +80,7 @@ with tempfile.TemporaryDirectory() as temp:
 
 test('stages separate embedded-asset notices from the selected Cargo source and refuses missing attribution', () => {
   const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-B', '-c', String.raw`
-import importlib.util, json, pathlib, tempfile
+import importlib.util, json, os, pathlib, subprocess, tempfile
 spec=importlib.util.spec_from_file_location('prepare', 'native/windows/native-installer-prepare.py')
 m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 with tempfile.TemporaryDirectory() as temp:
@@ -95,6 +95,28 @@ with tempfile.TemporaryDirectory() as temp:
     notice.write_bytes(b'current upstream attribution')
     m.prepare_asset_notices(root, packages)
     assert output.read_bytes()==notice.read_bytes()
+    # Cargo may select a cache reached through an ancestor junction/symlink.
+    # Its canonical crate is trusted; links in requested notice paths are not.
+    alias=root/'cargo-alias'
+    def link_directory(target, link):
+        if os.name=='nt': subprocess.run(['cmd', '/c', 'mklink', '/J', str(link), str(target)], check=True, capture_output=True)
+        else: link.symlink_to(target, target_is_directory=True)
+    link_directory(root/'cargo', alias)
+    selected=[dict(packages[0], manifest_path=str(alias/'gpui-kit-assets/Cargo.toml'))]
+    m.prepare_asset_notices(root, selected)
+    assert output.read_bytes()==notice.read_bytes()
+    outside=root/'outside'; outside.mkdir(); (outside/'LICENSE-LUCIDE').write_bytes(b'wrong attribution')
+    link_directory(outside, crate/'linked')
+    (root/'native/installer-inputs.json').write_text(json.dumps({'rustAssetNotices':[{'package':'gpui-kit-assets','files':['linked/LICENSE-LUCIDE']}]}))
+    try: m.prepare_asset_notices(root, selected)
+    except ValueError: pass
+    else: raise AssertionError('linked notice path inside the selected crate was accepted')
+    for name in ['../outside/LICENSE-LUCIDE', '..\\outside\\LICENSE-LUCIDE', str(outside/'LICENSE-LUCIDE')]:
+        (root/'native/installer-inputs.json').write_text(json.dumps({'rustAssetNotices':[{'package':'gpui-kit-assets','files':[name]}]}))
+        try: m.prepare_asset_notices(root, selected)
+        except ValueError: pass
+        else: raise AssertionError('escaped selected-crate notice was accepted: '+name)
+    (root/'native/installer-inputs.json').write_text(json.dumps({'rustAssetNotices':[{'package':'gpui-kit-assets','files':['LICENSE-LUCIDE']}]}))
     notice.unlink()
     try: m.prepare_asset_notices(root, packages)
     except ValueError: pass

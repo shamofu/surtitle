@@ -83,7 +83,9 @@ def prepare_asset_notices(workspace, packages):
             identity = package['name'] + '-' + package['version']
             if not re.fullmatch(r'[A-Za-z0-9._+-]+', identity):
                 raise ValueError('Invalid Cargo package identity for asset notices')
-            crate = Path(package['manifest_path']).parent
+            # Cargo selects the source root, which may live behind a cache
+            # junction. Canonicalize that root before rejecting links in notices.
+            crate = Path(package['manifest_path']).parent.resolve(strict=True)
             for name in requirement['files']:
                 source = notice_file(crate, name)
                 destination = contained_path(output / identity, name)
