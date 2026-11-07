@@ -44,5 +44,18 @@ try {
 }
 
 Add-Type -Path (Join-Path $PSScriptRoot 'windows-standard-user.cs')
-$exitCode = [SurtitleWindowsStandardUser]::Run($applicationPath, $arguments.ToArray(), $workingDirectory, $ForegroundApplication)
+$windowsPowerShell = [IO.Path]::GetFullPath((Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'))
+$resetModulePath = $applicationPath -ieq $windowsPowerShell
+$hadModulePath = Test-Path Env:PSModulePath
+$modulePath = $env:PSModulePath
+try {
+    # CreateProcess bypasses PowerShell's native-command adaptation. Let Windows
+    # PowerShell construct its own module path instead of inheriting PS7 modules.
+    if ($resetModulePath) { $env:PSModulePath = $null }
+    $exitCode = [SurtitleWindowsStandardUser]::Run($applicationPath, $arguments.ToArray(), $workingDirectory, $ForegroundApplication)
+} finally {
+    if ($resetModulePath) {
+        if ($hadModulePath) { $env:PSModulePath = $modulePath } else { $env:PSModulePath = $null }
+    }
+}
 exit $exitCode

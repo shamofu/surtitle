@@ -6,6 +6,38 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+test.skipIf(process.platform !== 'win32')('owned Windows PowerShell worker resolves builtin modules across a PowerShell 7 parent', t => {
+  const root = mkdtempSync(join(tmpdir(), 'surtitle worker modules '));
+  t.onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+  const output = join(root, 'worker');
+  const script = String.raw`
+$ErrorActionPreference='Stop'
+. ./native/windows/production-uia-launch.ps1
+# Reproduce a PS7-only inherited module path. The child only hashes repository
+# bytes and probes builtin commands; it never loads UIAutomation or a product.
+$env:PSModulePath=Join-Path $PSHOME 'Modules'
+$command='$ErrorActionPreference="Stop"; Get-Command Get-FileHash, ConvertTo-Json, Get-Content, Add-Type, Start-Sleep | Out-Null; @{hash=(Get-FileHash -LiteralPath package.json -Algorithm SHA256).Hash;major=$PSVersionTable.PSVersion.Major} | ConvertTo-Json -Compress'
+Invoke-OwnedUiaWorker (Get-Location).ProviderPath @('-NoProfile','-NonInteractive','-Command',$command) $env:SURTITLE_WORKER_OUTPUT 20
+$result=[IO.File]::ReadAllText($env:SURTITLE_WORKER_OUTPUT+'.stdout.log') | ConvertFrom-Json
+if($result.major -ne 5 -or $result.hash -ne (Get-FileHash -LiteralPath package.json -Algorithm SHA256).Hash){throw 'Worker hash/JSON roundtrip failed'}
+# Also call the real wrapper in this process to verify its finally restores the
+# inherited value and its normal nonzero child status contract remains intact.
+$arguments=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('["-NoProfile","-NonInteractive","-Command","exit 17"]'))
+foreach($value in @($env:PSModulePath, '', $null)) {
+    $env:PSModulePath=$value
+    $present=Test-Path Env:PSModulePath
+    & ./e2e/support/run-windows-standard-user.ps1 -Application (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -ArgumentsBase64 $arguments
+    if($LASTEXITCODE -ne 17 -or $env:PSModulePath -cne $value -or (Test-Path Env:PSModulePath) -ne $present){throw 'Worker status or module path restoration changed'}
+}
+'builtin module boundary passed'
+`;
+  const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+    encoding: 'utf8', windowsHide: true, timeout: 30_000, env: { ...process.env, SURTITLE_WORKER_OUTPUT: output },
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+}, 35_000);
+
 test.skipIf(process.platform !== 'win32')('production UIA context refuses a substituted profile or untrusted CI assertion', t => {
   const root = mkdtempSync(join(tmpdir(), 'surtitle UIA guards 日本語 & '));
   t.onTestFinished(() => rmSync(root, { recursive: true, force: true }));
