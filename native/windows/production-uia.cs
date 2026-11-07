@@ -108,15 +108,24 @@ public static class SurtitleProductionUia {
         Range(slider, maximum);
         ((RangeValuePattern)slider.GetCurrentPattern(RangeValuePattern.Pattern)).SetValue(value);
     }
-    public static bool VideoSurface(Process app) {
+    public static bool VideoSurface(Process app, out string observations) {
         int count = 0; var parent = app.MainWindowHandle;
+        var surfaces = new List<string>();
         EnumChildWindows(parent, delegate(IntPtr child, IntPtr data) {
             var name = new System.Text.StringBuilder(256); GetClassName(child, name, name.Capacity);
             Rect rect;
-            if (GetParent(child) == parent && name.ToString() == "STATIC" && IsWindowVisible(child)
-                && GetClientRect(child, out rect) && rect.Right > 0 && rect.Bottom > 0) count++;
+            var owner = GetParent(child);
+            if (owner == parent) {
+                bool visible = IsWindowVisible(child), bounds = GetClientRect(child, out rect);
+                surfaces.Add("handle=" + child.ToInt64() + ",parent=" + owner.ToInt64()
+                    + ",class=" + name + ",visible=" + visible + ",bounds=" + bounds
+                    + ",width=" + rect.Right + ",height=" + rect.Bottom);
+                if (name.ToString().Equals("STATIC", StringComparison.OrdinalIgnoreCase) && visible
+                    && bounds && rect.Right > 0 && rect.Bottom > 0) count++;
+            }
             return true;
         }, IntPtr.Zero);
+        observations = string.Join("; ", surfaces.ToArray());
         if (count > 1) throw new Exception("Ambiguous native video surface");
         return count == 1;
     }

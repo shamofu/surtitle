@@ -60,8 +60,15 @@ try {
     [SurtitleProductionUia]::Activate((Find-Id 'study-fixture-media'))
     Wait-For {
         $toggle = Find-Id 'play-toggle'; $metadata = Find-Id 'player-metadata'
+        $surfaceDetails = ''
+        $surface = [SurtitleProductionUia]::VideoSurface($app, [ref]$surfaceDetails)
+        $script:videoObservation = @{
+            toggleFound=($null -ne $toggle); toggleEnabled=($null -ne $toggle -and $toggle.Current.IsEnabled)
+            metadataFound=($null -ne $metadata); metadataName=$(if($metadata){$metadata.Current.Name}else{$null})
+            videoSurface=$surface; childWindows=$surfaceDetails
+        }
         $null -ne $toggle -and $toggle.Current.IsEnabled -and $null -ne $metadata -and
-            $metadata.Current.Name -match '^0:(11|12) · 640 × 360$' -and [SurtitleProductionUia]::VideoSurface($app)
+            $metadata.Current.Name -match '^0:(11|12) · 640 × 360$' -and $surface
     } 'real libmpv metadata and visible native video surface' 35
     $metadataName = (Find-Id 'player-metadata').Current.Name
     $volume = [SurtitleProductionUia]::Slider([SurtitleProductionUia]::Root($app), 'Volume', '音量')
@@ -94,7 +101,8 @@ try {
     $stream = [IO.File]::Open($Output,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
     try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }
 } catch {
-    throw "Production UIA failed after stage '$probeStage': $($_.Exception.Message)"
+    $details = if($videoObservation){' Last video observation: '+($videoObservation|ConvertTo-Json -Compress)}else{''}
+    throw "Production UIA failed after stage '$probeStage': $($_.Exception.Message)$details"
 } finally {
     if (-not $app.HasExited) { $app.Kill(); $app.WaitForExit() }
     $app.Dispose()
