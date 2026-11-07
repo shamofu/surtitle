@@ -210,8 +210,10 @@ fn settings_autosave_and_freeze_preserve_the_form_viewport(cx: &mut TestAppConte
                 "freeze resized form viewport: {language}, {width}"
             );
             backend.exclusive.store(false, Ordering::Release);
+            // Autosave persists the raw draft in workspace.sqlite before the
+            // preferences.json commit; learning.sqlite does not block this save.
             let database =
-                rusqlite::Connection::open(harness.root.path().join("learning.sqlite")).unwrap();
+                rusqlite::Connection::open(harness.root.path().join("workspace.sqlite")).unwrap();
             database.execute_batch("BEGIN IMMEDIATE").unwrap();
             cx.update_window(window, |_, window, app| {
                 window.click("settings-learningLanguage", app);
@@ -225,8 +227,15 @@ fn settings_autosave_and_freeze_preserve_the_form_viewport(cx: &mut TestAppConte
                 registry
                     .key_for("settings", "default")
                     .and_then(|key| registry.view(&key))
-                    .is_some_and(|view| view.saving)
+                    .is_some_and(|view| {
+                        view.saving
+                            && view
+                                .fields
+                                .get("learningLanguage")
+                                .is_some_and(|raw| raw == "fr")
+                    })
             });
+            assert_eq!(harness.state.settings().unwrap().learning_language, "en");
             assert_eq!(
                 before,
                 bounds(cx, window, "settings-scroll"),
@@ -236,6 +245,21 @@ fn settings_autosave_and_freeze_preserve_the_form_viewport(cx: &mut TestAppConte
             harness.wait(cx, "settings save finished", |root, app| {
                 !root.editors.read(app).pending()
             });
+            cx.read(|app| {
+                let registry = harness.view.read(app).editors.read(app);
+                let key = registry.key_for("settings", "default").unwrap();
+                let view = registry.view(&key).unwrap();
+                assert!(
+                    !view.saving && !view.dirty && view.error.is_none(),
+                    "autosave did not finish cleanly: {language}, {width}: {view:?}"
+                );
+                assert_eq!(view.fields["learningLanguage"], "fr");
+            });
+            let saved: crate::application::Preferences = serde_json::from_reader(
+                std::fs::File::open(harness.root.path().join("preferences.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(saved.settings.learning_language, "fr");
             assert_eq!(before, bounds(cx, window, "settings-scroll"));
             cx.update_window(window, |_, window, _| window.remove_window())
                 .unwrap();
