@@ -32,6 +32,12 @@ fn bounds(cx: &mut TestAppContext, window: AnyWindowHandle, id: &str) -> Bounds<
 }
 
 fn locale(harness: &Harness, value: &str, cx: &mut TestAppContext) {
+    // Finish the preceding case's drafts before changing their canonical revision.
+    harness.wait(
+        cx,
+        "settings edits before test language change",
+        |root, app| !root.editors.read(app).pending(),
+    );
     let mut settings = harness.state.settings().unwrap();
     settings.locale = value.into();
     commands::models::update_settings(&harness.state, settings).unwrap();
@@ -39,7 +45,14 @@ fn locale(harness: &Harness, value: &str, cx: &mut TestAppContext) {
         root.session.update(cx, |session, cx| session.refresh(cx))
     });
     harness.wait(cx, "test interface language", |root, app| {
+        // The session snapshot and editor reload have independent completions.
+        let registry = root.editors.read(app);
         root.session.read(app).text("ja", "en") == value
+            && !registry.pending()
+            && registry
+                .key_for("settings", "default")
+                .and_then(|key| registry.view(&key))
+                .is_some_and(|view| view.ready && view.fields["locale"] == value)
     });
 }
 

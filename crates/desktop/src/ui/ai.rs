@@ -579,6 +579,24 @@ impl AiView {
     pub fn entered(&mut self, cx: &mut Context<Self>) {
         self.refresh(cx);
     }
+    #[cfg(test)]
+    pub(super) fn test_refresh_diagnostics(&self, cx: &gpui_kit::App) -> String {
+        format!(
+            "continuation_epoch={} generation={} refreshing={} again={} frozen={} pending={} error={:?} save_error={:?} continuation_ids={:?}",
+            self.store.continuation_read_epoch(),
+            self.store.generation(),
+            self.refreshing,
+            self.refresh_again,
+            self.frozen(cx),
+            self.store.pending(),
+            self.error,
+            self.store.error(),
+            self.continuations
+                .iter()
+                .map(|value| value.id.as_str())
+                .collect::<Vec<_>>(),
+        )
+    }
     fn refresh(&mut self, cx: &mut Context<Self>) {
         if self.frozen(cx) || self.refreshing {
             self.refresh_again = true;

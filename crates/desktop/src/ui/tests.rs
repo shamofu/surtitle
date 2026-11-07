@@ -298,6 +298,17 @@ impl Harness {
         description: &str,
         ready: impl Fn(&Window) -> bool,
     ) {
+        self.wait_window_with_diagnostics(cx, window, description, ready, |_, _| String::new());
+    }
+
+    fn wait_window_with_diagnostics(
+        &self,
+        cx: &mut TestAppContext,
+        window: AnyWindowHandle,
+        description: &str,
+        ready: impl Fn(&Window) -> bool,
+        diagnostics: impl Fn(&DesktopView, &App) -> String,
+    ) {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             cx.executor().advance_clock(Duration::from_millis(20));
@@ -311,10 +322,10 @@ impl Harness {
             {
                 return;
             }
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for {description}"
-            );
+            if Instant::now() >= deadline {
+                let context = cx.read(|app| diagnostics(self.view.read(app), app));
+                panic!("timed out waiting for {description}: {context}");
+            }
             std::thread::sleep(Duration::from_millis(2));
         }
     }

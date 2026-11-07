@@ -217,11 +217,17 @@ fn activity_entry_and_local_dialog_save_reload_durable_unfinished_requests(
         }
     }
     let new_id = new_id.unwrap();
-    harness.wait_window(
+    harness.wait_window_with_diagnostics(
         cx,
         activity_window,
         "locally saved request shown without snapshot",
         |window| window.try_find(format!("resume-{new_id}")).is_some(),
+        |root, app| {
+            format!(
+                "requested=resume-{new_id}; {}",
+                root.ai.read(app).test_refresh_diagnostics(app)
+            )
+        },
     );
     cx.update_window(activity_window, |_, window, app| {
         window.click(format!("discard-{new_id}"), app);
