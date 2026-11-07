@@ -1,5 +1,5 @@
 {
-  "name": "Surtitle 窶｢ Ubuntu 24.04",
+  "name": "Surtitle • Ubuntu 24.04",
   "build": {
     "dockerfile": "Dockerfile",
     "context": ".."

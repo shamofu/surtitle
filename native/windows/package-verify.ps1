@@ -6,8 +6,8 @@ $workspace = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../..')).Path
 Set-Location -LiteralPath $workspace
 $archiveRef = & node scripts/check-release.mjs --source
 if ($LASTEXITCODE -ne 0) { throw 'Corresponding-source packaging requires a clean checkout of the tested revision.' }
-& node scripts/check-release.mjs --version-only
-if ($LASTEXITCODE -ne 0) { throw 'Release version mismatch.' }
+$version = (& node scripts/check-release.mjs --version-only) -replace '^Version (\d+\.\d+\.\d+) is consistent\.$', '$1'
+if ($LASTEXITCODE -ne 0 -or $version -notmatch '^\d+\.\d+\.\d+$') { throw 'Workspace version could not be read.' }
 & node scripts/check-production-features.mjs
 if ($LASTEXITCODE -ne 0) { throw 'Development-only AI code must not be packaged.' }
 $releaseDir = Join-Path $workspace 'work/artifacts/release'
@@ -27,10 +27,6 @@ $nativeArguments = if ($verifyNative) { @('-RequireNativeAcceptance') } else { @
 $externalArguments = if ($NativeExternalEvidence) { @('-NativeExternalEvidence',$NativeExternalEvidence) } else { @() }
 & pwsh -NoProfile -File native/windows/package-installer-smoke.ps1 -Installer $installer.FullName -InstallDirectory 'work/installer-test/日本語 & application' -ProductionProbe $ProductionProbe @profileArguments @nativeArguments @externalArguments
 if ($LASTEXITCODE -ne 0) { throw 'Installer lifecycle or production application verification failed.' }
-if ($verifyNative) {
-    & node scripts/check-native-acceptance.mjs work/artifacts/native-acceptance/gpui-native-acceptance.json ($installer.FullName + '.build.json')
-    if ($LASTEXITCODE -ne 0) { throw 'Requested native acceptance evidence is incomplete or belongs to another production binary.' }
-}
 Copy-Item -LiteralPath $installer.FullName -Destination $releaseDir
 Copy-Item -LiteralPath ($installer.FullName + '.build.json') -Destination $releaseDir
 foreach ($name in @('native-smoke.json', 'installer-smoke.json', 'production-smoke.json')) {
@@ -94,8 +90,6 @@ try {
     & $sevenZip a '-tzip' '-mx=5' (Join-Path $releaseDir 'surtitle-source.zip') '.' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Corresponding-source ZIP creation failed.' }
 } finally { Pop-Location }
-$version = (& node scripts/check-release.mjs --version-only) -replace '^Version (\d+\.\d+\.\d+) is consistent\.$', '$1'
-if ($LASTEXITCODE -ne 0 -or $version -notmatch '^\d+\.\d+\.\d+$') { throw 'Workspace version could not be read.' }
 @{ schemaVersion=1; version=$version; installer=$installer.Name; installerSmokePassed=$true; nativeAcceptanceRequired=[bool]$verifyNative } |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $releaseDir 'release-manifest.json') -Encoding utf8NoBOM
 & node scripts/release.mjs --check

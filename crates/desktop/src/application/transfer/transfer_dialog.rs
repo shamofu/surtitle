@@ -46,7 +46,7 @@ fn fixture_path_from_environment(
 }
 
 // This compile-time-only boundary chooses one fixed ZIP inside an explicitly
-// isolated fixture profile. It never accepts a path from the webview or a marker.
+// isolated fixture profile. It never accepts a path from UI input or a marker.
 #[cfg(feature = "e2e-test")]
 fn fixture_path(
     state: &AppState,

@@ -227,8 +227,8 @@ jobs:
       - name: Rust workspace tests
         id: rust-tests
         run: pnpm test:rust
-      - name: Retained accessibility providers after native window close
-        run: cargo test -p gpui-pre-windows --lib destroyed_window_retained_uia_provider_is_unavailable --locked
+      - name: Windows GPUI backend regressions
+        run: cargo test -p gpui-pre-windows --lib --locked
       - name: Verify ordinary builds cannot bypass evaluation accounting
         id: rust-no-default
         run: pnpm test:rust:no-default-features
@@ -347,7 +347,6 @@ jobs:
           & ./work/package-tools/bin/cargo-about.exe --version
           & ./work/package-tools/bin/cargo-about.exe generate --manifest-path crates/desktop/Cargo.toml --target x86_64-pc-windows-msvc --no-default-features --locked --fail --config about.toml scripts/licenses.hbs --output-file work/resources/notices/rust.html
           node scripts/audit-js-licenses.mjs
-      # The package script owns the Cargo separator before PowerShell can consume it.
       - run: pnpm package:app
         if: env.NATIVE_CANDIDATE_RUN_ID == ''
         id: package-build

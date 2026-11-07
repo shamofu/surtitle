@@ -95,7 +95,7 @@ unsafe extern "system" fn surface_proc(
         let original = (*input).original;
         match message {
             // STATIC otherwise returns HTTRANSPARENT and passes clicks through
-            // the video to a sibling webview. No parent STN_CLICKED is needed.
+            // the video to underlying windows. No parent STN_CLICKED is needed.
             WM_NCHITTEST => {
                 return if (*input).blocked.get() {
                     HTTRANSPARENT as LRESULT

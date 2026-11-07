@@ -6,6 +6,7 @@ packages:
   - '!.pnpm/**'
   - '!.git/**'
   - '!vendor/**'
+  - '!patches/**'
   - '!javascript-packages/**'
   - '!native-sources/**'
   - '!native-installer-sources/**'

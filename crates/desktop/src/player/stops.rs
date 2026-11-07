@@ -1,4 +1,4 @@
-/// Stops stay native so backgrounding the webview cannot defer a sentence pause.
+/// Stops follow the decoder clock so UI scheduling cannot defer a sentence pause.
 #[derive(Default)]
 pub(super) struct PlaybackStops {
     pub(super) explicit_end: Option<u64>,

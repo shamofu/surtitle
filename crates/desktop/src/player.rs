@@ -1433,7 +1433,7 @@ mod subtitle_tests {
                 .unwrap();
             assert!(!player.poll().paused);
             assert_eq!(player.native.string("pause").as_deref(), Some("no"));
-            // Exercise the real decoder clock, independently of webview timers.
+            // Exercise the real decoder clock, independently of UI updates.
             for target in [1800, 400] {
                 let mut revision = player.poll().revision;
                 player

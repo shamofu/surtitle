@@ -8,7 +8,6 @@ param(
     [string]$NativeAcceptance = 'native/windows/native-acceptance.ps1',
     [switch]$RequireNativeAcceptance,
     [string]$NativeExternalEvidence,
-    [switch]$RenderingAcceptance,
     [string]$EvidenceDirectory = 'work/artifacts'
 )
 $ErrorActionPreference = 'Stop'
@@ -87,7 +86,6 @@ function Assert-Payload {
     if ($LASTEXITCODE -ne 0) { throw 'Installed native libraries failed to initialize.' }
 }
 function Probe-Production {
-    if ($RenderingAcceptance) { throw 'Rendering acceptance must be provided by the native GPUI UIA suite.' }
     $fixture = Join-Path $workspace 'work/test-results/fixtures/日本語 & sample.mp4'
     $localData = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) $config.identifier
     if (-not (Test-Path -LiteralPath $fixture -PathType Leaf)) { throw 'Generate the local media fixture before production verification.' }
