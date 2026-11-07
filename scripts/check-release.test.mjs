@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { checkVersion, checkRelease, validateTagEvent } from './check-release.mjs';
+import { checkVersion, checkRelease, validateTagEvent, checkSourceRevision } from './check-release.mjs';
 
 const version = '0.1.0';
 const environment = { GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/tags/v0.1.0', GITHUB_SHA: 'a'.repeat(40) };
@@ -13,9 +13,6 @@ const environment = { GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/tags/v0.1.0',
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'surtitle-release-inputs-'));
   t.onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
-  mkdirSync(join(directory, 'src-tauri'));
-  writeFileSync(join(directory, 'package.json'), JSON.stringify({ version }));
-  writeFileSync(join(directory, 'src-tauri/tauri.conf.json'), JSON.stringify({ version }));
   writeFileSync(join(directory, 'Cargo.toml'), `[workspace.package]\nversion = "${version}"\n`);
   return directory;
 }
@@ -62,21 +59,24 @@ test('version-only checks do not require release event metadata or Git refs', t 
   assert.match(result.stdout, /Version .* is consistent/);
 });
 
-test('rejects inconsistent or unsupported versions before querying release refs', t => {
+test('uses the workspace version independently of legacy JavaScript and Tauri metadata', t => {
+  const directory = fixture(t);
+  writeFileSync(join(directory, 'package.json'), JSON.stringify({ version: '8.0.0' }));
+  assert.equal(checkVersion(directory), version);
+});
+
+test('rejects missing or unsupported workspace versions before querying release refs', t => {
   const directory = fixture(t);
   const run = () => assert.fail('Invalid versions must stop before Git');
-  for (const [name, content] of [
-    ['package.json', JSON.stringify({ version: '0.2.0' })],
-    ['src-tauri/tauri.conf.json', JSON.stringify({ version: '0.2.0' })],
-    ['Cargo.toml', '[workspace.package]\nversion = "0.2.0"\n'],
+  for (const content of [
+    '[package]\nversion = "0.1.0"\n',
+    '[workspace.package]\nversion = "0.1.0-rc.1"\n',
+    '[workspace.package]\nversion = "00.1.0"\n',
+    '[workspace.package]\nlicense = "MIT"\n[package]\nversion = "0.1.0"\n',
   ]) {
-    const initial = name === 'Cargo.toml' ? '[workspace.package]\nversion = "0.1.0"\n' : JSON.stringify({ version });
-    writeFileSync(join(directory, name), content);
-    assert.throws(() => checkRelease({ directory, env: environment, run }), /same explicit release version/);
-    writeFileSync(join(directory, name), initial);
+    writeFileSync(join(directory, 'Cargo.toml'), content);
+    assert.throws(() => checkRelease({ directory, env: environment, run }), /workspace.*version/i);
   }
-  writeFileSync(join(directory, 'package.json'), JSON.stringify({ version: '0.1.0-rc.1' }));
-  assert.throws(() => checkVersion(directory), /same explicit release version/);
 });
 
 test('requires a canonical stable version tag, push event and full commit SHA', () => {
@@ -143,4 +143,26 @@ test('a tag ref from a non-push event cannot use branch validation', t => {
   const directory = fixture(t);
   assert.throws(() => checkRelease({ directory, env: { ...environment, GITHUB_EVENT_NAME: 'workflow_dispatch' },
     run: () => assert.fail('Invalid event must stop before Git') }), /canonical/);
+});
+
+test('source packaging refuses modified, staged and untracked source instead of archiving an unrelated HEAD', t => {
+  const options = repository(t);
+  const check = () => checkSourceRevision({ directory: options.directory, revision: 'HEAD' });
+  assert.equal(check(), options.env.GITHUB_SHA);
+  const cargo = join(options.directory, 'Cargo.toml');
+  writeFileSync(cargo, '[workspace.package]\nversion = "0.2.0"\n');
+  assert.throws(check, /clean source tree/);
+  git(options.directory, 'add', 'Cargo.toml');
+  assert.throws(check, /clean source tree/);
+  git(options.directory, 'reset', '--hard', 'HEAD');
+  writeFileSync(join(options.directory, 'new-source.rs'), '// untracked application source');
+  assert.throws(check, /clean source tree/);
+});
+
+test('source packaging requires the checkout to be the exact tested revision', t => {
+  const options = repository(t);
+  writeFileSync(join(options.directory, 'next.txt'), 'new revision');
+  git(options.directory, 'add', 'next.txt');
+  git(options.directory, 'commit', '-m', 'Next revision');
+  assert.throws(() => checkSourceRevision({ directory: options.directory, revision: options.env.GITHUB_SHA }), /tested revision/);
 });

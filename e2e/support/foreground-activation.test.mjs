@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'vitest';
-import { spawnWebDriver } from './webdriver-process.mjs';
+import { spawnStandardUser } from './standard-user-process.mjs';
 
 test.runIf(process.platform === 'win32' && process.env.SURTITLE_E2E_NATIVE_INPUT === '1')('activates only the owned target through the production caption fallback after a real foreground-policy denial', async () => {
   const evidence = mkdtempSync(join(tmpdir(), 'surtitle-foreground-activation-'));
   try {
-    const child = spawnWebDriver('pwsh.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File',
+    const child = spawnStandardUser('pwsh.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File',
       fileURLToPath(new URL('./foreground-activation-fixture.ps1', import.meta.url)), '-EvidenceDirectory', evidence],
     { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '', launchError, timedOut = false;

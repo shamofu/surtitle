@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "suite": "gpui-windows",
+  "requiredCases": [
+    {
+      "id": "production-playback",
+      "method": "native-uia",
+      "purpose": "Installed production metadata, native video, progress, pause and seek"
+    },
+    {
+      "id": "window-geometry",
+      "method": "native-uia",
+      "purpose": "Resize, enforced minimum, maximization and restored bounds across process restart"
+    },
+    {
+      "id": "dpi-video-bounds",
+      "method": "native-uia",
+      "purpose": "Accessible viewport and physical native child agree at the observed window DPI"
+    },
+    {
+      "id": "fullscreen",
+      "method": "native-uia",
+      "purpose": "Fullscreen fills its monitor and returns to the previous window bounds"
+    },
+    {
+      "id": "owned-dialog-focus",
+      "method": "native-uia",
+      "purpose": "Native dialog owns its parent, blocks underlying input and returns focus"
+    },
+    {
+      "id": "raw-input-restart",
+      "method": "native-uia",
+      "purpose": "Unfinished input survives clean process close and reopen through actual accessible controls"
+    },
+    {
+      "id": "dpi-monitor-transitions",
+      "method": "native-display",
+      "purpose": "Actual 100/125/150 percent DPI samples and monitor moves with accessible/native video and usable work-area bounds",
+      "requiredDpiPercentages": [
+        100,
+        125,
+        150
+      ]
+    },
+    {
+      "id": "keyboard-clipboard-accessibility",
+      "method": "windows-accessibility",
+      "purpose": "Real OS keyboard/clipboard and principal screen-reader operations; UIA value assignment alone is insufficient",
+      "requiredKeyboardOperations": [
+        "route-navigation",
+        "text-editing",
+        "playback-shortcuts",
+        "dialog-open-dismiss"
+      ],
+      "requiredScreenReaderOperations": [
+        "navigate-principal-routes",
+        "read-and-edit-fields",
+        "open-and-control-media",
+        "review-card",
+        "open-and-dismiss-dialog"
+      ]
+    },
+    {
+      "id": "rendered-composition",
+      "method": "native-rendering",
+      "purpose": "Actual GPU/video pixels, dialogs, route transitions and clipping at normal and wide layouts",
+      "requiredLayouts": [
+        "normal",
+        "wide"
+      ]
+    },
+    {
+      "id": "real-japanese-ime",
+      "method": "windows-ime",
+      "purpose": "Windows Japanese IME preedit, candidate placement, commit and persistence"
+    },
+    {
+      "id": "audio-output",
+      "method": "audio-signal",
+      "purpose": "Measured output signal and timing; state explicitly whether direct listening occurred"
+    },
+    {
+      "id": "interval-auto-stop",
+      "method": "native-media",
+      "purpose": "Actual source interval and sentence-boundary playback stop at the intended media clock",
+      "requiredStopKinds": [
+        "source",
+        "sentence"
+      ]
+    },
+    {
+      "id": "long-media",
+      "method": "native-media",
+      "purpose": "Real long-duration source decode, seeking, transcript scrolling and recovery"
+    },
+    {
+      "id": "gpu-performance",
+      "method": "native-performance",
+      "purpose": "Current GPUI playback on identified 1080p60 and 4K30 assets: CPU/GPU load, dropped frames and measured A/V sync with display size and criteria",
+      "requiredWorkloads": [
+        {
+          "id": "1080p60",
+          "width": 1920,
+          "height": 1080,
+          "fps": 60
+        },
+        {
+          "id": "4k30",
+          "width": 3840,
+          "height": 2160,
+          "fps": 30
+        }
+      ],
+      "requiredMetrics": [
+        "cpuPercent",
+        "gpuPercent",
+        "droppedFrames",
+        "avSyncOffsetMs",
+        "sampleWindowMs"
+      ]
+    }
+  ]
+}

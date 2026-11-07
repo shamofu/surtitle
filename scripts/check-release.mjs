@@ -4,14 +4,29 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export function checkVersion(directory = fileURLToPath(new URL('..', import.meta.url))) {
-  const pkg = JSON.parse(readFileSync(join(directory, 'package.json')));
-  const tauri = JSON.parse(readFileSync(join(directory, 'src-tauri/tauri.conf.json')));
-  const cargo = readFileSync(join(directory, 'Cargo.toml'), 'utf8')
-    .match(/\[workspace\.package\][\s\S]*?version\s*=\s*"([^"]+)"/)?.[1];
-  if (!/^\d+\.\d+\.\d+$/.test(pkg.version) || pkg.version !== tauri.version || pkg.version !== cargo) {
-    throw new Error('package.json, workspace Cargo.toml and tauri.conf.json must have the same explicit release version.');
+  const manifest = readFileSync(join(directory, 'Cargo.toml'), 'utf8');
+  const workspace = manifest.match(/^\[workspace\.package\]\s*\r?\n([^]*?)(?=^\[|$(?![^]))/m)?.[1];
+  const version = workspace?.match(/^version\s*=\s*"([^"]+)"\s*(?:#.*)?$/m)?.[1];
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version ?? '')) {
+    throw new Error('Cargo workspace.package.version must be an explicit stable X.Y.Z version.');
   }
-  return pkg.version;
+  return version;
+}
+
+export function checkSourceRevision({ directory = fileURLToPath(new URL('..', import.meta.url)),
+  revision = process.env.GITHUB_SHA || 'HEAD', run = spawnSync } = {}) {
+  if (revision !== 'HEAD' && !/^[a-f0-9]{40}$/.test(revision)) throw new Error('Source packaging requires HEAD or a full tested commit SHA');
+  const git = args => {
+    const result = run('git', args, { cwd: directory, encoding: 'utf8', shell: false });
+    if (result.error || result.status !== 0) throw new Error(result.error?.message || result.stderr || 'Source revision check failed');
+    return result.stdout.trim();
+  };
+  const sha = git(['rev-parse', '--verify', `${revision}^{commit}`]);
+  if (git(['rev-parse', '--verify', 'HEAD^{commit}']) !== sha) throw new Error('Source checkout differs from the tested revision');
+  if (git(['status', '--porcelain', '--untracked-files=normal'])) {
+    throw new Error('Source packaging requires a clean source tree; uncommitted files cannot be replaced by HEAD sources');
+  }
+  return sha;
 }
 
 export function validateTagEvent(version, env = process.env) {
@@ -49,7 +64,10 @@ export function checkRelease({ directory = fileURLToPath(new URL('..', import.me
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const versionOnly = process.argv.includes('--version-only');
-  const version = checkRelease({ versionOnly });
-  console.log(versionOnly ? `Version ${version} is consistent.` : `Version ${version} and release inputs are valid.`);
+  if (process.argv.includes('--source')) console.log(checkSourceRevision());
+  else {
+    const versionOnly = process.argv.includes('--version-only');
+    const version = checkRelease({ versionOnly });
+    console.log(versionOnly ? `Version ${version} is consistent.` : `Version ${version} and release inputs are valid.`);
+  }
 }

@@ -15,3 +15,9 @@ test('rejects resolved development permits and fixture features', () => {
 test('rejects an incomplete or failed cargo graph', () => {
   assert.throws(() => validateProductionFeatures('error: feature unavailable'), /missing/);
 });
+
+test('rejects browser runtime dependencies in the shipped native desktop graph', () => {
+  for (const dependency of ['tauri', 'tauri-runtime-wry', 'wry', 'webview2-com', 'webkit2gtk']) {
+    assert.throws(() => validateProductionFeatures(`surtitle v0.1.0|\nsurtitle-ai v0.1.0|\n${dependency} v1.0.0|`), /Browser runtime/);
+  }
+});

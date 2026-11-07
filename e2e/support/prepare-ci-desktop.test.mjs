@@ -37,7 +37,10 @@ test('keeps a sufficient desktop unchanged and validates the observed result aft
 });
 
 test('reserves the new default width as well as the existing tallest native fixture', () => {
-  const initialWindow = JSON.parse(readFileSync(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8')).app.windows[0];
+  const host = readFileSync(new URL('../../crates/desktop/src/desktop/windows.rs', import.meta.url), 'utf8');
+  const initialBounds = host.match(/Bounds::centered\(\s*None,\s*size\(px\(([\d.]+)\),\s*px\(([\d.]+)\)\)/);
+  assert(initialBounds, 'The GPUI host must declare its initial window bounds');
+  const initialWindow = { width: Number(initialBounds[1]), height: Number(initialBounds[2]) };
   const required = snapshot(1920, 1080).requiredClient;
   assert(required.width >= initialWindow.width && required.height >= initialWindow.height);
   const narrowWorkArea = snapshot(1920, 1080); narrowWorkArea.workArea.width = 1500;

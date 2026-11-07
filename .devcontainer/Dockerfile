@@ -1,8 +1,8 @@
 FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake perl curl ca-certificates pkg-config python3 libwebkit2gtk-4.1-dev \
-    libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev \
-    patchelf xvfb dbus-x11 webkit2gtk-driver ffmpeg libmpv-dev \
+    build-essential cmake perl curl ca-certificates pkg-config python3 clang libfontconfig1-dev libfreetype6-dev libxkbcommon-x11-dev \
+    libwayland-dev libx11-xcb-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+    libvulkan-dev mesa-vulkan-drivers libssl-dev xvfb dbus-x11 ffmpeg libmpv-dev \
     fonts-noto-cjk unzip zip && rm -rf /var/lib/apt/lists/*
 USER vscode
 COPY native/installer-inputs.json /tmp/surtitle-installer-inputs.json

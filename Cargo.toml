@@ -1,5 +1,6 @@
 [workspace]
-members = ["crates/core", "crates/tools", "crates/ai", "crates/ai-validation", "src-tauri"]
+members = ["crates/core", "crates/tools", "crates/ai", "crates/ai-validation", "crates/desktop"]
+exclude = ["patches/gpui-pre-windows"]
 default-members = ["crates/core", "crates/tools", "crates/ai"]
 resolver = "2"
 
@@ -8,6 +9,9 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 rust-version = "1.99"
+
+[patch.crates-io]
+gpui-pre-windows = { path = "patches/gpui-pre-windows" }
 
 # Keep useful backtraces without full type and variable debug information.
 # The test profile inherits this; incremental compilation remains enabled locally.

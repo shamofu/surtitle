@@ -66,7 +66,7 @@ fn real_spoken_audio_and_interior_pause_require_only_local_warning_review() {
     let source = directory.path().join("constructed-spoken-pause.wav");
     std::fs::write(&source, wav16(&source_pcm)).unwrap();
     let assets = VadAssets {
-        runtime_path: repo.join("src-tauri/resources/native/onnxruntime.dll"),
+        runtime_path: repo.join("work/resources/native/onnxruntime.dll"),
         model_path: repo.join("work/native-fixtures/silero_vad.onnx"),
         model_sha256: SILERO_MODEL_SHA256.into(),
     };

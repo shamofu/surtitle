@@ -1,6 +1,6 @@
 # AI, audio preparation, and spending
 
-Rust owns credentials, immutable requests, usage accounting and transcript review. No IPC returns saved API keys, service-account JSON or access tokens. Generated content is labeled for comparison with the source. [Vertex setup](vertex-verification.md) covers Vertex application and development CLI configuration.
+Rust services own credentials, immutable requests, usage accounting and transcript review. UI-facing methods never return saved API keys, service-account JSON or access tokens. Generated content is labeled for comparison with the source. [Vertex setup](vertex-verification.md) covers Vertex application and development CLI configuration.
 
 ## Selecting a service and OpenAI setup
 

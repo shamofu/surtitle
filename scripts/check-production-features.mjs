@@ -3,6 +3,9 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 export function validateProductionFeatures(tree) {
+  if (tree.split(/\r?\n/).some(line => /^(?:tauri(?:-\S+)?|wry|webview2(?:-\S+)?|webkit2gtk(?:-\S+)?) v/.test(line))) {
+    throw new Error('Browser runtime dependency in production desktop graph');
+  }
   const rows = tree.split(/\r?\n/).filter(line => /^surtitle(?:-ai)? v/.test(line));
   if (!rows.some(line => /^surtitle v/.test(line)) || !rows.some(line => /^surtitle-ai v/.test(line))) {
     throw new Error('Production dependency graph is missing the desktop or AI crate');
@@ -17,7 +20,7 @@ export function validateProductionFeatures(tree) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const result = spawnSync('cargo', ['tree', '--locked', '--package', 'surtitle', '--no-default-features', '--features', 'custom-protocol', '--edges', 'normal,build', '--prefix', 'none', '--format', '{p}|{f}'], { encoding: 'utf8', windowsHide: true, shell: false, maxBuffer: 8 * 1024 * 1024 });
+  const result = spawnSync('cargo', ['tree', '--locked', '--package', 'surtitle', '--no-default-features', '--edges', 'normal,build', '--prefix', 'none', '--format', '{p}|{f}'], { encoding: 'utf8', windowsHide: true, shell: false, maxBuffer: 8 * 1024 * 1024 });
   if (result.error || result.status !== 0) throw new Error(result.error?.message || result.stderr || 'cargo tree failed');
   validateProductionFeatures(result.stdout);
   console.log('Production desktop excludes development validation and offline E2E fixtures.');
