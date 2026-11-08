@@ -10,7 +10,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::base::{Disableable, Selectable};
 use gpui_kit::component::{
     ActiveTheme, Icon,
-    button::{Button, ButtonVariants},
+    button::ButtonVariants,
     input::{Input, InputEvent, InputState},
 };
 use gpui_kit::{
@@ -25,6 +25,10 @@ pub(crate) struct LibraryView {
     imports: Entity<ImportWorkspace>,
     import_dialog: Option<AnyWindowHandle>,
     error: Option<String>,
+    row_motion: super::list_motion::ListMotion,
+    row_filter: Option<String>,
+    row_scroll: gpui_kit::UniformListScrollHandle,
+    row_ids: Vec<String>,
     _subscriptions: Vec<Subscription>,
 }
 impl LibraryView {
@@ -58,6 +62,10 @@ impl LibraryView {
             imports,
             import_dialog: None,
             error: None,
+            row_motion: Default::default(),
+            row_filter: None,
+            row_scroll: gpui_kit::UniformListScrollHandle::new(),
+            row_ids: Vec::new(),
             _subscriptions: vec![changed, snapshot, import_changes],
         }
     }
@@ -82,7 +90,9 @@ impl LibraryView {
         }
         if let Some(handle) = self.import_dialog
             && handle
-                .update(cx, |_, window, _| window.activate_window())
+                .update(cx, |_, window, cx| {
+                    crate::desktop::dialog::activate(window, cx)
+                })
                 .is_ok()
         {
             return;
@@ -111,6 +121,17 @@ impl Render for LibraryView {
         let t = move |j: &'static str, e: &'static str| if ja { j } else { e };
         let search = self.search.read(cx).value().to_string().to_lowercase();
         let filtering = !search.is_empty() || self.kind != "all";
+        self.row_motion.viewport(
+            window.viewport_size(),
+            self.row_scroll.0.borrow().base_handle.offset(),
+        );
+        let row_filter = format!("{}:{search}", self.kind);
+        let row_filter_changed = self
+            .row_filter
+            .as_ref()
+            .is_some_and(|previous| previous != &row_filter);
+        self.row_filter = Some(row_filter);
+        let row_motion = self.row_motion.clone();
         let rows: Vec<_> = session
             .snapshot
             .as_ref()
@@ -122,6 +143,33 @@ impl Render for LibraryView {
             })
             .cloned()
             .collect();
+        let row_ids: Vec<_> = rows.iter().map(|media| media.id.clone()).collect();
+        if row_filter_changed {
+            let top = self
+                .row_scroll
+                .0
+                .borrow()
+                .base_handle
+                .logical_scroll_top()
+                .0;
+            if let Some(index) = super::list_motion::retained_anchor(&self.row_ids, top, &row_ids) {
+                let scroll = self.row_scroll.0.borrow();
+                if let Some(item) = scroll.last_item_size {
+                    let offset = scroll.base_handle.offset();
+                    let within = offset.y + item.item.height * top as f32;
+                    scroll.base_handle.set_offset(gpui_kit::point(
+                        offset.x,
+                        within - item.item.height * index as f32,
+                    ));
+                }
+            }
+            self.row_motion.viewport(
+                window.viewport_size(),
+                self.row_scroll.0.borrow().base_handle.offset(),
+            );
+            self.row_motion.filter_changed();
+        }
+        self.row_ids = row_ids;
         let continuing = session
             .snapshot
             .as_ref()
@@ -169,6 +217,7 @@ impl Render for LibraryView {
             .foreground(foreground)
             .hover(hover)
             .active(accent_soft);
+        self.row_motion.begin_layout();
         column().id("library-view").size_full().min_h(px(0.)).overflow_y_scroll()
             .px(px(24.)).pt(px(if spacious { 40. } else { 32. })).pb(px(32.))
             .gap(px(24.)).bg(background).text_color(foreground)
@@ -209,7 +258,7 @@ impl Render for LibraryView {
                         .border_color(border).rounded(px(8.)).overflow_hidden()
                         .children(continuing.into_iter().map(|media| {
                             let id = media.id.clone();
-                            Button::new(SharedString::from(format!("resume-{id}"))).custom(row_tone)
+                            Button::new(SharedString::from(format!("resume-{id}"))).custom(row_tone).surface_colors(surface, hover, accent_soft)
                                 .w_full().h(px(104.)).px(px(24.)).rounded(px(0.))
                                 .border_l(px(3.)).border_color(accent)
                                 .accessibility_id(format!("library-resume-{id}"))
@@ -293,7 +342,7 @@ impl Render for LibraryView {
                         .child(div().w(px(105.)).child(t("字幕", "Subtitles")))
                         .when(wide, |row| row.child(div().w(px(105.)).child(t("フレーズ", "Phrases"))))
                         .child(div().w(px(150.)).child(t("再生位置 / 長さ", "Position / duration"))))
-                    .child(uniform_list("library-media", rows.len(), move |range,_,_| range.map(|index| {
+                    .child(uniform_list("library-media", rows.len(), move |range,window,cx| range.map(|index| {
                         let media = &rows[index];
                         let id = media.id.clone();
                         let model = model.clone();
@@ -303,7 +352,7 @@ impl Render for LibraryView {
                             "importing" => t("読み込み中", "Importing"),
                             _ => t("ローカルファイル", "Local file"),
                         };
-                        Button::new(("study",index)).custom(row_tone)
+                        row_motion.row(id.clone(), Button::new(("study",index)).motion_identity(format!("study-{id}")).custom(row_tone).surface_colors(surface, hover, accent_soft)
                             .accessibility_id(format!("study-{id}")).accessibility_label(media.title.clone())
                             .w_full().h(px(104.)).px(px(22.)).rounded(px(0.)).border_t_1().border_color(border)
                             .child(row().w_full().gap(px(20.)).text_size(px(13.)).text_color(subdued)
@@ -332,12 +381,17 @@ impl Render for LibraryView {
                                     .child(row().gap(px(4.)).text_size(px(14.)).font_features(tabular_numbers())
                                         .child(div().text_color(foreground).child(timestamp(media.last_position_ms)))
                                         .child(format!("/ {}", if media.duration_ms > 0 { timestamp(media.duration_ms) } else { "—".into() })))
-                                    .when(media.duration_ms > 0, |col| col.child(div().w_full().h(px(3.)).bg(border).rounded(px(2.))
+                                    .when(media.duration_ms > 0, |col| col.child(div().id(SharedString::from(format!("library-progress-{}",media.id)))
+                                        .role(gpui_kit::accesskit::Role::ProgressIndicator)
+                                        .aria_label(t("再生位置", "Playback position"))
+                                        .aria_numeric_value(media.last_position_ms.min(media.duration_ms) as f64)
+                                        .aria_min_numeric_value(0.).aria_max_numeric_value(media.duration_ms as f64)
+                                        .w_full().h(px(3.)).bg(border).rounded(px(2.))
                                         .child(div().h_full().bg(accent).w(relative(
-                                            (media.last_position_ms as f32 / media.duration_ms as f32).clamp(0.,1.)
+                                            super::motion_controls::progress(format!("library-progress-{}-{}", media.id, media.duration_ms), (media.last_position_ms as f32 / media.duration_ms as f32).clamp(0.,1.), window, cx)
                                         )))))))
-                            .on_click(move |_,_,cx| model.update(cx, |session,cx| session.navigate(Route::Study(id.clone()),cx)))
-                    }).collect::<Vec<_>>()).with_horizontal_sizing_behavior(gpui_kit::ListHorizontalSizingBehavior::FitList).w_full().flex_1().min_h(px(0.)))
+                            .on_click(move |_,_,cx| model.update(cx, |session,cx| session.navigate(Route::Study(id.clone()),cx))))
+                    }).collect::<Vec<_>>()).track_scroll(&self.row_scroll).with_horizontal_sizing_behavior(gpui_kit::ListHorizontalSizingBehavior::FitList).w_full().flex_1().min_h(px(0.)))
                     .into_any_element()
             })
     }

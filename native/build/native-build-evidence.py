@@ -17,7 +17,8 @@ if not runtime.is_file():
 recipe_paths = ['native/build/Dockerfile', 'native/build/sources.json', 'native/build/cross-win64.ini',
                 'native/build/toolchain-win64.cmake', 'native/build/native-build.sh',
                 'native/build/native-source-inputs.py', 'native/build/native_source_manifest.py', 'native/build/native-build-evidence.py',
-                'native/build/native_source_archive.py']
+                'native/build/native_source_archive.py',
+                'native/build/patches/mpv-owned-composition-swapchain.patch']
 bundle_inputs = [(workspace / path, 'recipe/' + path) for path in recipe_paths]
 inventory = []
 for source in sources['sources']:

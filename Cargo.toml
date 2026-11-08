@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/core", "crates/tools", "crates/ai", "crates/ai-validation", "crates/desktop"]
-exclude = ["patches/gpui-pre-windows"]
+exclude = ["patches/gpui-pre-windows", "patches/gpui-pre"]
 default-members = ["crates/core", "crates/tools", "crates/ai"]
 resolver = "2"
 
@@ -11,6 +11,7 @@ license = "GPL-3.0-or-later"
 rust-version = "1.99"
 
 [patch.crates-io]
+gpui-pre = { path = "patches/gpui-pre" }
 gpui-pre-windows = { path = "patches/gpui-pre-windows" }
 
 # Keep useful backtraces without full type and variable debug information.

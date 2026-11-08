@@ -1,0 +1,119 @@
+--- a/player/client.h
++++ b/player/client.h
+@@ -42,6 +42,11 @@
+ // m_option.c
+ void *node_get_alloc(struct mpv_node *node);
+ 
++// Private Surtitle runtime extension, deliberately outside the installed API.
++// Success transfers exactly one IDXGISwapChain1 COM reference to the caller.
++MPV_EXPORT int mpv_surtitle_acquire_d3d11_swapchain(struct mpv_handle *ctx,
++                                                 void **out);
++
+ // for vo_libmpv.c
+ struct osd_state;
+ struct mpv_render_context;
+--- a/player/client.c
++++ b/player/client.c
+@@ -42,6 +42,7 @@
+ #include "osdep/timer.h"
+ #include "osdep/io.h"
+ #include "stream/stream.h"
++#include "video/out/vo.h"
+ 
+ #include "command.h"
+ #include "core.h"
+@@ -1486,6 +1487,39 @@
+     };
+     run_locked(ctx, getproperty_fn, &req);
+     return req.status;
++}
++
++struct surtitle_swapchain_request {
++    struct MPContext *mpctx;
++    void *swapchain;
++};
++
++static void surtitle_acquire_swapchain(void *data)
++{
++    struct surtitle_swapchain_request *req = data;
++    // The core dispatch lock keeps video_out and its published swapchain alive
++    // until QueryInterface owns a reference. Never release this lock between
++    // reading the pointer and acquiring ownership.
++    if (req->mpctx->video_out)
++        req->swapchain = vo_acquire_d3d11_swapchain(req->mpctx->video_out);
++}
++
++int mpv_surtitle_acquire_d3d11_swapchain(mpv_handle *ctx, void **out)
++{
++    if (!out)
++        return MPV_ERROR_INVALID_PARAMETER;
++    *out = NULL;
++    if (!ctx)
++        return MPV_ERROR_INVALID_PARAMETER;
++    if (!ctx->mpctx->initialized)
++        return MPV_ERROR_UNINITIALIZED;
++
++    struct surtitle_swapchain_request req = { .mpctx = ctx->mpctx };
++    run_locked(ctx, surtitle_acquire_swapchain, &req);
++    if (!req.swapchain)
++        return MPV_ERROR_PROPERTY_UNAVAILABLE;
++    *out = req.swapchain;
++    return MPV_ERROR_SUCCESS;
+ }
+ 
+ char *mpv_get_property_string(mpv_handle *ctx, const char *name)
+--- a/video/out/vo.h
++++ b/video/out/vo.h
+@@ -555,6 +555,9 @@
+ double vo_get_estimated_vsync_jitter(struct vo *vo);
+ double vo_get_display_fps(struct vo *vo);
+ void * vo_get_display_swapchain(struct vo *vo);
++// Caller must hold the playback core lock. Returns one owned IDXGISwapChain1
++// reference, or NULL when unavailable. Does not wait for the VO render thread.
++void *vo_acquire_d3d11_swapchain(struct vo *vo);
+ double vo_get_delay(struct vo *vo);
+ void vo_discard_timing_info(struct vo *vo);
+ struct vo_frame *vo_get_current_vo_frame(struct vo *vo);
+--- a/video/out/vo.c
++++ b/video/out/vo.c
+@@ -26,6 +26,9 @@
+ #include "mpv_talloc.h"
+ 
+ #include "config.h"
++#if HAVE_D3D11
++#include <dxgi1_2.h>
++#endif
+ #include "osdep/timer.h"
+ #include "osdep/threads.h"
+ #include "misc/dispatch.h"
+@@ -1424,6 +1427,30 @@
+     return vo->display_swapchain;
+ }
+ 
++void *vo_acquire_d3d11_swapchain(struct vo *vo)
++{
++#if HAVE_D3D11
++    // In this pinned backend, initialization publishes display_swapchain before
++    // vo_create's init barrier returns. Only teardown clears/releases it, and
++    // vo_destroy is called under the playback core lock held by our caller.
++    // ResizeBuffers preserves the COM object. Recheck these invariants whenever
++    // updating mpv: reading a borrowed pointer and AddRef'ing later is unsafe.
++    // DXGI explicitly permits concurrent QueryInterface/AddRef/Release. Avoid
++    // VO dispatch here: it can wait for rendering/Present and stall the UI.
++    IUnknown *swapchain = vo->display_swapchain;
++    void *owned = NULL;
++    if (swapchain) {
++        HRESULT hr = swapchain->lpVtbl->QueryInterface(
++            swapchain, &IID_IDXGISwapChain1, &owned);
++        if (FAILED(hr))
++            owned = NULL;
++    }
++    return owned;
++#else
++    return NULL;
++#endif
++}
++
+ // Set specific event flags, and wakeup the playback core if needed.
+ // vo_query_and_reset_events() can retrieve the events again.
+ void vo_event(struct vo *vo, int event)

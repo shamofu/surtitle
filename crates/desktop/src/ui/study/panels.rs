@@ -13,6 +13,36 @@ pub(super) enum CompanionTab {
     Meaning,
 }
 
+impl CompanionTab {
+    pub(super) const ALL: [Self; 5] = [
+        Self::Transcript,
+        Self::Transcription,
+        Self::Suggestions,
+        Self::Tools,
+        Self::Meaning,
+    ];
+
+    pub(super) fn order(self) -> usize {
+        match self {
+            Self::Transcript => 0,
+            Self::Transcription => 1,
+            Self::Suggestions => 2,
+            Self::Tools => 3,
+            Self::Meaning => 4,
+        }
+    }
+
+    pub(super) fn key(self) -> &'static str {
+        match self {
+            Self::Transcript => "transcript",
+            Self::Transcription => "transcription",
+            Self::Suggestions => "suggestions",
+            Self::Tools => "tools",
+            Self::Meaning => "meaning",
+        }
+    }
+}
+
 pub(super) struct BoundCandidate {
     value: VocabularyCandidate,
     cues: Vec<SubtitleSegment>,
@@ -20,6 +50,64 @@ pub(super) struct BoundCandidate {
 }
 
 impl StudyView {
+    /// Every destination, including caption actions and return links, shares
+    /// selection semantics and the same rendered transition channels.
+    pub(super) fn companion_has_focus(&self, window: &Window, cx: &gpui_kit::App) -> bool {
+        self.companion_focus
+            .iter()
+            .any(|focus| focus.contains_focused(window, cx))
+    }
+
+    pub(super) fn select_companion(
+        &mut self,
+        tab: CompanionTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if tab != self.companion_tab || !self.companion_open {
+            let transfer_focus = self.companion_has_focus(window, cx);
+            gpui_kit::base::TextSelection::clear(window, cx);
+            if transfer_focus {
+                let focus = if tab == CompanionTab::Transcript {
+                    self.search.read(cx).focus_handle(cx)
+                } else {
+                    self.companion_focus[tab.order()].clone()
+                };
+                focus.focus(window, cx);
+            }
+        }
+        self.companion_tab = tab;
+        self.companion_open = true;
+        if tab == CompanionTab::Suggestions {
+            self.refresh_candidates(cx);
+        }
+        cx.notify();
+    }
+
+    pub(super) fn toggle_companion(
+        &mut self,
+        tab: CompanionTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.companion_open && self.companion_tab == tab {
+            self.close_companion(window, cx);
+        } else {
+            self.select_companion(tab, window, cx);
+        }
+    }
+
+    pub(super) fn close_companion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.companion_open {
+            gpui_kit::base::TextSelection::clear(window, cx);
+            if self.companion_has_focus(window, cx) {
+                self.focus.focus(window, cx);
+            }
+        }
+        self.companion_open = false;
+        cx.notify();
+    }
+
     pub(super) fn tools_panel(&self, cx: &mut Context<Self>) -> gpui_kit::Stateful<gpui_kit::Div> {
         let ja = self.session.read(cx).text("ja", "en") == "ja";
         let t = |ja_text, en_text| if ja { ja_text } else { en_text };
@@ -193,9 +281,7 @@ impl StudyView {
         self.meaning_resume = player.position_ms;
         self.meaning_visible = true;
         self.control("pause", None, cx);
-        self.companion_open = true;
-        self.companion_tab = CompanionTab::Meaning;
-        cx.notify();
+        self.select_companion(CompanionTab::Meaning, window, cx);
     }
 
     fn meaning_stale(&self, cx: &gpui_kit::App) -> bool {
@@ -303,7 +389,7 @@ impl StudyView {
             .map(|(first, last)| (first.start_ms, last.end_ms));
         column().id("study-meaning-panel").flex_1().min_h(px(0.)).overflow_y_scroll().p_5().gap_4()
             .child(compact_button("meaning-back-transcript").ghost().icon(IconName::ArrowLeft).label(t("字幕一覧へ戻る", "Back to transcript"))
-                .on_click(cx.listener(|this, _, _, cx| {this.companion_tab = CompanionTab::Transcript; cx.notify();})))
+                .on_click(cx.listener(|this, _, window, cx| this.select_companion(CompanionTab::Transcript, window, cx))))
             .when(stale, |body| body.child(div().text_color(cx.theme().warning).child(t("出典の字幕が変わりました。字幕や表現を選び直してください。", "The source subtitles changed. Select the subtitles or phrase again."))))
             .child(div().text_size(px(21.)).line_height(gpui_kit::relative(1.65)).child(gpui_kit::base::SelectableText::new("meaning-source", source)))
             .when_some(self.meaning_term.clone(), |body, term| body.child(div().text_size(px(18.)).pl_3().border_l_2().border_color(cx.theme().primary).text_color(cx.theme().primary).child(term)))
@@ -335,12 +421,11 @@ impl StudyView {
             .child(button("save-meaning-phrase").primary().icon(IconName::BookmarkPlus).label(t("フレーズを保存", "Save phrase")).mt_4().w_full().disabled(disabled)
                 .on_click(cx.listener(|this, _, _, cx| this.edit_meaning("phrase", cx))))
             .child(button("meaning-resume").icon(IconName::Play).label(t("元の位置から再生を再開", "Resume from the original position")).mt_6().w_full().disabled(playback_disabled)
-                .on_click(cx.listener(|this, _, _, cx| {
+                .on_click(cx.listener(|this, _, window, cx| {
                     this.set_loop(None,cx);
                     this.control("seek",Some(this.meaning_resume as f64),cx);
                     this.control("play",None,cx);
-                    this.companion_tab = CompanionTab::Transcript;
-                    cx.notify();
+                    this.select_companion(CompanionTab::Transcript, window, cx);
                 })))
     }
 
@@ -485,17 +570,13 @@ impl StudyView {
                 .into_iter()
                 .map(|label| Tab::new().label(label)),
             )
-            .on_click(cx.listener(|this, index: &usize, _, cx| {
-                this.companion_tab = match index {
+            .on_click(cx.listener(|this, index: &usize, window, cx| {
+                let tab = match index {
                     1 => CompanionTab::Transcription,
                     2 => CompanionTab::Suggestions,
                     _ => CompanionTab::Transcript,
                 };
-                this.companion_open = true;
-                if this.companion_tab == CompanionTab::Suggestions {
-                    this.refresh_candidates(cx);
-                }
-                cx.notify();
+                this.select_companion(tab, window, cx);
             }))
     }
 

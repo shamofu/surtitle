@@ -733,7 +733,7 @@ impl StudyView {
             .to_owned();
         let error_owner = owner.clone();
         gpui_kit::App::defer(cx, move |cx| {
-            if let Err(error) = gpui_kit::open_window(
+            if let Err(error) = crate::desktop::dialog::open_window(
                 gpui_kit::WindowOptions {
                     titlebar: Some(gpui_kit::TitlebarOptions {
                         title: Some(title.into()),
@@ -918,12 +918,12 @@ impl Render for PlaybackSettings {
                     && event.keystroke.modifiers == Default::default()
                 {
                     cx.stop_propagation();
-                    window.remove_window();
+                    crate::desktop::dialog::request_close(window, cx);
                 }
             })
             .child(row().justify_between()
                 .child(div().text_size(px(24.)).font_weight(gpui_kit::FontWeight::SEMIBOLD).child(t("再生設定","Playback settings")))
-                .child(icon_button("close-playback-settings",IconName::X,t("閉じる","Close")).on_click(|_,window,_|window.remove_window())))
+                .child(icon_button("close-playback-settings",IconName::X,t("閉じる","Close")).on_click(|_,window,cx| { crate::desktop::dialog::request_close(window,cx); })))
             .child(column().gap_2().child(div().text_size(px(14.)).child(t("字幕のない間","Between captions"))).child(mode_selector))
             .when_some(mode_error,|body,error|body.child(column().gap_2().p_3().bg(cx.theme().button_warning)
                 .child(div().text_color(cx.theme().button_warning_foreground).child(error))
@@ -955,8 +955,8 @@ impl Render for PlaybackSettings {
                     let Some(owner)=this.owner.upgrade()else{return;};
                     if !owner.read(cx).playback_ready(cx)||owner.read(cx).sources.read(cx).frozen(){return;}
                     let media_id=owner.read(cx).media_id.clone();
-                    this.session.update(cx,|_,cx|cx.emit(UiEvent::ManageSubtitles{media_id,stream_index}));
-                    window.remove_window();
+                    let session=this.session.clone();
+                    crate::desktop::dialog::close_then(window,cx,move|cx|{session.update(cx,|_,cx|cx.emit(UiEvent::ManageSubtitles{media_id,stream_index}));});
                 }))))
             .child(button("sentence-pause").ghost().icon(if sentence_pause{IconName::SquareCheck}else{IconName::Square})
                 .role(gpui_kit::accesskit::Role::CheckBox).toggled(sentence_pause)

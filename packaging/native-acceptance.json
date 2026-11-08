@@ -15,7 +15,7 @@
     {
       "id": "dpi-video-bounds",
       "method": "native-uia",
-      "purpose": "Accessible viewport and physical native child agree at the observed window DPI"
+      "purpose": "Actual composed fixture pixels match the aspect-fitted accessible viewport at the observed window DPI"
     },
     {
       "id": "fullscreen",

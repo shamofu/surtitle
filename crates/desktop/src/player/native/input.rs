@@ -13,11 +13,27 @@ struct SurfaceInput {
     click: Arc<dyn Fn() + Send + Sync>,
     pressed: Cell<Option<(i32, i32)>>,
     blocked: Cell<bool>,
+    delegate_input: bool,
 }
 
 /// Only our GUI-thread host is subclassed. In wid mode mpv creates a disabled
 /// child on its own thread, so Windows routes its mouse input to this host.
 pub(super) fn install(hwnd: HWND, click: Arc<dyn Fn() + Send + Sync>) -> Result<()> {
+    let parent = unsafe { GetParent(hwnd) };
+    // A composition-backed GPUI owner paints controls above this HWND. Its
+    // hitboxes must also receive input there, including while child geometry
+    // still covers part of a moving panel. Standalone native owners retain the
+    // native callback and capture behavior.
+    let delegate_input = !parent.is_null()
+        && unsafe { gpui_windows::window_frame_update(parent as isize) }.is_some();
+    install_with_routing(hwnd, click, delegate_input)
+}
+
+fn install_with_routing(
+    hwnd: HWND,
+    click: Arc<dyn Fn() + Send + Sync>,
+    delegate_input: bool,
+) -> Result<()> {
     unsafe {
         ensure!(
             GetWindowLongPtrW(hwnd, GWLP_USERDATA) == 0,
@@ -30,6 +46,7 @@ pub(super) fn install(hwnd: HWND, click: Arc<dyn Fn() + Send + Sync>) -> Result<
             click,
             pressed: Cell::new(None),
             blocked: Cell::new(false),
+            delegate_input,
         }));
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, input as isize);
         if GetWindowLongPtrW(hwnd, GWLP_USERDATA) != input as isize {
@@ -97,7 +114,7 @@ unsafe extern "system" fn surface_proc(
             // STATIC otherwise returns HTTRANSPARENT and passes clicks through
             // the video to underlying windows. No parent STN_CLICKED is needed.
             WM_NCHITTEST => {
-                return if (*input).blocked.get() {
+                return if (*input).delegate_input || (*input).blocked.get() {
                     HTTRANSPARENT as LRESULT
                 } else {
                     HTCLIENT as LRESULT
@@ -105,7 +122,11 @@ unsafe extern "system" fn surface_proc(
             }
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
                 let position = point(lparam);
-                if !(*input).blocked.get() && IsWindowVisible(hwnd) != 0 && inside(hwnd, position) {
+                if !(*input).delegate_input
+                    && !(*input).blocked.get()
+                    && IsWindowVisible(hwnd) != 0
+                    && inside(hwnd, position)
+                {
                     (*input).pressed.set(Some(position));
                     SetCapture(hwnd);
                 }
@@ -124,7 +145,8 @@ unsafe extern "system" fn surface_proc(
                     .pressed
                     .take()
                     .filter(|start| {
-                        !(*input).blocked.get()
+                        !(*input).delegate_input
+                            && !(*input).blocked.get()
                             && IsWindowVisible(hwnd) != 0
                             && inside(hwnd, point(lparam))
                             && !moved(*start, point(lparam))
@@ -175,7 +197,13 @@ mod tests {
             let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
             let hwnd = unsafe {
                 CreateWindowExW(
-                    0,
+                    // Message-driven fixtures must not steal foreground focus
+                    // from concurrently running native placement regressions.
+                    if parent.is_null() {
+                        WS_EX_NOACTIVATE
+                    } else {
+                        0
+                    },
                     class.as_ptr(),
                     ptr::null(),
                     style,
@@ -207,6 +235,37 @@ mod tests {
         unsafe {
             SendMessageW(hwnd, message, 0, at(x, y));
         }
+    }
+
+    #[test]
+    fn composition_parent_receives_pointer_input_without_native_click_or_capture() {
+        let parent = Window::new(ptr::null_mut(), WS_POPUP | WS_VISIBLE);
+        let host = Window::new(parent.0, WS_CHILD | WS_VISIBLE);
+        let clicks = Arc::new(AtomicUsize::new(0));
+        let observed = clicks.clone();
+        install_with_routing(
+            host.0,
+            Arc::new(move || {
+                observed.fetch_add(1, Ordering::Relaxed);
+            }),
+            true,
+        )
+        .unwrap();
+        for blocked in [false, true, false] {
+            set_blocked(host.0, blocked);
+            unsafe {
+                assert_eq!(
+                    SendMessageW(host.0, WM_NCHITTEST, 0, 0),
+                    HTTRANSPARENT as isize,
+                    "GPUI hitboxes own video, moving panels, and deferred overlays"
+                );
+            }
+            send(host.0, WM_LBUTTONDOWN, 10, 10);
+            assert_ne!(unsafe { GetCapture() }, host.0);
+            send(host.0, WM_LBUTTONUP, 10, 10);
+        }
+        assert_eq!(clicks.load(Ordering::Relaxed), 0);
+        assert_ne!(unsafe { IsWindowVisible(host.0) }, 0);
     }
 
     #[test]

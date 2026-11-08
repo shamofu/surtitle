@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Explicit AI estimates, durable unfinished flows, and local result review.
+use crate::ui::style::Button;
 use gpui_kit::base::{Disableable, TestSupportExt};
 mod draft_study;
 mod manual;
@@ -17,7 +18,7 @@ use crate::{
     application::{ai::AiQuote, continuations::AiContinuation, operations::OperationProgress},
     commands,
 };
-use gpui_kit::component::{ActiveTheme, button::Button};
+use gpui_kit::component::ActiveTheme;
 use gpui_kit::{
     AppContext, Context, Entity, IntoElement, Subscription, TitlebarOptions, Window, WindowOptions,
     div, prelude::*, px, size,
@@ -1376,7 +1377,7 @@ pub(super) fn open_dialog<V: Render + 'static>(
     } else {
         title
     };
-    gpui_kit::open_window(
+    crate::desktop::dialog::open_window(
         WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some(title.to_owned().into()),

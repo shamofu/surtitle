@@ -14,6 +14,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'production-uia-common.ps1')
+. (Join-Path $PSScriptRoot 'production-video-pixels.ps1')
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $identity = Get-Content -LiteralPath (Join-Path $workspace 'packaging/app.json') -Raw | ConvertFrom-Json
 if ($AppId -ne $identity.identifier -and $AppId -notmatch '^app\.surtitle\.evaluation\.[a-z0-9]+$') { throw 'Unknown application identity.' }
@@ -102,16 +103,22 @@ function Same-Rect($Left,$Right,[double]$Tolerance=2) {
 }
 function Assert-Viewport {
     $native=@(Native 'inspect'); $root=$native[0]
-    $video=@($native|Where-Object{$_.parent -eq $mainHandle -and $_.visible -and $_.className -ieq 'STATIC'})
-    if($video.Count -ne 1){throw 'Expected one visible native video child'}
+    $toggle=Find-Id 'play-toggle'
+    if(-not [SurtitleProductionUia]::IsPaused($toggle)){[SurtitleProductionUia]::Activate($toggle)}
+    Wait-For { [SurtitleProductionUia]::IsPaused((Find-Id 'play-toggle')) } 'paused pixel observation'
+    $slider=[SurtitleProductionUia]::Slider([SurtitleProductionUia]::FromHandle($mainHandle),'Playback position','再生位置')
+    [SurtitleProductionUia]::SetRange($slider,10000,1000)
+    Wait-For { [Math]::Abs([SurtitleProductionUia]::Range($slider,10000)-1000)-lt 200 } 'pixel fixture seek'
     $bounds=[SurtitleProductionUia]::Bounds((Find-Id 'player-viewport'))
     $expected=@{Left=$bounds[0];Top=$bounds[1];Right=$bounds[0]+$bounds[2];Bottom=$bounds[1]+$bounds[3]}
-    if(-not (Same-Rect $video[0].screen $expected)){throw 'Native child physical bounds disagree with accessible video viewport'}
-    return @{windowDpi=$root.dpi;viewport=$expected;nativeVideo=$video[0];root=$root}
+    $pixels=Assert-ProductionVideoPixels $app $Fixture $Output (Find-Id 'player-viewport') $slider $currentCase
+    return @{windowDpi=$root.dpi;viewport=$expected;composedVideo=$pixels;root=$root}
 }
 try {
     [IO.File]::Copy($ProductionSmoke,$copy,$false)
+    Copy-ProductionPixelEvidence $ProductionSmoke ([IO.Path]::GetDirectoryName($Output))
     Mark-Passed 'production-playback' 'Matching installed production smoke observed metadata, video, progress, pause, seek and zero AI activity.' $smoke
+    $records['production-playback'].evidence=@($smoke.pixelEvidence | ForEach-Object { @{path=$_.path;sha256=$_.sha256} })
     $currentCase='window-geometry'
     Start-App; Open-Study
     $initial=@(Native 'inspect')[0]; $monitor=Native 'monitor'
@@ -138,7 +145,8 @@ try {
     Open-Study
     $currentCase='dpi-video-bounds'
     $bounds=Assert-Viewport
-    Mark-Passed 'dpi-video-bounds' 'Accessible physical viewport agrees with its visible native child at the recorded window DPI.' $bounds
+    Mark-Passed 'dpi-video-bounds' 'Owned captured pixels match the fixture and aspect-fitted accessible viewport at the recorded window DPI; the capture method is recorded in the evidence.' $bounds
+    $records['dpi-video-bounds'].evidence=@(@{path=$bounds.composedVideo.path;sha256=$bounds.composedVideo.sha256})
     $currentCase='fullscreen'
     $beforeFull=@(Native 'inspect')[0]
     [SurtitleProductionUia]::Activate((Find-Id 'player-fullscreen'))
@@ -146,7 +154,8 @@ try {
     $full=Assert-Viewport
     [SurtitleProductionUia]::Activate((Find-Id 'player-fullscreen'))
     Wait-For { Same-Rect (@(Native 'inspect')[0]).screen $beforeFull.screen } 'fullscreen restore'
-    Mark-Passed 'fullscreen' 'Native fullscreen filled its monitor, retained matching video bounds, and restored the prior window.' @{before=$beforeFull;fullscreen=$full;after=@(Native 'inspect')[0]}
+    Mark-Passed 'fullscreen' 'Native fullscreen filled its monitor, displayed matching fixture pixels in its accessible viewport, and restored the prior window.' @{before=$beforeFull;fullscreen=$full;after=@(Native 'inspect')[0]}
+    $records['fullscreen'].evidence=@(@{path=$full.composedVideo.path;sha256=$full.composedVideo.sha256})
     $currentCase='owned-dialog-focus'
     [SurtitleProductionUia]::Focus((Find-Id 'study-manage-media'))
     [SurtitleProductionUia]::Activate((Find-Id 'study-manage-media'))
@@ -193,9 +202,9 @@ $detailsPath=Join-Path ([IO.Path]::GetDirectoryName($Output)) 'native-observatio
 Write-NewJson $detailsPath $observations
 $detailHash=(Get-FileHash -LiteralPath $detailsPath -Algorithm SHA256).Hash.ToLowerInvariant()
 foreach($record in $records.Values){
-    if($record.status -ne 'not_run'){$record.evidence=@(@{path='native-observations.json';sha256=$detailHash})}
+    if($record.status -ne 'not_run'){$record.evidence+=@(@{path='native-observations.json';sha256=$detailHash})}
 }
-if(Test-Path -LiteralPath $copy){$records['production-playback'].evidence=@(@{path='production-smoke.json';sha256=(Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash.ToLowerInvariant()})}
+if(Test-Path -LiteralPath $copy){$records['production-playback'].evidence+=@(@{path='production-smoke.json';sha256=(Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash.ToLowerInvariant()})}
 $allPassed=@($records.Values|Where-Object{$_.status -ne 'passed'}).Count -eq 0 -and $paidRequests -eq 0
 $report=[ordered]@{schemaVersion=$inventory.schemaVersion;suite=$inventory.suite;executableSha256=$receipt.executableSha256;installerSha256=$receipt.installerSha256;sourceRevision=$receipt.sourceRevision;normalBuild=$true;paidRequests=$paidRequests;passed=$allPassed;cases=@($records.Values);limitations=@('Only the observed monitor DPI is covered by automated bounds checks.','UIAutomation ValuePattern does not establish physical keyboard, Japanese IME or candidate-window behavior.','The automated UIA phase alone makes no direct-listening, audio-output, long-media or GPU-efficiency claim; completed external phases identify their own measurements.','The external cases in the authoritative inventory remain required; not_run blocks release, including display/monitor, keyboard/clipboard/screen-reader and current 1080p60/4K30 workload measurements.')}
 Write-NewJson $Output $report

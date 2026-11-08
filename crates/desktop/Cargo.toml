@@ -33,6 +33,7 @@ tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 
 [target.'cfg(windows)'.dependencies]
+gpui-windows = { package = "gpui-pre-windows", version = "=0.3.11", default-features = false }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_System_LibraryLoader"] }
 
 [features]

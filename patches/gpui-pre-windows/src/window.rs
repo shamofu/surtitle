@@ -50,6 +50,7 @@ pub struct WindowsWindowState {
     pub border_offset: WindowBorderOffset,
     pub appearance: Cell<WindowAppearance>,
     pub background_appearance: Cell<WindowBackgroundAppearance>,
+    pub(crate) opaque_redirection: bool,
     pub scale_factor: Cell<f32>,
     pub restore_from_minimized: Cell<Option<Box<dyn FnMut(RequestFrameOptions)>>>,
 
@@ -73,6 +74,8 @@ pub struct WindowsWindowState {
     /// and when a forced render was requested while another draw was in
     /// progress and had to be deferred.
     pub force_render_pending: Cell<bool>,
+    pub(crate) dialog_surface: crate::dialog_surface::SurfaceState,
+    pub(crate) frame_update: crate::frame_update::PendingFrameUpdate,
 
     pub click_state: ClickState,
     pub current_cursor: Cell<Option<HCURSOR>>,
@@ -112,6 +115,15 @@ pub(crate) struct WindowsWindowInner {
 }
 
 impl WindowsWindowState {
+    pub(crate) fn paint_opaque_backing(&self) -> Result<()> {
+        if self.opaque_redirection
+            && self.background_appearance.get() == WindowBackgroundAppearance::Opaque
+        {
+            paint_opaque_backing(self.hwnd)?;
+        }
+        Ok(())
+    }
+
     fn new(
         hwnd: HWND,
         directx_devices: &DirectXDevices,
@@ -166,6 +178,8 @@ impl WindowsWindowState {
             border_offset,
             appearance: Cell::new(appearance),
             background_appearance: Cell::new(WindowBackgroundAppearance::Opaque),
+            opaque_redirection: !disable_direct_composition
+                && !window_params.dwExStyle.contains(WS_EX_NOREDIRECTIONBITMAP),
             scale_factor: Cell::new(scale_factor),
             restore_from_minimized: Cell::new(restore_from_minimized),
             min_size,
@@ -180,6 +194,8 @@ impl WindowsWindowState {
             last_visibility: Cell::new(None),
             renderer: RefCell::new(renderer),
             force_render_pending: Cell::new(false),
+            dialog_surface: Default::default(),
+            frame_update: Default::default(),
             click_state,
             current_cursor: Cell::new(current_cursor),
             cursor_visible,
@@ -255,7 +271,41 @@ impl WindowsWindowState {
     }
 }
 
+fn paint_opaque_backing(hwnd: HWND) -> Result<()> {
+    unsafe {
+        let mut rect = RECT::default();
+        GetClientRect(hwnd, &mut rect)?;
+        let dc = GetDC(Some(hwnd));
+        anyhow::ensure!(!dc.is_invalid(), "obtaining opaque parent backing DC");
+        // GPUI's parent has no WS_CLIPCHILDREN: initialize pixels behind the
+        // child too, so a later move cannot reveal unpainted redirection pixels.
+        let painted = FillRect(dc, &rect, HBRUSH(GetStockObject(BLACK_BRUSH).0));
+        ReleaseDC(Some(hwnd), dc);
+        anyhow::ensure!(painted != 0, "painting opaque parent backing");
+        GdiFlush().ok()?;
+    }
+    Ok(())
+}
+
 impl WindowsWindowInner {
+    pub(crate) fn apply_hidden_placement(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !unsafe { IsWindowVisible(self.hwnd) }.as_bool(),
+            "dialog must be created hidden"
+        );
+        if let Some(status) = self.state.initial_placement.take() {
+            let mut placement = status.placement;
+            placement.showCmd = SW_HIDE.0 as u32;
+            unsafe {
+                SetWindowPlacement(self.hwnd, &placement)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn native_hwnd(&self) -> HWND {
+        self.hwnd
+    }
     /// Whether the window is being presented: shown and not minimized. Windows
     /// has no notification for a window fully covered by other windows, so
     /// that case reports `Visible`.
@@ -512,7 +562,10 @@ impl WindowsWindow {
 
             (dwexstyle, dwstyle)
         };
-        if !disable_direct_composition {
+        // Normal opaque windows retain the system's opaque redirection surface.
+        // A lower DComp visual is child-clipped and can expose the desktop while
+        // a child HWND's movement and its clipping update reach DWM separately.
+        if !disable_direct_composition && params.kind != WindowKind::Normal {
             dwexstyle |= WS_EX_NOREDIRECTIONBITMAP;
         }
 
@@ -920,6 +973,31 @@ impl PlatformWindow for WindowsWindow {
         self.state.background_appearance.set(background_appearance);
         let hwnd = self.0.hwnd;
 
+        if self.state.opaque_redirection {
+            unsafe {
+                let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+                let next = if background_appearance == WindowBackgroundAppearance::Opaque {
+                    style & !WS_EX_NOREDIRECTIONBITMAP.0
+                } else {
+                    style | WS_EX_NOREDIRECTIONBITMAP.0
+                };
+                if next != style {
+                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next as isize);
+                    SetWindowPos(
+                        hwnd,
+                        None,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                    )
+                    .log_err();
+                }
+            }
+            self.state.paint_opaque_backing().log_err();
+        }
+
         // using Dwm APIs for Mica and MicaAlt backdrops.
         // others follow the set_window_composition_attribute approach
         match background_appearance {
@@ -1037,11 +1115,15 @@ impl PlatformWindow for WindowsWindow {
     }
 
     fn draw(&self, scene: &Scene) {
-        self.state
-            .renderer
-            .borrow_mut()
-            .draw(scene, self.state.background_appearance.get())
-            .log_err();
+        let result = {
+            let mut renderer = self.state.renderer.borrow_mut();
+            let rendered = renderer.render_frame(scene, self.state.background_appearance.get());
+            self.state
+                .frame_update
+                .present(rendered, || renderer.present())
+        };
+        self.0.dialog_frame_result(&result);
+        result.log_err();
     }
 
     #[cfg(feature = "test-support")]
@@ -1455,6 +1537,11 @@ enum WindowOpenState {
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("Zed::Window");
 
+pub(crate) fn is_gpui_window(hwnd: HWND) -> bool {
+    // Do not interpret another native window's GWLP_USERDATA as our Weak.
+    (unsafe { GetClassLongPtrW(hwnd, GCLP_WNDPROC) }) == window_procedure as *const () as usize
+}
+
 fn register_window_class(icon_handle: HICON) {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
@@ -1503,7 +1590,9 @@ unsafe extern "system" fn window_procedure(
     let result = if let Some(inner) = inner.upgrade() {
         if msg == WM_NCDESTROY {
             inner.dialog_owner.close();
+            inner.dialog_destroyed();
         }
+        inner.dialog_native_event(msg);
         inner.handle_msg(hwnd, msg, wparam, lparam)
     } else {
         unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
@@ -1720,6 +1809,110 @@ mod tests {
     use super::ClickState;
     use gpui::{DevicePixels, MouseButton, point};
     use std::time::Duration;
+
+    #[test]
+    fn opaque_parent_backing_covers_child_history_and_resize() {
+        use super::*;
+        struct OwnedWindow(HWND);
+        impl Drop for OwnedWindow {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = DestroyWindow(self.0);
+                }
+            }
+        }
+        unsafe {
+            let parent = OwnedWindow(
+                CreateWindowExW(
+                    WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+                    w!("STATIC"),
+                    w!("opaque parent backing regression"),
+                    WS_POPUP | WS_VISIBLE,
+                    16,
+                    16,
+                    96,
+                    64,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            );
+            let child = OwnedWindow(
+                CreateWindowExW(
+                    WS_EX_NOACTIVATE,
+                    w!("STATIC"),
+                    w!("moving native child"),
+                    WS_CHILD | WS_VISIBLE,
+                    32,
+                    16,
+                    40,
+                    32,
+                    Some(parent.0),
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            );
+            // Poison the parent's persistent pixels, including beneath the child.
+            let dc = GetDC(Some(parent.0));
+            let brush = CreateSolidBrush(COLORREF(0x00ff00ff));
+            let rect = RECT {
+                left: 0,
+                top: 0,
+                right: 96,
+                bottom: 64,
+            };
+            assert_ne!(FillRect(dc, &rect, brush), 0);
+            ReleaseDC(Some(parent.0), dc);
+            let _ = DeleteObject(brush.into());
+            paint_opaque_backing(parent.0).unwrap();
+            let dc = GetDC(Some(parent.0));
+            assert_eq!(
+                GetPixel(dc, 60, 24),
+                COLORREF(0),
+                "backing is initialized even while covered by the child"
+            );
+            ReleaseDC(Some(parent.0), dc);
+            SetWindowPos(
+                child.0,
+                None,
+                0,
+                16,
+                40,
+                32,
+                SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOREDRAW,
+            )
+            .unwrap();
+            let dc = GetDC(Some(parent.0));
+            assert_eq!(
+                GetPixel(dc, 60, 24),
+                COLORREF(0),
+                "vacated child pixels retain opaque black backing"
+            );
+            ReleaseDC(Some(parent.0), dc);
+            SetWindowPos(
+                parent.0,
+                None,
+                0,
+                0,
+                160,
+                100,
+                SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER,
+            )
+            .unwrap();
+            paint_opaque_backing(parent.0).unwrap();
+            let dc = GetDC(Some(parent.0));
+            assert_eq!(
+                GetPixel(dc, 140, 90),
+                COLORREF(0),
+                "new parent extent is initialized before transparent UI submission"
+            );
+            ReleaseDC(Some(parent.0), dc);
+        }
+    }
 
     #[test]
     fn test_double_click_interval() {

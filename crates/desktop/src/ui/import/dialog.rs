@@ -1,4 +1,5 @@
 use super::{ImportWorkspace, Status, languages};
+use crate::ui::style::Button;
 use crate::ui::{
     session::{Route, Session, UiEvent},
     style::*,
@@ -6,7 +7,7 @@ use crate::ui::{
 use gpui_kit::base::{Disableable, StyledExt, TestSupportExt};
 use gpui_kit::component::{
     ActiveTheme,
-    button::{Button, ButtonVariants},
+    button::ButtonVariants,
     input::{Input, InputEditsEvent, InputState},
 };
 use gpui_kit::{
@@ -210,13 +211,13 @@ impl Render for ImportDialog {
                             .child(muted(format!("{status}{}",item.reason.as_ref().map(|reason|format!(" · {}",reason_text(reason,ja))).unwrap_or_default())))
                             .when_some(item.error.clone(),|body,error|body.child(div().text_color(cx.theme().danger).child(error))))
                         .child(div().h(px(30.)).children(media.map(|media|Button::new(("open-import",id as usize)).label(t("開く","Open")).accessibility_id(format!("import-open-{id}")).disabled(disabled)
-                            .on_click(cx.listener(move|this,_,window,cx|{this.session.update(cx,|session,cx|session.navigate(Route::Study(media.clone()),cx));window.remove_window();})))))
+                            .on_click(cx.listener(move|this,_,window,cx|{let session=this.session.clone();let media=media.clone();crate::desktop::dialog::close_then(window,cx,move|cx|{session.update(cx,|session,cx|session.navigate(Route::Study(media),cx));});})))))
                 })))
             .child(muted(if busy{format!("{}  {completed} / {}",t("ファイルを追加中","Adding files"),view.rows.len())}else{format!("{} / {}",completed,view.rows.len())}))
             .child(div().id("import-error").h(px(36.)).flex_shrink_0().overflow_y_scroll()
                 .children(view.error.clone().map(|error|div().text_color(cx.theme().danger).child(error))))
             .child(row().justify_between()
-                .child(Button::new("close-import").label(t("閉じる","Close")).accessibility_id("import-close").on_click(|_,window,_|window.remove_window()))
+                .child(Button::new("close-import").label(t("閉じる","Close")).accessibility_id("import-close").on_click(|_,window,cx| { crate::desktop::dialog::request_close(window,cx); }))
                 .child(row()
                     .child(Button::new("retry-import").label(t("保存・失敗したファイルを再試行","Retry saving or failed files")).accessibility_id("import-retry").disabled(!view.retryable)
                         .on_click(cx.listener(move|this,_,_,cx|{this.workspace.update(cx,|workspace,cx|workspace.retry(Some(failed.clone()),true,cx));})))

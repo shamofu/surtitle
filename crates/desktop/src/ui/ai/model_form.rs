@@ -3,6 +3,7 @@
 //! are separate; an estimate uses only a fully validated preference snapshot.
 use super::persistence::Persistence;
 use super::{locale_format, localized};
+use crate::ui::style::Button;
 use crate::{
     commands,
     ui::{
@@ -13,7 +14,6 @@ use crate::{
 use gpui_kit::base::Disableable;
 use gpui_kit::component::{
     ActiveTheme,
-    button::Button,
     input::{Input, InputEditsEvent, InputState},
 };
 use gpui_kit::{AppContext, Context, Entity, EventEmitter, Subscription, Window, prelude::*};

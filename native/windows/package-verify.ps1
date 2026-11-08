@@ -32,11 +32,20 @@ Copy-Item -LiteralPath ($installer.FullName + '.build.json') -Destination $relea
 foreach ($name in @('native-smoke.json', 'installer-smoke.json', 'production-smoke.json')) {
     Copy-Item -LiteralPath (Join-Path 'work/artifacts' $name) -Destination $releaseDir
 }
+. (Join-Path $PSScriptRoot 'production-uia-common.ps1')
+. (Join-Path $PSScriptRoot 'production-video-pixels.ps1')
+Copy-ProductionPixelEvidence (Join-Path $workspace 'work/artifacts/production-smoke.json') $releaseDir
+$productionPixelNames = @((Get-Content -LiteralPath (Join-Path $releaseDir 'production-smoke.json') -Raw | ConvertFrom-Json).pixelEvidence.path)
 if ($verifyNative) {
     foreach ($file in Get-ChildItem -LiteralPath 'work/artifacts/native-acceptance' -File) {
         # Evidence references are relative to the comprehensive report. Keep those
         # exact file names together in release staging; publication uploads payloads only.
         if ($file.Name -eq 'production-smoke.json') { continue }
+        # The identical production crops were already copied from their smoke.
+        if ($file.Name -in $productionPixelNames) {
+            if ((Get-FileHash -LiteralPath $file.FullName).Hash -ine (Get-FileHash -LiteralPath (Join-Path $releaseDir $file.Name)).Hash) { throw 'Archived production pixel evidence changed.' }
+            continue
+        }
         if (Test-Path -LiteralPath (Join-Path $releaseDir $file.Name)) { throw 'Native acceptance evidence collides with a release asset.' }
         Copy-Item -LiteralPath $file.FullName -Destination $releaseDir
     }

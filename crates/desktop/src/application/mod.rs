@@ -200,7 +200,8 @@ impl Services {
     pub fn playback_tick(&self, persist: bool) -> Result<PlayerState> {
         self.playback.tick(&self.db, persist)
     }
-    /// Apply native geometry synchronously during the owning GUI thread's prepaint.
+    /// Stage native geometry during prepaint; the Windows owner applies it after
+    /// GPU encoding immediately before its corresponding frame is submitted.
     pub(crate) fn set_player_bounds(&self, bounds: crate::player::Bounds) -> Result<()> {
         self.playback.operation()?.control(&crate::player::Control {
             action: "bounds".into(),

@@ -13,19 +13,16 @@ impl Region {
         Ok(Self(handle))
     }
 
+    #[cfg(test)]
     fn occlusion(bounds: &Bounds, exclusion: &SurfaceOcclusion) -> Result<Self> {
-        let diameter = (exclusion.border_radius * 2.)
-            .min(exclusion.rect.width)
-            .min(exclusion.rect.height);
-        let diameter = (diameter * bounds.scale_factor).round() as i32;
+        let (rect, diameter) = occlusion_shape(bounds, exclusion);
+        Self::rounded(rect, diameter)
+    }
+
+    fn rounded(rect: [i32; 4], diameter: i32) -> Result<Self> {
         if diameter <= 0 {
-            return Self::rectangle(rectangle(bounds, &exclusion.rect, true));
+            return Self::rectangle(rect);
         }
-        // Round the original card, not its intersection with the player: a card
-        // crossing the video edge must not acquire corners at that cut edge.
-        let rect = physical_rectangle(bounds, &exclusion.rect, true);
-        // Unlike CreateRectRgn, GDI's rounded rectangle drops the last row and
-        // column. Include them so the opaque right/bottom borders stay covered.
         let handle = unsafe {
             CreateRoundRectRgn(
                 rect[0],
@@ -43,6 +40,22 @@ impl Region {
         Ok(Self(handle))
     }
 }
+
+fn occlusion_shape(bounds: &Bounds, exclusion: &SurfaceOcclusion) -> ([i32; 4], i32) {
+    let diameter = (exclusion.border_radius * 2.)
+        .min(exclusion.rect.width)
+        .min(exclusion.rect.height);
+    let diameter = (diameter * bounds.scale_factor).round() as i32;
+    if diameter <= 0 {
+        return (rectangle(bounds, &exclusion.rect, true), diameter);
+    }
+    // Round the original card, not its intersection with the player: a card
+    // crossing the video edge must not acquire corners at that cut edge.
+    let rect = physical_rectangle(bounds, &exclusion.rect, true);
+    // Unlike CreateRectRgn, GDI's rounded rectangle drops the last row and
+    // column. Include them so the opaque right/bottom borders stay covered.
+    (rect, diameter)
+}
 impl Drop for Region {
     fn drop(&mut self) {
         unsafe {
@@ -53,7 +66,8 @@ impl Drop for Region {
 
 fn physical_rectangle(bounds: &Bounds, rect: &SurfaceRect, exclude: bool) -> [i32; 4] {
     let scale = bounds.scale_factor;
-    let origin = [(bounds.x * scale).round(), (bounds.y * scale).round()];
+    let [x, y, _, _] = physical_bounds(bounds);
+    let origin = [x as f64, y as f64];
     let low = |value: f64| if exclude { value.floor() } else { value.ceil() };
     let high = |value: f64| if exclude { value.ceil() } else { value.floor() };
     let left = low(rect.x * scale - origin[0]) as i32;
@@ -65,8 +79,7 @@ fn physical_rectangle(bounds: &Bounds, rect: &SurfaceRect, exclude: bool) -> [i3
 
 fn rectangle(bounds: &Bounds, rect: &SurfaceRect, exclude: bool) -> [i32; 4] {
     let [left, top, right, bottom] = physical_rectangle(bounds, rect, exclude);
-    let width = (bounds.width * bounds.scale_factor).round().max(0.) as i32;
-    let height = (bounds.height * bounds.scale_factor).round().max(0.) as i32;
+    let [_, _, width, height] = physical_bounds(bounds);
     [
         left.clamp(0, width),
         top.clamp(0, height),
@@ -77,37 +90,71 @@ fn rectangle(bounds: &Bounds, rect: &SurfaceRect, exclude: bool) -> [i32; 4] {
 
 /// All coordinates are converted relative to the same physical window origin.
 /// Exclusions round outward so fractional DPI never leaves a native pixel above UI.
+#[cfg(test)]
 pub(super) fn apply(hwnd: HWND, bounds: &Bounds) -> Result<()> {
-    let full = [
-        0,
-        0,
-        (bounds.width * bounds.scale_factor).round() as i32,
-        (bounds.height * bounds.scale_factor).round() as i32,
-    ];
-    let region = Region::rectangle(
-        bounds
+    shape(bounds).apply(hwnd)
+}
+
+/// Physical region identity, independent of unrelated input state or subpixel
+/// layout changes that rasterize to the same native pixels.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Shape {
+    clip: [i32; 4],
+    holes: Vec<([i32; 4], i32)>,
+}
+
+/// Match GPUI Window::snap_bounds: snap near/far edges independently in f32,
+/// rounding exact halves toward zero, then derive size from those same edges.
+pub(super) fn physical_bounds(bounds: &Bounds) -> [i32; 4] {
+    let scale = bounds.scale_factor as f32;
+    let snap = |value: f32| {
+        let value = value * scale;
+        (value.abs() - 0.5).ceil().copysign(value) as i32
+    };
+    let (x, y) = (bounds.x as f32, bounds.y as f32);
+    let left = snap(x);
+    let top = snap(y);
+    let right = snap(x + bounds.width as f32).max(left);
+    let bottom = snap(y + bounds.height as f32).max(top);
+    [left, top, right - left, bottom - top]
+}
+
+pub(super) fn shape(bounds: &Bounds) -> Shape {
+    let [_, _, width, height] = physical_bounds(bounds);
+    let full = [0, 0, width, height];
+    Shape {
+        clip: bounds
             .clip
             .as_ref()
             .map_or(full, |clip| rectangle(bounds, clip, false)),
-    )?;
-    for exclusion in &bounds.occlusions {
-        if exclusion.rect.width <= 0. || exclusion.rect.height <= 0. {
-            continue;
-        }
-        let hole = Region::occlusion(bounds, exclusion)?;
-        ensure!(
-            unsafe { CombineRgn(region.0, region.0, hole.0, RGN_DIFF) } != RGN_ERROR,
-            "could not subtract video occlusion"
-        );
+        holes: bounds
+            .occlusions
+            .iter()
+            .filter(|exclusion| exclusion.rect.width > 0. && exclusion.rect.height > 0.)
+            .map(|exclusion| occlusion_shape(bounds, exclusion))
+            .collect(),
     }
-    ensure!(
-        unsafe { SetWindowRgn(hwnd, region.0, 1) } != 0,
-        "could not apply video clipping: {}",
-        std::io::Error::last_os_error()
-    );
-    // SetWindowRgn takes ownership only on success.
-    std::mem::forget(region);
-    Ok(())
+}
+
+impl Shape {
+    pub(super) fn apply(&self, hwnd: HWND) -> Result<()> {
+        let region = Region::rectangle(self.clip)?;
+        for &(rect, diameter) in &self.holes {
+            let hole = Region::rounded(rect, diameter)?;
+            ensure!(
+                unsafe { CombineRgn(region.0, region.0, hole.0, RGN_DIFF) } != RGN_ERROR,
+                "could not subtract video occlusion"
+            );
+        }
+        ensure!(
+            unsafe { SetWindowRgn(hwnd, region.0, 1) } != 0,
+            "could not apply video clipping: {}",
+            std::io::Error::last_os_error()
+        );
+        // SetWindowRgn takes ownership only on success.
+        std::mem::forget(region);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -115,6 +162,29 @@ mod tests {
     use super::*;
     use std::ptr;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+    #[test]
+    fn native_rectangle_matches_near_and_far_pixel_edges() {
+        for (x, width, scale_factor, expected) in [
+            (10.4, 100.4, 1., [10, 0, 101, 10]),
+            (10., 100., 1.25, [12, 0, 125, 12]),
+            (-10.5, 20., 1., [-10, 0, 19, 10]),
+            (0.5, 100., 2., [1, 0, 200, 20]),
+        ] {
+            let bounds = Bounds {
+                x,
+                y: 0.,
+                width,
+                height: 10.,
+                scale_factor,
+                clip: None,
+                occlusions: vec![],
+                input_blocked: false,
+            };
+            assert_eq!(physical_bounds(&bounds), expected);
+            assert_eq!(shape(&bounds).clip, [0, 0, expected[2], expected[3]]);
+        }
+    }
 
     #[test]
     fn fractional_occlusions_round_outward_and_page_clip_rounds_inward() {
