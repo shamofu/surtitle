@@ -72,7 +72,7 @@ pub(super) struct ActivityWindow {
     content: Entity<AiView>,
     focus: FocusHandle,
     close_focus: FocusHandle,
-    restore_focus: bool,
+    restore_focus: std::rc::Rc<std::cell::Cell<bool>>,
     _subscription: Subscription,
 }
 
@@ -90,19 +90,18 @@ impl ActivityWindow {
         // The window owns this wrapper; DesktopView owns only a weak reference.
         // Release covers X/Alt-F4 as well as our Close/Escape actions. A route
         // link suppresses restoration so its destination keeps its own focus.
-        cx.on_release(move |this, cx| {
-            if this.restore_focus {
-                cx.defer(move |cx| {
-                    let _ = opener.update(cx, |_, window, cx| {
-                        window.activate_window();
-                        if let Some(focus) = previous_focus {
-                            focus.focus(window, cx);
-                        }
-                    });
+        let restore_focus = std::rc::Rc::new(std::cell::Cell::new(true));
+        let should_restore = restore_focus.clone();
+        crate::desktop::dialog::on_closed(window, cx, move |cx| {
+            if should_restore.get() {
+                let _ = opener.update(cx, |_, window, cx| {
+                    window.activate_window();
+                    if let Some(focus) = previous_focus {
+                        focus.focus(window, cx);
+                    }
                 });
             }
-        })
-        .detach();
+        });
         let mut presentation = (
             session.read(cx).text("ja", "en").to_owned(),
             session.read(cx).error.clone(),
@@ -122,13 +121,13 @@ impl ActivityWindow {
             content,
             focus: cx.focus_handle(),
             close_focus,
-            restore_focus: true,
+            restore_focus,
             _subscription: subscription,
         }
     }
 
     pub fn navigating(&mut self) {
-        self.restore_focus = false;
+        self.restore_focus.set(false);
     }
 }
 
@@ -149,7 +148,7 @@ impl Render for ActivityWindow {
                     && event.keystroke.modifiers == Default::default()
                 {
                     cx.stop_propagation();
-                    window.remove_window();
+                    crate::desktop::dialog::request_close(window, cx);
                 }
             }))
             .child(
@@ -173,7 +172,9 @@ impl Render for ActivityWindow {
                         )
                         .accessibility_id("activity-close")
                         .track_focus(&self.close_focus)
-                        .on_click(|_, window, _| window.remove_window()),
+                        .on_click(|_, window, cx| {
+                            crate::desktop::dialog::request_close(window, cx);
+                        }),
                     ),
             )
             .when_some(session.error.clone(), |body, error| {

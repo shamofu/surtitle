@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+pub(crate) use super::motion_controls::Button;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{ActiveTheme, Theme, ThemeConfig, ThemeMode};
-use gpui_kit::component::{
-    Icon,
-    button::{Button, ButtonVariants},
-};
+use gpui_kit::component::{Icon, button::ButtonVariants};
 use gpui_kit::{
     App, Context, Div, ElementId, FontFallbacks, FontWeight, Global, IntoElement, ParentElement,
     Refineable, Render, SharedString, Stateful, StyleRefinement, Styled, Window, div, font, px,
@@ -164,6 +162,17 @@ pub(crate) fn init(cx: &mut App) {
             theme.light_theme.clone()
         };
         theme.apply_config(&current);
+        theme.motion.duration_fast = super::motion::CONTROL_HOVER;
+        theme.motion.duration_normal = super::motion::PANEL;
+        theme.motion.duration_slow = super::motion::DISCLOSE_ENTER;
+        theme.motion.easing_enter = super::motion::entering_easing();
+        theme.motion.easing_exit = super::motion::exiting_easing();
+        theme.motion.easing_move = super::motion::resizing_easing();
+        theme.motion.spring_control =
+            gpui_kit::base::motion::Spring::new(super::motion::CONTROL_HOVER);
+        theme.motion.spring_move = gpui_kit::base::motion::Spring::new(super::motion::SELECTION)
+            .with_damping(0.85)
+            .with_epsilon(0.1);
     });
     cx.set_global(InstalledStyle {
         fallbacks: FontFallbacks::from_fonts(sans),
@@ -346,7 +355,7 @@ pub(crate) fn icon_button(
 /// Read Windows' current animation preference, including switching back from an
 /// explicit app override. GPUI's base helper intentionally retains overrides.
 pub fn system_reduced_motion() -> Option<bool> {
-    #[cfg(windows)]
+    #[cfg(all(windows, not(test)))]
     {
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             SPI_GETCLIENTAREAANIMATION, SystemParametersInfoW,
@@ -362,8 +371,10 @@ pub fn system_reduced_motion() -> Option<bool> {
         };
         (success != 0).then_some(enabled == 0)
     }
-    #[cfg(not(windows))]
+    #[cfg(any(not(windows), test))]
     {
+        // Fake-platform tests control App's preference directly. Reading the
+        // real desktop here would overwrite it whenever a snapshot arrives.
         None
     }
 }

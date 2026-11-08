@@ -4,13 +4,20 @@
 use super::*;
 mod activity;
 mod card_dialog;
+mod control_motion;
 mod form_stability;
 mod keyboard;
 mod layout_stability;
 mod library_playback;
+mod list_motion;
+mod motion;
+#[cfg(windows)]
+mod native_aperture;
+mod review_motion;
 mod study_accessibility;
 mod study_fullscreen;
 mod study_layout;
+mod study_motion;
 mod study_toggles;
 mod study_wheel;
 use crate::{

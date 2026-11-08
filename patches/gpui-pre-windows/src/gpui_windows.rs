@@ -3,6 +3,7 @@
 mod clipboard;
 mod destination_list;
 mod dialog;
+mod dialog_surface;
 mod direct_manipulation;
 mod direct_write;
 mod directx_atlas;
@@ -11,6 +12,7 @@ mod directx_renderer;
 mod dispatcher;
 mod display;
 mod events;
+mod frame_update;
 mod keyboard;
 mod platform;
 mod system_notifications;
@@ -38,6 +40,9 @@ pub(crate) use vsync::*;
 pub(crate) use window::*;
 pub(crate) use wrapper::*;
 
+pub use dialog_surface::{DialogGeometry, DialogSurface, prepare_hidden_dialog};
+pub use directx_renderer::{CompositionSwapChain, CompositionVideoFrame};
+pub use frame_update::{FrameUpdateRollback, WindowFrameUpdate, window_frame_update};
 pub use platform::WindowsPlatform;
 
 pub(crate) use windows::Win32::Foundation::HWND;

@@ -549,7 +549,10 @@ impl Player {
                     "invalid player occlusions"
                 );
                 #[cfg(windows)]
-                self.native.bounds(b)?;
+                // A replacement load may still expose the previous VO's
+                // metadata. Publish composition content only after the existing
+                // source-identity check has confirmed this media's load.
+                self.native.bounds(b, self.state.ready)?;
             }
             "hide" => {
                 self.hide();
@@ -1395,16 +1398,19 @@ mod subtitle_tests {
             }
             player
                 .native
-                .bounds(&Bounds {
-                    x: 0.,
-                    y: 0.,
-                    width: 32.,
-                    height: 32.,
-                    scale_factor: 1.,
-                    clip: None,
-                    occlusions: vec![],
-                    input_blocked: false,
-                })
+                .bounds(
+                    &Bounds {
+                        x: 0.,
+                        y: 0.,
+                        width: 32.,
+                        height: 32.,
+                        scale_factor: 1.,
+                        clip: None,
+                        occlusions: vec![],
+                        input_blocked: false,
+                    },
+                    true,
+                )
                 .unwrap();
             let host = player.native.surface_window();
             unsafe {

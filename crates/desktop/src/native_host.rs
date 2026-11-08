@@ -7,8 +7,9 @@ use crate::player;
 
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::{
-    AppContext, Context, IntoElement, ParentElement, Render, Styled, Window, WindowBounds,
-    WindowOptions, canvas, div, px, rgb, size,
+    AppContext, Context, InteractiveElement, IntoElement, ParentElement, Render,
+    StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, canvas, div, px, rgb,
+    size,
 };
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::{
@@ -40,13 +41,7 @@ impl NativeHost {
         else {
             anyhow::bail!("The native video host requires Windows");
         };
-        #[cfg(windows)]
-        unsafe {
-            use windows_sys::Win32::UI::WindowsAndMessaging::*;
-            let hwnd = handle.hwnd.get() as _;
-            let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-            SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_CLIPCHILDREN as isize);
-        }
+        // Keep GPUI's opaque backing paintable beneath the DComp video child.
         let clicked = Arc::new(AtomicBool::new(false));
         let click_flag = clicked.clone();
         let mut player = player::Player::new(resources, handle.hwnd.get())?;
@@ -118,38 +113,49 @@ impl Render for NativeHost {
             .text_color(rgb(0xedf2f7))
             .child(div().p_3().child("Surtitle · Native video host validation"))
             .child(
-                canvas(
-                    move |bounds, window, cx| {
-                        let _ = view.update(cx, |this, _| {
-                            if let Some(player) = &mut this.player {
-                                let rect = player::Bounds {
-                                    x: f32::from(bounds.origin.x) as f64,
-                                    y: f32::from(bounds.origin.y) as f64,
-                                    width: f32::from(bounds.size.width) as f64,
-                                    height: f32::from(bounds.size.height) as f64,
-                                    scale_factor: window.scale_factor() as f64,
-                                    clip: None,
-                                    occlusions: vec![],
-                                    input_blocked: false,
-                                };
-                                if let Err(error) = player.control(&player::Control {
-                                    action: "bounds".into(),
-                                    value: None,
-                                    start_ms: None,
-                                    end_ms: None,
-                                    bounds: Some(rect),
-                                    track_kind: None,
-                                }) {
-                                    this.error = Some(error.to_string());
-                                }
-                            }
-                        });
-                    },
-                    |_, _, _, _| {},
-                )
-                .w_full()
-                .flex_1()
-                .min_h(px(0.)),
+                div()
+                    .id("native-host-video")
+                    .w_full()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .on_click(cx.listener(|this, _, _, _| this.control("toggle-pause", None)))
+                    .child(
+                        canvas(
+                            move |bounds, window, cx| {
+                                let _ = view.update(cx, |this, _| {
+                                    if let Some(player) = &mut this.player {
+                                        let rect = player::Bounds {
+                                            x: f32::from(bounds.origin.x) as f64,
+                                            y: f32::from(bounds.origin.y) as f64,
+                                            width: f32::from(bounds.size.width) as f64,
+                                            height: f32::from(bounds.size.height) as f64,
+                                            scale_factor: window.scale_factor() as f64,
+                                            clip: None,
+                                            occlusions: vec![],
+                                            input_blocked: false,
+                                        };
+                                        if let Err(error) = player.control(&player::Control {
+                                            action: "bounds".into(),
+                                            value: None,
+                                            start_ms: None,
+                                            end_ms: None,
+                                            bounds: Some(rect),
+                                            track_kind: None,
+                                        }) {
+                                            this.error = Some(error.to_string());
+                                        }
+                                    }
+                                });
+                            },
+                            |bounds, _, window, _| {
+                                #[cfg(windows)]
+                                window.paint_native_aperture(bounds);
+                                #[cfg(not(windows))]
+                                let _ = (bounds, window);
+                            },
+                        )
+                        .size_full(),
+                    ),
             )
             .child(
                 div()
@@ -267,7 +273,7 @@ pub fn run() -> anyhow::Result<()> {
     .canonicalize()?;
     // Must precede GPUI and its worker threads. This affects only this process.
     unsafe {
-        std::env::set_var("GPUI_DISABLE_DIRECT_COMPOSITION", "true");
+        std::env::set_var("GPUI_DISABLE_DIRECT_COMPOSITION", "false");
     }
     gpui_kit::application()
         .with_assets(crate::ui::assets::Assets)

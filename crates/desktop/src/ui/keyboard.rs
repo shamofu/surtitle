@@ -68,6 +68,12 @@ pub(super) struct Slider {
     style: StyleRefinement,
 }
 
+#[derive(Default)]
+struct ThumbInteraction {
+    hovered: bool,
+    pressed: bool,
+}
+
 impl Slider {
     pub fn new(state: &Entity<SliderState>) -> Self {
         Self {
@@ -140,6 +146,24 @@ fn set_value(
 
 impl RenderOnce for Slider {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let interaction =
+            window.use_keyed_state(("app-slider-ring", self.state.entity_id()), cx, |_, _| {
+                ThumbInteraction::default()
+            });
+        if self.disabled {
+            interaction.update(cx, |state, _| {
+                state.hovered = false;
+                state.pressed = false;
+            });
+        }
+        let ring_active = interaction.read(cx).hovered || interaction.read(cx).pressed;
+        let ring_progress = gpui_kit::base::motion::spring(
+            (("app-slider-ring", self.state.entity_id()), "progress"),
+            if ring_active { 1. } else { 0. },
+            cx.theme().motion.spring_control,
+            window,
+            cx,
+        );
         let focus = window
             .use_keyed_state(("slider-focus", self.state.entity_id()), cx, |_, cx| {
                 cx.focus_handle()
@@ -185,8 +209,13 @@ impl RenderOnce for Slider {
             })
             .refine_style(&self.style)
             .when(!disabled, |this| {
+                let press_interaction = interaction.clone();
                 this.capture_any_mouse_down(move |event, window, cx| {
                     if event.button == MouseButton::Left {
+                        press_interaction.update(cx, |state, cx| {
+                            state.pressed = true;
+                            cx.notify();
+                        });
                         focus_on_press.focus(window, cx);
                     }
                 })
@@ -230,11 +259,30 @@ impl RenderOnce for Slider {
                 })
                 .on_mouse_up(
                     MouseButton::Left,
-                    window.listener_for(&self.state, |state, _, _, cx| state.handle_release(cx)),
+                    window.listener_for(&self.state, {
+                        let interaction = interaction.clone();
+                        move |state, _, _, cx| {
+                            interaction.update(cx, |state, cx| {
+                                state.pressed = false;
+                                cx.notify();
+                            });
+                            state.handle_release(cx)
+                        }
+                    }),
                 )
                 .on_mouse_up_out(
                     MouseButton::Left,
-                    window.listener_for(&self.state, |state, _, _, cx| state.handle_release(cx)),
+                    window.listener_for(&self.state, {
+                        let interaction = interaction.clone();
+                        move |state, _, _, cx| {
+                            interaction.update(cx, |state, cx| {
+                                state.pressed = false;
+                                state.hovered = false;
+                                cx.notify();
+                            });
+                            state.handle_release(cx)
+                        }
+                    }),
                 )
             })
             .child(
@@ -271,7 +319,38 @@ impl RenderOnce for Slider {
                                     .rounded_full()
                                     .border_1()
                                     .border_color(color)
-                                    .bg(thumb),
+                                    .bg(thumb)
+                                    .shadow(vec![
+                                        gpui_kit::BoxShadow::new(
+                                            px(0.),
+                                            px(0.),
+                                            ring.alpha(0.5 * ring_progress),
+                                        )
+                                        .spread_radius(px(3.) * ring_progress),
+                                    ])
+                                    .when(!disabled, |this| {
+                                        this.on_hover({
+                                            let interaction = interaction.clone();
+                                            move |hovered, _, cx| {
+                                                interaction.update(cx, |state, cx| {
+                                                    state.hovered = *hovered;
+                                                    cx.notify();
+                                                })
+                                            }
+                                        })
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            {
+                                                let interaction = interaction.clone();
+                                                move |_, _, cx| {
+                                                    interaction.update(cx, |state, cx| {
+                                                        state.pressed = true;
+                                                        cx.notify();
+                                                    })
+                                                }
+                                            },
+                                        )
+                                    }),
                             ),
                     ),
             )

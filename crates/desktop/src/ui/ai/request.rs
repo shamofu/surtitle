@@ -1,4 +1,5 @@
 use super::{locale_format, localized};
+use crate::ui::style::Button;
 use gpui_kit::base::Disableable;
 // SPDX-License-Identifier: GPL-3.0-or-later
 use super::{
@@ -21,7 +22,7 @@ use crate::{
 };
 use gpui_kit::component::{
     ActiveTheme,
-    button::{Button, ButtonVariants},
+    button::ButtonVariants,
     input::{Input, InputEvent, InputState},
 };
 use gpui_kit::{AppContext, Context, Entity, Subscription, Window, div, prelude::*, px};
@@ -596,9 +597,11 @@ impl Render for RequestDialog {
                         this.persist(cx);
                         let media = this.value.media_id.clone();
                         let id = this.value.id.clone();
-                        this.session
-                            .update(cx, |session, cx| session.request_rebind_ai(id, media, cx));
-                        window.remove_window();
+                        let session = this.session.clone();
+                        crate::desktop::dialog::close_then(window, cx, move |cx| {
+                            session
+                                .update(cx, |session, cx| session.request_rebind_ai(id, media, cx));
+                        });
                     })),
             );
         }
@@ -699,9 +702,12 @@ impl Render for RequestDialog {
                         .disabled(frozen)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.persist(cx);
-                            this.session
-                                .update(cx, |session, cx| session.navigate(Route::Settings, cx));
-                            window.remove_window();
+                            let session = this.session.clone();
+                            crate::desktop::dialog::close_then(window, cx, move |cx| {
+                                session.update(cx, |session, cx| {
+                                    session.navigate(Route::Settings, cx)
+                                });
+                            });
                         })),
                 );
             content = content.child(
@@ -834,7 +840,9 @@ impl Render for RequestDialog {
         content = content.child(
             Button::new("close-ai-request")
                 .label(localized(cx, "入力を残して閉じる / Close and keep input"))
-                .on_click(|_, window, _| window.remove_window()),
+                .on_click(|_, window, cx| {
+                    crate::desktop::dialog::request_close(window, cx);
+                }),
         );
         div()
             .id("ai-request-scroll")

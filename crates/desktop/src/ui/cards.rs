@@ -17,6 +17,17 @@ use gpui_kit::{AppContext, Context, Entity, Subscription, Window, div, prelude::
 use std::collections::BTreeMap;
 use surtitle_core::StudyCard;
 
+#[derive(Clone)]
+enum ReviewVisual {
+    Card(StudyCard, bool),
+    Wipe {
+        card: StudyCard,
+        revealed: bool,
+        outgoing: Box<ReviewVisual>,
+        progress: f32,
+    },
+}
+
 pub(crate) struct CardsView {
     session: Entity<Session>,
     editors: Entity<EditorRegistry>,
@@ -35,6 +46,10 @@ pub(crate) struct CardsView {
     rating_focus: [gpui_kit::FocusHandle; 4],
     focus_after_rating: Option<gpui_kit::FocusHandle>,
     review_current: Option<String>,
+    review_last: Option<ReviewVisual>,
+    review_outgoing: Option<ReviewVisual>,
+    review_started: Option<std::time::Instant>,
+    review_wipe: f32,
     language: Option<String>,
     due_timer: Option<gpui_kit::Task<()>>,
     next_due: Option<String>,
@@ -42,6 +57,8 @@ pub(crate) struct CardsView {
     list: gpui_kit::ListState,
     list_key: String,
     list_filter: String,
+    row_motion: super::list_motion::ListMotion,
+    list_ids: Vec<String>,
     _subscriptions: Vec<Subscription>,
 }
 impl CardsView {
@@ -83,6 +100,10 @@ impl CardsView {
             rating_focus: std::array::from_fn(|_| cx.focus_handle()),
             focus_after_rating: None,
             review_current: None,
+            review_last: None,
+            review_outgoing: None,
+            review_started: None,
+            review_wipe: 1.,
             language: None,
             due_timer: None,
             next_due: None,
@@ -90,6 +111,8 @@ impl CardsView {
             list: gpui_kit::ListState::new(0, gpui_kit::ListAlignment::Top, px(600.)),
             list_key: String::new(),
             list_filter: String::new(),
+            row_motion: Default::default(),
+            list_ids: Vec::new(),
             _subscriptions: vec![input, changes, editing],
         }
     }
@@ -100,6 +123,309 @@ impl CardsView {
             &self.focus
         }
         .focus(window, cx);
+    }
+    fn review_card(
+        &self,
+        card: &StudyCard,
+        revealed: bool,
+        disabled: bool,
+        active: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let ja = self.session.read(cx).text("ja", "en") == "ja";
+        let t = move |j: &'static str, e: &'static str| if ja { j } else { e };
+        let theme = cx.theme().clone();
+        let snapshot = self.session.read(cx).snapshot.clone();
+        let source = self.session.clone();
+        let media_id = card.media_id.clone();
+        let media = snapshot
+            .as_ref()
+            .and_then(|s| s.media.iter().find(|m| m.id == media_id));
+        let source_available = media.is_some();
+        let source_title = media.map_or_else(|| card.source_title.clone(), |m| m.title.clone());
+        let audio_id = card.id.clone();
+        let short = window.viewport_size().height < px(760.);
+        let mut prompt = column()
+            .gap_3()
+            .px_6()
+            .py(px(if short { 10. } else { 20. }))
+            .child(
+                div()
+                    .id(if active {
+                        "review-prompt"
+                    } else {
+                        "review-outgoing-prompt"
+                    })
+                    .test_support()
+                    .track_focus(&self.prompt_focus)
+                    .role(gpui_kit::accesskit::Role::Heading)
+                    .aria_level(2)
+                    .aria_label(card.term.clone())
+                    .when(
+                        !revealed && !self.prompt_focus.is_focused(window),
+                        |prompt| prompt.aria_active_descendant(),
+                    )
+                    .text_size(px(if short { 26. } else { 34. }))
+                    .line_height(relative(1.4))
+                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                    .whitespace_normal()
+                    .child(card.term.clone()),
+            )
+            .child(
+                div()
+                    .text_size(px(if short { 16. } else { 18. }))
+                    .line_height(relative(1.8))
+                    .whitespace_normal()
+                    .child(card.example.clone()),
+            );
+        if card.audio_path.is_some() {
+            prompt = prompt.child(
+                div().child(
+                    button(if active {
+                        "review-audio"
+                    } else {
+                        "review-outgoing-audio"
+                    })
+                    .ghost()
+                    .icon(IconName::AudioLines)
+                    .accessibility_id(if active {
+                        "review-audio"
+                    } else {
+                        "review-outgoing-audio"
+                    })
+                    .label(t("文脈を聴く", "Listen in context"))
+                    .disabled(disabled)
+                    .on_click(cx.listener(move |this, _, _, cx| this.audio(audio_id.clone(), cx))),
+                ),
+            );
+        }
+        let answer_progress = super::motion::reveal(
+            (format!("review-answer-{}", card.id), "reveal"),
+            revealed,
+            if revealed {
+                super::motion::DISCLOSE_ENTER
+            } else {
+                // A newly concealed/requeued card must never expose its old
+                // answer or run a hidden collapse before the next reveal.
+                std::time::Duration::ZERO
+            },
+            super::motion::entering_easing(),
+            window,
+            cx,
+        );
+        let answer_content = column()
+            // Preserve intrinsic content height inside the scroll viewport;
+            // otherwise only this shrunken wrapper contributes to its extent.
+            .flex_shrink_0()
+            .gap_2()
+            .px_6()
+            .py_5()
+            .min_h(px(88.))
+            .bg(theme.secondary)
+            .border_t_1()
+            .border_color(theme.border)
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(theme.muted_foreground)
+                    .child(t("意味", "Meaning")),
+            )
+            .child(
+                div()
+                    .id(if active {
+                        "review-meaning"
+                    } else {
+                        "review-outgoing-meaning"
+                    })
+                    .test_support()
+                    .track_focus(&self.answer_focus)
+                    .role(gpui_kit::accesskit::Role::Label)
+                    .aria_value(card.meaning.clone())
+                    .text_size(px(18.))
+                    .line_height(relative(1.8))
+                    .child(card.meaning.clone())
+                    .test_support(),
+            )
+            .when_some(card.translation.clone(), |body, text| {
+                body.child(
+                    column()
+                        .gap_1()
+                        .mt_2()
+                        .child(muted(t("例文の訳", "Example translation")))
+                        .child(
+                            div()
+                                .id(if active {
+                                    "review-translation"
+                                } else {
+                                    "review-outgoing-translation"
+                                })
+                                .role(gpui_kit::accesskit::Role::Label)
+                                .aria_value(text.clone())
+                                .text_size(px(15.))
+                                .line_height(relative(1.8))
+                                .child(text)
+                                .test_support(),
+                        ),
+                )
+            })
+            .when_some(card.explanation.clone(), |body, text| {
+                body.child(
+                    column()
+                        .gap_1()
+                        .mt_4()
+                        .pt_4()
+                        .border_t_1()
+                        .border_color(theme.border)
+                        .child(muted(t("解説・メモ", "Explanation and notes")))
+                        .child(
+                            div()
+                                .id(if active {
+                                    "review-explanation"
+                                } else {
+                                    "review-outgoing-explanation"
+                                })
+                                .role(gpui_kit::accesskit::Role::Label)
+                                .aria_value(text.clone())
+                                .text_size(px(15.))
+                                .line_height(relative(1.8))
+                                .child(text)
+                                .test_support(),
+                        ),
+                )
+            });
+        let reveal_control = column()
+            .min_h(px(88.))
+            .px_6()
+            .py_5()
+            .items_center()
+            .justify_center()
+            .border_t_1()
+            .border_color(theme.border)
+            .child(
+                button(if active {
+                    "review-reveal"
+                } else {
+                    "review-outgoing-reveal"
+                })
+                .primary()
+                .icon(IconName::Eye)
+                .accessibility_id(if active {
+                    "review-reveal"
+                } else {
+                    "review-outgoing-reveal"
+                })
+                .label(t("意味を確認する   Space", "Reveal meaning   Space"))
+                .disabled(disabled)
+                .on_click(cx.listener(|this, _, window, cx| this.reveal(window, cx))),
+            );
+        let answer = column()
+            .relative()
+            .gap_0()
+            .child(super::motion_controls::reveal_vertical(
+                super::motion::interactive(answer_content, revealed),
+                answer_progress,
+            ))
+            .when(!revealed, |body| {
+                body.child(reveal_control.absolute().inset_0())
+            });
+        let footer = row()
+            .px_6()
+            .py_4()
+            .gap_2()
+            .border_t_1()
+            .border_color(theme.border)
+            .child(
+                button(if active {
+                    "review-source"
+                } else {
+                    "review-outgoing-source"
+                })
+                .ghost()
+                .icon(IconName::BookOpen)
+                .accessibility_id(if active {
+                    "review-source"
+                } else {
+                    "review-outgoing-source"
+                })
+                .label(source_title)
+                .disabled(disabled || !source_available)
+                .on_click(move |_, _, cx| {
+                    source.update(cx, |s, cx| s.navigate(Route::Study(media_id.clone()), cx))
+                }),
+            )
+            .child(div().flex_1())
+            .child(muted(if ja {
+                format!("{} 回の復習", card.review_count)
+            } else {
+                format!("{} reviews", card.review_count)
+            }));
+        let body = column()
+            .id(gpui_kit::SharedString::from(format!(
+                "review-card-{}",
+                card.id
+            )))
+            .flex_1()
+            .min_h(px(360.))
+            .gap_0()
+            .rounded(px(12.))
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.popover)
+            .overflow_hidden()
+            .child(
+                row()
+                    .justify_between()
+                    .px_6()
+                    .pt_4()
+                    .child(phrase_badge(language_name(&card.language, ja), false, cx))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(theme.muted_foreground)
+                            .child(t(
+                                "この表現の意味を思い出す",
+                                "Recall the meaning of this phrase",
+                            )),
+                    ),
+            )
+            .child(prompt)
+            .child(
+                answer
+                    .flex_1()
+                    .id(if active {
+                        "review-answer-scroll"
+                    } else {
+                        "review-outgoing-answer-scroll"
+                    })
+                    .min_h(px(64.))
+                    .overflow_y_scroll()
+                    .test_support(),
+            )
+            .child(footer);
+        body.into_any_element()
+    }
+    fn review_visual(
+        &self,
+        visual: &ReviewVisual,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        match visual {
+            ReviewVisual::Card(card, revealed) => {
+                self.review_card(card, *revealed, true, false, window, cx)
+            }
+            ReviewVisual::Wipe {
+                card,
+                revealed,
+                outgoing,
+                progress,
+            } => {
+                let current = self.review_card(card, *revealed, true, false, window, cx);
+                let outgoing = self.review_visual(outgoing, window, cx);
+                super::motion_controls::wipe(current, Some(outgoing), *progress).into_any_element()
+            }
+        }
     }
     fn reveal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.revealed = true;
@@ -173,14 +499,16 @@ impl CardsView {
         }
         if let Some(handle) = self.form_windows.get(&card)
             && handle
-                .update(cx, |_, window, _| window.activate_window())
+                .update(cx, |_, window, cx| {
+                    crate::desktop::dialog::activate(window, cx)
+                })
                 .is_ok()
         {
             return;
         }
         let entity = self.form_for(card.clone(), window, cx);
         let size = gpui_kit::size(px(660.), px(720.));
-        match gpui_kit::open_window(
+        match crate::desktop::dialog::open_window(
             gpui_kit::WindowOptions {
                 titlebar: Some(gpui_kit::TitlebarOptions {
                     title: Some(t("フレーズを編集", "Edit phrase").into()),
@@ -191,7 +519,7 @@ impl CardsView {
             cx,
             move |window, cx| {
                 let closing = entity.downgrade();
-                window.on_window_should_close(cx, move |_, cx| {
+                crate::desktop::dialog::set_close_guard(window, cx, move |_, cx| {
                     closing
                         .update(cx, |form, cx| {
                             if form.busy || form.editors.read(cx).frozen() {
@@ -381,7 +709,42 @@ impl Render for CardsView {
                 self.prompt_focus.focus(window, cx);
             }
             let current = cards.first().cloned();
-            self.review_current = current.as_ref().map(|card| card.id.clone());
+            let next_id = current.as_ref().map(|card| card.id.clone());
+            if self.review_current != next_id && self.review_current.is_some() && next_id.is_some()
+            {
+                self.review_outgoing = self.review_last.take();
+                self.review_started = Some(cx.background_executor().now());
+            }
+            self.review_current = next_id;
+            self.review_wipe = self.review_started.map_or(1., |started| {
+                let progress = (cx
+                    .background_executor()
+                    .now()
+                    .saturating_duration_since(started)
+                    .as_secs_f32()
+                    / super::motion::REVIEW.as_secs_f32())
+                .clamp(0., 1.);
+                super::motion::entering_easing().sample(progress)
+            });
+            if cx.reduce_motion() || self.review_wipe >= 1. {
+                self.review_wipe = 1.;
+                self.review_outgoing = None;
+                self.review_started = None;
+            } else {
+                window.request_animation_frame();
+            }
+
+            self.review_last = current
+                .as_ref()
+                .map(|card| match self.review_outgoing.clone() {
+                    Some(outgoing) => ReviewVisual::Wipe {
+                        card: card.clone(),
+                        revealed: self.revealed,
+                        outgoing: Box::new(outgoing),
+                        progress: self.review_wipe,
+                    },
+                    None => ReviewVisual::Card(card.clone(), self.revealed),
+                });
             let total = self.reviewed.len() + cards.len();
             let back = self.session.clone();
             let mut page = column()
@@ -468,6 +831,12 @@ impl Render for CardsView {
                 )
                 .child(
                     div()
+                        .id("review-progress")
+                        .role(gpui_kit::accesskit::Role::ProgressIndicator)
+                        .aria_label(t("復習の進み具合", "Review progress"))
+                        .aria_numeric_value(self.reviewed.len() as f64)
+                        .aria_min_numeric_value(0.)
+                        .aria_max_numeric_value(total as f64)
                         .h(px(4.))
                         .w_full()
                         .rounded(px(3.))
@@ -475,221 +844,34 @@ impl Render for CardsView {
                         .child(
                             div()
                                 .h_full()
-                                .w(relative(if total == 0 {
-                                    0.
-                                } else {
-                                    self.reviewed.len() as f32 / total as f32
-                                }))
+                                .w(relative(super::motion_controls::progress(
+                                    "review-progress",
+                                    if total == 0 {
+                                        0.
+                                    } else {
+                                        self.reviewed.len() as f32 / total as f32
+                                    },
+                                    window,
+                                    cx,
+                                )))
                                 .bg(theme.primary),
                         ),
                 );
             if let Some(card) = current {
-                let source = self.session.clone();
-                let media_id = card.media_id.clone();
-                let media = snapshot
-                    .as_ref()
-                    .and_then(|s| s.media.iter().find(|m| m.id == media_id));
-                let source_available = media.is_some();
-                let source_title =
-                    media.map_or_else(|| card.source_title.clone(), |m| m.title.clone());
-                let audio_id = card.id.clone();
                 let short = window.viewport_size().height < px(760.);
-                let mut prompt = column()
-                    .gap_3()
-                    .px_6()
-                    .py(px(if short { 10. } else { 20. }))
-                    .child(
-                        div()
-                            .id("review-prompt")
-                            .test_support()
-                            .track_focus(&self.prompt_focus)
-                            .role(gpui_kit::accesskit::Role::Heading)
-                            .aria_level(2)
-                            .aria_label(card.term.clone())
-                            .when(
-                                !self.revealed && !self.prompt_focus.is_focused(window),
-                                |prompt| prompt.aria_active_descendant(),
-                            )
-                            .text_size(px(if short { 26. } else { 34. }))
-                            .line_height(relative(1.4))
-                            .font_weight(gpui_kit::FontWeight::MEDIUM)
-                            .whitespace_normal()
-                            .child(card.term.clone()),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(if short { 16. } else { 18. }))
-                            .line_height(relative(1.8))
-                            .whitespace_normal()
-                            .child(card.example.clone()),
-                    );
-                if card.audio_path.is_some() {
-                    prompt = prompt.child(
-                        div().child(
-                            button("review-audio")
-                                .ghost()
-                                .icon(IconName::AudioLines)
-                                .accessibility_id("review-audio")
-                                .label(t("文脈を聴く", "Listen in context"))
-                                .disabled(disabled)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.audio(audio_id.clone(), cx)
-                                })),
-                        ),
-                    );
-                }
-                let answer = if self.revealed {
-                    column()
-                        .gap_2()
-                        .px_6()
-                        .py_5()
-                        .min_h(px(88.))
-                        .bg(theme.secondary)
-                        .border_t_1()
-                        .border_color(theme.border)
-                        .child(
-                            div()
-                                .text_size(px(12.))
-                                .text_color(theme.muted_foreground)
-                                .child(t("意味", "Meaning")),
-                        )
-                        .child(
-                            div()
-                                .id("review-meaning")
-                                .test_support()
-                                .track_focus(&self.answer_focus)
-                                .role(gpui_kit::accesskit::Role::Label)
-                                .aria_value(card.meaning.clone())
-                                .text_size(px(18.))
-                                .line_height(relative(1.8))
-                                .child(card.meaning.clone())
-                                .test_support(),
-                        )
-                        .when_some(card.translation.clone(), |body, text| {
-                            body.child(
-                                column()
-                                    .gap_1()
-                                    .mt_2()
-                                    .child(muted(t("例文の訳", "Example translation")))
-                                    .child(
-                                        div()
-                                            .id("review-translation")
-                                            .role(gpui_kit::accesskit::Role::Label)
-                                            .aria_value(text.clone())
-                                            .text_size(px(15.))
-                                            .line_height(relative(1.8))
-                                            .child(text)
-                                            .test_support(),
-                                    ),
-                            )
-                        })
-                        .when_some(card.explanation.clone(), |body, text| {
-                            body.child(
-                                column()
-                                    .gap_1()
-                                    .mt_4()
-                                    .pt_4()
-                                    .border_t_1()
-                                    .border_color(theme.border)
-                                    .child(muted(t("解説・メモ", "Explanation and notes")))
-                                    .child(
-                                        div()
-                                            .id("review-explanation")
-                                            .role(gpui_kit::accesskit::Role::Label)
-                                            .aria_value(text.clone())
-                                            .text_size(px(15.))
-                                            .line_height(relative(1.8))
-                                            .child(text)
-                                            .test_support(),
-                                    ),
-                            )
-                        })
-                } else {
-                    column()
-                        .min_h(px(88.))
-                        .px_6()
-                        .py_5()
-                        .items_center()
-                        .justify_center()
-                        .border_t_1()
-                        .border_color(theme.border)
-                        .child(
-                            button("review-reveal")
-                                .primary()
-                                .icon(IconName::Eye)
-                                .accessibility_id("review-reveal")
-                                .label(t("意味を確認する   Space", "Reveal meaning   Space"))
-                                .disabled(disabled)
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.reveal(window, cx)),
-                                ),
-                        )
-                };
-                let footer = row()
-                    .px_6()
-                    .py_4()
-                    .gap_2()
-                    .border_t_1()
-                    .border_color(theme.border)
-                    .child(
-                        button("review-source")
-                            .ghost()
-                            .icon(IconName::BookOpen)
-                            .accessibility_id("review-source")
-                            .label(source_title)
-                            .disabled(disabled || !source_available)
-                            .on_click(move |_, _, cx| {
-                                source.update(cx, |s, cx| {
-                                    s.navigate(Route::Study(media_id.clone()), cx)
-                                })
-                            }),
-                    )
-                    .child(div().flex_1())
-                    .child(muted(if ja {
-                        format!("{} 回の復習", card.review_count)
-                    } else {
-                        format!("{} reviews", card.review_count)
-                    }));
-                page = page.child(
-                    column()
-                        .flex_1()
-                        .min_h(px(360.))
-                        .gap_0()
-                        .rounded(px(12.))
-                        .border_1()
-                        .border_color(theme.border)
-                        .bg(theme.popover)
-                        .overflow_hidden()
-                        .child(
-                            row()
-                                .justify_between()
-                                .px_6()
-                                .pt_4()
-                                .child(phrase_badge(language_name(&card.language, ja), false, cx))
-                                .child(
-                                    div()
-                                        .text_size(px(12.))
-                                        .text_color(theme.muted_foreground)
-                                        .child(t(
-                                            "この表現の意味を思い出す",
-                                            "Recall the meaning of this phrase",
-                                        )),
-                                ),
-                        )
-                        .child(prompt)
-                        .child(
-                            answer
-                                .flex_1()
-                                .id("review-answer-scroll")
-                                .min_h(px(64.))
-                                .overflow_y_scroll()
-                                .test_support(),
-                        )
-                        .child(footer),
-                );
+                let body = self.review_card(&card, self.revealed, disabled, true, window, cx);
+                let outgoing = self
+                    .review_outgoing
+                    .as_ref()
+                    .map(|visual| self.review_visual(visual, window, cx));
+                page = page.child(super::motion_controls::wipe(
+                    body,
+                    outgoing,
+                    self.review_wipe,
+                ));
                 let id = card.id.clone();
                 page = page.child(column().min_h(px(140.)).gap_3().items_center()
-                    .child(div().text_size(px(15.)).child(if self.revealed {t("どれくらい思い出せましたか？", "How well did you remember?")} else {t("まずは自分の言葉で意味を思い浮かべて。", "Take a moment to recall the meaning in your own words.")}))
+                    .child(div().text_size(px(15.)).w_full().text_center().child(state_message(if self.revealed {t("どれくらい思い出せましたか？", "How well did you remember?")} else {t("まずは自分の言葉で意味を思い浮かべて。", "Take a moment to recall the meaning in your own words.")}, &[t("どれくらい思い出せましたか？", "How well did you remember?"),t("まずは自分の言葉で意味を思い浮かべて。", "Take a moment to recall the meaning in your own words.")])))
                     .when(self.revealed, |body| body.child(row().w_full().items_stretch().gap(px(10.)).children([
                         ("again",t("もう一度","Again"),t("思い出せなかった","Could not recall")),
                         ("hard",t("難しい","Hard"),t("少し迷った","Took some effort")),
@@ -701,6 +883,7 @@ impl Render for CardsView {
                             .child(column().gap_1().items_center().child(div().text_size(px(12.)).text_color(theme.muted_foreground).child((index+1).to_string())).child(div().text_size(px(15.)).font_weight(gpui_kit::FontWeight::MEDIUM).child(label)).child(muted(detail)))
                             .on_click(cx.listener(move|this,_,window,cx|this.rate(id.clone(),rating,window,cx)))
                     }))))
+                    .when(!self.revealed, |body| body.child(div().w_full().h(px(if short {80.} else {94.}))))
                     .child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(t("思い出しやすさに合わせて、次の復習時刻が調整されます。", "Your next review is scheduled from how well you recalled this phrase."))));
             } else {
                 let library = self.session.clone();
@@ -797,16 +980,40 @@ impl Render for CardsView {
                 card.explanation
             ));
         }
+        self.row_motion.viewport(
+            window.viewport_size(),
+            self.list.scroll_px_offset_for_scrollbar(),
+        );
         if key != self.list_key {
             let filter = format!("{:?}:{query}", self.language);
             if filter != self.list_filter {
-                self.list.reset(cards.len());
+                let anchor = self.list.logical_scroll_top();
+                let ids = cards.iter().map(|card| card.id.clone()).collect::<Vec<_>>();
+                self.list.splice(0..self.list.item_count(), cards.len());
+                if let Some(index) =
+                    super::list_motion::retained_anchor(&self.list_ids, anchor.item_ix, &ids)
+                {
+                    self.list.scroll_to(gpui_kit::ListOffset {
+                        item_ix: index,
+                        offset_in_item: anchor.offset_in_item,
+                    });
+                }
+                self.row_motion.viewport(
+                    window.viewport_size(),
+                    self.list.scroll_px_offset_for_scrollbar(),
+                );
+                if !self.list_key.is_empty() {
+                    self.row_motion.filter_changed();
+                }
                 self.list_filter = filter;
             } else {
                 self.list.splice(0..self.list.item_count(), cards.len());
             }
             self.list_key = key;
+            self.list_ids = cards.iter().map(|card| card.id.clone()).collect();
         }
+        let row_motion = self.row_motion.clone();
+        self.row_motion.begin_layout();
         let view = cx.entity().downgrade();
         let model = self.session.clone();
         let selected_language = self.language.clone();
@@ -1168,42 +1375,45 @@ impl Render for CardsView {
                         }
                         article = article.child(details);
                     }
-                    article
-                        .child(
-                            row()
-                                .justify_between()
-                                .flex_wrap()
-                                .mt_2()
-                                .gap_4()
-                                .child(
-                                    button(("card-source", index))
-                                        .ghost()
-                                        .icon(IconName::BookOpen)
-                                        .label(title)
-                                        .accessibility_id(format!("card-source-{}", card.id))
-                                        .disabled(disabled || !available)
-                                        .on_click(move |_, _, cx| {
-                                            source.update(cx, |s, cx| {
-                                                s.navigate(Route::Study(media_id.clone()), cx)
-                                            })
-                                        }),
-                                )
-                                .child(
-                                    row()
-                                        .gap_2()
-                                        .child(muted(language_name(&card.language, ja)))
-                                        .child(phrase_badge(
-                                            if card.suspended {
-                                                t("復習を停止中", "Reviews suspended")
-                                            } else if is_due {
-                                                t("復習の時間", "Ready to review")
-                                            } else {
-                                                t("次回の復習待ち", "Review scheduled")
-                                            },
-                                            is_due,
-                                            cx,
-                                        )),
-                                ),
+                    row_motion
+                        .row(
+                            card.id.clone(),
+                            article.child(
+                                row()
+                                    .justify_between()
+                                    .flex_wrap()
+                                    .mt_2()
+                                    .gap_4()
+                                    .child(
+                                        button(("card-source", index))
+                                            .ghost()
+                                            .icon(IconName::BookOpen)
+                                            .label(title)
+                                            .accessibility_id(format!("card-source-{}", card.id))
+                                            .disabled(disabled || !available)
+                                            .on_click(move |_, _, cx| {
+                                                source.update(cx, |s, cx| {
+                                                    s.navigate(Route::Study(media_id.clone()), cx)
+                                                })
+                                            }),
+                                    )
+                                    .child(
+                                        row()
+                                            .gap_2()
+                                            .child(muted(language_name(&card.language, ja)))
+                                            .child(phrase_badge(
+                                                if card.suspended {
+                                                    t("復習を停止中", "Reviews suspended")
+                                                } else if is_due {
+                                                    t("復習の時間", "Ready to review")
+                                                } else {
+                                                    t("次回の復習待ち", "Review scheduled")
+                                                },
+                                                is_due,
+                                                cx,
+                                            )),
+                                    ),
+                            ),
                         )
                         .into_any_element()
                 })
@@ -1375,15 +1585,7 @@ impl CardForm {
         }
     }
     fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.busy || self.editors.read(cx).frozen() {
-            return;
-        }
-        if let Some(key) = &self.key {
-            self.editors.update(cx, |editors, cx| {
-                editors.blur(key, cx);
-            });
-        }
-        window.remove_window();
+        crate::desktop::dialog::request_close(window, cx);
     }
     fn suspend(&mut self, cx: &mut Context<Self>) {
         if self.busy || self.editors.read(cx).frozen() {
