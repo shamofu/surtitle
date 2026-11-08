@@ -14,6 +14,44 @@ const childTimeoutMs = 15_000;
 // their own margin outside its deadline. Cleanup uses a separate hook budget.
 const testTimeoutMs = childTimeoutMs + 5_000;
 
+test.skipIf(process.platform !== 'win32')('comprehensive native collection is opt-in and supplied evidence or failed collection cannot be ignored', () => {
+  const command = String.raw`
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile($env:SURTITLE_ACCEPTANCE_SCRIPT, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw 'Installer smoke script did not parse' }
+$definition = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-NativeAcceptance' }, $false))
+if ($definition.Count -ne 1) { throw 'Expected the actual native acceptance dispatcher' }
+. ([ScriptBlock]::Create($definition[0].Extent.Text))
+# Only execute the real opt-in dispatcher. Replace its external process boundary;
+# no installer, native window, input, profile write or download runs in this test.
+$script:calls = @(); $script:probeExit = 0
+function pwsh { $script:calls += ,@($args); $global:LASTEXITCODE = $script:probeExit }
+$workspace = $env:SURTITLE_ACCEPTANCE_WORKSPACE
+$config = @{ identifier='app.surtitle.evaluation.synthetic' }
+$binary = 'synthetic.exe'; $buildReceipt = 'synthetic.exe.build.json'
+$evidenceRoot = $workspace; $NativeAcceptance = 'native-check.ps1'; $DisposableProfile = $false
+$RequireNativeAcceptance = $false; $NativeExternalEvidence = ''
+if ((Invoke-NativeAcceptance) -ne $false -or $script:calls.Count -ne 0) { throw 'Default smoke unexpectedly ran manual acceptance' }
+$RequireNativeAcceptance = $true
+if ((Invoke-NativeAcceptance) -ne $true -or $script:calls.Count -ne 1) { throw 'Explicit acceptance was skipped' }
+$RequireNativeAcceptance = $false; $NativeExternalEvidence = 'evidence 日本語 & space.json'
+if ((Invoke-NativeAcceptance) -ne $true -or $script:calls.Count -ne 2) { throw 'Supplied evidence was ignored' }
+$last = $script:calls[-1]; $index = [Array]::IndexOf($last, '-ExternalEvidence')
+if ($index -lt 0 -or $last[$index + 1] -ne $NativeExternalEvidence) { throw 'Supplied evidence path was changed' }
+$script:probeExit = 23; $rejected = $false
+try { Invoke-NativeAcceptance | Out-Null } catch { $rejected = $_.Exception.Message -like '*acceptance failed*' }
+if (-not $rejected) { throw 'Failed opted-in collection was accepted' }
+'optional native acceptance dispatch passed'
+`;
+  const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')], {
+    cwd: workspace, encoding: 'utf8', windowsHide: true, timeout: childTimeoutMs,
+    env: { ...process.env, SURTITLE_ACCEPTANCE_SCRIPT: join(workspace, 'native/windows/package-installer-smoke.ps1'), SURTITLE_ACCEPTANCE_WORKSPACE: workspace },
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+}, testTimeoutMs);
+
 test.skipIf(process.platform !== 'win32')('installed resource checks require files inside the installation without pinning their contents', t => {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'surtitle-installed-resources-')));
   t.onTestFinished(() => rmSync(root, { recursive: true, force: true }));
@@ -67,7 +105,7 @@ $ErrorActionPreference = 'Stop'
 # Stop at the first configuration read, before profile inspection or installation.
 function Get-Content {
     param([string]$LiteralPath, [switch]$Raw)
-    if ($LiteralPath -ne 'src-tauri/tauri.conf.json') { throw 'Unexpected configuration read' }
+    if ($LiteralPath -ne 'packaging/app.json') { throw 'Unexpected configuration read' }
     throw ('validated-install-root:' + $installRoot)
 }
 function Start-Process { throw 'Unexpected process launch' }

@@ -102,11 +102,11 @@ async function main() {
   const sources = join(output, 'sources');
   await cp(join(root, 'verification/tla'), sources, { recursive: true });
   const inputs = await inputHashes(sources);
-  // Fingerprint the implementation/test surfaces to which the model is mapped,
+  // Bind the bounded model evidence to the current Rust implementation inputs,
   // including dirty worktrees and containers whose host .git link is unreadable.
+  // A matching fingerprint is provenance, not proof of the whole implementation.
   const implementation = {};
-  for (const directory of ['crates/ai/src', 'crates/core/src/store', 'src/shared/editing',
-    'src/shared/query', 'src/features/study/editor-drafts', 'src/test']) {
+  for (const directory of ['crates/ai/src', 'crates/core/src', 'crates/desktop/src']) {
     Object.assign(implementation, await inputHashes(join(root, directory), directory));
   }
   const git = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true });

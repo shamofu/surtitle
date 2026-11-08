@@ -1,18 +1,18 @@
 # Surtitle architecture
 
-Surtitle is a Windows 11 x64 desktop application built with Tauri, React, TypeScript, Rust and SQLite.
+Surtitle is a Windows 11 x64 desktop application built with Rust, GPUI, GPUI Kit and SQLite. Cargo builds the native executable; standard NSIS packages it with its native libraries and notices.
 
 | Component | Responsibility |
 | --- | --- |
-| React renderer | Library, study, cards/review, settings, AI approval and data transfer |
-| Tauri application | Typed IPC, application services, resource events and the native video window |
+| `surtitle` GPUI views/controllers | Library, study, cards/review, settings, AI approval, durable raw input and data transfer |
+| `surtitle` application/desktop host | Typed in-process services, resource events, Tokio workers, native window lifecycle and playback |
 | `surtitle-core` | Learning data, subtitle parsing, FSRS scheduling and portable archives |
 | `surtitle-tools` | Executable discovery, selection, bounded processes and managed updates |
 | `surtitle-ai` | Shared request/approval lifecycle, Vertex and OpenAI adapters, encrypted credentials and per-service charge accounting |
 
-The renderer cannot execute shell commands, read saved credentials, run SQL or send provider requests. Only the local Tauri window is an IPC client; remote documents are never loaded into its WebView. Commands delegate to application services and the core crates.
+Views call typed Rust facades that delegate to application services and the core crates. The UI receives credential status rather than saved secrets; approved provider operations and bounded external processes remain owned by their services. GPUI entities and native window lifetime stay on the GUI thread, while blocking and asynchronous work use the explicit Tokio runtime. These are in-process ownership boundaries, not a separate renderer sandbox. The production dependency graph excludes Electron, Tauri and WebView runtimes.
 
-## Data and IPC
+## Data and service boundaries
 
 | Store | Authority |
 | --- | --- |
@@ -23,21 +23,23 @@ The renderer cannot execute shell commands, read saved credentials, run SQL or s
 
 Learning backups exclude operational settings, credentials, approvals and charge records. Settings patches update non-budget preferences or the complete budget group under revision checks. Preferences are saved atomically before in-memory replacement. The legacy full-settings operation spans two stores and is not atomic; later native reconfiguration failures require readback and user feedback.
 
-The generated IPC map connects command names with Rust/TypeScript argument and result types. Run `pnpm generate:ipc` after command changes and `pnpm check:ipc` to verify it. Runtime validators cover event envelopes and result shapes; semantic constraints remain enforced in native use cases.
+The native UI uses Rust argument/result types directly. Native use cases enforce semantic constraints, expected revisions and source authority.
 
 Resource events carry entity, process epoch and revision. Shared subscriptions coalesce notifications, request incremental snapshots and recover after gaps, focus/network changes or a visible-window checkpoint. Playback ticks are independent. Older reads cannot overwrite newer revisions or cross a restore boundary.
 
-Settings and existing-card edits save after 500 ms idle or blur. Raw incomplete input survives navigation, acknowledged drafts survive restart, and conflicting input stays available for explicit recovery. Closing waits for pending editors and later input; persistence failure leaves the window available for retry. Phrase/subtitle drafts remain separate from committed learning content. Source changes and archive restore preserve their text but require explicit reconnection before saving.
+Settings and existing-card edits save after 500 ms idle or blur. Raw incomplete input survives navigation, acknowledged drafts survive restart, and conflicting input stays available for explicit recovery. Close, export, restore and source-changing actions freeze new submissions, drain admitted service operations and their GUI callbacks, and then flush every retained editor. Persistence failure leaves input available for retry. Phrase/subtitle drafts remain separate from committed learning content and require explicit save. Source changes and archive restore preserve their text but require explicit reconnection before saving.
 
 ## Study surface and native rendering
 
-Video and the current subtitle remain the primary study surface. User actions open one companion panel at a time; progress does not open panels or resize video. React Aria owns modal focus, dismissal and IME-aware Escape.
+The native views preserve the original UI's roles: top navigation, a resumable media library, full-width phrase articles, reveal-before-grade review, and categorized settings. Activity opens beside the current page. Study's companion switches between transcript, transcription history, suggestions and a captured passage's meaning; changing tabs or advancing playback does not retarget an unfinished edit. Matching results may refresh the captured passage, while changed source identity requires explicit reselection.
 
-Windows presents libmpv through a stable child HWND behind the existing transparent WebView. The video child omits `WS_CLIPSIBLINGS` so the WebView does not suppress its rendering. CSS paints the theme everywhere except the measured video viewport; `SetWindowRgn` retains viewport/page clipping, without popup cutouts. Dialog shells can slide and fade over continuously decoded video. Video ancestors never transform. Panel resizing still waits for confirmed native placement before admitting focus. Companion views slide together inside a fixed frame, retain their state and immediately disable the outgoing view. Reduced motion settles active transitions immediately and disables smooth transcript following. Browser tests alone cannot verify native composition.
+Video and the current subtitle remain the primary study surface. The transcript uses a virtualized projection for search and marked cues while actions retain the original source identity. Long caption and row text scroll within bounded regions. Editing and approval dialogs are separate owned native GPUI windows; their parent is disabled until the dialog closes.
 
-Window fitting uses monitor work area, DPI and visible frame bounds. The 1280×720 logical client minimum is capped on smaller work areas; the initial size is 1600×900. Appearance offers 1280×720, 1600×900 and 1920×1080 presets, while valid saved placement takes precedence. Windows retains normal maximized/minimized behavior; edge alignment moves without resizing. Long phrase/subtitle lists are virtualized while retaining focused and edited rows; database reads are not paginated.
+Windows presents libmpv through a stable child HWND using `gpu-next` and D3D11. Frames are not copied through CPU buffers into GPUI. Captions and controls stay outside the video surface, including fullscreen. The application disables GPUI DirectComposition before starting worker threads so native child composition remains available. GPUI prepaint synchronously supplies the viewport bounds on the GUI thread; loading another item hides the old surface and disables controls until that item's load succeeds. Eager media generations reject stale loads, controls and loop operations. Fake-platform tests do not establish physical composition, IME or audio behavior; required Windows acceptance is defined in [testing](testing.md#required-gpui-windows-acceptance).
 
-The bundled DLL is loaded by absolute path with restricted dependency search; mpv configuration, scripts and URL hooks are disabled. Basic playback uses mpv metadata and codecs without FFmpeg. Windows always uses real libmpv. The Linux `e2e-test` adapter is deterministic test support, not a Linux product or proof of Windows rendering. See [native runtime and packaging](native-runtime.md).
+Window fitting uses monitor work area, DPI and visible frame bounds. The 1280×720 logical client minimum is capped on smaller work areas. Appearance offers 1280×720, 1600×900 and 1920×1080 presets, while valid saved placement takes precedence. Windows retains normal maximized/minimized behavior; edge alignment moves without resizing. Retained controllers own editing state independently of visible rows; database reads are not paginated.
+
+The bundled DLL is loaded by absolute path with restricted dependency search; mpv configuration, scripts and URL hooks are disabled. Basic playback uses mpv metadata and codecs without the separate FFmpeg CLI. Windows uses real libmpv. Linux supports compilation and shared service/component tests; its desktop entry point refuses product launch. Deterministic test adapters do not establish Windows rendering. See [native runtime and packaging](native-runtime.md).
 
 ## Behavioral boundaries
 

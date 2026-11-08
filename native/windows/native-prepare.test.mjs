@@ -33,9 +33,9 @@ windows('preparation stages alternate DLLs and notices without source/evidence f
   const manifest = readFileSync(f.manifestPath);
   const first = f.run();
   assert.equal(first.status, 0, first.stdout + first.stderr);
-  assert.equal(readFileSync(join(f.root, 'src-tauri/resources/native/mpv-2.dll'), 'utf8'), 'Alternate locally built DLL');
-  assert.equal(readFileSync(join(f.root, 'src-tauri/resources/native/NOTICE'), 'utf8'), 'Current license notice');
-  const target = join(f.root, 'src-tauri/resources/native/mpv-2.dll');
+  assert.equal(readFileSync(join(f.root, 'work/resources/native/mpv-2.dll'), 'utf8'), 'Alternate locally built DLL');
+  assert.equal(readFileSync(join(f.root, 'work/resources/native/NOTICE'), 'utf8'), 'Current license notice');
+  const target = join(f.root, 'work/resources/native/mpv-2.dll');
   utimesSync(target, new Date('2020-01-01'), new Date('2020-01-01'));
   const before = statSync(target).mtimeMs;
   const unchanged = f.run();
@@ -44,7 +44,7 @@ windows('preparation stages alternate DLLs and notices without source/evidence f
   writeFileSync(join(f.root, 'work/native-ci-artifact/mpv-2.dll'), 'New alternate DLL bytes');
   const second = f.run();
   assert.equal(second.status, 0, second.stdout + second.stderr);
-  assert.equal(readFileSync(join(f.root, 'src-tauri/resources/native/mpv-2.dll'), 'utf8'), 'New alternate DLL bytes');
+  assert.equal(readFileSync(join(f.root, 'work/resources/native/mpv-2.dll'), 'utf8'), 'New alternate DLL bytes');
   assert.deepEqual(readFileSync(f.manifestPath), manifest);
 }, 45_000);
 
@@ -68,7 +68,7 @@ windows('runtime archives are cached by component version without requiring bina
     f.save();
     const result = f.run();
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.equal(readFileSync(join(f.root, 'src-tauri/resources/native/onnxruntime.dll'), 'utf8'), 'ORT build ' + version);
+    assert.equal(readFileSync(join(f.root, 'work/resources/native/onnxruntime.dll'), 'utf8'), 'ORT build ' + version);
   }
 }, 90_000);
 

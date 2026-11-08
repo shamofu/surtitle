@@ -45,7 +45,7 @@ function Copy-Runtime([string]$source, [string]$target) {
     Copy-Item -LiteralPath $source -Destination $target -Force
 }
 $cache = Resolve-RepoPath 'work/native-cache'
-$runtime = Resolve-RepoPath 'src-tauri/resources/native'
+$runtime = Resolve-RepoPath 'work/resources/native'
 New-Item -ItemType Directory -Path $cache,$runtime -Force | Out-Null
 foreach ($component in $manifest.components) {
     Write-Host "Preparing $($component.id) $($component.version) for development."

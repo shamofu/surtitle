@@ -4,10 +4,11 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { validateTagEvent } from './check-release.mjs';
+import { checkVersion, validateTagEvent } from './check-release.mjs';
 import { readJson, sha256File } from './file-content.mjs';
+import { checkNativeAcceptance } from './check-native-acceptance.mjs';
 
-export function validateRelease(directory, version) {
+export function validateRelease(directory, version, { requireNativeAcceptance = false } = {}) {
   const names = readdirSync(directory).sort();
   const required = ['release-manifest.json', 'surtitle-source.zip',
     'native-runtime-manifest.json', 'js-sbom.cdx.json', 'rust-dependencies.json', 'installer-smoke.json'];
@@ -22,15 +23,29 @@ export function validateRelease(directory, version) {
   if (manifest.version !== version || manifest.installer !== installers[0] || manifest.installerSmokePassed !== true) {
     throw new Error('Release version, installer name or smoke result differs');
   }
+  const receiptPath = join(directory, installers[0] + '.build.json');
+  const receipt = readJson(receiptPath);
+  if (receipt.schema !== 1 || receipt.productionBuild !== true
+    || !/^[a-f0-9]{64}$/.test(receipt.executableSha256 ?? '')
+    || !/^[a-f0-9]{40}$/.test(receipt.sourceRevision ?? '')) throw new Error('Release requires a valid production build receipt');
+  if (receipt.installerSha256 !== sha256File(join(directory, installers[0]))) throw new Error('Production installer hash differs from the native acceptance build receipt');
+  if (receipt.sourceTreeClean !== true) throw new Error('Production package must be built from a clean source revision');
+  const hasAcceptance = names.includes('gpui-native-acceptance.json');
+  if ((requireNativeAcceptance || manifest.nativeAcceptanceRequired === true) && !hasAcceptance) {
+    throw new Error('Explicitly required native acceptance report is missing');
+  }
+  if (hasAcceptance) checkNativeAcceptance(join(directory, 'gpui-native-acceptance.json'), receiptPath);
   return files;
 }
 
-export function publishRelease({ directory = 'work/artifacts/release', version = readJson('package.json').version,
-  env = process.env, run = spawnSync } = {}) {
+export function publishRelease({ directory = 'work/artifacts/release', version = checkVersion(process.cwd()),
+  env = process.env, run = spawnSync, requireNativeAcceptance = false } = {}) {
   const repo = env.GITHUB_REPOSITORY;
   if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error('A valid GitHub repository is required.');
   const { tag, sha } = validateTagEvent(version, env);
-  const files = validateRelease(directory, version);
+  const files = validateRelease(directory, version, { requireNativeAcceptance });
+  const receipt = readJson(files.find(file => file.name.endsWith('.exe')).path + '.build.json');
+  if (receipt.sourceRevision !== sha) throw new Error('Native acceptance source revision differs from the release tag');
   function command(program, args) {
     const result = run(program, args, { encoding: 'utf8', shell: false, maxBuffer: 16 * 1024 * 1024 });
     if (result.error || result.status !== 0) throw new Error(result.error?.message || result.stderr || `${program} failed: ${args[0]}`);
@@ -66,8 +81,9 @@ export function publishRelease({ directory = 'work/artifacts/release', version =
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  const requireNativeAcceptance = process.argv.includes('--require-native-acceptance');
   if (process.argv.includes('--check')) {
-    validateRelease('work/artifacts/release', readJson('package.json').version);
+    validateRelease('work/artifacts/release', checkVersion(process.cwd()), { requireNativeAcceptance });
     console.log('Release assets are valid.');
-  } else publishRelease();
+  } else publishRelease({ requireNativeAcceptance });
 }

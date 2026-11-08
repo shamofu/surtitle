@@ -27,8 +27,20 @@ pub struct PreparedJob {
     /// Missing on older plans; omitting the default preserves their digest.
     #[serde(default, skip_serializing_if = "TextFailurePolicy::is_fail_fast")]
     pub text_failure_policy: TextFailurePolicy,
+    #[serde(deserialize_with = "deserialize_frozen_requests")]
     frozen_requests: Vec<Value>,
     frozen_task_digests: Vec<String>,
+}
+
+fn deserialize_frozen_requests<'de, D>(deserializer: D) -> std::result::Result<Vec<Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let mut requests = Vec::<Value>::deserialize(deserializer)?;
+    // Historical plans used serde_json's BTreeMap ordering. Other workspace
+    // dependencies can enable preserve_order, but cannot change approval hashes.
+    requests.iter_mut().for_each(Value::sort_all_objects);
+    Ok(requests)
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -147,6 +159,7 @@ impl PreparedJob {
                 task.body(Some(&[]))?
             };
             execution.apply(&mut body)?;
+            body.sort_all_objects();
             frozen_requests.push(body);
         }
         let frozen_task_digests = requests

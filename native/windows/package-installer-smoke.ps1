@@ -3,8 +3,11 @@ param(
     [Parameter(Mandatory)][string]$Installer,
     [string]$InstallDirectory = 'work/installer-test/日本語 & application',
     [switch]$DisposableProfile,
-    [string]$ConfigPath = 'src-tauri/tauri.conf.json',
-    [switch]$RenderingAcceptance,
+    [string]$ConfigPath = 'packaging/app.json',
+    [string]$ProductionProbe = 'native/windows/package-production-uia.ps1',
+    [string]$NativeAcceptance = 'native/windows/native-acceptance.ps1',
+    [switch]$RequireNativeAcceptance,
+    [string]$NativeExternalEvidence,
     [string]$EvidenceDirectory = 'work/artifacts'
 )
 $ErrorActionPreference = 'Stop'
@@ -12,7 +15,7 @@ $PSNativeCommandUseErrorActionPreference = $true
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 Set-Location -LiteralPath $workspace
 if (-not $IsWindows) { throw 'NSIS verification requires Windows.' }
-if ($env:CI -ne 'true' -and -not $DisposableProfile) { throw 'Use an isolated CI runner or explicitly supply -DisposableProfile in a disposable Windows user profile.' }
+. (Join-Path $PSScriptRoot 'production-uia-common.ps1')
 $installerPath = (Resolve-Path -LiteralPath $Installer).Path
 $installRoot = [IO.Path]::GetFullPath($InstallDirectory, $workspace)
 if (-not $installRoot.StartsWith($workspace + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Test install path must stay inside the repository.' }
@@ -21,7 +24,11 @@ $evidenceRoot = [IO.Path]::GetFullPath($EvidenceDirectory, $workspace)
 if (-not $evidenceRoot.StartsWith($workspace + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Test evidence must stay inside the repository.' }
 New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
 $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-if ($ConfigPath -ne 'src-tauri/tauri.conf.json' -and ($config.identifier -notmatch '^app\.surtitle\.evaluation\.[a-z0-9]+$' -or $config.productName -notmatch '^Surtitle Evaluation [A-Za-z0-9]+$')) { throw 'An override must identify a separate evaluation app, never the installed product.' }
+if ($ConfigPath -ne 'packaging/app.json' -and ($config.identifier -notmatch '^app\.surtitle\.evaluation\.[a-z0-9]+$' -or $config.productName -notmatch '^Surtitle Evaluation [A-Za-z0-9]+$')) { throw 'An override must identify a separate evaluation app, never the installed product.' }
+Assert-ProbeContext $IsWindows @{CI=$env:CI;GITHUB_ACTIONS=$env:GITHUB_ACTIONS;RUNNER_ENVIRONMENT=$env:RUNNER_ENVIRONMENT;RUNNER_OS=$env:RUNNER_OS} ([bool]$DisposableProfile) ([Environment]::GetFolderPath('LocalApplicationData')) (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) $config.identifier) $config.identifier
+$buildReceipt = $installerPath + '.build.json'
+$receipt = Get-Content -LiteralPath $buildReceipt -Raw | ConvertFrom-Json
+if ($receipt.productionBuild -ne $true -or $receipt.installerSha256 -ine (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash) { throw 'Installer lacks a matching production build receipt.' }
 $dataRoots = @(
     (Join-Path ([Environment]::GetFolderPath('ApplicationData')) $config.identifier),
     (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) $config.identifier)
@@ -62,7 +69,7 @@ function Assert-Payload {
         foreach ($file in $component.runtimeFiles) {
             $path = Join-Path $runtime $file.target
             Assert-InstalledFile $path
-            $expected = Join-Path (Join-Path $workspace 'src-tauri/resources/native') $file.target
+            $expected = Join-Path (Join-Path $workspace 'work/resources/native') $file.target
             $expectedHash = (Get-FileHash -LiteralPath $expected -Algorithm SHA256).Hash.ToLowerInvariant()
             $installedHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($installedHash -ne $expectedHash) { throw "Installed native payload differs from the selected runtime: $($file.target)" }
@@ -81,41 +88,19 @@ function Assert-Payload {
 function Probe-Production {
     $fixture = Join-Path $workspace 'work/test-results/fixtures/日本語 & sample.mp4'
     $localData = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) $config.identifier
-    if (-not (Test-Path -LiteralPath $fixture -PathType Leaf)) { throw 'Generate the local 12-second media fixture before production verification.' }
+    if (-not (Test-Path -LiteralPath $fixture -PathType Leaf)) { throw 'Generate the local media fixture before production verification.' }
     & pnpm build:fixtures
     if ($LASTEXITCODE -ne 0) { throw 'Disposable production learning fixture build failed.' }
-    # Create the profile and SQLite files with the same restricted token as the app.
     $seedApplication = Join-Path $workspace 'work/target/debug/examples/seed_fixture.exe'
     $seedArguments = ConvertTo-Json -InputObject @($localData, $fixture) -Compress
     $seedArgumentsBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($seedArguments))
     & pwsh -NoProfile -File e2e/support/run-windows-standard-user.ps1 -Application $seedApplication -ArgumentsBase64 $seedArgumentsBase64
     if ($LASTEXITCODE -ne 0) { throw 'Disposable production learning fixture preparation failed.' }
-    $arguments = @('native/windows/package-production-smoke.mjs', '--application', $binary,
-        '--data-root', $localData, '--fixture', $fixture,
-        '--driver', (Join-Path $workspace 'work/driver/bin/tauri-driver.exe'),
-        '--native-driver', (Join-Path $workspace 'work/webdriver/msedgedriver.exe'),
-        '--output', (Join-Path $evidenceRoot 'production-smoke.json'))
-    if ($DisposableProfile) { $arguments += '--disposable-profile' }
-    if ($config.identifier -ne 'app.surtitle.desktop') { $arguments += @('--app-id', $config.identifier) }
-    & node @arguments
-    if ($LASTEXITCODE -ne 0) { throw 'Installed production application readiness, playback or accounting verification failed.' }
-    if ($RenderingAcceptance) {
-        if ($config.identifier -notmatch '^app\.surtitle\.evaluation\.[a-z0-9]+$') { throw 'Extra rendering checks require an isolated evaluation identity.' }
-        $names = @('SURTITLE_E2E_BINARY', 'SURTITLE_E2E_DATA_DIR', 'SURTITLE_TAURI_DRIVER', 'SURTITLE_NATIVE_DRIVER', 'SURTITLE_WEBDRIVER_PORT')
-        $previous = @{}
-        foreach ($name in $names) { $previous[$name] = [Environment]::GetEnvironmentVariable($name) }
-        try {
-            $env:SURTITLE_E2E_BINARY = $binary
-            $env:SURTITLE_E2E_DATA_DIR = $localData
-            $env:SURTITLE_TAURI_DRIVER = Join-Path $workspace 'work/driver/bin/tauri-driver.exe'
-            $env:SURTITLE_NATIVE_DRIVER = Join-Path $workspace 'work/webdriver/msedgedriver.exe'
-            $env:SURTITLE_WEBDRIVER_PORT = '4471'
-            & node e2e/support/run-native-e2e.mjs --spec e2e/native/rendering-occlusion.e2e.js --spec e2e/native/motion.e2e.js --spec e2e/native/phrase-inspection.e2e.js --spec e2e/native/learning-continuity.e2e.js
-            if ($LASTEXITCODE -ne 0) { throw 'Installed production rendering checks failed.' }
-        } finally {
-            foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $previous[$name]) }
-        }
-    }
+    $profileArguments = if ($DisposableProfile) { @('-DisposableProfile') } else { @() }
+    & pwsh -NoProfile -File $ProductionProbe -Application $binary -DataRoot $localData -Fixture $fixture -Output (Join-Path $evidenceRoot 'production-smoke.json') -BuildReceipt $buildReceipt -AppId $config.identifier @profileArguments
+    if ($LASTEXITCODE -ne 0) { throw 'Installed production GPUI verification failed.' }
+    $result = Get-Content -LiteralPath (Join-Path $evidenceRoot 'production-smoke.json') -Raw | ConvertFrom-Json
+    if ($result.passed -ne $true -or $result.normalBuild -ne $true -or $result.paidRequests -ne 0) { throw 'Native production evidence is missing or invalid.' }
 }
 function Snapshot-Data {
     $values = @{}
@@ -136,10 +121,21 @@ function Assert-Data($before) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $before[$path]) { throw "Installer changed retained learning data: $path" }
     }
 }
+function Invoke-NativeAcceptance {
+    if (-not ($RequireNativeAcceptance -or $NativeExternalEvidence)) { return $false }
+    $localData = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) $config.identifier
+    $profileArguments = if ($DisposableProfile) { @('-DisposableProfile') } else { @() }
+    $externalArguments = if ($NativeExternalEvidence) { @('-ExternalEvidence',$NativeExternalEvidence) } else { @() }
+    & pwsh -NoProfile -File $NativeAcceptance -Application $binary -DataRoot $localData -Fixture (Join-Path $workspace 'work/test-results/fixtures/日本語 & sample.mp4') -BuildReceipt $buildReceipt -ProductionSmoke (Join-Path $evidenceRoot 'production-smoke.json') -Output (Join-Path $evidenceRoot 'native-acceptance/gpui-native-acceptance.json') -AppId $config.identifier @profileArguments @externalArguments | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Requested GPUI native acceptance failed or is incomplete; retained evidence lists missing cases.' }
+    return $true
+}
+if (-not $ProductionProbe -or -not (Test-Path -LiteralPath $ProductionProbe -PathType Leaf)) { throw 'A native GPUI installed-production UIA probe is required; legacy WebDriver cannot verify this binary.' }
 # /D and _?= deliberately remain last: NSIS treats their remaining text as one path.
 Run-Installer $installerPath @('/S', "/D=$installRoot")
 Assert-Payload
 Probe-Production
+$nativeAcceptancePassed = Invoke-NativeAcceptance
 $audioRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) ($config.identifier + '/card-audio')
 New-Item -ItemType Directory -Path $audioRoot -Force | Out-Null
 $ffmpeg = if ($env:FFMPEG_PATH) { $env:FFMPEG_PATH } else { (Get-Command ffmpeg -CommandType Application -ErrorAction Stop).Source }
@@ -169,8 +165,8 @@ $report = @{
     uninstallPassed=$true; defaultDataRetentionPassed=$true; retainedFileCount=$before.Count
     nonAsciiSpaceAmpersandInstallPath=$true; retainedDataRemoved=$false
     applicationIdentifier=$config.identifier; isolatedIdentity=($config.identifier -ne 'app.surtitle.desktop')
-    renderingAcceptancePassed=[bool]$RenderingAcceptance
-    learningContinuityPassed=[bool]$RenderingAcceptance
+    nativeAcceptancePassed=$nativeAcceptancePassed
+    nativeAcceptanceStatus=$(if ($nativeAcceptancePassed) { 'passed' } else { 'not_run' })
     payloadSha256=$payloadHashes
 }
 $report | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidenceRoot 'installer-smoke.json') -Encoding utf8

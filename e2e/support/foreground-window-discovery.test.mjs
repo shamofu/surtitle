@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { test } from 'vitest';
-import { spawnWebDriver } from './webdriver-process.mjs';
+import { spawnStandardUser } from './standard-user-process.mjs';
 
 const marker = 'SURTITLE_FOREGROUND_WINDOWS:';
 
@@ -120,7 +120,7 @@ public static class ForegroundWindowFixture {
       '${marker}' + (@{ utility = $utilityState; candidates = $observed } | ConvertTo-Json -Depth 8 -Compress)
     } finally { [ForegroundWindowFixture]::Dispose() }
   `;
-  const child = spawnWebDriver('pwsh.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
+  const child = spawnStandardUser('pwsh.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
     env: { ...process.env, SURTITLE_FOREGROUND_SOURCE: fileURLToPath(new URL('./windows-standard-user.cs', import.meta.url)) },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

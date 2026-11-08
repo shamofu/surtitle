@@ -1,6 +1,8 @@
 use super::*;
 use crate::{sha256_bytes, AiStore, AudioAttachment, PreparationBinding, PreparedJob, SourceCue};
 
+mod feature_composition;
+
 fn task() -> RequestTask {
     RequestTask::Translation {
         target_language: "ja".into(),

@@ -41,7 +41,14 @@ pub struct WorkspaceStore {
 
 fn validate_identity(kind: &str, entity_id: &str) -> Result<()> {
     ensure!(
-        ["settings", "card", "draft_card", "import"].contains(&kind),
+        [
+            "settings",
+            "card",
+            "draft_card",
+            "import",
+            "transcript_review"
+        ]
+        .contains(&kind),
         "Unknown draft kind"
     );
     ensure!(
@@ -49,8 +56,73 @@ fn validate_identity(kind: &str, entity_id: &str) -> Result<()> {
         "Invalid draft identity"
     );
     ensure!(
-        ["card", "draft_card"].contains(&kind) || entity_id == "default",
+        ["card", "draft_card", "transcript_review"].contains(&kind) || entity_id == "default",
         "Invalid singleton draft identity"
+    );
+    if kind == "transcript_review" {
+        ensure!(
+            entity_id.strip_prefix("review-").is_some_and(
+                |hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+            ),
+            "Invalid transcript review identity"
+        );
+    }
+    Ok(())
+}
+
+/// Raw local review inputs are bound to an exact review revision, never to a
+/// provider response or an approval. A changed digest creates a different draft.
+pub fn transcript_review_draft_id(
+    job_id: &str,
+    digest: &str,
+    target: &str,
+    range_version: u64,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let binding = serde_json::to_vec(&(job_id, digest, target, range_version))
+        .expect("string tuple serializes");
+    format!("review-{:x}", Sha256::digest(binding))
+}
+
+fn validate_transcript_binding(
+    kind: &str,
+    entity_id: &str,
+    fields: &BTreeMap<String, String>,
+) -> Result<()> {
+    if kind != "transcript_review" {
+        return Ok(());
+    }
+    let required = |name: &str| {
+        fields
+            .get(name)
+            .filter(|value| !value.is_empty())
+            .context("Missing transcript review binding")
+    };
+    let job = required("jobId")?;
+    let digest = required("draftDigest")?;
+    let target = required("target")?;
+    let version = required("rangeVersion")?
+        .parse::<u64>()
+        .context("Invalid transcript range version")?;
+    ensure!(
+        job.len() <= 128
+            && digest.len() == 64
+            && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            && target.len() <= 160
+            && (target
+                .strip_prefix("range:")
+                .is_some_and(|ordinal| ordinal.parse::<u32>().is_ok())
+                || target
+                    .strip_prefix("boundary:")
+                    .is_some_and(|id| !id.is_empty())
+                || target
+                    .strip_prefix("selection:")
+                    .is_some_and(|id| !id.is_empty())),
+        "Invalid transcript review binding"
+    );
+    ensure!(
+        entity_id == transcript_review_draft_id(job, digest, target, version),
+        "Transcript review binding changed"
     );
     Ok(())
 }
@@ -101,6 +173,16 @@ fn validate_fields(kind: &str, fields: &BTreeMap<String, String>) -> Result<()> 
             "recovery",
         ],
         "import" => &["learningLanguage", "explanationLanguage", "paths", "rows"],
+        "transcript_review" => &[
+            "jobId",
+            "draftDigest",
+            "target",
+            "rangeVersion",
+            "rows",
+            "confirmedNoSpeech",
+            "baseRevision",
+            "recovery",
+        ],
         _ => anyhow::bail!("Unknown draft kind"),
     };
     ensure!(
@@ -235,7 +317,7 @@ impl WorkspaceStore {
                 revision: revision as u64,
                 fields: serde_json::from_str(&fields)?,
                 updated_at,
-                stale: ["card", "draft_card"].contains(&kind)
+                stale: ["card", "draft_card", "transcript_review"].contains(&kind)
                     && bound.as_deref() != Some(generation),
                 archive_id: None,
             })
@@ -290,6 +372,7 @@ impl WorkspaceStore {
     pub fn archive(&mut self, request: &ArchiveUiDraft) -> Result<UiDraft> {
         validate_identity(&request.kind, &request.entity_id)?;
         validate_fields(&request.kind, &request.fields)?;
+        validate_transcript_binding(&request.kind, &request.entity_id, &request.fields)?;
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -321,6 +404,7 @@ impl WorkspaceStore {
     pub fn save(&mut self, request: &SaveUiDraft, generation: &str) -> Result<UiDraft> {
         validate_identity(&request.kind, &request.entity_id)?;
         validate_fields(&request.kind, &request.fields)?;
+        validate_transcript_binding(&request.kind, &request.entity_id, &request.fields)?;
         ensure!(
             request.expected_revision < i64::MAX as u64,
             "Invalid draft revision"
@@ -355,7 +439,7 @@ impl WorkspaceStore {
         let updated_at = crate::now();
         tx.execute("INSERT INTO ui_drafts(kind,entity_id,revision,fields,updated_at,learning_generation) VALUES(?,?,?,?,?,?)
             ON CONFLICT(kind,entity_id) DO UPDATE SET revision=excluded.revision,fields=excluded.fields,updated_at=excluded.updated_at,learning_generation=excluded.learning_generation",
-            params![request.kind,request.entity_id,revision,fields,updated_at,if ["card", "draft_card"].contains(&request.kind.as_str()) { Some(generation) } else { None }])?;
+            params![request.kind,request.entity_id,revision,fields,updated_at,if ["card", "draft_card", "transcript_review"].contains(&request.kind.as_str()) { Some(generation) } else { None }])?;
         tx.commit()?;
         Ok(UiDraft {
             kind: request.kind.clone(),
@@ -587,6 +671,96 @@ mod tests {
         assert_eq!(
             reopened.get("settings", "default", "b").unwrap(),
             Some(first)
+        );
+    }
+}
+
+#[cfg(test)]
+mod transcript_review_draft_tests {
+    use super::*;
+    fn input() -> SaveUiDraft {
+        let fields = [
+            ("jobId".into(), "job-one".into()),
+            ("draftDigest".into(), "a".repeat(64)),
+            ("target".into(), "range:0".into()),
+            ("rangeVersion".into(), "2".into()),
+            (
+                "rows".into(),
+                r#"[{"start":"00:","end":"","text":"unfinished"}]"#.into(),
+            ),
+            ("confirmedNoSpeech".into(), "false".into()),
+        ]
+        .into();
+        SaveUiDraft {
+            kind: "transcript_review".into(),
+            entity_id: transcript_review_draft_id("job-one", &"a".repeat(64), "range:0", 2),
+            expected_revision: 0,
+            fields,
+        }
+    }
+    #[test]
+    fn transcript_review_raw_input_reopens_and_cas_preserves_the_newer_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.sqlite");
+        let mut store = WorkspaceStore::open(&path).unwrap();
+        let request = input();
+        let saved = store.save(&request, "before").unwrap();
+        assert!(
+            !store
+                .get(&request.kind, &request.entity_id, "before")
+                .unwrap()
+                .unwrap()
+                .stale
+        );
+        assert!(store.save(&request, "before").is_err());
+        drop(store);
+        let reopened = WorkspaceStore::open(path).unwrap();
+        let record = reopened
+            .get(&request.kind, &request.entity_id, "after")
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.fields, saved.fields);
+        assert!(record.stale);
+        assert_eq!(
+            record.fields["rows"],
+            r#"[{"start":"00:","end":"","text":"unfinished"}]"#
+        );
+    }
+    #[test]
+    fn transcript_review_rejects_malformed_identity_and_private_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = WorkspaceStore::open(dir.path().join("workspace.sqlite")).unwrap();
+        for identity in ["", "default", "review-short", "review-../../outside"] {
+            let mut request = input();
+            request.entity_id = identity.into();
+            assert!(store.save(&request, "a").is_err());
+        }
+        let mut request = input();
+        request
+            .fields
+            .insert("credentialId".into(), "private".into());
+        assert!(store.save(&request, "a").is_err());
+        assert!(store.list("a").unwrap().is_empty());
+    }
+    #[test]
+    fn transcript_review_bookmark_raw_input_is_bound_to_the_exact_source_and_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = WorkspaceStore::open(dir.path().join("workspace.sqlite")).unwrap();
+        let mut request = input();
+        request
+            .fields
+            .insert("target".into(), "selection:bookmark-one".into());
+        request.entity_id =
+            transcript_review_draft_id("job-one", &"a".repeat(64), "selection:bookmark-one", 2);
+        let saved = store.save(&request, "a").unwrap();
+        request.expected_revision = saved.revision;
+        request.fields.insert("rangeVersion".into(), "3".into());
+        assert!(store.save(&request, "a").is_err());
+        assert_eq!(
+            store
+                .get("transcript_review", &request.entity_id, "a")
+                .unwrap(),
+            Some(saved)
         );
     }
 }

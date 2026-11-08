@@ -149,7 +149,7 @@ public static class SurtitleNativeWindow {
             int physicalHeight = checked((int)Math.Round(height * scale));
             int borderWidth = outer.Right - outer.Left - client.Right + client.Left;
             int borderHeight = outer.Bottom - outer.Top - client.Bottom + client.Top;
-            // Preserve position, z-order and activation; let Tauri resize its own WebView.
+            // Preserve position, z-order and activation while resizing the client area.
             if (!SetWindowPos(root, IntPtr.Zero, 0, 0, physicalWidth + borderWidth, physicalHeight + borderHeight, 0x0002 | 0x0004 | 0x0010)) throw new Win32Exception();
         } finally { if (previous != IntPtr.Zero) SetThreadDpiAwarenessContext(previous); }
     }
