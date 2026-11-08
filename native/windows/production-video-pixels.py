@@ -81,6 +81,36 @@ def run(executable, args, *, data=None, deadline=None):
     return result.stdout
 
 
+def capture_viewport(ffmpeg, geometry, deadline):
+    x, y, width, height, mx, my, _, _ = geometry
+    args = ['-hide_banner', '-loglevel', 'error', '-nostdin']
+    initialization_error = None
+    try:
+        capture = run(ffmpeg, [*args, '-f', 'lavfi', '-i',
+                              f'ddagrab=output_idx=0:output_fmt=bgra:draw_mouse=0:framerate=10:video_size={width}x{height}:offset_x={x-mx}:offset_y={y-my}',
+                              '-vf', 'hwdownload,format=bgra,format=rgb24', '-frames:v', '1',
+                              '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'], deadline=deadline)
+        method = 'DXGI Desktop Duplication / FFmpeg ddagrab'
+    except ValueError as error:
+        # This paused-fixture probe does not require video-acceleration APIs.
+        # Accept the alternative desktop pixels only through the same strict
+        # image/fit/seek comparison below; successful GDI capture alone proves nothing.
+        if 'Failed to create D3D11VA device.' not in str(error):
+            raise
+        initialization_error = str(error)
+        try:
+            capture = run(ffmpeg, [*args, '-f', 'gdigrab', '-draw_mouse', '0', '-framerate', '10',
+                                  '-video_size', f'{width}x{height}', '-offset_x', str(x), '-offset_y', str(y),
+                                  '-i', 'desktop', '-frames:v', '1', '-f', 'rawvideo',
+                                  '-pix_fmt', 'rgb24', 'pipe:1'], deadline=deadline)
+        except (ValueError, subprocess.TimeoutExpired) as fallback_error:
+            raise ValueError(f'{initialization_error}\nAlternative desktop capture failed: {fallback_error}') from fallback_error
+        method = 'GDI desktop / FFmpeg gdigrab (SRCCOPY | CAPTUREBLT)'
+    if len(capture) != width * height * 3:
+        raise ValueError('Desktop capture returned incomplete viewport pixels')
+    return capture, method, initialization_error
+
+
 def probe(ffmpeg, fixture, output, geometry, fraction):
     deadline = time.monotonic() + 25
     ffprobe = ffmpeg.with_name('ffprobe.exe' if ffmpeg.suffix.lower() == '.exe' else 'ffprobe')
@@ -98,12 +128,7 @@ def probe(ffmpeg, fixture, output, geometry, fraction):
     args = ['-hide_banner', '-loglevel', 'error', '-nostdin']
     # The caller verifies a single active primary monitor and exclusive app
     # ownership of this exact rectangle both before and after this capture.
-    capture = run(ffmpeg, [*args, '-f', 'lavfi', '-i',
-                          f'ddagrab=output_idx=0:output_fmt=bgra:draw_mouse=0:framerate=10:video_size={width}x{height}:offset_x={x-mx}:offset_y={y-my}',
-                          '-vf', 'hwdownload,format=bgra,format=rgb24', '-frames:v', '1',
-                          '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'], deadline=deadline)
-    if len(capture) != width * height * 3:
-        raise ValueError('Desktop Duplication returned incomplete viewport pixels')
+    capture, method, initialization_error = capture_viewport(ffmpeg, geometry, deadline)
     if output.exists():
         raise ValueError('Existing pixel evidence is protected')
     # Retain the actual crop even if comparison fails; never save a full desktop.
@@ -121,7 +146,7 @@ def probe(ffmpeg, fixture, output, geometry, fraction):
     references = decode(max(0, timestamp - 0.125), 7)
     contrast_time = duration * (0.7 if fraction < 0.5 else 0.1)
     result = verify_frame(capture, width, height, references, (160, 90), decode(contrast_time, 1)[0])
-    return dict(method='DXGI Desktop Duplication / FFmpeg ddagrab',
+    return dict(method=method, captureInitializationError=initialization_error,
                 viewportBounds=dict(x=x, y=y, width=width, height=height),
                 positionFraction=fraction, fixtureTimestampSeconds=timestamp,
                 fixtureSha256=hashlib.sha256(fixture.read_bytes()).hexdigest(),

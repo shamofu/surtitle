@@ -390,6 +390,8 @@ fn frame(shared: Rc<RefCell<Host>>, window: &mut Window, cx: &mut App) {
         .duration_since(state.clock)
         .as_secs_f64();
     let y = state.motion.sample(now, cx.reduce_motion());
+    #[cfg(not(windows))]
+    let _ = y;
     #[cfg(windows)]
     if let (Some(surface), Some(geometry)) = (&state.surface, state.geometry)
         && let Err(error) = surface.move_to(geometry.x, y.round() as i32)

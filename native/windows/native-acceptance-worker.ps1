@@ -145,7 +145,7 @@ try {
     Open-Study
     $currentCase='dpi-video-bounds'
     $bounds=Assert-Viewport
-    Mark-Passed 'dpi-video-bounds' 'Owned Desktop Duplication pixels match the fixture and aspect-fitted accessible viewport at the recorded window DPI.' $bounds
+    Mark-Passed 'dpi-video-bounds' 'Owned captured pixels match the fixture and aspect-fitted accessible viewport at the recorded window DPI; the capture method is recorded in the evidence.' $bounds
     $records['dpi-video-bounds'].evidence=@(@{path=$bounds.composedVideo.path;sha256=$bounds.composedVideo.sha256})
     $currentCase='fullscreen'
     $beforeFull=@(Native 'inspect')[0]

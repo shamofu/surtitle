@@ -92,15 +92,16 @@ impl<V: gpui_kit::Render> gpui_kit::Render for DialogContent<V> {
 /// Open an owned dialog with the first-present barrier and default close host.
 /// The constructor may install its guard with `set_close_guard`.
 pub(crate) fn open_window<V: gpui_kit::Render>(
-    mut options: WindowOptions,
+    options: WindowOptions,
     cx: &mut App,
     build: impl FnOnce(&mut gpui_kit::Window, &mut App) -> gpui_kit::Entity<V>,
 ) -> anyhow::Result<(gpui_kit::AnyWindowHandle, gpui_kit::Entity<V>)> {
     #[cfg(windows)]
-    {
-        options.show = false;
-        options.focus = false;
-    }
+    let options = WindowOptions {
+        show: false,
+        focus: false,
+        ..options
+    };
     let mut setup_error = None;
     let mut built = None;
     let result = gpui_kit::open_window(options, cx, |window, cx| {
