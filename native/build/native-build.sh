@@ -9,6 +9,16 @@ prefix="$build_root/prefix"
 logs="$build_root/logs"
 mkdir -p "$prefix" "$logs" "$build_root/objects"
 python3 "$workspace/native/build/native-source-inputs.py" "$workspace" "$source_root"
+# Keep the installed upstream API unchanged. The app's private composition
+# bridge acquires a COM reference while both core and VO lifetimes are protected.
+mpv_patch="$workspace/native/build/patches/mpv-owned-composition-swapchain.patch"
+if patch --batch --forward --dry-run -p1 -d "$source_root/mpv" < "$mpv_patch" > "$logs/mpv-patch.log" 2>&1; then
+  patch --batch --forward -p1 -d "$source_root/mpv" < "$mpv_patch" >> "$logs/mpv-patch.log" 2>&1
+elif ! patch --batch --reverse --dry-run -p1 -d "$source_root/mpv" < "$mpv_patch" >> "$logs/mpv-patch.log" 2>&1; then
+  cat "$logs/mpv-patch.log" >&2
+  echo 'The private mpv bridge does not match the pinned source; use a fresh build volume.' >&2
+  exit 1
+fi
 export PKG_CONFIG_PATH=
 export PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig:$prefix/share/pkgconfig"
 export CMAKE_PREFIX_PATH="$prefix"

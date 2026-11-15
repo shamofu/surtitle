@@ -6,6 +6,7 @@ use super::{
     policy::{self, RawRow},
     review::ReviewDialog,
 };
+use crate::ui::style::Button;
 use crate::ui::style::state_label;
 use crate::{
     commands,
@@ -17,7 +18,7 @@ use crate::{
 use gpui_kit::base::Disableable;
 use gpui_kit::component::{
     ActiveTheme,
-    button::{Button, ButtonVariants},
+    button::ButtonVariants,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
 };
 use gpui_kit::{AppContext, Context, Entity, Subscription, WeakEntity, Window, prelude::*, px};

@@ -1,11 +1,137 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Placement for owned GPUI dialogs, using the owner's current monitor.
+use gpui_kit::component::{WindowExt, input::AnyInputState};
 use gpui_kit::{
-    App, Bounds, DevicePixels, DisplayId, Pixels, Size, WindowBounds, WindowKind, WindowOptions,
-    point, size,
+    App, Bounds, DevicePixels, DisplayId, EntityInputHandler, Pixels, Size, WindowBounds,
+    WindowKind, WindowOptions, point, prelude::*, size,
 };
 
 type DisplayArea = (DisplayId, Bounds<Pixels>);
+mod host;
+mod motion;
+pub(crate) use host::{activate, close_then, install, on_closed, request_close, set_close_guard};
+
+struct DialogContent<V: gpui_kit::Render> {
+    view: gpui_kit::Entity<V>,
+    focus: gpui_kit::FocusHandle,
+    escape_blocked: bool,
+}
+fn escape_belongs_to_child(window: &mut gpui_kit::Window, cx: &mut App) -> bool {
+    if gpui_kit::base::active_focus_trap(window, cx).is_some()
+        || window.has_active_dialog(cx)
+        || window.has_active_sheet(cx)
+    {
+        return true;
+    }
+    match window.focused_input(cx) {
+        Some(AnyInputState::Input(input)) => input.update(cx, |input, cx| {
+            input.marked_text_range(window, cx).is_some()
+        }),
+        Some(AnyInputState::Textarea(input)) => input.update(cx, |input, cx| {
+            input.marked_text_range(window, cx).is_some()
+        }),
+        Some(AnyInputState::Editor(input)) => input.update(cx, |input, cx| {
+            input.marked_text_range(window, cx).is_some()
+        }),
+        Some(AnyInputState::Otp(_)) | None => false,
+    }
+}
+impl<V: gpui_kit::Render> gpui_kit::Render for DialogContent<V> {
+    fn render(
+        &mut self,
+        window: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
+        let enabled = host::interactive(window, cx);
+        gpui_kit::div()
+            .id("owned-dialog-content")
+            .size_full()
+            .track_focus(&self.focus)
+            .capture_key_down(
+                cx.listener(|this, event: &gpui_kit::KeyDownEvent, window, cx| {
+                    // Snapshot composition/popup ownership before a child consumes
+                    // Escape and removes its marked range or closes its surface.
+                    if event.keystroke.key == "escape" {
+                        this.escape_blocked |=
+                            event.prefer_character_input || escape_belongs_to_child(window, cx);
+                    } else {
+                        this.escape_blocked = false;
+                    }
+                }),
+            )
+            .capture_action(
+                cx.listener(|this, _: &gpui_kit::base::input::Escape, window, cx| {
+                    // Input Escape can unmark composition and propagate before
+                    // GPUI retries the keystroke as a plain KeyDown event.
+                    this.escape_blocked |= escape_belongs_to_child(window, cx);
+                }),
+            )
+            .capture_key_up(cx.listener(|this, event: &gpui_kit::KeyUpEvent, _, _| {
+                if event.keystroke.key == "escape" {
+                    this.escape_blocked = false;
+                }
+            }))
+            .on_key_down(
+                cx.listener(|this, event: &gpui_kit::KeyDownEvent, window, cx| {
+                    if event.keystroke.key == "escape"
+                        && !event.is_held
+                        && !event.prefer_character_input
+                        && event.keystroke.modifiers == Default::default()
+                        && !this.escape_blocked
+                        && host::interactive(window, cx)
+                    {
+                        cx.stop_propagation();
+                        request_close(window, cx);
+                    }
+                }),
+            )
+            .child(crate::ui::motion::interactive(self.view.clone(), enabled))
+    }
+}
+
+/// Open an owned dialog with the first-present barrier and default close host.
+/// The constructor may install its guard with `set_close_guard`.
+pub(crate) fn open_window<V: gpui_kit::Render>(
+    options: WindowOptions,
+    cx: &mut App,
+    build: impl FnOnce(&mut gpui_kit::Window, &mut App) -> gpui_kit::Entity<V>,
+) -> anyhow::Result<(gpui_kit::AnyWindowHandle, gpui_kit::Entity<V>)> {
+    #[cfg(windows)]
+    let options = WindowOptions {
+        show: false,
+        focus: false,
+        ..options
+    };
+    let mut setup_error = None;
+    let mut built = None;
+    let result = gpui_kit::open_window(options, cx, |window, cx| {
+        if let Err(error) = install(window, cx, |_, _| true) {
+            setup_error = Some(error);
+        }
+        let view = build(window, cx);
+        built = Some(view.clone());
+        // GPUI drops its root before the Windows backend asynchronously destroys
+        // the HWND. Keep entity release/autosave tied to native destruction.
+        let retained = view.clone();
+        on_closed(window, cx, move |_| drop(retained));
+        gpui_kit::AppContext::new(cx, |cx| {
+            let focus = cx.focus_handle().tab_stop(false);
+            if window.focused(cx).is_none() {
+                focus.focus(window, cx);
+            }
+            DialogContent {
+                view,
+                focus,
+                escape_blocked: false,
+            }
+        })
+    })?;
+    if let Some(error) = setup_error {
+        let _ = result.0.update(cx, |_, window, _| window.remove_window());
+        return Err(error);
+    }
+    Ok((result.0, built.expect("dialog build ran")))
+}
 
 #[derive(Clone, Copy)]
 struct Frame {
@@ -166,6 +292,110 @@ fn centered_options(
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_min_size: minimum,
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod keyboard_tests {
+    use super::*;
+    use gpui_kit::{
+        AppContext, Context, Entity, Focusable, IntoElement, Render, TestAppContext,
+        component::input::{Textarea, TextareaState},
+        test::{TestInput, TestQueryExt, TestWindowExt},
+    };
+    use std::{cell::Cell, rc::Rc};
+
+    struct Editing {
+        input: Entity<TextareaState>,
+    }
+    impl Render for Editing {
+        fn render(&mut self, _: &mut gpui_kit::Window, _: &mut Context<Self>) -> impl IntoElement {
+            gpui_kit::div()
+                .size_full()
+                .child(Textarea::new(&self.input).aria_label("Owned input"))
+        }
+    }
+    #[gpui_kit::test]
+    fn common_escape_keeps_builder_focus_and_ime_then_saves_accepted_close_once(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(|app| {
+            gpui_kit::init(app);
+            crate::ui::style::init(app);
+            app.set_reduce_motion(false);
+        });
+        let attempts = Rc::new(Cell::new(0));
+        let saves = Rc::new(Cell::new(0));
+        let closed = Rc::new(Cell::new(0));
+        let busy = Rc::new(Cell::new(true));
+        let (dialog, editing) = cx.update(|app| {
+            open_window(WindowOptions::default(), app, |window, app| {
+                let attempts = attempts.clone();
+                let saves = saves.clone();
+                let busy = busy.clone();
+                set_close_guard(window, app, move |_, _| {
+                    attempts.set(attempts.get() + 1);
+                    if busy.get() {
+                        false
+                    } else {
+                        saves.set(saves.get() + 1);
+                        true
+                    }
+                });
+                let closed = closed.clone();
+                on_closed(window, app, move |_| closed.set(closed.get() + 1));
+                let input = app.new(|cx| TextareaState::new(window, cx));
+                input.focus_handle(app).focus(window, app);
+                app.new(|_| Editing { input })
+            })
+            .unwrap()
+        });
+        dialog
+            .update(cx, |_, window, app| {
+                window.render_frame(app);
+                let field = window.find_by_label("Owned input");
+                assert_eq!(
+                    field.focused(),
+                    Some(true),
+                    "common fallback must preserve builder-owned input focus"
+                );
+                let input = editing.read(app).input.clone();
+                TestInput::new(
+                    gpui_kit::ElementInputHandler::new(field.bounds(), input),
+                    window,
+                )
+                .compose_text(None, "にほん", Some(0..3), app);
+                window.press("escape", app);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        assert_eq!(
+            attempts.get(),
+            0,
+            "composition owns its Escape even if the input unmarks before bubbling"
+        );
+        dialog
+            .update(cx, |_, window, app| window.press("escape", app))
+            .unwrap();
+        cx.run_until_parked();
+        assert_eq!(attempts.get(), 1);
+        assert_eq!(saves.get(), 0, "refusal must not save or remove the window");
+        assert!(dialog.update(cx, |_, _, _| ()).is_ok());
+        busy.set(false);
+        dialog
+            .update(cx, |_, window, app| {
+                window.press("escape", app);
+                window.press("escape", app);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        assert_eq!(attempts.get(), 2);
+        assert_eq!(saves.get(), 1);
+        cx.executor().advance_clock(crate::ui::motion::EXIT);
+        let _ = dialog.update(cx, |_, window, app| window.render_frame(app));
+        cx.run_until_parked();
+        assert_eq!(closed.get(), 1);
+        assert!(dialog.update(cx, |_, _, _| ()).is_err());
     }
 }
 

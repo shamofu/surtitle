@@ -18,14 +18,14 @@ network access on their first run. A fully offline first build is not automated.
 From a fresh extracted source directory, inspect the supplied source files and
 build the native artifact:
 
-On Windows with wslc and PowerShell 7.4 or newer, stream the tar export into the new output directory:
+On Windows with wslc, export a tar file and extract it into the new output directory:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 New-Item -ItemType Directory -Path work/native-ci-artifact | Out-Null
-wslc build --progress plain --file native/build/Dockerfile --target export --output type=tar,dest=- . |
-  tar -xf - -C work/native-ci-artifact
+wslc build --progress plain --file native/build/Dockerfile --target export --output type=tar,dest=work/native-ci-artifact.tar .
+tar -xf work/native-ci-artifact.tar -C work/native-ci-artifact
 ```
 
 With Docker Buildx:
@@ -40,8 +40,11 @@ The build exports `mpv-2.dll`, `libmpv-source.tar.gz`,
 preparation and packaging. Both backends cache native stages by their source and
 recipe inputs; add `--no-cache` to the chosen build command when needed.
 
-The libmpv recipe compiles the pinned source archives. Compiler packages and
-intermediate build trees remain inside the container. Compiler versions and PE
+The libmpv recipe applies its bundled private composition-ownership patch to
+the pinned mpv archive before compilation. The corresponding-source archive
+retains this patch alongside the recipe and original upstream archives.
+Compiler packages and intermediate build trees remain inside the container.
+Compiler versions and PE
 timestamps may change a rebuilt DLL's hash; runtime loading does not compare it
 with a recorded hash.
 The ORT package retains the corresponding source and dependency reconstruction

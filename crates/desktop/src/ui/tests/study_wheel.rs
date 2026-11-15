@@ -66,6 +66,7 @@ fn wheel_over_unavailable_video_and_volume_preserves_search_focus(cx: &mut TestA
 #[cfg(feature = "e2e-test")]
 mod applied {
     use super::*;
+    use gpui_kit::test::TestEventExt;
     use std::sync::{Arc, Mutex, atomic::AtomicBool};
 
     struct PlaybackFixture {
@@ -201,6 +202,66 @@ mod applied {
         });
         let fixture = ready(&harness, cx);
         (harness, delay, queue, fixture)
+    }
+
+    #[gpui_kit::test]
+    #[cfg_attr(
+        windows,
+        ignore = "requires prepared native resources; uses only owned hidden HWNDs"
+    )]
+    fn composition_video_clicks_and_moving_overlay_use_gpui_hitboxes(cx: &mut TestAppContext) {
+        let (harness, _, _, _fixture) = delayed(cx);
+        cx.update(|app| app.set_reduce_motion(false));
+        cx.update_window(harness.window, |_, window, app| {
+            window.click("close-study-companion", app);
+        })
+        .unwrap();
+        cx.executor().advance_clock(Duration::from_millis(220));
+        let expanded = cx
+            .update_window(harness.window, |_, window, app| {
+                window.render_frame(app);
+                let bounds = window.find("player-viewport").bounds();
+                window.click("toggle-transcript", app);
+                bounds
+            })
+            .unwrap();
+        cx.executor().advance_clock(Duration::from_millis(180));
+        let paused = harness.state.player_state().unwrap().paused;
+        cx.update_window(harness.window, |_, window, app| {
+            window.render_frame(app);
+            let panel = window.find("subtitle-panel").bounds();
+            let search = window.find("subtitle-search").bounds();
+            let position = search.center();
+            assert!(position.x > panel.left());
+            assert!(
+                expanded.contains(&position),
+                "exercise the panel strip which an older, wider HWND can still cover"
+            );
+            assert!(
+                position.x > window.find("player-viewport").bounds().right(),
+                "the current GPUI video hitbox must exclude the moving panel"
+            );
+            window.pointer_down(position, gpui_kit::MouseButton::Left, app);
+            window.pointer_up(position, gpui_kit::MouseButton::Left, app);
+            assert_eq!(window.find("subtitle-search").focused(), Some(true));
+        })
+        .unwrap();
+        harness.drain_callbacks(cx);
+        assert_eq!(harness.state.player_state().unwrap().paused, paused);
+        cx.update_window(harness.window, |_, window, app| {
+            window.click("player-viewport", app);
+            assert_eq!(window.find("subtitle-search").focused(), Some(false));
+        })
+        .unwrap();
+        harness.drain_callbacks(cx);
+        assert_eq!(harness.state.player_state().unwrap().paused, !paused);
+        cx.update_window(harness.window, |_, window, app| {
+            window.scroll("player-viewport", ScrollDelta::Lines(point(0., 3.)), app);
+        })
+        .unwrap();
+        harness.drain_callbacks(cx);
+        assert!(harness.state.player_state().unwrap().position_ms < 17_000);
+        harness.close(cx);
     }
 
     #[gpui_kit::test]

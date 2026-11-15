@@ -1,4 +1,5 @@
 use super::{locale_format, localized};
+use crate::ui::style::Button;
 use gpui_kit::base::Disableable;
 // SPDX-License-Identifier: GPL-3.0-or-later
 use super::{
@@ -20,7 +21,7 @@ use crate::{
 };
 use gpui_kit::component::{
     ActiveTheme,
-    button::{Button, ButtonVariants},
+    button::ButtonVariants,
     input::{Textarea, TextareaState},
 };
 use gpui_kit::{
@@ -1442,7 +1443,9 @@ impl Render for ReviewDialog {
         content = content.child(
             Button::new("close-ai-review")
                 .label(localized(cx, "入力を残して閉じる / Close and keep input"))
-                .on_click(|_, window, _| window.remove_window()),
+                .on_click(|_, window, cx| {
+                    crate::desktop::dialog::request_close(window, cx);
+                }),
         );
         super::super::keyboard::form_tab_navigation(div())
             .id("ai-review-scroll")

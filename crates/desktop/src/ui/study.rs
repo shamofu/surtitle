@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use super::keyboard::Slider;
+use super::motion;
 use super::source_editors::SourceEditors;
 use super::{
     captions::{CaptionIndex, marked, transcript_rows},
@@ -10,10 +11,11 @@ use super::{
 use crate::{application::changes::ChangeDomain, commands, player::Bounds};
 use gpui_kit::Focusable;
 use gpui_kit::assets::IconName;
+use gpui_kit::base::motion::Presence;
 use gpui_kit::base::{Disableable, TestSupportExt};
 use gpui_kit::component::{
     ActiveTheme,
-    button::{Button, ButtonVariants},
+    button::ButtonVariants,
     input::{Input, InputEvent, InputState},
     menu::{DropdownMenu, PopupMenuItem},
     slider::{SliderEvent, SliderState, SliderValue},
@@ -51,11 +53,14 @@ pub(crate) struct StudyView {
     volume_wheel: WheelSteps,
     rate: Entity<SliderState>,
     focus: gpui_kit::FocusHandle,
+    companion_focus: [gpui_kit::FocusHandle; 5],
+    companion_visible: bool,
     looping: Option<(u64, u64)>,
     selection_source: Option<String>,
     follow: bool,
     last_caption: Option<usize>,
     list_scroll: gpui_kit::UniformListScrollHandle,
+    transcript_motion: super::list_motion::ListMotion,
     rebind_request: Option<String>,
     search: Entity<InputState>,
     marked_only: bool,
@@ -68,6 +73,8 @@ pub(crate) struct StudyView {
     empty_issues: Vec<surtitle_core::TranscriptIssueRecord>,
     companion_open: bool,
     companion_tab: CompanionTab,
+    companion_motion: motion::pages::Pages<5>,
+    viewport_size: Option<gpui_kit::Size<gpui_kit::Pixels>>,
     candidates: Vec<BoundCandidate>,
     candidates_loading: bool,
     candidates_error: Option<String>,
@@ -97,12 +104,16 @@ impl StudyView {
         focus.focus(window, cx);
         let search_placeholder = session.read(cx).text("字幕を検索", "Search subtitles");
         let search = cx.new(|cx| InputState::new(window, cx).placeholder(search_placeholder));
-        let search_events = cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.follow = false;
-                this.filter(cx);
-            }
-        });
+        let search_events = cx.subscribe_in(
+            &search,
+            window,
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.follow = false;
+                    this.filter_from_user(window, cx);
+                }
+            },
+        );
         let seek = cx.new(|_| SliderState::new().min(0.).max(10000.).step(1.));
         let volume = cx.new(|_| {
             SliderState::new()
@@ -196,6 +207,7 @@ impl StudyView {
                             && let Some(index) =
                                 current.and_then(|index| this.visible.binary_search(&index).ok())
                         {
+                            this.transcript_motion.settle();
                             this.list_scroll
                                 .scroll_to_item(index, gpui_kit::ScrollStrategy::Center);
                         }
@@ -203,11 +215,7 @@ impl StudyView {
                         cx.notify();
                     }
                     UiEvent::SurfaceClick => {
-                        // The native video child does not pass through GPUI's
-                        // pointer focus dispatch. Leave any caption input before
-                        // returning playback shortcuts to the study surface.
-                        this.focus.focus(window, cx);
-                        this.control("toggle-pause", None, cx);
+                        this.surface_click(window, cx);
                     }
                     UiEvent::Snapshot => {
                         let placeholder =
@@ -249,11 +257,14 @@ impl StudyView {
             volume_wheel: Default::default(),
             rate,
             focus,
+            companion_focus: std::array::from_fn(|_| cx.focus_handle()),
+            companion_visible: true,
             looping: None,
             selection_source: None,
             follow: true,
             last_caption: None,
             list_scroll: gpui_kit::UniformListScrollHandle::new(),
+            transcript_motion: Default::default(),
             rebind_request: None,
             search,
             marked_only: false,
@@ -266,6 +277,8 @@ impl StudyView {
             empty_issues: vec![],
             companion_open: true,
             companion_tab: CompanionTab::Transcript,
+            companion_motion: motion::pages::Pages::with_duration(0, motion::PANEL),
+            viewport_size: None,
             candidates: vec![],
             candidates_loading: false,
             candidates_error: None,
@@ -386,15 +399,53 @@ impl StudyView {
             && player.ready
             && player.media_id.as_deref() == Some(self.media_id.as_str())
     }
-    fn filter(&mut self, cx: &mut Context<Self>) {
-        self.visible = Arc::new(transcript_rows(
+    fn projected_rows(&self, cx: &gpui_kit::App) -> Arc<Vec<usize>> {
+        Arc::new(transcript_rows(
             &self.segments,
             self.search.read(cx).value().as_ref(),
             self.marked_only,
-        ));
+        ))
+    }
+    fn filter(&mut self, cx: &mut Context<Self>) {
+        self.transcript_motion.settle();
+        self.visible = self.projected_rows(cx);
+        cx.notify();
+    }
+    fn filter_from_user(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.follow = false;
+        // A queued follow request must not override the new user-owned anchor.
+        self.list_scroll.0.borrow_mut().deferred_scroll_to_item = None;
+        let next = self.projected_rows(cx);
+        if next == self.visible {
+            cx.notify();
+            return;
+        }
+        let scroll = self.list_scroll.0.borrow();
+        let (top, _) = scroll.base_handle.logical_scroll_top();
+        if let (Some(source), Some(item)) = (self.visible.get(top), scroll.last_item_size)
+            && !next.is_empty()
+        {
+            // Both projections are sorted source indices, so the insertion
+            // point is the nearest surviving successor, then predecessor.
+            let anchor = next
+                .binary_search(source)
+                .unwrap_or_else(|index| index.min(next.len() - 1));
+            let offset = scroll.base_handle.offset();
+            let within = offset.y + item.item.height * top as f32;
+            scroll.base_handle.set_offset(gpui_kit::point(
+                offset.x,
+                within - item.item.height * anchor as f32,
+            ));
+        }
+        self.visible = next;
+        self.transcript_motion
+            .viewport(window.viewport_size(), scroll.base_handle.offset());
+        drop(scroll);
+        self.transcript_motion.filter_changed();
         cx.notify();
     }
     fn follow_playback(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.transcript_motion.settle();
         if let Some(index) = self.current_caption(cx) {
             if self.visible.binary_search(&index).is_err() {
                 self.marked_only = false;
@@ -409,6 +460,13 @@ impl StudyView {
         }
         self.follow = true;
         cx.notify();
+    }
+    fn surface_click(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Both native notifications and GPUI pointer routing leave an editor
+        // before returning playback shortcuts to the Study surface. `control`
+        // preserves the current media-readiness and frozen-source guards.
+        self.focus.focus(window, cx);
+        self.control("toggle-pause", None, cx);
     }
     fn control(&mut self, action: &str, value: Option<f64>, cx: &mut Context<Self>) {
         if self.sources.read(cx).frozen() || (action != "fullscreen" && !self.playback_ready(cx)) {
@@ -748,14 +806,56 @@ impl StudyView {
 
 impl Render for StudyView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let viewport = window.viewport_size();
+        let resized = self
+            .viewport_size
+            .is_some_and(|previous| previous != viewport);
+        self.viewport_size = Some(viewport);
         let subtitle_panel = self.companion_open && !window.is_fullscreen();
-        if (!subtitle_panel || self.companion_tab != CompanionTab::Transcript)
-            && self.search.read(cx).focus_handle(cx).is_focused(window)
-        {
-            // Pointer buttons retain prior focus. Do not strand it on a search
-            // editor removed by fullscreen, closing, or changing the companion.
-            self.focus.focus(window, cx);
+        // Layout, rather than a transform on the video ancestor, owns this
+        // reveal. The native canvas consequently receives its real bounds in
+        // the same frame's prepaint, including every intermediate width.
+        let companion_progress = motion::reveal(
+            "study-companion-width",
+            subtitle_panel,
+            if window.is_fullscreen() || resized {
+                std::time::Duration::ZERO
+            } else if subtitle_panel {
+                motion::ENTER
+            } else {
+                motion::EXIT
+            },
+            motion::resizing_easing(),
+            window,
+            cx,
+        );
+        let translation_progress = motion::reveal(
+            "study-caption-translation",
+            self.show_translation,
+            if resized {
+                std::time::Duration::ZERO
+            } else if self.show_translation {
+                motion::DISCLOSE_ENTER
+            } else {
+                motion::DISCLOSE_EXIT
+            },
+            motion::resizing_easing(),
+            window,
+            cx,
+        );
+        let entry = Presence::new("study-chrome-entry", true)
+            .transition(motion::enter(motion::ENTER))
+            .sample(window, cx)
+            .progress;
+        if self.companion_visible && !subtitle_panel {
+            // Fullscreen can hide the panel independently of its toggle. Retire
+            // its copy selection and focus before the old tree becomes inert.
+            gpui_kit::base::TextSelection::clear(window, cx);
+            if self.companion_has_focus(window, cx) {
+                self.focus.focus(window, cx);
+            }
         }
+        self.companion_visible = subtitle_panel;
         let session = self.session.read(cx);
         let japanese = session.text("ja", "en") == "ja";
         let t = move |ja: &'static str, en: &'static str| if japanese { ja } else { en };
@@ -801,6 +901,7 @@ impl Render for StudyView {
             .w_full()
             .flex_1()
             .min_h(px(100.))
+            .on_click(cx.listener(|this, _, window, cx| this.surface_click(window, cx)))
             .on_scroll(cx.listener(|this, event, _, cx| this.scroll_video(event, cx)))
             .child(
                 canvas(
@@ -829,7 +930,14 @@ impl Render for StudyView {
                             input_blocked: false,
                         });
                     },
-                    |_, _, _, _| {},
+                    move |bounds, _, window, _| {
+                        #[cfg(windows)]
+                        if show_surface {
+                            window.paint_native_aperture(bounds);
+                        }
+                        #[cfg(not(windows))]
+                        let _ = (bounds, window);
+                    },
                 )
                 .size_full(),
             );
@@ -854,7 +962,20 @@ impl Render for StudyView {
         let visible = self.visible.clone();
         let view = cx.entity().downgrade();
 
-        let transport = self.transport(&player, playback_disabled, window.is_fullscreen(), cx);
+        let transport = div()
+            .id("study-chrome-transport")
+            .test_support()
+            .relative()
+            .top(px(8. * (1. - entry)))
+            .opacity(entry)
+            .flex_shrink_0()
+            .child(self.transport(&player, playback_disabled, window.is_fullscreen(), cx));
+        self.transcript_motion.viewport(
+            window.viewport_size(),
+            self.list_scroll.0.borrow().base_handle.offset(),
+        );
+        self.transcript_motion.begin_layout();
+        let row_motion = self.transcript_motion.clone();
         let rows = uniform_list("subtitle-list", visible.len(), move |range, _, cx| {
             range
                 .map(|visible_row| {
@@ -868,7 +989,7 @@ impl Render for StudyView {
                     let selection_view = view.clone();
                     let id = cue.id.clone();
                     let selection_id = id.clone();
-                    row()
+                    row_motion.row(cue.id.clone(), row()
                         .id(format!("cue-row-{}", cue.id))
                         .test_support()
                         .role(gpui_kit::Role::Group)
@@ -1132,7 +1253,7 @@ impl Render for StudyView {
                                             }),
                                         ),
                                 ),
-                        )
+                        ))
                 })
                 .collect::<Vec<_>>()
         })
@@ -1208,10 +1329,10 @@ impl Render for StudyView {
                     .text_size(px(12.))
                     .mx_2()
                     .disabled(!self.marked_only && !self.has_marked)
-                    .on_click(cx.listener(|this, _, _, cx| {
+                    .on_click(cx.listener(|this, _, window, cx| {
                         this.marked_only = !this.marked_only;
                         this.follow = false;
-                        this.filter(cx);
+                        this.filter_from_user(window, cx);
                     })),
             )
             .child(
@@ -1223,7 +1344,7 @@ impl Render for StudyView {
                         this.marked_only = false;
                         this.search
                             .update(cx, |search, cx| search.set_value("", window, cx));
-                        this.filter(cx);
+                        this.filter_from_user(window, cx);
                     })),
             )
             .when(!self.empty_issues.is_empty(), |body| {
@@ -1312,78 +1433,132 @@ impl Render for StudyView {
                             ),
                     ),
             );
-        let panel_heading = match self.companion_tab {
-            CompanionTab::Meaning => t("意味とフレーズ", "Meaning and phrases"),
-            CompanionTab::Tools => t("処理・管理", "Activity & tools"),
-            _ => t("字幕", "Transcript"),
-        };
         let companion_width = if f32::from(window.viewport_size().width) >= 1400. {
             360.
         } else {
             320.
         };
-        let companion = column()
-            .id("subtitle-panel")
-            .w(px(companion_width))
+        // All displayed layers share one clock and keep their physical
+        // ordering across retargets. This prevents uncovered strips when a
+        // third destination interrupts an already moving pair of pages.
+        let page_frame = self.companion_motion.frame(
+            self.companion_tab.order(),
+            cx.background_executor().now(),
+            cx.reduce_motion()
+                || resized
+                || window.is_fullscreen()
+                || !window.is_visible()
+                || companion_progress <= 0.,
+        );
+        if page_frame.running {
+            window.request_animation_frame();
+        }
+        let mut transcript = Some(transcript.into_any_element());
+        let mut pages = Vec::new();
+        for (index, offset) in page_frame.layers {
+            if companion_progress <= 0. {
+                break;
+            }
+            let tab = CompanionTab::ALL[index];
+            // Match the travel distance to the content viewport inside the
+            // fixed one-pixel border, rather than its outer width.
+            let x = offset * (companion_width - 2.);
+            let panel_heading = match tab {
+                CompanionTab::Meaning => t("意味とフレーズ", "Meaning and phrases"),
+                CompanionTab::Tools => t("処理・管理", "Activity & tools"),
+                _ => t("字幕", "Transcript"),
+            };
+            let panel = match tab {
+                CompanionTab::Transcript => transcript.take().unwrap(),
+                CompanionTab::Transcription => self.transcription_panel(cx).into_any_element(),
+                CompanionTab::Suggestions => self.suggestions_panel(cx).into_any_element(),
+                CompanionTab::Meaning => self.meaning_panel(cx).into_any_element(),
+                CompanionTab::Tools => self.tools_panel(cx).into_any_element(),
+            };
+            let active = subtitle_panel && tab == self.companion_tab;
+            let close_id = if active {
+                "close-study-companion".to_owned()
+            } else {
+                format!("close-outgoing-{}", tab.key())
+            };
+            let content = column()
+                .track_focus(&self.companion_focus[index])
+                .tab_group()
+                .size_full()
+                .min_h(px(0.))
+                .gap_0()
+                .child(
+                    row()
+                        .px_4()
+                        .py_3()
+                        .justify_between()
+                        .gap_2()
+                        .border_b_1()
+                        .border_color(cx.theme().border)
+                        .child(
+                            div()
+                                .text_size(px(16.))
+                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                .child(panel_heading),
+                        )
+                        .child(
+                            icon_button(close_id, IconName::X, t("閉じる", "Close"))
+                                .w(px(32.))
+                                .h(px(32.))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.close_companion(window, cx)
+                                })),
+                        ),
+                )
+                .when(
+                    !matches!(tab, CompanionTab::Meaning | CompanionTab::Tools),
+                    |body| body.child(self.companion_tabs(cx)),
+                )
+                .child(panel);
+            pages.push(
+                div()
+                    .id(format!("study-page-{}", tab.key()))
+                    .test_support()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(px(x))
+                    .w(px(companion_width - 2.))
+                    .bg(cx.theme().popover)
+                    .occlude()
+                    .child(motion::interactive(content, active))
+                    .into_any_element(),
+            );
+        }
+        let companion = div()
+            .id("study-companion-reveal")
+            .w(px((companion_width + 16.) * companion_progress))
+            .h_full()
             .flex_shrink_0()
             .min_h(px(0.))
-            .gap_0()
-            .rounded(px(12.))
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().popover)
             .overflow_hidden()
             .child(
-                row()
-                    .px_4()
-                    .py_3()
-                    .justify_between()
-                    .gap_2()
-                    .border_b_1()
+                column()
+                    .id("subtitle-panel")
+                    .test_support()
+                    .relative()
+                    .ml(px(16. * companion_progress))
+                    .w(px(companion_width))
+                    .h_full()
+                    .flex_shrink_0()
+                    .min_h(px(0.))
+                    .rounded(px(12.))
+                    .border_1()
                     .border_color(cx.theme().border)
-                    .child(
-                        div()
-                            .text_size(px(16.))
-                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                            .child(panel_heading),
-                    )
-                    .child(
-                        icon_button("close-study-companion", IconName::X, t("閉じる", "Close"))
-                            .w(px(32.))
-                            .h(px(32.))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.companion_open = false;
-                                cx.notify();
-                            })),
-                    ),
-            )
-            .when(
-                !matches!(
-                    self.companion_tab,
-                    CompanionTab::Meaning | CompanionTab::Tools
-                ),
-                |body| body.child(self.companion_tabs(cx)),
-            )
-            .when(self.companion_tab == CompanionTab::Transcript, |body| {
-                body.child(transcript)
-            })
-            .when(self.companion_tab == CompanionTab::Transcription, |body| {
-                body.child(self.transcription_panel(cx))
-            })
-            .when(self.companion_tab == CompanionTab::Suggestions, |body| {
-                body.child(self.suggestions_panel(cx))
-            })
-            .when(self.companion_tab == CompanionTab::Meaning, |body| {
-                body.child(self.meaning_panel(cx))
-            })
-            .when(self.companion_tab == CompanionTab::Tools, |body| {
-                body.child(self.tools_panel(cx))
-            });
+                    .bg(cx.theme().popover)
+                    .overflow_hidden()
+                    .children(pages),
+            );
         let content = row()
             .flex_1()
             .min_h(px(0.))
             .items_stretch()
-            .gap_4()
+            .gap_0()
             .child(
                 column()
                     .flex_1()
@@ -1408,57 +1583,77 @@ impl Render for StudyView {
                             .pt_4()
                             .gap_2()
                             .child(
-                                div()
-                                    .id("caption-selection")
-                                    .test_support()
-                                    .role(gpui_kit::accesskit::Role::Group)
-                                    .accessibility_id("caption-selection")
-                                    .aria_label(t("現在の字幕", "Current subtitle"))
+                                column()
                                     .flex_1()
                                     .min_h(px(0.))
-                                    .overflow_y_scroll()
-                                    .px_1()
-                                    .on_mouse_down(
-                                        gpui_kit::MouseButton::Left,
-                                        cx.listener(move |this, _, _, cx| {
-                                            this.select_text_source(caption_source.clone(), cx)
-                                        }),
-                                    )
-                                    .text_size(px(28.))
-                                    .line_height(gpui_kit::relative(1.4))
+                                    .gap(px(8. * translation_progress))
                                     .child(
                                         div()
-                                            .id("caption-accessible-text")
+                                            .id("caption-selection")
                                             .test_support()
-                                            .role(gpui_kit::accesskit::Role::Label)
-                                            .accessibility_id("caption-accessible-text")
-                                            .aria_value(caption_text.clone())
-                                            .child(gpui_kit::base::SelectableText::new(
-                                                "caption-text",
-                                                caption_text,
-                                            )),
-                                    ),
+                                            .role(gpui_kit::accesskit::Role::Group)
+                                            .accessibility_id("caption-selection")
+                                            .aria_label(t("現在の字幕", "Current subtitle"))
+                                            .flex_basis(px(0.))
+                                            .flex_grow(2. - translation_progress)
+                                            .min_h(px(0.))
+                                            .overflow_y_scroll()
+                                            .px_1()
+                                            .on_mouse_down(
+                                                gpui_kit::MouseButton::Left,
+                                                cx.listener(move |this, _, _, cx| {
+                                                    this.select_text_source(
+                                                        caption_source.clone(),
+                                                        cx,
+                                                    )
+                                                }),
+                                            )
+                                            .text_size(px(28.))
+                                            .line_height(gpui_kit::relative(1.4))
+                                            .child(
+                                                div()
+                                                    .id("caption-accessible-text")
+                                                    .test_support()
+                                                    .role(gpui_kit::accesskit::Role::Label)
+                                                    .accessibility_id("caption-accessible-text")
+                                                    .aria_value(caption_text.clone())
+                                                    .child(gpui_kit::base::SelectableText::new(
+                                                        "caption-text",
+                                                        caption_text,
+                                                    )),
+                                            ),
+                                    )
+                                    .when(translation_progress > 0., |body| {
+                                        body.child(
+                                            div()
+                                                .flex_basis(px(0.))
+                                                .flex_grow(translation_progress)
+                                                .min_h(px(0.))
+                                                .overflow_hidden()
+                                                .child(motion::interactive(
+                                                    div()
+                                                        .id("caption-translation-text")
+                                                        .test_support()
+                                                        .role(gpui_kit::accesskit::Role::Label)
+                                                        .accessibility_id(
+                                                            "caption-translation-text",
+                                                        )
+                                                        .aria_value(translation.clone())
+                                                        .h_full()
+                                                        .min_h(px(0.))
+                                                        .overflow_y_scroll()
+                                                        .px_1()
+                                                        .pt(px(8. * translation_progress))
+                                                        .border_t(px(translation_progress))
+                                                        .border_color(cx.theme().border)
+                                                        .text_size(px(15.))
+                                                        .line_height(gpui_kit::relative(1.7))
+                                                        .child(translation),
+                                                    self.show_translation,
+                                                )),
+                                        )
+                                    }),
                             )
-                            .when(self.show_translation, |body| {
-                                body.child(
-                                    div()
-                                        .id("caption-translation-text")
-                                        .test_support()
-                                        .role(gpui_kit::accesskit::Role::Label)
-                                        .accessibility_id("caption-translation-text")
-                                        .aria_value(translation.clone())
-                                        .flex_1()
-                                        .min_h(px(0.))
-                                        .overflow_y_scroll()
-                                        .px_1()
-                                        .pt_2()
-                                        .border_t_1()
-                                        .border_color(cx.theme().border)
-                                        .text_size(px(15.))
-                                        .line_height(gpui_kit::relative(1.7))
-                                        .child(translation),
-                                )
-                            })
                             .child(
                                 row()
                                     .justify_between()
@@ -1637,8 +1832,8 @@ impl Render for StudyView {
                             ),
                     ),
             )
-            .when(subtitle_panel, |body| body.child(companion));
-        column().key_context("SurtitleStudy").track_focus(&self.focus)
+            .when(companion_progress > 0., |body| body.child(companion));
+        column().key_context("SurtitleStudy").track_focus(&self.focus).tab_group()
             .on_key_down(
                 cx.listener(|this, event: &gpui_kit::KeyDownEvent, window, cx| {
                     // Fullscreen belongs to the Study window, including when a
@@ -1655,7 +1850,7 @@ impl Render for StudyView {
                         cx.stop_propagation();
                         return;
                     }
-                    if !super::keyboard::page_shortcut(event, &[&this.focus], window) {
+                    if !super::keyboard::page_shortcut(event, &[&this.focus, &this.companion_focus[this.companion_tab.order()]], window) {
                         return;
                     }
                     let position = this.session.read(cx).player.position_ms;
@@ -1681,7 +1876,7 @@ impl Render for StudyView {
                 .child(div().flex_1().child(t("AI依頼の新しい出典を選んでください。モデル設定と入力は保持されています。","Select new source subtitles for the saved AI request.")))
                 .child(button("confirm-ai-source").primary().label(t("選択した字幕を使う","Use selected subtitles")).disabled(self.selected.is_empty()||self.sources.read(cx).frozen()).on_click(cx.listener(|this,_,_,cx|this.confirm_ai_source(cx))))
                 .child(button("cancel-ai-rebind").label(t("選び直しを終了","Cancel reselection")).on_click(cx.listener(|this,_,_,cx|{this.rebind_request=None;cx.notify();})))))
-            .child(row().h(px(48.)).flex_shrink_0().gap_4()
+            .child(row().id("study-chrome-heading").test_support().relative().top(px(8. * (1. - entry))).opacity(entry).h(px(48.)).flex_shrink_0().gap_4()
                 .child(icon_button("study-back",IconName::ArrowLeft,t("ライブラリへ","Back to library"))
                     .on_click(cx.listener(|this,_,_,cx|this.session.update(cx,|session,cx|session.navigate(super::session::Route::Library,cx)))))
                 .child(column().flex_1().min_w(px(0.)).gap_0()
@@ -1691,9 +1886,9 @@ impl Render for StudyView {
                         .child(div().text_size(px(13.)).text_color(cx.theme().muted_foreground).child(format!("{} / {}",language_name(self.session.read(cx).snapshot.as_ref().and_then(|s|s.media.iter().find(|m|m.id==self.media_id)).map(|m|m.learning_language.as_str()).unwrap_or("en"),japanese),timestamp(player.duration_ms))))))
                 .child(button("toggle-transcript").icon(IconName::Captions).label(t("字幕一覧","Transcript"))
                     .bg(if subtitle_panel&&self.companion_tab==CompanionTab::Transcript{cx.theme().accent}else{cx.theme().popover})
-                    .on_click(cx.listener(|this,_,_,cx|{this.companion_open = !(this.companion_open&&this.companion_tab==CompanionTab::Transcript);this.companion_tab=CompanionTab::Transcript;cx.notify();})))
+                    .on_click(cx.listener(|this,_,window,cx|{this.toggle_companion(CompanionTab::Transcript,window,cx);})))
                 .child(button("study-tools").label(t("処理・管理","Activity & tools")).icon(IconName::ChevronDown)
-                    .on_click(cx.listener(|this,_,_,cx|{this.companion_open = !(this.companion_open&&this.companion_tab==CompanionTab::Tools);this.companion_tab=CompanionTab::Tools;cx.notify();}))))
+                    .on_click(cx.listener(|this,_,window,cx|{this.toggle_companion(CompanionTab::Tools,window,cx);}))))
             .child(content)
             .when_some(self.load_error.clone(),|body,error|body.child(row().p_3().flex_wrap().child(div().flex_1().child(error)).child(button("retry-media-load").label(t("読み込みを再試行","Retry loading")).disabled(self.sources.read(cx).frozen()).on_click(cx.listener(|this,_,_,cx|this.load_media(cx))))))
             .when_some(self.error.clone().or(player.error),|body,error|body.child(div().p_3().bg(cx.theme().button_danger).text_color(cx.theme().button_danger_foreground).child(error)))

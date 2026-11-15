@@ -225,7 +225,7 @@ pub(super) fn open(
     workspace: Entity<ImportWorkspace>,
     cx: &mut gpui_kit::App,
 ) -> anyhow::Result<gpui_kit::AnyWindowHandle> {
-    gpui_kit::open_window(
+    crate::desktop::dialog::open_window(
         gpui_kit::WindowOptions {
             titlebar: Some(gpui_kit::TitlebarOptions {
                 title: Some("Surtitle · 作品を追加 / Add media".into()),

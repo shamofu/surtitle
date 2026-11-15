@@ -6,6 +6,7 @@ use super::{
     persistence::{Persistence, RawInput},
     policy, quote_content,
 };
+use crate::ui::style::Button;
 use crate::{
     application::{
         ai::AiQuote,
@@ -27,7 +28,7 @@ use crate::{
 use gpui_kit::base::Disableable;
 use gpui_kit::component::{
     ActiveTheme,
-    button::{Button, ButtonVariants},
+    button::ButtonVariants,
     input::{Input, InputEditsEvent, InputEvent, InputState, Textarea, TextareaState},
 };
 use gpui_kit::{
@@ -610,7 +611,9 @@ impl Render for DraftStudyDialog {
         content = content.child(
             Button::new("close-draft-study")
                 .label(localized(cx, "入力を残して閉じる / Close and keep input"))
-                .on_click(|_, window, _| window.remove_window()),
+                .on_click(|_, window, cx| {
+                    crate::desktop::dialog::request_close(window, cx);
+                }),
         );
         super::super::keyboard::form_tab_navigation(div())
             .id("draft-study-scroll")

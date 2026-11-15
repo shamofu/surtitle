@@ -47,7 +47,9 @@ pub fn run() -> Result<()> {
     // Environment mutation is safe here: main calls this before constructing
     // Tokio, GPUI, application services, or any other worker threads.
     unsafe {
-        std::env::set_var("GPUI_DISABLE_DIRECT_COMPOSITION", "true");
+        // GPUI's ordered transparent aperture reveals native video underneath;
+        // opaque UI must remain in the composition tree above child HWNDs.
+        std::env::set_var("GPUI_DISABLE_DIRECT_COMPOSITION", "false");
     }
     #[cfg(windows)]
     {

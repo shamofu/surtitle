@@ -9,7 +9,10 @@ mod import;
 mod in_flight;
 mod keyboard;
 mod library;
+mod list_motion;
 mod media;
+pub(crate) mod motion;
+mod motion_controls;
 mod recovery;
 pub(crate) mod session;
 mod settings;
@@ -27,13 +30,15 @@ use crate::{
 };
 use editors::{EditorRegistry, FlushPurpose};
 use gpui_kit::assets::IconName;
-use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
+use gpui_kit::base::TestSupportExt;
+use gpui_kit::component::button::{ButtonCustomVariant, ButtonVariants};
 use gpui_kit::component::{ActiveTheme, Icon, Sizable, Theme, ThemeMode, spinner::Spinner};
 use gpui_kit::{
     AppContext, Context, Entity, FontWeight, Subscription, Window, div, prelude::*, px,
 };
 use session::{Backend, Route, Session, UiEvent};
 use std::{path::PathBuf, sync::mpsc::Receiver, time::Duration};
+use style::Button;
 
 pub(crate) struct DesktopView {
     session: Entity<Session>,
@@ -46,6 +51,10 @@ pub(crate) struct DesktopView {
     settings: Entity<settings::SettingsView>,
     ai: Entity<ai::AiView>,
     route: Route,
+    page_motion: Option<motion::pages::Pages>,
+    motion_viewport: Option<gpui_kit::Size<gpui_kit::Pixels>>,
+    navigation_focus: [gpui_kit::FocusHandle; 4],
+    page_focus: gpui_kit::FocusHandle,
     close_pending: bool,
     close_ready: bool,
     transfer_pending: bool,
@@ -226,6 +235,10 @@ impl DesktopView {
             settings,
             ai,
             route: Route::Library,
+            page_motion: Some(motion::pages::Pages::new(0)),
+            motion_viewport: None,
+            navigation_focus: std::array::from_fn(|_| cx.focus_handle()),
+            page_focus: cx.focus_handle(),
             close_pending: false,
             close_ready: false,
             transfer_pending: false,
@@ -251,7 +264,21 @@ impl DesktopView {
             if let Some(content) = self.activity_window.take() {
                 let _ = content.update(cx, |content, _| content.navigating());
             }
-            let _ = dialog.update(cx, |_, window, _| window.remove_window());
+            let main = window.window_handle();
+            let owner = cx.entity().downgrade();
+            let next = route.clone();
+            if dialog
+                .update(cx, |_, window, cx| {
+                    crate::desktop::dialog::close_then(window, cx, move |cx| {
+                        let _ = main.update(cx, |_, window, cx| {
+                            let _ = owner.update(cx, |this, cx| this.navigate(next, window, cx));
+                        });
+                    });
+                })
+                .is_ok()
+            {
+                return;
+            }
         }
         if let Route::Study(media) = &route {
             if self
@@ -282,6 +309,25 @@ impl DesktopView {
             }
             let _ = self.session.read(cx).backend.state.hide_player_surface();
             self.study.take();
+        }
+        if self.route != route {
+            // The outgoing view remains painted. Its selection and keyboard
+            // focus must not survive the semantic navigation with it.
+            gpui_kit::base::TextSelection::clear(window, cx);
+            if matches!(route, Route::Library | Route::Cards | Route::Settings) {
+                if window.is_fullscreen() {
+                    // The header is absent in fullscreen; retain a dispatch
+                    // path through the always-mounted page shell instead.
+                    self.page_focus.focus(window, cx);
+                } else {
+                    let index = match route {
+                        Route::Cards => 1,
+                        Route::Settings => 3,
+                        _ => 0,
+                    };
+                    self.navigation_focus[index].focus(window, cx);
+                }
+            }
         }
         self.route = route;
         if self.route == Route::Library {
@@ -416,7 +462,9 @@ impl DesktopView {
     fn open_activity(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(dialog) = self.activity_dialog
             && dialog
-                .update(cx, |_, window, _| window.activate_window())
+                .update(cx, |_, window, cx| {
+                    crate::desktop::dialog::activate(window, cx)
+                })
                 .is_ok()
         {
             return;
@@ -427,7 +475,7 @@ impl DesktopView {
         let opener = window.window_handle();
         let previous_focus = Some(self.activity_focus.clone());
         let title = self.session.read(cx).text("処理状況", "Activity");
-        match gpui_kit::open_window(
+        match crate::desktop::dialog::open_window(
             gpui_kit::WindowOptions {
                 titlebar: Some(gpui_kit::TitlebarOptions {
                     title: Some(title.into()),
@@ -508,7 +556,9 @@ impl DesktopView {
         }
         if let Some((handle, _)) = self.recovery.as_ref()
             && handle
-                .update(cx, |_, window, _| window.activate_window())
+                .update(cx, |_, window, cx| {
+                    crate::desktop::dialog::activate(window, cx)
+                })
                 .is_ok()
         {
             return;
@@ -832,6 +882,80 @@ impl DesktopView {
 }
 impl Render for DesktopView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let route_index = match self.route {
+            Route::Library => Some(0),
+            Route::Cards => Some(1),
+            Route::Review => Some(2),
+            Route::Settings => Some(3),
+            _ => None,
+        };
+        let viewport = window.viewport_size();
+        let resized = self
+            .motion_viewport
+            .is_some_and(|previous| previous != viewport);
+        self.motion_viewport = Some(viewport);
+        let content = if let Some(index) = route_index {
+            let pages = self
+                .page_motion
+                .get_or_insert_with(|| motion::pages::Pages::new(index));
+            let frame = pages.frame(
+                index,
+                cx.background_executor().now(),
+                cx.reduce_motion() || resized || !window.is_visible(),
+            );
+            if frame.running {
+                window.request_animation_frame();
+            }
+            div()
+                .relative()
+                .flex_1()
+                .size_full()
+                .min_h(px(0.))
+                .overflow_hidden()
+                .children(frame.layers.into_iter().map(|(page, offset)| {
+                    let active = page == index;
+                    let view = match page {
+                        1 => self.cards.clone().into_any_element(),
+                        2 => self.review.clone().into_any_element(),
+                        3 => self.settings.clone().into_any_element(),
+                        _ => self.library.clone().into_any_element(),
+                    };
+                    // The outer visual layer occludes covered incoming controls;
+                    // only its current page registers input or accessible nodes.
+                    div()
+                        .id(("main-page", page))
+                        .test_support()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left(viewport.width * offset)
+                        .w(viewport.width)
+                        .bg(cx.theme().background)
+                        .occlude()
+                        .child(motion::interactive(view, active))
+                }))
+                .into_any_element()
+        } else {
+            self.page_motion = None;
+            match &self.route {
+                Route::Study(_) if self.study.is_some() => {
+                    self.study.as_ref().unwrap().clone().into_any_element()
+                }
+                Route::Activity => self.ai.clone().into_any_element(),
+                _ => self.library.clone().into_any_element(),
+            }
+        };
+        let selection = gpui_kit::base::motion::transition(
+            "main-selection",
+            route_index.unwrap_or(0) as f32,
+            motion::enter(if resized {
+                Duration::ZERO
+            } else {
+                motion::SELECTION
+            }),
+            window,
+            cx,
+        );
         let session = self.session.read(cx);
         let due = session.snapshot.as_ref().map_or(0, |snapshot| {
             snapshot
@@ -851,6 +975,7 @@ impl Render for DesktopView {
         let compact = window.viewport_size().width < px(1100.);
         let icon_navigation = window.viewport_size().width < px(850.);
         div()
+            .track_focus(&self.page_focus)
             .size_full()
             .flex()
             .flex_col()
@@ -892,6 +1017,7 @@ impl Render for DesktopView {
                         )
                         .child(
                             style::row()
+                                .relative()
                                 .w(px(if icon_navigation {
                                     200.
                                 } else if compact {
@@ -942,7 +1068,15 @@ impl Render for DesktopView {
                                             } else {
                                                 theme.muted_foreground
                                             };
+                                            let focus_index = match route {
+                                                Route::Library => 0,
+                                                Route::Cards => 1,
+                                                Route::Review => 2,
+                                                Route::Settings => 3,
+                                                _ => unreachable!(),
+                                            };
                                             Button::new(id)
+                                                .track_focus(&self.navigation_focus[focus_index])
                                                 .custom(
                                                     ButtonCustomVariant::new(cx)
                                                         .color(fill)
@@ -950,16 +1084,18 @@ impl Render for DesktopView {
                                                         .hover(theme.background)
                                                         .active(theme.accent),
                                                 )
+                                                .surface_colors(
+                                                    fill,
+                                                    theme.background,
+                                                    theme.accent,
+                                                )
+                                                .text_color(text)
                                                 .flex_1()
                                                 .h_full()
                                                 .rounded(px(0.))
                                                 .px(px(if icon_navigation { 3. } else { 12. }))
                                                 .border_b(px(3.))
-                                                .border_color(if selected {
-                                                    theme.primary
-                                                } else {
-                                                    theme.transparent
-                                                })
+                                                .border_color(theme.transparent)
                                                 .toggled(selected)
                                                 .accessibility_label(if selected {
                                                     format!(
@@ -1021,7 +1157,18 @@ impl Render for DesktopView {
                                                 ))
                                         },
                                     ),
-                                ),
+                                )
+                                .when(route_index.is_some(), |navigation| {
+                                    navigation.child(
+                                        div()
+                                            .absolute()
+                                            .bottom_0()
+                                            .h(px(3.))
+                                            .left(gpui_kit::relative(selection / 4.))
+                                            .w(gpui_kit::relative(0.25))
+                                            .bg(theme.primary),
+                                    )
+                                }),
                         )
                         .child(
                             style::row()
@@ -1147,16 +1294,7 @@ impl Render for DesktopView {
                     .min_h(px(0.))
                     .min_w(px(0.))
                     .gap_0()
-                    .child(match &self.route {
-                        Route::Study(_) if self.study.is_some() => {
-                            self.study.as_ref().unwrap().clone().into_any_element()
-                        }
-                        Route::Cards => self.cards.clone().into_any_element(),
-                        Route::Review => self.review.clone().into_any_element(),
-                        Route::Settings => self.settings.clone().into_any_element(),
-                        Route::Activity => self.ai.clone().into_any_element(),
-                        _ => self.library.clone().into_any_element(),
-                    })
+                    .child(content)
                     .when_some(
                         self.error.clone().or(session.error.clone()),
                         |body, error| {

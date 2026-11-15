@@ -118,7 +118,7 @@ fn open_key(
 ) -> anyhow::Result<()> {
     let ja = session.read(cx).text("ja", "en") == "ja";
     let t = move |ja_text: &'static str, en_text: &'static str| if ja { ja_text } else { en_text };
-    gpui_kit::open_window(
+    crate::desktop::dialog::open_window(
         gpui_kit::WindowOptions {
             titlebar: Some(gpui_kit::TitlebarOptions {
                 title: Some(
@@ -218,7 +218,7 @@ impl SourceForm {
             cx.notify();
         }));
         let weak = cx.entity().downgrade();
-        window.on_window_should_close(cx, move |_, cx| {
+        crate::desktop::dialog::set_close_guard(window, cx, move |_, cx| {
             weak.update(cx, |this, _| !this.busy).unwrap_or(true)
         });
         let release_editors = editors.clone();
@@ -289,9 +289,12 @@ impl SourceForm {
             this.busy = false;
             match result {
                 Ok(()) => {
-                    let _ = handle.update(cx, |_, window, _| window.remove_window());
-                    this.session
-                        .update(cx, |session, cx| session.request_ai(intent, cues, cx));
+                    let session = this.session.clone();
+                    let _ = handle.update(cx, |_, window, cx| {
+                        crate::desktop::dialog::close_then(window, cx, move |cx| {
+                            session.update(cx, |session, cx| session.request_ai(intent, cues, cx));
+                        });
+                    });
                 }
                 Err(error) => this.error = Some(error),
             }
@@ -611,7 +614,7 @@ impl Render for SourceForm {
                             .child(state_label(close_label, &close_labels))
                             .accessibility_label(close_label)
                             .disabled(self.busy)
-                            .on_click(|_, window, _| window.remove_window()),
+                            .on_click(|_, window, cx| { crate::desktop::dialog::request_close(window, cx); }),
                     )
                     .child(
                         button("save-source").accessibility_id("save-source")

@@ -7,10 +7,10 @@ use super::{
     source_form,
     style::*,
 };
+use crate::ui::style::Button;
 use gpui_kit::base::{Disableable, Selectable};
 use gpui_kit::component::{
     ActiveTheme,
-    button::Button,
     input::{Textarea, TextareaState},
 };
 use gpui_kit::{
@@ -60,7 +60,7 @@ pub(crate) fn open(
     );
     let ja = session.read(cx).text("ja", "en") == "ja";
     let t = move |ja_text: &'static str, en_text: &'static str| if ja { ja_text } else { en_text };
-    gpui_kit::open_window(
+    crate::desktop::dialog::open_window(
         gpui_kit::WindowOptions {
             titlebar: Some(gpui_kit::TitlebarOptions {
                 title: Some(t("Surtitle · 未完了の入力", "Surtitle · Unfinished input").into()),
@@ -100,7 +100,7 @@ impl RecoveryView {
         let editing = cx.observe(&editors, |_, _, cx| cx.notify());
         let source_changes = cx.observe(&sources, |this, _, cx| this.refresh(cx));
         let weak = cx.entity().downgrade();
-        window.on_window_should_close(cx, move |_, cx| {
+        crate::desktop::dialog::set_close_guard(window, cx, move |_, cx| {
             weak.update(cx, |this, _| !this.busy).unwrap_or(true)
         });
         let mut this = Self {
@@ -209,8 +209,12 @@ impl RecoveryView {
         }
         match item {
             RecoveryItem::Ui(draft) if draft.archive_id.is_none() => {
-                cx.emit(RecoveryAction::OpenUi { draft, recover });
-                window.remove_window();
+                let entity = cx.entity();
+                crate::desktop::dialog::close_then(window, cx, move |cx| {
+                    entity.update(cx, |_, cx| {
+                        cx.emit(RecoveryAction::OpenUi { draft, recover })
+                    });
+                });
             }
             RecoveryItem::Source(draft) => {
                 if let Err(error) =
@@ -220,8 +224,10 @@ impl RecoveryView {
                 }
             }
             RecoveryItem::Ai(value) => {
-                cx.emit(RecoveryAction::OpenAi { id: value.id });
-                window.remove_window();
+                let entity = cx.entity();
+                crate::desktop::dialog::close_then(window, cx, move |cx| {
+                    entity.update(cx, |_, cx| cx.emit(RecoveryAction::OpenAi { id: value.id }));
+                });
             }
             _ => {}
         }
@@ -280,6 +286,6 @@ impl Render for RecoveryView {
             .child(column().id("recovery-status").h(px(42.)).flex_shrink_0().overflow_y_scroll().gap_1()
                 .when_some(self.error.clone(), |body,error| body.child(div().text_color(cx.theme().danger).child(error)))
                 .when_some(self.notice.clone(), |body,notice| body.child(muted(notice))))
-            .child(Button::new("recovery-close").accessibility_id("recovery-close").label(t("閉じる", "Close")).disabled(self.busy).on_click(|_,window,_|window.remove_window()))
+            .child(Button::new("recovery-close").accessibility_id("recovery-close").label(t("閉じる", "Close")).disabled(self.busy).on_click(|_,window,cx| { crate::desktop::dialog::request_close(window,cx); }))
     }
 }

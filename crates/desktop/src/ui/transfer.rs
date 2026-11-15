@@ -5,14 +5,12 @@ use super::{
     session::{Session, run},
     style::{column, muted, row, title},
 };
+use crate::ui::style::Button;
 use crate::{
     application::transfer::{RestorePreview, RestoreResult},
     commands,
 };
-use gpui_kit::component::{
-    ActiveTheme, Disableable,
-    button::{Button, ButtonVariants},
-};
+use gpui_kit::component::{ActiveTheme, Disableable, button::ButtonVariants};
 use gpui_kit::{
     AnyWindowHandle, AppContext, Context, Entity, WeakEntity, Window, div, prelude::*, px, size,
 };
@@ -40,7 +38,7 @@ pub(crate) fn open(
 ) -> anyhow::Result<()> {
     let ja = session.read(cx).text("ja", "en") == "ja";
     let t = move |ja_text: &'static str, en_text: &'static str| if ja { ja_text } else { en_text };
-    gpui_kit::open_window(
+    crate::desktop::dialog::open_window(
         gpui_kit::WindowOptions {
             titlebar: Some(gpui_kit::TitlebarOptions {
                 title: Some(t("Surtitle · 学習データ", "Surtitle · Learning data").into()),
@@ -80,7 +78,7 @@ impl TransferDialog {
         cx: &mut Context<Self>,
     ) -> Self {
         let weak = cx.entity().downgrade();
-        window.on_window_should_close(cx, move |_, cx| {
+        crate::desktop::dialog::set_close_guard(window, cx, move |_, cx| {
             weak.update(cx, |this, _| !this.busy).unwrap_or(true)
         });
         cx.on_release(|this, cx| {
@@ -385,7 +383,9 @@ impl Render for TransferDialog {
                     .accessibility_id("close-transfer")
                     .label(t("閉じる", "Close"))
                     .disabled(self.busy)
-                    .on_click(|_, window, _| window.remove_window()),
+                    .on_click(|_, window, cx| {
+                        crate::desktop::dialog::request_close(window, cx);
+                    }),
             )
     }
 }

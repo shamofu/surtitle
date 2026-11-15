@@ -15,6 +15,7 @@ RUN python3 native/build/native-source-inputs.py /workspace /build/sources /buil
 FROM libmpv-sources AS libmpv-build
 COPY native/build/cross-win64.ini native/build/toolchain-win64.cmake native/build/Dockerfile /workspace/native/build/
 COPY native/build/native-build.sh native/build/native-build-evidence.py native/build/native_source_archive.py /workspace/native/build/
+COPY native/build/patches/ /workspace/native/build/patches/
 RUN --network=none bash native/build/native-build.sh /workspace /build \
     && python3 native/build/native-build-evidence.py /workspace /build /out/native-build \
     && rm -rf /build /out/native-build/logs /out/native-build/toolchain-notices

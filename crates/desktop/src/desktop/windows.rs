@@ -10,7 +10,9 @@ use crate::{
     ui::DesktopView,
 };
 use anyhow::{Context as _, Result, ensure};
-use gpui_kit::{AppContext, SendForegroundExecutor, Window, WindowBounds, WindowOptions, px, size};
+use gpui_kit::{
+    App, AppContext, SendForegroundExecutor, Window, WindowBounds, WindowOptions, px, size,
+};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::{
     cell::RefCell,
@@ -125,12 +127,12 @@ impl Lifecycle {
             .capture(normal, maximized, minimized || window.is_fullscreen());
         self.placement.save()
     }
-    fn tick(&mut self, window: &mut Window, persist: bool) {
+    fn tick(&mut self, window: &mut Window, persist: bool, cx: &mut App) {
         if self.stopped {
             return;
         }
         if persist {
-            let result = fit_current_window(window, &mut self.environment)
+            let result = fit_current_window(window, &mut self.environment, cx)
                 .and_then(|_| self.capture(window));
             if let Err(error) = result {
                 if !self.placement_error {
@@ -236,11 +238,13 @@ fn environment(hwnd: HWND, previous: Option<Placement>) -> Result<Environment> {
 }
 
 fn apply_geometry(
-    hwnd: HWND,
+    window: &mut Window,
     area: Environment,
     requested: PhysicalSize<u32>,
     position: PhysicalPosition<i32>,
+    cx: &mut App,
 ) -> Result<()> {
+    let hwnd = native_handle(window)?;
     let (outer, client) = rectangles(hwnd)?;
     let frame_scale = area.scale / window_scale(hwnd);
     let frame = PhysicalSize::new(
@@ -276,9 +280,17 @@ fn apply_geometry(
         "Could not fit the window: {}",
         std::io::Error::last_os_error()
     );
+    // SetWindowPos synchronously sends WM_SIZE while this Window/App is borrowed.
+    // The backend updates its size, but GPUI's reentrant resize callback cannot
+    // borrow App again. Read that updated size here before the next layout.
+    window.bounds_changed(cx);
     Ok(())
 }
-fn fit_current_window(window: &mut Window, previous: &mut Option<Environment>) -> Result<()> {
+fn fit_current_window(
+    window: &mut Window,
+    previous: &mut Option<Environment>,
+    cx: &mut App,
+) -> Result<()> {
     let hwnd = native_handle(window)?;
     if unsafe { IsIconic(hwnd) != 0 || IsZoomed(hwnd) != 0 } || window.is_fullscreen() {
         return Ok(());
@@ -301,12 +313,12 @@ fn fit_current_window(window: &mut Window, previous: &mut Option<Environment>) -
         native::insets(hwnd),
     );
     if *previous != Some(area) || fit.size != requested {
-        apply_geometry(hwnd, area, requested, (outer.left, outer.top).into())?;
+        apply_geometry(window, area, requested, (outer.left, outer.top).into(), cx)?;
         *previous = Some(area);
     }
     Ok(())
 }
-fn restore(window: &mut Window, persistence: &mut Persistence) -> Result<()> {
+fn restore(window: &mut Window, persistence: &mut Persistence, cx: &mut App) -> Result<()> {
     let hwnd = native_handle(window)?;
     let area = environment(hwnd, persistence.placement)?;
     let (outer, inner) = rectangles(hwnd)?;
@@ -328,16 +340,17 @@ fn restore(window: &mut Window, persistence: &mut Persistence) -> Result<()> {
         .placement
         .map(Placement::position)
         .unwrap_or((outer.left, outer.top).into());
-    apply_geometry(hwnd, area, requested, position)?;
+    apply_geometry(window, area, requested, position, cx)?;
     if persistence.placement.is_some_and(|value| value.maximized) {
         unsafe {
             ShowWindow(hwnd, SW_MAXIMIZE);
         }
+        window.bounds_changed(cx);
     }
     Ok(())
 }
 
-fn apply_window_action(window: &mut Window, action: WindowAction) -> Result<()> {
+fn apply_window_action(window: &mut Window, action: WindowAction, cx: &mut App) -> Result<()> {
     match action {
         WindowAction::SetFullscreen(target) => {
             let current = window.is_fullscreen();
@@ -363,7 +376,7 @@ fn apply_window_action(window: &mut Window, action: WindowAction) -> Result<()> 
                 (f64::from(logical.height) * area.scale).round() as u32,
             );
             let (outer, _) = rectangles(hwnd)?;
-            apply_geometry(hwnd, area, requested, (outer.left, outer.top).into())?;
+            apply_geometry(window, area, requested, (outer.left, outer.top).into(), cx)?;
         }
     }
     Ok(())
@@ -470,16 +483,10 @@ pub(super) fn run() -> Result<()> {
                     move |window, cx| {
                         let setup = (|| -> Result<()> {
                             let hwnd = native_handle(window)?;
-                            unsafe {
-                                let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-                                SetWindowLongPtrW(
-                                    hwnd,
-                                    GWL_STYLE,
-                                    style | WS_CLIPCHILDREN as isize,
-                                );
-                            }
+                            // DComp puts GPUI above the video child. Keep the
+                            // opaque parent backing paintable beneath that child.
                             native::install_hwnd(hwnd)?;
-                            restore(window, &mut state.borrow_mut().placement)?;
+                            restore(window, &mut state.borrow_mut().placement, cx)?;
                             let click_host = view_host.clone();
                             view_services.initialize_player(
                                 &resources,
@@ -495,7 +502,7 @@ pub(super) fn run() -> Result<()> {
                         WINDOW_ACTION.with(|callback| {
                             *callback.borrow_mut() = Some(Box::new(move |action| {
                                 async_window
-                                    .update(|window, _| apply_window_action(window, action))?
+                                    .update(|window, cx| apply_window_action(window, action, cx))?
                             }))
                         });
                         let entity = cx.new(|cx| {
@@ -532,8 +539,12 @@ pub(super) fn run() -> Result<()> {
                                     break;
                                 }
                                 if poll_window
-                                    .update(|window, _| {
-                                        polling.borrow_mut().tick(window, tick.is_multiple_of(10))
+                                    .update(|window, cx| {
+                                        polling.borrow_mut().tick(
+                                            window,
+                                            tick.is_multiple_of(10),
+                                            cx,
+                                        )
                                     })
                                     .is_err()
                                 {

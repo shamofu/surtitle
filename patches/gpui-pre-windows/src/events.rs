@@ -1,4 +1,8 @@
-use std::{cell::Cell, rc::Rc, sync::atomic::Ordering};
+use std::{
+    cell::{Cell, RefCell},
+    rc::{Rc, Weak},
+    sync::atomic::Ordering,
+};
 
 use anyhow::Context as _;
 use gpui_util::ResultExt;
@@ -43,12 +47,14 @@ pub(crate) struct DrawCoordinator {
     /// nest GPUI draws. Nested draws are wasted work whose output is
     /// immediately redrawn, so we defer them instead.
     drawing: Cell<bool>,
+    hidden_retries: RefCell<Vec<Weak<WindowsWindowInner>>>,
 }
 
 impl DrawCoordinator {
     pub(crate) fn new() -> Self {
         Self {
             drawing: Cell::new(false),
+            hidden_retries: RefCell::new(Vec::new()),
         }
     }
 
@@ -74,6 +80,13 @@ struct DrawWindowGuard<'a> {
 impl Drop for DrawWindowGuard<'_> {
     fn drop(&mut self) {
         self.coordinator.drawing.set(false);
+        for weak in self.coordinator.hidden_retries.take() {
+            if let Some(inner) = weak.upgrade() {
+                if inner.state.dialog_surface.needs_first_present() {
+                    inner.request_dialog_frame().log_err();
+                }
+            }
+        }
     }
 }
 
@@ -196,7 +209,13 @@ impl WindowsWindowInner {
                 )?);
             }
         }
-        if let Some(mut callback) = self.state.callbacks.moved.take() {
+        // Motion runs inside GPUI's current App borrow. Native state above is
+        // current, but reentering its moved callback would lose the notification.
+        // The initial placement explicitly synchronizes bounds in the host;
+        // subsequent NOSIZE motion needs no client-layout invalidation.
+        if !self.state.dialog_surface.moving()
+            && let Some(mut callback) = self.state.callbacks.moved.take()
+        {
             callback();
             self.state.callbacks.moved.set(Some(callback));
         }
@@ -234,6 +253,9 @@ impl WindowsWindowInner {
 
         let width = lparam.loword().max(1) as i32;
         let height = lparam.hiword().max(1) as i32;
+        // WM_PAINT is GPUI-driven and validates without BeginPaint, so initialize
+        // the newly allocated opaque redirection pixels explicitly on resize.
+        self.state.paint_opaque_backing().log_err();
         let new_size = size(DevicePixels(width), DevicePixels(height));
 
         let scale_factor = self.state.scale_factor.get();
@@ -268,7 +290,9 @@ impl WindowsWindowInner {
                 .invalidate_devices
                 .store(true, std::sync::atomic::Ordering::Release);
         }
-        if let Some(mut callback) = self.state.callbacks.resize.take() {
+        if !self.state.dialog_surface.moving()
+            && let Some(mut callback) = self.state.callbacks.resize.take()
+        {
             callback(new_logical_size, scale_factor);
             self.state.callbacks.resize.set(Some(callback));
         }
@@ -323,6 +347,7 @@ impl WindowsWindowInner {
     }
 
     fn handle_destroy_msg(&self, handle: HWND) -> Option<isize> {
+        self.state.frame_update.retire();
         A11yState::retire(&self.state.a11y, handle);
         let callback = { self.state.callbacks.close.take() };
         // Re-enable parent window if this was a modal dialog
@@ -1369,6 +1394,15 @@ impl WindowsWindowInner {
     #[inline]
     fn draw_window(&self, handle: HWND, force_render: bool) -> Option<isize> {
         let Some(_guard) = self.state.draw_coordinator.try_begin_draw() else {
+            if self.state.dialog_surface.needs_first_present() {
+                if let Some(inner) = window_from_hwnd(handle) {
+                    self.state
+                        .draw_coordinator
+                        .hidden_retries
+                        .borrow_mut()
+                        .push(Rc::downgrade(&inner));
+                }
+            }
             log::debug!("deferring re-entrant draw of window {handle:?}");
             if force_render {
                 self.state.force_render_pending.set(true);
@@ -1396,7 +1430,17 @@ impl WindowsWindowInner {
             }
         }
 
-        let force_render = force_render || self.state.force_render_pending.take();
+        // Vsync already supplies WM_PAINT. Failed native/frame submissions
+        // need explicit demand even after GPUI clears its ordinary dirty flag.
+        // Backoff avoids a busy retry loop; hidden/minimized windows wait until
+        // restoration, and success/destruction clears this additional demand.
+        let retry_frame = self
+            .state
+            .frame_update
+            .retry_due(std::time::Instant::now(), unsafe {
+                IsWindowVisible(handle).as_bool() && !IsIconic(handle).as_bool()
+            });
+        let force_render = force_render || self.state.force_render_pending.take() || retry_frame;
         if force_render {
             // Re-enable drawing after a device loss recovery. The forced render
             // will rebuild the scene with fresh atlas textures.
@@ -1407,7 +1451,7 @@ impl WindowsWindowInner {
             |(at, source)| (Some(at), source),
         );
         request_frame(RequestFrameOptions {
-            require_presentation: false,
+            require_presentation: self.state.dialog_surface.needs_first_present(),
             force_render,
             signal_at,
             signal_source,

@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use gpui_util::ResultExt;
 use windows::{
     Win32::{
-        Foundation::HWND,
+        Foundation::{HWND, POINT, RECT},
         Graphics::{
             Direct3D::*,
             Direct3D11::*,
@@ -22,6 +22,17 @@ use windows::{
 use crate::directx_renderer::shader_resources::{RawShaderBytes, ShaderModule, ShaderTarget};
 use crate::*;
 use gpui::*;
+
+#[path = "composition_video.rs"]
+mod composition_video;
+pub use composition_video::{CompositionSwapChain, CompositionVideoFrame};
+
+#[cfg(test)]
+#[path = "composition_video_tests.rs"]
+mod composition_video_tests;
+#[cfg(test)]
+#[path = "native_aperture_tests.rs"]
+mod native_aperture_tests;
 
 pub(crate) const DISABLE_DIRECT_COMPOSITION: &str = "GPUI_DISABLE_DIRECT_COMPOSITION";
 const RENDER_TARGET_FORMAT: DXGI_FORMAT = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -63,6 +74,7 @@ pub(crate) struct DirectXRendererDevices {
     pub(crate) dxgi_factory: IDXGIFactory6,
     pub(crate) device: ID3D11Device,
     pub(crate) device_context: ID3D11DeviceContext,
+    clear_view_context: Option<ID3D11DeviceContext1>,
     dxgi_device: Option<IDXGIDevice>,
     annotation: Option<ID3DUserDefinedAnnotation>,
 }
@@ -86,6 +98,7 @@ struct DirectXResources {
 struct DirectXRenderPipelines {
     shadow_pipeline: PipelineState<Shadow>,
     quad_pipeline: PipelineState<Quad>,
+    aperture_pipeline: PipelineState<Quad>,
     path_rasterization_pipeline: PipelineState<PathRasterizationSprite>,
     path_sprite_pipeline: PipelineState<PathSprite>,
     underline_pipeline: PipelineState<Underline>,
@@ -116,9 +129,16 @@ impl Drop for Annotation<'_> {
 }
 
 struct DirectComposition {
+    hwnd: HWND,
     comp_device: IDCompositionDevice,
     comp_target: IDCompositionTarget,
     comp_visual: IDCompositionVisual,
+    native_backing: Option<NativeBacking>,
+    video: Option<composition_video::VideoComposition>,
+}
+
+struct NativeBacking {
+    _target: IDCompositionTarget,
 }
 
 impl DirectXRendererDevices {
@@ -138,12 +158,26 @@ impl DirectXRendererDevices {
             Some(device.cast().context("Creating DXGI device")?)
         };
         let annotation = device_context.cast().ok();
+        let mut options = D3D11_FEATURE_DATA_D3D11_OPTIONS::default();
+        let clear_view_supported = unsafe {
+            device.CheckFeatureSupport(
+                D3D11_FEATURE_D3D11_OPTIONS,
+                (&mut options as *mut D3D11_FEATURE_DATA_D3D11_OPTIONS).cast(),
+                std::mem::size_of_val(&options) as u32,
+            )
+        }
+        .is_ok()
+            && options.ClearView.as_bool();
+        let clear_view_context = clear_view_supported
+            .then(|| device_context.cast().ok())
+            .flatten();
 
         Ok(Self {
             adapter: adapter.clone(),
             dxgi_factory: dxgi_factory.clone(),
             device: device.clone(),
             device_context: device_context.clone(),
+            clear_view_context,
             dxgi_device,
             annotation,
         })
@@ -242,7 +276,26 @@ impl DirectXRenderer {
     }
 
     #[inline]
-    fn present(&mut self) -> Result<()> {
+    pub(crate) fn present(&mut self) -> Result<()> {
+        if let Some(composition) = self.direct_composition.as_mut()
+            && let Some(video) = composition.video.as_mut()
+        {
+            let devices = self.devices.as_ref().context("devices missing")?;
+            unsafe {
+                devices.device.GetDeviceRemovedReason()?;
+            }
+            return video.present(
+                &composition.comp_device,
+                &composition.comp_target,
+                devices,
+                self.resources
+                    .as_ref()
+                    .and_then(|r| r.render_target.as_ref())
+                    .context("render target missing")?,
+                self.width,
+                self.height,
+            );
+        }
         let result = unsafe {
             self.resources
                 .as_ref()
@@ -253,16 +306,51 @@ impl DirectXRenderer {
         result.ok().context("Presenting swap chain failed")
     }
 
+    pub(crate) fn supports_composition_video(&self) -> bool {
+        self.direct_composition.is_some()
+    }
+
+    pub(crate) fn stage_composition_video(
+        &mut self,
+        frame: Option<CompositionVideoFrame>,
+    ) -> Result<()> {
+        let composition = self
+            .direct_composition
+            .as_mut()
+            .context("DirectComposition is disabled")?;
+        if composition.video.is_none() {
+            // Complete the only helper Commit before this device can accumulate
+            // shared UI/video updates, including a failed shared submission.
+            composition.ensure_native_backing(self.devices.as_ref().context("devices missing")?)?;
+            composition.video = Some(composition_video::VideoComposition::new(
+                &composition.comp_device,
+            )?);
+        }
+        composition.video.as_mut().unwrap().frame = frame;
+        Ok(())
+    }
+
     pub(crate) fn handle_device_lost(&mut self, directx_devices: &DirectXDevices) -> Result<()> {
+        // Recovery can fail after dropping the old device. Preserve the chosen
+        // mode and desired content across every attempt, not just the first.
+        let disable_direct_composition = self.direct_composition.is_none();
+        let video = self
+            .direct_composition
+            .as_ref()
+            .and_then(|c| c.video.as_ref())
+            .map(|v| v.frame.clone());
         try_to_recover_from_device_lost(|| {
-            self.handle_device_lost_impl(directx_devices)
+            self.handle_device_lost_impl(directx_devices, disable_direct_composition, video.clone())
                 .context("DirectXRenderer handling device lost")
         })
     }
 
-    fn handle_device_lost_impl(&mut self, directx_devices: &DirectXDevices) -> Result<()> {
-        let disable_direct_composition = self.direct_composition.is_none();
-
+    fn handle_device_lost_impl(
+        &mut self,
+        directx_devices: &DirectXDevices,
+        disable_direct_composition: bool,
+        video: Option<Option<CompositionVideoFrame>>,
+    ) -> Result<()> {
         unsafe {
             #[cfg(debug_assertions)]
             if let Some(devices) = &self.devices {
@@ -323,27 +411,30 @@ impl DirectXRenderer {
         self.globals = globals;
         self.pipelines = pipelines;
         self.direct_composition = direct_composition;
+        if let Some(frame) = video {
+            self.stage_composition_video(frame)?;
+        }
         self.skip_draws = true;
         Ok(())
     }
 
-    pub(crate) fn draw(
+    pub(crate) fn render_frame(
         &mut self,
         scene: &Scene,
         background_appearance: WindowBackgroundAppearance,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         if self.skip_draws {
             // skip drawing this frame, we just recovered from a device lost event
             // and so likely do not have the textures anymore that are required for drawing
-            return Ok(());
+            return Ok(false);
         }
         self.render(scene, background_appearance)?;
-        self.present()
+        Ok(true)
     }
 
     /// Clear the render target for `background_appearance` and encode every
     /// primitive batch of `scene` into it, without presenting. Shared by
-    /// [`draw`](Self::draw) (which then presents) and
+    /// [`render_frame`](Self::render_frame) (whose caller then presents) and
     /// [`render_to_image`](Self::render_to_image) (which reads the target back
     /// instead), so the two cannot drift.
     fn render(
@@ -369,6 +460,7 @@ impl DirectXRenderer {
             match batch {
                 PrimitiveBatch::Shadows(range) => self.draw_shadows(range.start, range.len()),
                 PrimitiveBatch::Quads(range) => self.draw_quads(range.start, range.len()),
+                PrimitiveBatch::NativeApertures(range) => self.draw_native_apertures(&scene.native_apertures[range]),
                 PrimitiveBatch::Paths(range) => {
                     let paths = &scene.paths[range];
                     self.draw_paths_to_intermediate(paths)?;
@@ -409,7 +501,7 @@ impl DirectXRenderer {
     /// goes through MetalRenderer; this is the Windows analogue). Draws into
     /// the existing render target, copies it into a `D3D11_USAGE_STAGING`
     /// texture, maps it, and converts BGRA to RGBA.
-    #[cfg(feature = "test-support")]
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn render_to_image(
         &mut self,
         scene: &Scene,
@@ -577,6 +669,83 @@ impl DirectXRenderer {
             )?;
         }
 
+        Ok(())
+    }
+
+    fn draw_native_apertures(&mut self, apertures: &[NativeAperture]) -> Result<()> {
+        let rectangles: Vec<_> = apertures
+            .iter()
+            .filter_map(|aperture| {
+                let bounds = aperture.bounds.intersect(&aperture.content_mask.bounds);
+                // Round inward: the transparent opening must never cut a pixel out
+                // of adjacent opaque UI, including at fractional DPI.
+                let rect = RECT {
+                    left: bounds.left().as_f32().ceil().max(0.) as i32,
+                    top: bounds.top().as_f32().ceil().max(0.) as i32,
+                    right: bounds.right().as_f32().floor().min(self.width as f32) as i32,
+                    bottom: bounds.bottom().as_f32().floor().min(self.height as f32) as i32,
+                };
+                (rect.left < rect.right && rect.top < rect.bottom).then_some(rect)
+            })
+            .collect();
+        if rectangles.is_empty() {
+            return Ok(());
+        }
+        let devices = self.devices.as_ref().context("devices missing")?;
+        if let Some(composition) = self.direct_composition.as_mut() {
+            composition.ensure_native_backing(devices)?;
+        }
+        if let Some(context) = &devices.clear_view_context {
+            let target = self
+                .resources
+                .as_ref()
+                .context("resources missing")?
+                .render_target_view
+                .as_ref()
+                .context("render target view missing")?;
+            unsafe {
+                context.ClearView(target, &[0.; 4], Some(&rectangles));
+            }
+        } else {
+            // Some D3D11 drivers expose Context1 without ClearView support.
+            // Source-over transparent paint cannot erase an existing background;
+            // replace all RGBA channels using the ordinary quad shader instead.
+            let quads: Vec<_> = rectangles
+                .iter()
+                .map(|rect| {
+                    let bounds = Bounds::new(
+                        point(
+                            ScaledPixels(rect.left as f32),
+                            ScaledPixels(rect.top as f32),
+                        ),
+                        size(
+                            ScaledPixels((rect.right - rect.left) as f32),
+                            ScaledPixels((rect.bottom - rect.top) as f32),
+                        ),
+                    );
+                    Quad {
+                        bounds,
+                        content_mask: ContentMask { bounds },
+                        background: transparent_black().into(),
+                        ..Default::default()
+                    }
+                })
+                .collect();
+            self.pipelines.aperture_pipeline.update_buffer(
+                &devices.device,
+                &devices.device_context,
+                &quads,
+            )?;
+            self.pipelines.aperture_pipeline.draw_range(
+                &devices.device_context,
+                self.globals
+                    .batch_params_buffer
+                    .as_ref()
+                    .context("batch params buffer missing")?,
+                0,
+                quads.len() as u32,
+            )?;
+        }
         Ok(())
     }
 
@@ -955,6 +1124,13 @@ impl DirectXRenderPipelines {
             64,
             create_blend_state(device)?,
         )?;
+        let aperture_pipeline = PipelineState::new(
+            device,
+            "native_aperture_pipeline",
+            ShaderModule::Quad,
+            4,
+            create_overwrite_blend_state(device)?,
+        )?;
         let path_rasterization_pipeline = PipelineState::new(
             device,
             "path_rasterization_pipeline",
@@ -1001,6 +1177,7 @@ impl DirectXRenderPipelines {
         Ok(Self {
             shadow_pipeline,
             quad_pipeline,
+            aperture_pipeline,
             path_rasterization_pipeline,
             path_sprite_pipeline,
             underline_pipeline,
@@ -1018,10 +1195,72 @@ impl DirectComposition {
         let comp_visual = unsafe { comp_device.CreateVisual() }?;
 
         Ok(Self {
+            hwnd,
             comp_device,
             comp_target,
             comp_visual,
+            native_backing: None,
+            video: None,
         })
+    }
+
+    fn ensure_native_backing(&mut self, devices: &DirectXRendererDevices) -> Result<()> {
+        if self.native_backing.is_none() {
+            // DComp's lower target supplies black letterboxing below child HWNDs.
+            // It is child-clipped, so ordinary opaque windows additionally retain
+            // their redirection bitmap to cover independently latched child moves.
+            unsafe {
+                let target = self.comp_device.CreateTargetForHwnd(self.hwnd, false)?;
+                let visual = self.comp_device.CreateVisual()?;
+                let surface = self.comp_device.CreateSurface(
+                    1,
+                    1,
+                    RENDER_TARGET_FORMAT,
+                    DXGI_ALPHA_MODE_PREMULTIPLIED,
+                )?;
+                let mut offset = POINT::default();
+                let drawing: IDXGISurface = surface.BeginDraw(None, &mut offset)?;
+                let update = (|| -> Result<()> {
+                    let texture: ID3D11Texture2D = drawing.cast()?;
+                    let pixel = [0u8, 0, 0, 255];
+                    let region = D3D11_BOX {
+                        left: offset.x as u32,
+                        top: offset.y as u32,
+                        front: 0,
+                        right: offset.x as u32 + 1,
+                        bottom: offset.y as u32 + 1,
+                        back: 1,
+                    };
+                    devices.device_context.UpdateSubresource(
+                        &texture,
+                        0,
+                        Some(&region),
+                        pixel.as_ptr().cast(),
+                        4,
+                        0,
+                    );
+                    Ok(())
+                })();
+                surface.EndDraw()?;
+                update?;
+                let scale = self.comp_device.CreateScaleTransform()?;
+                // WM_SIZE encodes each client dimension in an unsigned16-bit
+                // word. One scaled texel covers that whole range; DComp clips
+                // both visual trees to the owning HWND. No resize Commit can
+                // lag an expanding aperture, and no large texture is allocated.
+                scale.SetScaleX2(65_536.)?;
+                scale.SetScaleY2(65_536.)?;
+                visual.SetContent(&surface)?;
+                visual.SetTransform(&scale)?;
+                target.SetRoot(&visual)?;
+                self.comp_device.Commit()?;
+                // Install opaque coverage before the first alpha aperture.
+                // All subsequent frames and resizes reuse this fixed backing.
+                self.comp_device.WaitForCommitCompletion()?;
+                self.native_backing = Some(NativeBacking { _target: target });
+            }
+        }
+        Ok(())
     }
 
     pub fn set_swap_chain(&self, swap_chain: &IDXGISwapChain1) -> Result<()> {
@@ -1523,6 +1762,24 @@ fn create_blend_state_for_subpixel_rendering(device: &ID3D11Device) -> Result<ID
     desc.RenderTarget[0].RenderTargetWriteMask =
         D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8 & !D3D11_COLOR_WRITE_ENABLE_ALPHA.0 as u8;
 
+    unsafe {
+        let mut state = None;
+        device.CreateBlendState(&desc, Some(&mut state))?;
+        Ok(state.unwrap())
+    }
+}
+
+#[inline]
+fn create_overwrite_blend_state(device: &ID3D11Device) -> Result<ID3D11BlendState> {
+    let mut desc = D3D11_BLEND_DESC::default();
+    desc.RenderTarget[0].BlendEnable = false.into();
+    desc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    desc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+    desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    desc.RenderTarget[0].DestBlend = D3D11_BLEND_ZERO;
+    desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+    desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8;
     unsafe {
         let mut state = None;
         device.CreateBlendState(&desc, Some(&mut state))?;

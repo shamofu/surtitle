@@ -274,6 +274,33 @@ fn native_surface_click_returns_keyboard_focus_from_subtitle_search(cx: &mut Tes
 }
 
 #[gpui_kit::test]
+fn gpui_video_click_preserves_unavailable_player_guard_and_restores_focus(cx: &mut TestAppContext) {
+    let harness = Harness::open(cx);
+    cx.update_window(harness.window, |_, window, app| {
+        window.click(("study", 0usize), app);
+    })
+    .unwrap();
+    harness.wait_window(cx, harness.window, "unavailable Study player", |window| {
+        window.try_find("subtitle-search").is_some()
+            && window.find("play-toggle").disabled() == Some(true)
+    });
+    cx.update_window(harness.window, |_, window, app| {
+        window.click("subtitle-search", app);
+        window.input("preserve editor value", app);
+        window.click("player-viewport", app);
+        assert_eq!(window.find("subtitle-search").focused(), Some(false));
+        assert_eq!(window.find("play-toggle").disabled(), Some(true));
+        window.press("space", app);
+        assert_eq!(
+            window.find("subtitle-search").value(),
+            Some("preserve editor value")
+        );
+    })
+    .unwrap();
+    harness.close(cx);
+}
+
+#[gpui_kit::test]
 fn page_shortcuts_do_not_grade_from_a_focused_button_but_work_on_review_surface(
     cx: &mut TestAppContext,
 ) {

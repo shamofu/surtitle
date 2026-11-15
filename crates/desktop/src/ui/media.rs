@@ -89,7 +89,7 @@ fn open_source(
 ) -> anyhow::Result<()> {
     let ja = session.read(cx).text("ja", "en") == "ja";
     let t = move |ja_text: &'static str, en_text: &'static str| if ja { ja_text } else { en_text };
-    gpui_kit::open_window(
+    crate::desktop::dialog::open_window(
         gpui_kit::WindowOptions {
             titlebar: Some(gpui_kit::TitlebarOptions {
                 title: Some(t("Surtitle · 教材の管理", "Surtitle · Manage media").into()),
@@ -140,7 +140,7 @@ impl MediaView {
         cx: &mut Context<Self>,
     ) -> Self {
         let weak = cx.entity().downgrade();
-        window.on_window_should_close(cx, move |_, cx| {
+        crate::desktop::dialog::set_close_guard(window, cx, move |_, cx| {
             weak.update(cx, |this, cx| !this.busy || this.retired(cx))
                 .unwrap_or(true)
         });
@@ -353,11 +353,14 @@ impl Render for MediaView {
         .when(no_subtitles || unsupported_subtitles, |body| body.when_some(media.clone().filter(|media| media.duration_ms > 0), |body, media| body.child(
             button("media-transcribe").accessibility_id("media-transcribe").label(t("全編の文字起こしを見積もる", "Estimate full transcription")).disabled(disabled)
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.session.update(cx, |session, cx| session.request_ai(super::ai::AiIntent {
+                    let session = this.session.clone();
+                    let intent = super::ai::AiIntent {
                         media_id: media.id.clone(), kind: super::ai::AiKind::Transcription,
                         start_ms: 0, end_ms: media.duration_ms, focus_term: None,
-                    }, vec![], cx));
-                    window.remove_window();
+                    };
+                    crate::desktop::dialog::close_then(window, cx, move |cx| {
+                        session.update(cx, |session, cx| session.request_ai(intent, vec![], cx));
+                    });
                 })))))
         .children(self.streams.iter().map(|stream|{
             let action=if stream.kind=="audio"{Action::Audio(stream.index)}else{Action::Embedded(stream.index)};
@@ -389,6 +392,6 @@ impl Render for MediaView {
                     .disabled(disabled).on_click(cx.listener(move|this,_,_,cx|this.action(action.clone(),cx)))))))
         .when_some(self.error.clone(),|body,error|body.child(div().text_color(cx.theme().danger).child(error)))
         .when_some(self.notice.clone(),|body,notice|body.child(muted(notice)))
-        .child(row().justify_end().child(button("close-media").accessibility_id("close-media").label(t("閉じる", "Close")).disabled(self.busy).on_click(|_,window,_|window.remove_window())))
+        .child(row().justify_end().child(button("close-media").accessibility_id("close-media").label(t("閉じる", "Close")).disabled(self.busy).on_click(|_,window,cx| { crate::desktop::dialog::request_close(window,cx); })))
     }
 }

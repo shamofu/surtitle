@@ -6,6 +6,48 @@ use gpui_kit::{
 };
 
 #[gpui_kit::test]
+fn card_dialog_escape_closes_without_a_click_and_from_its_editing_field(cx: &mut TestAppContext) {
+    let harness = Harness::open(cx);
+    for edited in [false, true] {
+        harness.update(cx, |root, window, cx| {
+            root.cards
+                .update(cx, |cards, cx| cards.open("ui-card".into(), window, cx))
+        });
+        harness.wait(cx, "directly opened card editor", |_, app| {
+            app.windows().len() == 2
+        });
+        let dialog = cx.read(|app| {
+            app.windows()
+                .into_iter()
+                .find(|window| *window != harness.window)
+                .unwrap()
+        });
+        harness.wait_window(cx, dialog, "card editor input loaded", |window| {
+            window
+                .try_find_by_label("Phrase")
+                .is_some_and(|field| field.value() == Some("at home"))
+        });
+        cx.update_window(dialog,|_,window,app| {
+            if edited {
+                let field=window.find_by_label("Phrase");
+                let input=field.path().iter().find(|id|matches!(id,gpui::ElementId::NamedInteger(name,_) if name.as_ref()=="input")).unwrap().clone();
+                window.within(input).click("input-state",app);
+                window.press("ctrl-a",app);window.input("saved from Escape",app);
+            }
+            window.press("escape",app);
+        }).unwrap();
+        harness.wait(cx, "Escape closes actual card editor", |_, app| {
+            app.windows().len() == 1
+        });
+    }
+    harness.wait(cx, "Escape retains the card edit", |_, _| {
+        commands::cards::get_card_edit_state(&harness.state, "ui-card".into())
+            .is_ok_and(|state| state.card.term == "saved from Escape")
+    });
+    harness.close(cx);
+}
+
+#[gpui_kit::test]
 fn playback_settings_escape_preserves_menu_priority_and_closes_the_owned_dialog(
     cx: &mut TestAppContext,
 ) {

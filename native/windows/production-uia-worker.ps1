@@ -13,6 +13,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'production-uia-common.ps1')
+. (Join-Path $PSScriptRoot 'production-video-pixels.ps1')
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $identity = Get-Content -LiteralPath (Join-Path $workspace 'packaging/app.json') -Raw | ConvertFrom-Json
 if ($AppId -ne $identity.identifier -and $AppId -notmatch '^app\.surtitle\.evaluation\.[a-z0-9]+$') { throw 'Unknown application identity.' }
@@ -60,16 +61,13 @@ try {
     [SurtitleProductionUia]::Activate((Find-Id 'study-fixture-media'))
     Wait-For {
         $toggle = Find-Id 'play-toggle'; $metadata = Find-Id 'player-metadata'
-        $surfaceDetails = ''
-        $surface = [SurtitleProductionUia]::VideoSurface($app, [ref]$surfaceDetails)
         $script:videoObservation = @{
             toggleFound=($null -ne $toggle); toggleEnabled=($null -ne $toggle -and $toggle.Current.IsEnabled)
             metadataFound=($null -ne $metadata); metadataName=$(if($metadata){$metadata.Current.Name}else{$null})
-            videoSurface=$surface; childWindows=$surfaceDetails
         }
         $null -ne $toggle -and $toggle.Current.IsEnabled -and $null -ne $metadata -and
-            $metadata.Current.Name -match '^0:(11|12) · 640 × 360$' -and $surface
-    } 'real libmpv metadata and visible native video surface' 35
+            $metadata.Current.Name -match '^0:(11|12) · 640 × 360$'
+    } 'real libmpv metadata' 35
     $metadataName = (Find-Id 'player-metadata').Current.Name
     $volume = [SurtitleProductionUia]::Slider([SurtitleProductionUia]::Root($app), 'Volume', '音量')
     [SurtitleProductionUia]::SetRange($volume, 100, 0)
@@ -78,6 +76,7 @@ try {
     Wait-For { [SurtitleProductionUia]::IsPaused((Find-Id 'play-toggle')) } 'paused baseline'
     [SurtitleProductionUia]::SetRange((Seek-Slider), 10000, 1000)
     Wait-For { [Math]::Abs([SurtitleProductionUia]::Range((Seek-Slider),10000)-1000) -lt 200 } 'seek baseline'
+    $baselinePixels = Assert-ProductionVideoPixels $app $Fixture $Output (Find-Id 'player-viewport') (Seek-Slider) 'baseline'
     $position = [SurtitleProductionUia]::Range((Seek-Slider),10000)
     [SurtitleProductionUia]::Activate((Find-Id 'play-toggle'))
     Wait-For { -not [SurtitleProductionUia]::IsPaused((Find-Id 'play-toggle')) -and [SurtitleProductionUia]::Range((Seek-Slider),10000) -gt $position+300 } 'actual playback advancement'
@@ -91,12 +90,13 @@ try {
     } while ([DateTime]::UtcNow -lt $deadline)
     [SurtitleProductionUia]::SetRange((Seek-Slider),10000,7000)
     Wait-For { [Math]::Abs([SurtitleProductionUia]::Range((Seek-Slider),10000)-7000) -lt 200 } 'production seek acknowledgement'
+    $seekPixels = Assert-ProductionVideoPixels $app $Fixture $Output (Find-Id 'player-viewport') (Seek-Slider) 'seek'
     if (-not $app.CloseMainWindow() -or -not $app.WaitForExit(15000) -or $app.ExitCode -ne 0) { throw 'Production application did not close cleanly.' }
     $afterText = & python -B (Join-Path $PSScriptRoot 'production-profile.py') $DataRoot $Fixture after
     if ($LASTEXITCODE -ne 0) { throw 'Final read-only production profile audit failed.' }
     $after = $afterText | ConvertFrom-Json
     if ($before.learningSha256 -ne $after.learningSha256) { throw 'Playback modified learning content.' }
-    $result = [ordered]@{schema=1;passed=$true;normalBuild=$true;executableSha256=$receipt.executableSha256;paidRequests=0;metadata=$metadataName;nativeVideoSurface=$true;playbackAdvanced=$true;pauseStable=$true;seekAcknowledged=$true;learningSha256=$after.learningSha256;mediaCount=1;cardCount=1;subtitleCount=20000}
+    $result = [ordered]@{schema=1;passed=$true;normalBuild=$true;executableSha256=$receipt.executableSha256;paidRequests=0;metadata=$metadataName;nativeVideoSurface=$true;pixelEvidence=@($baselinePixels,$seekPixels);playbackAdvanced=$true;pauseStable=$true;seekAcknowledged=$true;learningSha256=$after.learningSha256;mediaCount=1;cardCount=1;subtitleCount=20000}
     $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($result | ConvertTo-Json -Depth 5))
     $stream = [IO.File]::Open($Output,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
     try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }

@@ -29,6 +29,7 @@ public static class SurtitleNativeSmoke {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate ulong ApiVersion();
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr PointerCall();
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int Initialize(IntPtr context);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int AcquireSwapchain(IntPtr context, ref IntPtr swapchain);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void Destroy(IntPtr context);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int Option(IntPtr context, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, [MarshalAs(UnmanagedType.LPUTF8Str)] string value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr Property(IntPtr context, [MarshalAs(UnmanagedType.LPUTF8Str)] string name);
@@ -63,6 +64,10 @@ public static class SurtitleNativeSmoke {
             mpv = Symbol<PointerCall>(mpvLibrary, "mpv_create")();
             if (mpv == IntPtr.Zero) throw new Exception("mpv_create failed");
             destroy = Symbol<Destroy>(mpvLibrary, "mpv_terminate_destroy");
+            var acquireSwapchain = Symbol<AcquireSwapchain>(mpvLibrary, "mpv_surtitle_acquire_d3d11_swapchain");
+            var unavailableSwapchain = new IntPtr(1);
+            if (acquireSwapchain(mpv, ref unavailableSwapchain) != -3 || unavailableSwapchain != IntPtr.Zero)
+                throw new Exception("Composition bridge must reject an uninitialized player and clear its output");
             var setOption = Symbol<Option>(mpvLibrary, "mpv_set_option_string");
             foreach (var pair in new string[][] { new[] {"config", "no"}, new[] {"ytdl", "no"}, new[] {"terminal", "no"}, new[] {"vo", "null"}, new[] {"ao", "null"} }) {
                 int result = setOption(mpv, pair[0], pair[1]);
@@ -70,6 +75,9 @@ public static class SurtitleNativeSmoke {
             }
             int initialized = Symbol<Initialize>(mpvLibrary, "mpv_initialize")(mpv);
             if (initialized < 0) throw new Exception("mpv_initialize failed: " + initialized);
+            unavailableSwapchain = new IntPtr(1);
+            if (acquireSwapchain(mpv, ref unavailableSwapchain) != -10 || unavailableSwapchain != IntPtr.Zero)
+                throw new Exception("Composition bridge must return unavailable without a video output");
             var get = Symbol<Property>(mpvLibrary, "mpv_get_property_string");
             var free = Symbol<Free>(mpvLibrary, "mpv_free");
             string ReadProperty(string name) {
@@ -84,7 +92,8 @@ public static class SurtitleNativeSmoke {
             return new Dictionary<string, object> {
                 {"loadedFiles", loaded}, {"mpvApiVersion", api}, {"mpvVersion", ReadProperty("mpv-version")},
                 {"ffmpegVersion", ReadProperty("ffmpeg-version")}, {"onnxruntimeVersion", ortVersion},
-                {"mpvInitialized", true}, {"realVideoSurfaceTested", false}, {"sileroInferenceTested", false}
+                {"mpvInitialized", true}, {"ownedCompositionBridgeAvailable", true},
+                {"realVideoSurfaceTested", false}, {"sileroInferenceTested", false}
             };
         } finally {
             if (mpv != IntPtr.Zero && destroy != null) destroy(mpv);

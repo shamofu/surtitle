@@ -1,17 +1,40 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
-test('ORT acquisition authenticates only the exact vcpkg API and never forwards credentials across redirects', () => {
-  const child = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-B', '-c', String.raw`
+const execFileAsync = promisify(execFile);
+const childTimeoutMs = 15_000;
+// The child owns the work deadline; allow its termination and diagnostics to
+// complete before Vitest's enclosing deadline, without blocking the worker.
+const testTimeoutMs = childTimeoutMs + 5_000;
+
+async function runPython(script, module) {
+  const started = performance.now();
+  try {
+    return await execFileAsync(process.platform === 'win32' ? 'python' : 'python3',
+      ['-B', '-u', '-c', script, module], {
+        encoding: 'utf8', timeout: childTimeoutMs, windowsHide: true,
+      });
+  } catch (error) {
+    assert.fail(`Python fixture failed after ${Math.round(performance.now() - started)}ms `
+      + `(code=${error.code}, signal=${error.signal}, killed=${error.killed}):\n`
+      + (error.stdout || '') + (error.stderr || ''));
+  }
+}
+
+test('ORT acquisition authenticates only the exact vcpkg API and never forwards credentials across redirects', async () => {
+  const child = await runPython(String.raw`
+print('ORT authentication fixture: interpreter started', flush=True)
 import importlib.util, io, os, socket, ssl, sys, urllib.request, urllib.response
 from email.message import Message
 from unittest.mock import patch
 spec = importlib.util.spec_from_file_location('ort_inputs', sys.argv[1])
 inputs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(inputs)
+print('ORT authentication fixture: imports complete', flush=True)
 token = 'ghs_fixture_secret_do_not_log'
 api = 'https://api.github.com/repos/microsoft/vcpkg/git/trees/' + 'a' * 40
 blob = 'https://api.github.com/repos/microsoft/vcpkg/git/blobs/' + 'b' * 40
@@ -96,14 +119,12 @@ with (
     assert inputs.request(api) == b'fixture source'
     assert seen[0][1] is None
 print('Scoped API authentication and redirect checks passed')
-`, fileURLToPath(new URL('./native-ort-source-inputs.py', import.meta.url))], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
-  assert.ifError(child.error);
-  assert.equal(child.status, 0, child.stdout + child.stderr);
+`, fileURLToPath(new URL('./native-ort-source-inputs.py', import.meta.url)));
   assert.doesNotMatch(child.stdout + child.stderr, /ghs_fixture_secret/);
-});
+}, testTimeoutMs);
 
-test('ORT acquisition extracts pinned overlay recipes and patches while checking archives and missing ports', () => {
-  const child = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-B', '-c', String.raw`
+test('ORT acquisition extracts pinned overlay recipes and patches while checking archives and missing ports', async () => {
+  await runPython(String.raw`
 import base64, hashlib, importlib.util, io, json, sys, tarfile, tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -220,14 +241,12 @@ with tempfile.TemporaryDirectory() as temporary:
             raise AssertionError('A missing required overlay silently used the baseline port')
     assert not (incomplete / 'source-inputs.json').exists()
 print('Pinned overlays, historical ports, archive checks and missing-port rejection passed')
-`, fileURLToPath(new URL('./native-ort-source-inputs.py', import.meta.url))], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
-  assert.ifError(child.error);
-  assert.equal(child.status, 0, child.stdout + child.stderr);
-});
+`, fileURLToPath(new URL('./native-ort-source-inputs.py', import.meta.url)));
+}, testTimeoutMs);
 
 
-test('ORT source packaging retains selected archives, ports and notices without runtime or reviewed-evidence bindings', () => {
-  const child = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-B', '-c', String.raw`
+test('ORT source packaging retains selected archives, ports and notices without runtime or reviewed-evidence bindings', async () => {
+  await runPython(String.raw`
 import hashlib, io, json, shutil, subprocess, sys, tarfile, tempfile
 from pathlib import Path
 script = Path(sys.argv[1])
@@ -297,7 +316,5 @@ with tempfile.TemporaryDirectory() as temporary:
     result = subprocess.run(command, capture_output=True, text=True)
     assert result.returncode != 0 and 'Changed source archive: onnxruntime' in result.stderr
 print('Source pins and packaging preserved without runtime evidence gates')
-`, fileURLToPath(new URL('./native-ort-package.py', import.meta.url))], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
-  assert.ifError(child.error);
-  assert.equal(child.status, 0, child.stdout + child.stderr);
-});
+`, fileURLToPath(new URL('./native-ort-package.py', import.meta.url)));
+}, testTimeoutMs);
