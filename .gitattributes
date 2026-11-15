@@ -2,11 +2,6 @@
 /package.json -text
 /.pnpmfile.mjs -text
 /.node-version -text
-# Generated IPC source is compared byte-for-byte with the LF generator output.
-/src/shared/native/command-registry.ts text eol=lf
-# Resource source files are shared between Windows and Linux containers.
-/src-tauri/resources/native/.gitkeep text eol=lf
-/src-tauri/resources/notices/README.txt text eol=lf
 /.devcontainer/Dockerfile -text
 /.devcontainer/README.md -text
 /.devcontainer/devcontainer.json -text
@@ -29,8 +24,5 @@
 /native/windows/native-prepare.ps1 -text
 /native/windows/native-smoke.ps1 -text
 /native/windows/package-installer-smoke.ps1 -text
-/native/windows/package-production-smoke.mjs -text
-/native/windows/package-production-smoke.test.mjs -text
 /native/windows/package-verify.ps1 -text
 /scripts/release.mjs -text
-/src-tauri/tauri.conf.json -text

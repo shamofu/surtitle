@@ -50,6 +50,7 @@ Node and pnpm run development helpers, fixture generation and formal verificatio
 | External and managed command-line tools | [Tool management](docs/tools.md) |
 | Development checks | [Testing](docs/testing.md) |
 | Native dependencies and distribution | [Build and packaging](docs/native-runtime.md) |
+| Repository rules and agent guardrails | [Repository instructions](AGENTS.md) |
 
 ## CI and releases
 
