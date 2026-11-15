@@ -10,7 +10,7 @@ use crate::{
     application::transfer::{RestorePreview, RestoreResult},
     commands,
 };
-use gpui_kit::component::{ActiveTheme, Disableable, button::ButtonVariants};
+use gpui_kit::component::{ActiveTheme, Disableable, Selectable, button::ButtonVariants};
 use gpui_kit::{
     AnyWindowHandle, AppContext, Context, Entity, WeakEntity, Window, div, prelude::*, px, size,
 };
@@ -206,6 +206,7 @@ impl Render for TransferDialog {
                     .child(
                         Button::new("export-tab")
                             .accessibility_id("export-tab")
+                            .selected(!self.restore_tab)
                             .label(t("書き出す", "Export"))
                             .disabled(self.busy)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -216,6 +217,7 @@ impl Render for TransferDialog {
                     .child(
                         Button::new("restore-tab")
                             .accessibility_id("restore-tab")
+                            .selected(self.restore_tab)
                             .label(t("復元する", "Restore"))
                             .disabled(self.busy)
                             .on_click(cx.listener(|this, _, _, cx| {

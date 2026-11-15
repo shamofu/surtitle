@@ -299,7 +299,7 @@ impl SettingsView {
                 section=section.child(column().gap_3().child(div().text_size(px(15.)).font_weight(gpui_kit::FontWeight::MEDIUM).child(label))
                     .child(row().gap_0().items_stretch().border_1().border_color(cx.theme().border).rounded(px(9.)).bg(cx.theme().background)
                         .children(amounts.into_iter().enumerate().map(|(index,(label,amount))|column().flex_1().min_w(px(0.)).px_4().py_4().gap_2()
-                            .when(index>0,|cell|cell.border_l_1().border_color(cx.theme().border)).child(muted(label)).child(div().text_size(px(23.)).font_weight(gpui_kit::FontWeight::MEDIUM).child(amount)))))
+                            .when(index>0,|cell|cell.border_l_1().border_color(cx.theme().border)).child(muted(label)).child(div().text_size(px(23.)).font_weight(gpui_kit::FontWeight::MEDIUM).font_features(tabular_numbers()).child(amount)))))
                     .when(!summary.monetary_totals_complete,|view|view.child(muted(self.t(&format!("料金未算定の{}件は上記に含みません。請求総額ではありません。",summary.unpriced_attempts),&format!("{} unpriced requests are excluded. These amounts are not your total bill.",summary.unpriced_attempts),cx)))));
             }
         }

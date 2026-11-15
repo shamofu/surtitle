@@ -885,6 +885,8 @@ fn panel_change_keeps_real_tab_navigation_in_the_selected_panel_and_restores_sea
         assert_eq!(window.find("subtitle-search").focused(), Some(true));
         assert_eq!(window.find("subtitle-search").value(), Some("home"));
         window.press("tab", app);
+        assert_eq!(window.find("clear-subtitle-search").focused(), Some(true));
+        window.press("tab", app);
         assert_eq!(window.find("import-subtitles").focused(), Some(true));
     })
     .unwrap();

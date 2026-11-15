@@ -1264,6 +1264,7 @@ impl Render for StudyView {
         .w_full()
         .flex_1()
         .min_h(px(0.));
+        let query_empty = self.search.read(cx).value().is_empty();
         let transcript = column()
             .flex_1()
             .min_h(px(0.))
@@ -1272,7 +1273,28 @@ impl Render for StudyView {
                 div().p_3().child(
                     Input::new(&self.search)
                         .id("subtitle-search")
-                        .prefix(gpui_kit::component::Icon::new(IconName::Search).size(px(16.))),
+                        .aria_label(t("字幕を検索", "Search subtitles"))
+                        .prefix(gpui_kit::component::Icon::new(IconName::Search).size(px(16.)))
+                        .when(!query_empty, |input| {
+                            input.suffix(
+                                icon_button(
+                                    "clear-subtitle-search",
+                                    IconName::X,
+                                    t("検索をクリア", "Clear search"),
+                                )
+                                .w(px(30.))
+                                .h(px(30.))
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.search.update(cx, |search, cx| {
+                                            search.set_value("", window, cx)
+                                        });
+                                        this.search.read(cx).focus_handle(cx).focus(window, cx);
+                                        this.filter_from_user(window, cx);
+                                    },
+                                )),
+                            )
+                        }),
                 ),
             )
             .child(
@@ -1316,36 +1338,44 @@ impl Render for StudyView {
                     ),
             )
             .child(
-                compact_button("marked-subtitles")
-                    .ghost()
-                    .role(gpui_kit::accesskit::Role::CheckBox)
-                    .toggled(self.marked_only)
-                    .icon(if self.marked_only {
-                        IconName::SquareCheck
-                    } else {
-                        IconName::Square
-                    })
-                    .label(t("注意のある箇所だけ表示", "Show marked passages only"))
-                    .text_size(px(12.))
-                    .mx_2()
-                    .disabled(!self.marked_only && !self.has_marked)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.marked_only = !this.marked_only;
-                        this.follow = false;
-                        this.filter_from_user(window, cx);
-                    })),
-            )
-            .child(
-                compact_button("reset-subtitle-filters")
-                    .ghost()
-                    .label(t("絞り込みをリセット", "Reset filters"))
-                    .disabled(!self.marked_only && self.search.read(cx).value().is_empty())
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.marked_only = false;
-                        this.search
-                            .update(cx, |search, cx| search.set_value("", window, cx));
-                        this.filter_from_user(window, cx);
-                    })),
+                row()
+                    .px_3()
+                    .pb_2()
+                    .justify_between()
+                    .items_center()
+                    .gap_1()
+                    .flex_wrap()
+                    .child(
+                        compact_button("marked-subtitles")
+                            .ghost()
+                            .role(gpui_kit::accesskit::Role::CheckBox)
+                            .toggled(self.marked_only)
+                            .icon(if self.marked_only {
+                                IconName::SquareCheck
+                            } else {
+                                IconName::Square
+                            })
+                            .label(t("注意のある箇所だけ表示", "Show marked passages only"))
+                            .text_size(px(12.))
+                            .disabled(!self.marked_only && !self.has_marked)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.marked_only = !this.marked_only;
+                                this.follow = false;
+                                this.filter_from_user(window, cx);
+                            })),
+                    )
+                    .child(
+                        compact_button("reset-subtitle-filters")
+                            .ghost()
+                            .label(t("絞り込みをリセット", "Reset filters"))
+                            .disabled(!self.marked_only && query_empty)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.marked_only = false;
+                                this.search
+                                    .update(cx, |search, cx| search.set_value("", window, cx));
+                                this.filter_from_user(window, cx);
+                            })),
+                    ),
             )
             .when(!self.empty_issues.is_empty(), |body| {
                 body.child(
@@ -1466,7 +1496,9 @@ impl Render for StudyView {
             let panel_heading = match tab {
                 CompanionTab::Meaning => t("意味とフレーズ", "Meaning and phrases"),
                 CompanionTab::Tools => t("処理・管理", "Activity & tools"),
-                _ => t("字幕", "Transcript"),
+                CompanionTab::Transcription => t("文字起こし", "Transcription"),
+                CompanionTab::Suggestions => t("AI の提案", "AI suggestions"),
+                CompanionTab::Transcript => t("字幕", "Transcript"),
             };
             let panel = match tab {
                 CompanionTab::Transcript => transcript.take().unwrap(),
@@ -1884,11 +1916,36 @@ impl Render for StudyView {
                     .child(div().id("player-metadata").test_support().role(gpui_kit::accesskit::Role::Label).accessibility_id("player-metadata")
                         .aria_value(format!("{} · {} × {}",timestamp(player.duration_ms),player.video_width,player.video_height))
                         .child(div().text_size(px(13.)).text_color(cx.theme().muted_foreground).child(format!("{} / {}",language_name(self.session.read(cx).snapshot.as_ref().and_then(|s|s.media.iter().find(|m|m.id==self.media_id)).map(|m|m.learning_language.as_str()).unwrap_or("en"),japanese),timestamp(player.duration_ms))))))
-                .child(button("toggle-transcript").icon(IconName::Captions).label(t("字幕一覧","Transcript"))
-                    .bg(if subtitle_panel&&self.companion_tab==CompanionTab::Transcript{cx.theme().accent}else{cx.theme().popover})
-                    .on_click(cx.listener(|this,_,window,cx|{this.toggle_companion(CompanionTab::Transcript,window,cx);})))
-                .child(button("study-tools").label(t("処理・管理","Activity & tools")).icon(IconName::ChevronDown)
-                    .on_click(cx.listener(|this,_,window,cx|{this.toggle_companion(CompanionTab::Tools,window,cx);}))))
+                .child({
+                    let active = subtitle_panel && self.companion_tab == CompanionTab::Transcript;
+                    button("toggle-transcript")
+                        .icon(IconName::Captions)
+                        .label(t("字幕一覧", "Transcript"))
+                        .toggled(active)
+                        .bg(if active {
+                            cx.theme().accent
+                        } else {
+                            cx.theme().popover
+                        })
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.toggle_companion(CompanionTab::Transcript, window, cx);
+                        }))
+                })
+                .child({
+                    let active = subtitle_panel && self.companion_tab == CompanionTab::Tools;
+                    button("study-tools")
+                        .label(t("処理・管理", "Activity & tools"))
+                        .icon(IconName::SlidersHorizontal)
+                        .toggled(active)
+                        .bg(if active {
+                            cx.theme().accent
+                        } else {
+                            cx.theme().popover
+                        })
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.toggle_companion(CompanionTab::Tools, window, cx);
+                        }))
+                }))
             .child(content)
             .when_some(self.load_error.clone(),|body,error|body.child(row().p_3().flex_wrap().child(div().flex_1().child(error)).child(button("retry-media-load").label(t("読み込みを再試行","Retry loading")).disabled(self.sources.read(cx).frozen()).on_click(cx.listener(|this,_,_,cx|this.load_media(cx))))))
             .when_some(self.error.clone().or(player.error),|body,error|body.child(div().p_3().bg(cx.theme().button_danger).text_color(cx.theme().button_danger_foreground).child(error)))

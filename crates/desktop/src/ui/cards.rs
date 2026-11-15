@@ -13,7 +13,9 @@ use gpui_kit::component::{
     input::{Input, InputEditsEvent, InputEvent, InputState, Textarea, TextareaState},
     menu::{DropdownMenu, PopupMenuItem},
 };
-use gpui_kit::{AppContext, Context, Entity, Subscription, Window, div, prelude::*, px, relative};
+use gpui_kit::{
+    AppContext, Context, Entity, Focusable, Subscription, Window, div, prelude::*, px, relative,
+};
 use std::collections::BTreeMap;
 use surtitle_core::StudyCard;
 
@@ -355,6 +357,23 @@ impl CardsView {
                 }),
             )
             .child(div().flex_1())
+            .child({
+                let edit_id = card.id.clone();
+                let edit_control_id = if active {
+                    "review-edit"
+                } else {
+                    "review-outgoing-edit"
+                };
+                button(edit_control_id)
+                    .ghost()
+                    .icon(IconName::Pencil)
+                    .accessibility_id(edit_control_id)
+                    .label(t("編集", "Edit"))
+                    .disabled(disabled)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open(edit_id.clone(), window, cx);
+                    }))
+            })
             .child(muted(if ja {
                 format!("{} 回の復習", card.review_count)
             } else {
@@ -1080,7 +1099,31 @@ impl Render for CardsView {
                     .child(button("cards-review").primary().icon(IconName::BookOpen).accessibility_label(review_label.clone()).child(state_label(review_label, &[&review_capacity]).font_features(tabular_numbers())).on_click(move|_,_,cx|review.update(cx,|s,cx|s.navigate(Route::Review,cx))))))
             .child(row().justify_between().gap_4().flex_wrap()
                 .child(row().gap_2().child(div().text_size(px(17.)).font_weight(gpui_kit::FontWeight::SEMIBOLD).child(t("保存した表現","Saved phrases"))).child(phrase_badge(count.to_string(),false,cx)))
-                .child(row().gap_3().child(filter).child(Input::new(&self.search).id("card-search").accessibility_id("card-search").aria_label(t("フレーズを検索","Search phrases")).prefix(Icon::new(IconName::Search)).w(px(310.))))) ;
+                .child(row().gap_3().child(filter).child(
+                    Input::new(&self.search)
+                        .id("card-search")
+                        .accessibility_id("card-search")
+                        .aria_label(t("フレーズを検索","Search phrases"))
+                        .prefix(Icon::new(IconName::Search))
+                        .when(!self.search.read(cx).value().is_empty(), |input| {
+                            input.suffix(
+                                icon_button(
+                                    "clear-card-search",
+                                    IconName::X,
+                                    t("検索をクリア", "Clear search"),
+                                )
+                                .w(px(30.))
+                                .h(px(30.))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.search
+                                        .update(cx, |search, cx| search.set_value("", window, cx));
+                                    this.search.read(cx).focus_handle(cx).focus(window, cx);
+                                    cx.notify();
+                                })),
+                            )
+                        })
+                        .w(px(310.)),
+                ))) ;
         if cards.is_empty() {
             let library = self.session.clone();
             page = page.child(

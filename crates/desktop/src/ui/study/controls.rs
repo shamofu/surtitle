@@ -399,7 +399,7 @@ impl StudyView {
                                     .ghost()
                                     .icon(IconName::RotateCcw)
                                     .label(t("5秒", "5s"))
-                                    .tooltip(t("5 秒戻る", "Back 5 seconds"))
+                                    .tooltip(t("5 秒戻る (←)", "Back 5 seconds (Left)"))
                                     .disabled(disabled)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         let position = this
@@ -423,6 +423,11 @@ impl StudyView {
                                         &[t("再生", "Play"), t("一時停止", "Pause")],
                                     ))
                                     .accessibility_label(play_label)
+                                    .tooltip(if player.paused {
+                                        t("再生 (Space)", "Play (Space)")
+                                    } else {
+                                        t("一時停止 (Space)", "Pause (Space)")
+                                    })
                                     .accessibility_id("play-toggle")
                                     .disabled(disabled)
                                     .on_click(cx.listener(|this, _, _, cx| {
@@ -434,7 +439,7 @@ impl StudyView {
                                     .ghost()
                                     .icon(IconName::RotateCw)
                                     .label(t("5秒", "5s"))
-                                    .tooltip(t("5 秒進む", "Forward 5 seconds"))
+                                    .tooltip(t("5 秒進む (→)", "Forward 5 seconds (Right)"))
                                     .disabled(disabled)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         let position = this
@@ -536,6 +541,11 @@ impl StudyView {
                                     IconName::Maximize,
                                     t("全画面表示を切り替える", "Toggle fullscreen"),
                                 )
+                                .tooltip(if fullscreen {
+                                    t("全画面表示を解除 (Esc)", "Exit fullscreen (Esc)")
+                                } else {
+                                    t("全画面表示を切り替える", "Toggle fullscreen")
+                                })
                                 .toggled(fullscreen)
                                 .accessibility_id("player-fullscreen")
                                 .disabled(disabled)
@@ -855,6 +865,7 @@ impl Render for PlaybackSettings {
             .and_then(|view| view.fields.get("captionGapMode"))
             .map(String::as_str)
             .unwrap_or("review");
+        let current_mode = mode.to_owned();
         let mode_ready = editing.is_some_and(|view| view.ready) && !self.editors.read(cx).frozen();
         let mode_error = editing.and_then(|view| view.error.clone());
         let editor = self.editors.clone();
@@ -873,20 +884,23 @@ impl Render for PlaybackSettings {
                     ("review", t("直前の字幕を復習", "Review previous caption")),
                     ("preview", t("次の字幕を予習", "Preview next caption")),
                 ] {
+                    let selected = current_mode == value;
                     let editor = editor.clone();
                     let key = mode_key.clone();
-                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
-                        if let Some(key) = &key
-                            && let Some(view) = editor.read(cx).view(key)
-                        {
-                            let mut fields = view.fields.clone();
-                            fields.insert("captionGapMode".into(), value.into());
-                            editor.update(cx, |registry, cx| {
-                                registry.change(key, fields, cx);
-                                registry.blur(key, cx);
-                            });
-                        }
-                    }));
+                    menu = menu.item(PopupMenuItem::new(label).checked(selected).on_click(
+                        move |_, _, cx| {
+                            if let Some(key) = &key
+                                && let Some(view) = editor.read(cx).view(key)
+                            {
+                                let mut fields = view.fields.clone();
+                                fields.insert("captionGapMode".into(), value.into());
+                                editor.update(cx, |registry, cx| {
+                                    registry.change(key, fields, cx);
+                                    registry.blur(key, cx);
+                                });
+                            }
+                        },
+                    ));
                 }
                 menu
             });
@@ -933,6 +947,7 @@ impl Render for PlaybackSettings {
                 let matching=tracks.iter().filter(|track|track.kind==kind).cloned().collect::<Vec<_>>();
                 if matching.is_empty(){return None;}
                 let selected=matching.iter().find(|track|track.selected);
+                let none_selected=selected.is_none();
                 let selected_label=selected.map(track_label).unwrap_or_else(||t("選択なし","None selected").into());
                 let owner=self.owner.clone();
                 Some(column().gap_2().child(div().text_size(px(14.)).child(label))
@@ -940,11 +955,11 @@ impl Render for PlaybackSettings {
                         .dropdown_menu(move|mut menu,_,_|{
                             if kind=="sub" {
                                 let owner=owner.clone();
-                                menu=menu.item(PopupMenuItem::new(t("選択なし","None selected")).on_click(move|_,_,cx|{let _=owner.update(cx,|this,cx|this.select_track("sub",0.,cx));}));
+                                menu=menu.item(PopupMenuItem::new(t("選択なし","None selected")).checked(none_selected).on_click(move|_,_,cx|{let _=owner.update(cx,|this,cx|this.select_track("sub",0.,cx));}));
                             }
                             for track in &matching {
                                 let id=track.id;let owner=owner.clone();
-                                menu=menu.item(PopupMenuItem::new(track_label(track)).on_click(move|_,_,cx|{let _=owner.update(cx,|this,cx|this.select_track(kind,id as f64,cx));}));
+                                menu=menu.item(PopupMenuItem::new(track_label(track)).checked(track.selected).on_click(move|_,_,cx|{let _=owner.update(cx,|this,cx|this.select_track(kind,id as f64,cx));}));
                             }
                             menu
                         }))

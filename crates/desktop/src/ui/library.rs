@@ -188,6 +188,14 @@ impl Render for LibraryView {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        let manage_target = session.snapshot.as_ref().and_then(|snapshot| {
+            snapshot
+                .media
+                .iter()
+                .find(|media| matches!(media.status.as_str(), "missing" | "error"))
+                .or_else(|| snapshot.media.first())
+                .map(|media| media.id.clone())
+        });
         let total = rows.len();
         let overall = session
             .snapshot
@@ -206,6 +214,7 @@ impl Render for LibraryView {
         let accent = theme.primary;
         let accent_soft = theme.accent;
         let hover = theme.list_hover;
+        let danger = theme.danger;
         let imports = self.imports.read(cx).view();
         let wide = window.viewport_size().width >= px(1100.);
         let spacious = window.viewport_size().width >= px(1600.);
@@ -242,11 +251,38 @@ impl Render for LibraryView {
                 .child(Icon::new(IconName::Upload).size(px(15.))).child(t(
                     "動画・音声ファイルをここへドロップして追加できます。",
                     "Drop video or audio files here to add them.")))
-                .child(button("library-transfer").ghost().icon(IconName::ArrowDownToLine)
-                    .label(t("データ管理", "Your data")).accessibility_id("library-your-data")
-                    .disabled(imports.frozen).on_click(cx.listener(|this, _, _, cx| {
-                        this.session.update(cx, |session, cx| session.request_transfer(cx))
-                    }))))
+                .child(
+                    row()
+                        .gap_2()
+                        .when_some(manage_target, |actions, id| {
+                            actions.child(
+                                button("library-manage-media")
+                                    .ghost()
+                                    .icon(IconName::Settings2)
+                                    .accessibility_id("library-manage-media")
+                                    .label(t("教材の管理", "Manage media"))
+                                    .disabled(imports.frozen)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        let id = id.clone();
+                                        this.session.update(cx, |session, cx| {
+                                            session.manage_media(id, cx);
+                                        });
+                                    })),
+                            )
+                        })
+                        .child(
+                            button("library-transfer")
+                                .ghost()
+                                .icon(IconName::ArrowDownToLine)
+                                .label(t("データ管理", "Your data"))
+                                .accessibility_id("library-your-data")
+                                .disabled(imports.frozen)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.session
+                                        .update(cx, |session, cx| session.request_transfer(cx))
+                                })),
+                        ),
+                ))
             .child(muted(t(
                 "ファイルを追加中です。追加画面を閉じても処理は続きます。",
                 "Files are being added. Work continues when the import dialog closes."))
@@ -346,6 +382,7 @@ impl Render for LibraryView {
                         let media = &rows[index];
                         let id = media.id.clone();
                         let model = model.clone();
+                        let issue = matches!(media.status.as_str(), "missing" | "error");
                         let status = match media.status.as_str() {
                             "missing" => t("ファイルが見つかりません", "File not found"),
                             "error" => t("読み込みエラー", "Import error"),
@@ -357,15 +394,31 @@ impl Render for LibraryView {
                             .w_full().h(px(104.)).px(px(22.)).rounded(px(0.)).border_t_1().border_color(border)
                             .child(row().w_full().gap(px(20.)).text_size(px(13.)).text_color(subdued)
                                 .child(row().flex_1().min_w(px(0.)).gap(px(16.))
-                                    .child(div().w(px(28.)).flex_shrink_0().child(Icon::new(
-                                        if media.kind == "audio" { IconName::Headphones } else { IconName::FileVideoCamera }
-                                    ).size(px(21.))))
+                                    .child(div().w(px(28.)).flex_shrink_0().child(
+                                        if issue {
+                                            Icon::new(IconName::TriangleAlert).size(px(21.)).text_color(danger)
+                                        } else {
+                                            Icon::new(if media.kind == "audio" {
+                                                IconName::Headphones
+                                            } else {
+                                                IconName::FileVideoCamera
+                                            })
+                                            .size(px(21.))
+                                        },
+                                    ))
                                     .child(column().flex_1().min_w(px(0.)).gap(px(5.))
                                         .child(div().truncate().text_size(px(17.)).font_weight(FontWeight::SEMIBOLD)
                                             .text_color(foreground).child(media.title.clone()))
                                         .child(row().gap(px(12.)).text_size(px(12.))
                                             .child(if media.kind == "audio" { t("音声","Audio") } else { t("動画","Video") })
-                                            .child(status))
+                                            .child(
+                                                div()
+                                                    .when(issue, |el| {
+                                                        el.text_color(danger)
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                    })
+                                                    .child(status),
+                                            ))
                                         .when(!wide, |column| column.child(row().gap(px(12.)).text_size(px(12.))
                                             .child(language_name(&media.learning_language,ja))
                                             .child(if ja {format!("保存したフレーズ {} 件", media.card_count)} else {format!("{} saved phrases", media.card_count)})))))

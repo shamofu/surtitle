@@ -146,8 +146,24 @@ impl StudyView {
             })
             .children(jobs.into_iter().map(|job| {
                 let id = job.id.clone();
+                let kind = match job.kind.as_str() {
+                    "transcribe" => t("文字起こし", "Transcription"),
+                    "translate" => t("翻訳", "Translation"),
+                    "vocabulary" => t("語彙・解説", "Vocabulary / explanation"),
+                    other => other,
+                };
+                let status = match job.status.as_str() {
+                    "queued" => t("開始待ち", "Queued"),
+                    "running" => t("実行中", "Running"),
+                    "paused" => t("一時停止", "Paused"),
+                    "completed" => t("完了", "Completed"),
+                    "failed" => t("失敗", "Failed"),
+                    "cancelled" => t("中止", "Cancelled"),
+                    "unknown" => t("結果不明", "Unknown outcome"),
+                    other => other,
+                };
                 compact_button(format!("study-job-{id}"))
-                    .label(format!("{} · {}", job.kind, job.status))
+                    .label(format!("{kind} · {status} · {:.0}%", job.progress * 100.))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.session
                             .update(cx, |_, cx| cx.emit(UiEvent::OpenAiJob(id.clone())))
@@ -194,6 +210,15 @@ impl StudyView {
                         let id = this.media_id.clone();
                         this.session
                             .update(cx, |session, cx| session.request_draft_study(id, cx));
+                    })),
+            )
+            .child(
+                compact_button("tools-back-transcript")
+                    .ghost()
+                    .icon(IconName::ArrowLeft)
+                    .label(t("字幕一覧へ戻る", "Back to transcript"))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.select_companion(CompanionTab::Transcript, window, cx);
                     })),
             )
     }
@@ -404,13 +429,34 @@ impl StudyView {
                 .child(compact_button("meaning-play-range").icon(IconName::Play).label(t("この区間を再生", "Play this passage")).disabled(playback_disabled)
                     .on_click(cx.listener(|this, _, _, cx| this.play_cues(this.meaning_cues.iter().map(|cue| cue.id.clone()).collect(), cx))))
                 .when_some(range, |body, (start,end)| body.child(muted(format!("{}.{:03}–{}.{:03}", timestamp(start), start % 1000, timestamp(end), end % 1000))))
-                .child(compact_button("meaning-loop-range").icon(IconName::Repeat).label(t("区間リピート", "Repeat passage")).disabled(playback_disabled)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if this.looping.is_some() {this.set_loop(None,cx);} else {
-                            this.loop_source = Some(this.meaning_cues.clone());
-                            this.set_loop(range,cx);
-                        }
-                    }))))
+                .child({
+                    let looping = self.looping.is_some();
+                    let loop_label = if looping {
+                        t("リピート解除", "Stop repeat")
+                    } else {
+                        t("区間リピート", "Repeat passage")
+                    };
+                    compact_button("meaning-loop-range")
+                        .icon(IconName::Repeat)
+                        .toggled(looping)
+                        .accessibility_label(loop_label)
+                        .child(state_label(
+                            loop_label,
+                            &[
+                                t("リピート解除", "Stop repeat"),
+                                t("区間リピート", "Repeat passage"),
+                            ],
+                        ))
+                        .disabled(playback_disabled)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if this.looping.is_some() {
+                                this.set_loop(None, cx);
+                            } else {
+                                this.loop_source = Some(this.meaning_cues.clone());
+                                this.set_loop(range, cx);
+                            }
+                        }))
+                }))
             .child(row().flex_wrap().gap_2()
                 .child(compact_button("ai-explanation").ghost().icon(IconName::Sparkles).label(t("意味を調べる", "Explain this phrase")).disabled(disabled)
                     .on_click(cx.listener(|this, _, _, cx| this.meaning_ai(super::super::ai::AiKind::Explanation, cx))))
@@ -609,12 +655,6 @@ impl StudyView {
             .overflow_y_scroll()
             .p_4()
             .gap_4()
-            .child(
-                div()
-                    .text_size(px(16.))
-                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                    .child(t("文字起こし", "Transcription")),
-            )
             .child(muted(t(
                 "音声から字幕を作成し、結果と区切りを確認します。",
                 "Create subtitles from audio, then review the text and boundaries.",

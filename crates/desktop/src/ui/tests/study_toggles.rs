@@ -41,6 +41,8 @@ fn study_toggles_report_filter_and_translation_state_after_real_actions(cx: &mut
         assert_toggle(window.find("marked-subtitles"), Role::CheckBox, false);
         assert_toggle(window.find("transcript-translation"), Role::Button, false);
         assert_toggle(window.find("caption-translation"), Role::Button, false);
+        assert_toggle(window.find("toggle-transcript"), Role::Button, true);
+        assert_toggle(window.find("study-tools"), Role::Button, false);
         window.click("transcript-translation", app);
         assert_toggle(window.find("transcript-translation"), Role::Button, true);
         assert_toggle(window.find("caption-translation"), Role::Button, true);
@@ -67,8 +69,23 @@ fn study_toggles_report_filter_and_translation_state_after_real_actions(cx: &mut
         window.click("reset-subtitle-filters", app);
         assert_toggle(window.find("marked-subtitles"), Role::CheckBox, false);
         assert!(window.find("cue-scroll-plain-cue").visible());
+        assert!(window.try_find("clear-subtitle-search").is_none());
+        window.click("subtitle-search", app);
+        window.input("marked", app);
     })
     .unwrap();
+    harness.wait_window(cx, harness.window, "clear search appears", |window| {
+        window.try_find("clear-subtitle-search").is_some()
+    });
+    cx.update_window(harness.window, |_, window, app| {
+        window.click("clear-subtitle-search", app);
+    })
+    .unwrap();
+    harness.wait_window(cx, harness.window, "clear search clears query", |window| {
+        window.find("subtitle-search").value() == Some("")
+            && window.find("subtitle-search").focused() == Some(true)
+            && window.try_find("clear-subtitle-search").is_none()
+    });
     harness.close(cx);
 }
 

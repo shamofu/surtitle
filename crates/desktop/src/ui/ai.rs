@@ -918,27 +918,35 @@ impl Render for AiView {
         ))).child(div().text_size(px(20.)).child(model.text("AIの処理と保存結果", "AI activity and saved results")))
             .child(div().text_color(theme.muted_foreground).child(localized(cx, "見積もりと音声準備は送信を承認しません。開始ボタンで表示した範囲だけを承認します。 / Estimates and audio preparation do not authorize sending.")));
         if let Some(error) = self.error.as_ref().or(self.store.error().as_ref()) {
-            content = content.child(div().child(error.clone()));
+            content = content.child(div().text_color(theme.danger).child(error.clone()));
         }
         if let Some(notice) = self.store.notice() {
             content = content.child(div().child(notice));
         }
         if let Some(snapshot) = &model.snapshot {
             for (provider, budget) in &snapshot.budgets {
-                content = content.child(div().text_size(px(16.)).child(locale_format!(
-                    cx,
-                    "{} · 使用済み ${:.4} · 予約中 ${:.4} · 1日の上限 ${:.2}{}",
-                    "{} · spent ${:.4} · reserved ${:.4} · daily limit ${:.2}{}",
-                    provider.as_str(),
-                    budget.spent_usd,
-                    budget.reserved_usd,
-                    budget.limit_usd,
-                    if budget.monetary_totals_complete {
-                        ""
-                    } else {
-                        model.text(" · 金額の集計は不完全です", " · monetary totals incomplete")
-                    }
-                )));
+                content = content.child(
+                    div()
+                        .text_size(px(16.))
+                        .font_features(tabular_numbers())
+                        .child(locale_format!(
+                            cx,
+                            "{} · 使用済み ${:.4} · 予約中 ${:.4} · 1日の上限 ${:.2}{}",
+                            "{} · spent ${:.4} · reserved ${:.4} · daily limit ${:.2}{}",
+                            provider.as_str(),
+                            budget.spent_usd,
+                            budget.reserved_usd,
+                            budget.limit_usd,
+                            if budget.monetary_totals_complete {
+                                ""
+                            } else {
+                                model.text(
+                                    " · 金額の集計は不完全です",
+                                    " · monetary totals incomplete",
+                                )
+                            }
+                        )),
+                );
                 for attempt in &budget.unknown_attempts {
                     let id = attempt.id.clone();
                     let job = attempt.job_id.clone();
@@ -1101,31 +1109,56 @@ impl Render for AiView {
                 } else {
                     &discard_label
                 };
+                let media_title = model
+                    .snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.media.iter().find(|m| m.id == value.media_id))
+                    .map(|media| media.title.as_str())
+                    .unwrap_or(value.media_id.as_str());
+                let purpose = match value.kind.as_str() {
+                    "transcribe" => localized(cx, "文字起こし / Transcription"),
+                    "translate" => localized(cx, "翻訳 / Translation"),
+                    "vocabulary" => localized(cx, "語彙・解説 / Vocabulary and explanation"),
+                    other => other.to_owned(),
+                };
                 content = content.child(
                     row()
-                        .child(format!(
-                            "{} · {} · {}–{}",
-                            value.kind, value.media_id, value.start, value.end
-                        ))
+                        .w_full()
+                        .p_3()
+                        .border_1()
+                        .border_color(theme.border)
+                        .rounded(px(8.))
+                        .justify_between()
+                        .items_center()
+                        .gap_3()
+                        .child(div().flex_1().min_w_0().truncate().child(format!(
+                            "{purpose} · {media_title} · {}–{}",
+                            value.start, value.end
+                        )))
                         .child(
-                            Button::new(format!("resume-{id}"))
-                                .label(localized(cx, "入力から再開 / Resume input"))
-                                .disabled(frozen)
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.open_continuation(resume_id.clone(), window, cx)
-                                })),
-                        )
-                        .child(
-                            Button::new(format!("discard-{id}"))
-                                .accessibility_label(current_label.clone())
-                                .child(state_label(
-                                    current_label.clone(),
-                                    &[&discard_label, &confirmation_label],
-                                ))
-                                .disabled(frozen)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.discard_continuation(discard_id.clone(), cx)
-                                })),
+                            row()
+                                .gap_2()
+                                .flex_shrink_0()
+                                .child(
+                                    Button::new(format!("resume-{id}"))
+                                        .label(localized(cx, "入力から再開 / Resume input"))
+                                        .disabled(frozen)
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.open_continuation(resume_id.clone(), window, cx)
+                                        })),
+                                )
+                                .child(
+                                    Button::new(format!("discard-{id}"))
+                                        .accessibility_label(current_label.clone())
+                                        .child(state_label(
+                                            current_label.clone(),
+                                            &[&discard_label, &confirmation_label],
+                                        ))
+                                        .disabled(frozen)
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.discard_continuation(discard_id.clone(), cx)
+                                        })),
+                                ),
                         ),
                 );
             }
