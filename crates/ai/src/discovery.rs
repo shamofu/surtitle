@@ -1,6 +1,5 @@
 //! Read-only Google metadata lookup. No generation probes or application model catalog.
 use crate::{AiError, CredentialVault, PriceSnapshot, Result};
-use gcp_auth::TokenProvider;
 use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
@@ -46,21 +45,15 @@ impl VertexDiscovery {
             .retry(reqwest::retry::never())
             .connect_timeout(Duration::from_secs(15))
             .timeout(Duration::from_secs(60))
+            .tcp_keepalive(Duration::from_secs(30))
+            .pool_idle_timeout(Duration::from_secs(30))
             .build()
             .map_err(|_| AiError::Invalid("Unable to initialize Google metadata client".into()))?;
         Ok(Self { vault, client })
     }
 
     async fn token(&self, credential_id: &str) -> Result<Zeroizing<String>> {
-        let (key, _) = self.vault.load_json(credential_id)?;
-        let auth =
-            gcp_auth::CustomServiceAccount::from_json(&key).map_err(|_| AiError::Credentials)?;
-        drop(key);
-        let token = auth
-            .token(&["https://www.googleapis.com/auth/cloud-platform"])
-            .await
-            .map_err(|_| AiError::Credentials)?;
-        Ok(Zeroizing::new(token.as_str().to_owned()))
+        self.vault.google_access_token(credential_id, None).await
     }
 
     async fn get(&self, url: &str, token: &str, query: &[(&str, &str)]) -> Result<Value> {

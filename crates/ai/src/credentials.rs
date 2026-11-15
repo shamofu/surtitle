@@ -1,9 +1,12 @@
 use crate::{models::valid_project_id, sha256_bytes, AiError, Result};
+use gcp_auth::TokenProvider;
 use serde::{Deserialize, Serialize};
 use std::{
-    fs,
+    collections::HashMap,
+    fmt, fs,
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
 };
 use zeroize::Zeroizing;
 
@@ -15,9 +18,20 @@ pub struct CredentialMetadata {
     pub imported_at_ms: i64,
 }
 
-#[derive(Clone, Debug)]
+type AuthCache = Arc<Mutex<HashMap<String, (String, Arc<gcp_auth::CustomServiceAccount>)>>>;
+
+#[derive(Clone)]
 pub struct CredentialVault {
     directory: PathBuf,
+    auth_cache: AuthCache,
+}
+
+impl fmt::Debug for CredentialVault {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CredentialVault")
+            .field("directory", &self.directory)
+            .finish()
+    }
 }
 
 impl CredentialVault {
@@ -25,6 +39,7 @@ impl CredentialVault {
         fs::create_dir_all(directory.as_ref())?;
         Ok(Self {
             directory: directory.as_ref().canonicalize()?,
+            auth_cache: Arc::default(),
         })
     }
 
@@ -92,7 +107,9 @@ impl CredentialVault {
     }
 
     pub fn remove(&self, id: &str) -> Result<()> {
-        fs::remove_file(self.credential_path(id)?).map_err(|_| AiError::Credentials)
+        let path = self.credential_path(id)?;
+        self.evict_cached_account(id);
+        fs::remove_file(path).map_err(|_| AiError::Credentials)
     }
 
     fn credential_path(&self, id: &str) -> Result<PathBuf> {
@@ -100,6 +117,77 @@ impl CredentialVault {
             return Err(AiError::Credentials);
         }
         Ok(self.directory.join(format!("{id}.dpapi")))
+    }
+
+    fn evict_cached_account(&self, id: &str) {
+        self.auth_cache
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .remove(id);
+    }
+
+    pub(crate) fn service_account(
+        &self,
+        id: &str,
+        expected_project_id: Option<&str>,
+    ) -> Result<Arc<gcp_auth::CustomServiceAccount>> {
+        let (key, metadata) = match self.load_json(id) {
+            Ok(loaded) => loaded,
+            Err(error) => {
+                self.evict_cached_account(id);
+                return Err(error);
+            }
+        };
+        if let Some(expected) = expected_project_id {
+            if metadata.project_id != expected {
+                return Err(AiError::Credentials);
+            }
+        }
+        let digest = sha256_bytes(key.as_bytes());
+        if let Some((cached_digest, account)) = self
+            .auth_cache
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .get(id)
+        {
+            if *cached_digest == digest {
+                drop(key);
+                return Ok(Arc::clone(account));
+            }
+        }
+        let account = Arc::new(
+            gcp_auth::CustomServiceAccount::from_json(&key).map_err(|_| AiError::Credentials)?,
+        );
+        drop(key);
+        let mut cache = self
+            .auth_cache
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Some((cached_digest, existing)) = cache.get(id) {
+            if *cached_digest == digest {
+                return Ok(Arc::clone(existing));
+            }
+        }
+        cache.insert(id.to_owned(), (digest, Arc::clone(&account)));
+        Ok(account)
+    }
+
+    pub(crate) async fn google_access_token(
+        &self,
+        id: &str,
+        expected_project_id: Option<&str>,
+    ) -> Result<Zeroizing<String>> {
+        let auth = self.service_account(id, expected_project_id)?;
+        match auth
+            .token(&["https://www.googleapis.com/auth/cloud-platform"])
+            .await
+        {
+            Ok(token) => Ok(Zeroizing::new(token.as_str().to_owned())),
+            Err(_) => {
+                self.evict_cached_account(id);
+                Err(AiError::Credentials)
+            }
+        }
     }
 
     pub(crate) fn load_json(&self, id: &str) -> Result<(Zeroizing<String>, CredentialMetadata)> {
@@ -312,6 +400,171 @@ mod tests {
         let mid = corrupt.len() / 2;
         corrupt[mid] ^= 1;
         assert!(unprotect(&corrupt).is_err());
+    }
+
+    #[cfg(windows)]
+    fn ephemeral_rsa_pkcs8_pem() -> Zeroizing<String> {
+        use base64::Engine;
+        use windows_sys::Win32::Security::Cryptography::{
+            BCryptCloseAlgorithmProvider, BCryptDestroyKey, BCryptExportKey, BCryptFinalizeKeyPair,
+            BCryptGenerateKeyPair, BCryptOpenAlgorithmProvider, BCRYPT_RSAFULLPRIVATE_MAGIC,
+            BCRYPT_RSAKEY_BLOB,
+        };
+
+        fn der_tlv(tag: u8, body: &[u8]) -> Vec<u8> {
+            let mut out = vec![tag];
+            if body.len() < 0x80 {
+                out.push(body.len() as u8);
+            } else if body.len() < 0x100 {
+                out.extend_from_slice(&[0x81, body.len() as u8]);
+            } else {
+                out.extend_from_slice(&[0x82, (body.len() >> 8) as u8, body.len() as u8]);
+            }
+            out.extend_from_slice(body);
+            out
+        }
+
+        fn der_int(bytes: &[u8]) -> Vec<u8> {
+            let trimmed = match bytes.iter().position(|&b| b != 0) {
+                Some(idx) => &bytes[idx..],
+                None => &[0],
+            };
+            let mut body = Vec::with_capacity(trimmed.len() + 1);
+            if trimmed[0] >= 0x80 {
+                body.push(0);
+            }
+            body.extend_from_slice(trimmed);
+            der_tlv(0x02, &body)
+        }
+
+        let alg_id: Vec<u16> = "RSA\0".encode_utf16().collect();
+        let blob_type: Vec<u16> = "RSAFULLPRIVATEBLOB\0".encode_utf16().collect();
+        let mut alg = std::ptr::null_mut();
+        let mut key = std::ptr::null_mut();
+        let blob = unsafe {
+            assert_eq!(
+                BCryptOpenAlgorithmProvider(&mut alg, alg_id.as_ptr(), std::ptr::null(), 0),
+                0
+            );
+            assert_eq!(BCryptGenerateKeyPair(alg, &mut key, 2048, 0), 0);
+            assert_eq!(BCryptFinalizeKeyPair(key, 0), 0);
+            let mut size = 0u32;
+            assert_eq!(
+                BCryptExportKey(
+                    key,
+                    std::ptr::null_mut(),
+                    blob_type.as_ptr(),
+                    std::ptr::null_mut(),
+                    0,
+                    &mut size,
+                    0,
+                ),
+                0
+            );
+            let mut buf = Zeroizing::new(vec![0u8; size as usize]);
+            assert_eq!(
+                BCryptExportKey(
+                    key,
+                    std::ptr::null_mut(),
+                    blob_type.as_ptr(),
+                    buf.as_mut_ptr(),
+                    size,
+                    &mut size,
+                    0,
+                ),
+                0
+            );
+            BCryptDestroyKey(key);
+            BCryptCloseAlgorithmProvider(alg, 0);
+            buf
+        };
+        let header_size = std::mem::size_of::<BCRYPT_RSAKEY_BLOB>();
+        let header: BCRYPT_RSAKEY_BLOB = unsafe { std::ptr::read_unaligned(blob.as_ptr().cast()) };
+        assert_eq!(header.Magic, BCRYPT_RSAFULLPRIVATE_MAGIC);
+        let mut offset = header_size;
+        let mut next = |len: u32| -> &[u8] {
+            let end = offset + len as usize;
+            let slice = &blob[offset..end];
+            offset = end;
+            slice
+        };
+        let pub_exp = next(header.cbPublicExp);
+        let modulus = next(header.cbModulus);
+        let prime1 = next(header.cbPrime1);
+        let prime2 = next(header.cbPrime2);
+        let exp1 = next(header.cbPrime1);
+        let exp2 = next(header.cbPrime2);
+        let coeff = next(header.cbPrime1);
+        let priv_exp = next(header.cbModulus);
+
+        let mut rsa_body = Vec::new();
+        rsa_body.extend_from_slice(&der_int(&[0]));
+        for part in [
+            modulus, pub_exp, priv_exp, prime1, prime2, exp1, exp2, coeff,
+        ] {
+            rsa_body.extend_from_slice(&der_int(part));
+        }
+        let rsa_der = der_tlv(0x30, &rsa_body);
+        let alg_id_der = der_tlv(
+            0x30,
+            &[
+                0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
+            ],
+        );
+        let mut pkcs8_body = Vec::new();
+        pkcs8_body.extend_from_slice(&der_int(&[0]));
+        pkcs8_body.extend_from_slice(&alg_id_der);
+        pkcs8_body.extend_from_slice(&der_tlv(0x04, &rsa_der));
+        let pkcs8_der = Zeroizing::new(der_tlv(0x30, &pkcs8_body));
+        let encoded = Zeroizing::new(base64::engine::general_purpose::STANDARD.encode(&*pkcs8_der));
+        let wrapped = encoded
+            .as_bytes()
+            .chunks(64)
+            .map(|c| std::str::from_utf8(c).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        Zeroizing::new(format!(
+            "-----BEGIN {}-----\n{wrapped}\n-----END {}-----\n",
+            "PRIVATE KEY", "PRIVATE KEY"
+        ))
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn service_account_is_cached_per_credential_and_evicted_on_remove() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = CredentialVault::new(dir.path()).unwrap();
+        let pem = ephemeral_rsa_pkcs8_pem();
+        let json = Zeroizing::new(
+            serde_json::json!({
+                "type": "service_account",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "project_id": "sample-project",
+                "client_email": "user@sample-project.iam.gserviceaccount.com",
+                "private_key_id": "test-only",
+                "private_key": &*pem
+            })
+            .to_string(),
+        );
+        let file = dir.path().join("ephemeral.json");
+        fs::write(&file, json.as_bytes()).unwrap();
+        let meta = vault.import_service_account(&file).unwrap();
+        let first = vault
+            .service_account(&meta.id, Some("sample-project"))
+            .unwrap();
+        let second = vault
+            .service_account(&meta.id, Some("sample-project"))
+            .unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+        assert!(matches!(
+            vault.service_account(&meta.id, Some("other-project")),
+            Err(AiError::Credentials)
+        ));
+        vault.remove(&meta.id).unwrap();
+        assert!(matches!(
+            vault.service_account(&meta.id, Some("sample-project")),
+            Err(AiError::Credentials)
+        ));
     }
 }
 

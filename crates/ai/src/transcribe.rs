@@ -263,7 +263,7 @@ fn parse_timed_transcribe_parts(audio: &AudioAttachment, parts: &[Value]) -> Res
             let punctuation = &text[anchors[i].2..next_byte];
             let sentence_end = punctuation
                 .chars()
-                .any(|c| matches!(c, '.' | '?' | '!' | '。' | '？' | '！' | '।'));
+                .any(|c| matches!(c, '.' | '?' | '!' | '。' | '．' | '？' | '！' | '।'));
             let pause = anchors
                 .get(i + 1)
                 .is_some_and(|next| next.0.saturating_sub(anchors[i].1) >= 800);
@@ -380,12 +380,44 @@ pub fn reparse_validation_transcribe_evidence(
 fn invalid(reason: &str) -> AiError {
     AiError::Invalid(format!("Transcribe output requires review: {reason}"))
 }
+fn is_separator_char(c: char) -> bool {
+    if c.is_alphanumeric()
+        || matches!(
+            c,
+            '\u{0300}'..='\u{036F}'
+                | '\u{3005}'..='\u{3007}'
+                | '\u{3021}'..='\u{3029}'
+                | '\u{3031}'..='\u{3035}'
+                | '\u{3038}'..='\u{303C}'
+                | '\u{3099}'..='\u{309E}'
+                | '\u{30FC}'..='\u{30FE}'
+                | '\u{FF70}'
+                | '\u{FF9E}'..='\u{FF9F}'
+        )
+    {
+        return false;
+    }
+    c.is_whitespace()
+        || c.is_ascii_punctuation()
+        || matches!(
+            c,
+            '\u{00A1}'..='\u{00BF}'
+                | '\u{2000}'..='\u{206F}'
+                | '\u{2600}'..='\u{27BF}'
+                | '\u{2E00}'..='\u{2E7F}'
+                | '\u{3000}'..='\u{303F}'
+                | '\u{30FB}'
+                | '\u{FE10}'..='\u{FE1F}'
+                | '\u{FE30}'..='\u{FE6F}'
+                | '\u{FF01}'..='\u{FF0F}'
+                | '\u{FF1A}'..='\u{FF20}'
+                | '\u{FF3B}'..='\u{FF40}'
+                | '\u{FF5B}'..='\u{FF65}'
+        )
+}
+
 fn only_separators(s: &str) -> bool {
-    s.chars().all(|c| {
-        c.is_whitespace()
-            || c.is_ascii_punctuation()
-            || "。！？、，；：…・「」『』（）【】—–“”‘’¿¡".contains(c)
-    })
+    s.chars().all(is_separator_char)
 }
 
 /// Protobuf Duration JSON uses a decimal seconds string. Parse integers instead of
@@ -593,5 +625,60 @@ mod tests {
             3_601_000
         );
         assert!(duration_ms(Some(&json!("NaNs")), false).is_err());
+    }
+
+    #[test]
+    fn unicode_punctuation_and_symbols_preserve_word_anchors_while_lexical_marks_remain_strict() {
+        let text = "«Hello»〜yes～―《確認》〈done〉｡｢テスト｣､･♪";
+        let words = vec![
+            json!({"word":"Hello","startOffset":"0.1s","endOffset":"0.4s"}),
+            json!({"word":"yes","startOffset":"0.5s","endOffset":"0.8s"}),
+            json!({"word":"確認","startOffset":"0.9s","endOffset":"1.2s"}),
+            json!({"word":"done","startOffset":"1.3s","endOffset":"1.6s"}),
+            json!({"word":"テスト","startOffset":"1.7s","endOffset":"2.0s"}),
+        ];
+        let ParsedOutput::Transcript { cues } = parse_transcribe_parts(
+            &attachment(),
+            &[json!({"audioTranscription":{"text":text,"words":words}})],
+        )
+        .unwrap() else {
+            panic!()
+        };
+        assert!(!cues.is_empty());
+        assert!(cues.iter().all(|cue| cue.timing_precision == "cue"));
+        let combined: String = cues
+            .iter()
+            .map(|cue| cue.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(combined.contains("«Hello»"));
+        assert!(combined.ends_with("｡｢テスト｣､･♪"));
+        let anchor_words: Vec<&str> = cues
+            .iter()
+            .flat_map(|cue| {
+                cue.word_anchors
+                    .iter()
+                    .map(|anchor| &cue.text[anchor.text_start..anchor.text_end])
+            })
+            .collect();
+        assert_eq!(anchor_words, vec!["Hello", "yes", "確認", "done", "テスト"]);
+
+        for unanchored in [
+            json!({"text":"well hello","words":[{"word":"hello","startOffset":"0s","endOffset":"1s"}]}),
+            json!({"text":"そうー","words":[{"word":"そう","startOffset":"0s","endOffset":"1s"}]}),
+            json!({"text":"日々","words":[{"word":"日","startOffset":"0s","endOffset":"1s"}]}),
+        ] {
+            let expected = unanchored["text"].as_str().unwrap().to_owned();
+            let ParsedOutput::Transcript { cues } =
+                parse_transcribe_parts(&attachment(), &[json!({"audioTranscription":unanchored})])
+                    .unwrap()
+            else {
+                panic!()
+            };
+            assert_eq!(cues.len(), 1);
+            assert_eq!(cues[0].text, expected);
+            assert_eq!(cues[0].timing_precision, "source_block");
+            assert!(cues[0].word_anchors.is_empty());
+        }
     }
 }

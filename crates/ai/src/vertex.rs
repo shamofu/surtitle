@@ -2,7 +2,6 @@ use crate::{
     models::parse_output, AiError, AiStore, CredentialVault, ParsedOutput, RequestTask,
     ReservedRequest, ResponseMode, Result,
 };
-use gcp_auth::TokenProvider;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{future::Future, sync::Arc, time::Duration};
@@ -119,18 +118,8 @@ impl Authorization for CredentialVault {
             }
             return self.load_openai_key(&request.credential_id);
         }
-        let (key, metadata) = self.load_json(&request.credential_id)?;
-        if metadata.project_id != request.project_id {
-            return Err(AiError::Credentials);
-        }
-        let auth =
-            gcp_auth::CustomServiceAccount::from_json(&key).map_err(|_| AiError::Credentials)?;
-        drop(key);
-        let token = auth
-            .token(&["https://www.googleapis.com/auth/cloud-platform"])
+        self.google_access_token(&request.credential_id, Some(&request.project_id))
             .await
-            .map_err(|_| AiError::Credentials)?;
-        Ok(Zeroizing::new(token.as_str().to_owned()))
     }
 }
 
@@ -246,6 +235,8 @@ impl VertexService {
             .retry(reqwest::retry::never())
             .connect_timeout(Duration::from_secs(20))
             .timeout(Duration::from_secs(300))
+            .tcp_keepalive(Duration::from_secs(30))
+            .pool_idle_timeout(Duration::from_secs(30))
             .build()
             .map_err(|_| AiError::Invalid("Unable to initialize provider HTTPS client".into()))?;
         Ok(Self {
@@ -916,8 +907,10 @@ pub(crate) fn parse_response(task: &RequestTask, response: &Value) -> Result<Par
     // Synchronous Transcribe returns no content for silence. Accept that only
     // with STOP and independently consistent zero-output usage; never treat a
     // missing transcription with nonzero/unknown usage as an empty subtitle set.
-    if matches!(task, RequestTask::TranscribePreview { .. })
-        && verified_zero_output(&response["usageMetadata"])
+    if matches!(
+        task,
+        RequestTask::TranscribePreview { .. } | RequestTask::AudioTranscription { .. }
+    ) && verified_zero_output(&response["usageMetadata"])
         && empty_candidate_content(candidate)
     {
         return Ok(ParsedOutput::Transcript { cues: Vec::new() });
@@ -1036,46 +1029,53 @@ mod tests {
             source_start_ms: 0,
             duration_ms: 2000,
         };
-        let task = RequestTask::TranscribePreview {
-            language: "en-US".into(),
-            audio,
-        };
         let raw = serde_json::json!({"candidates":[{"finishReason":"STOP","content":{"role":"model"}}],"usageMetadata":{"promptTokenCount":52,"totalTokenCount":52}});
-        for content in [
-            None,
-            Some(serde_json::json!({})),
-            Some(serde_json::json!({"role":"model","parts":[]})),
-            Some(serde_json::json!({"parts":[{"text":""}]})),
+        for task in [
+            RequestTask::TranscribePreview {
+                language: "en-US".into(),
+                audio: audio.clone(),
+            },
+            RequestTask::AudioTranscription {
+                language: "en-US".into(),
+                audio,
+            },
         ] {
-            let mut response = raw.clone();
-            if let Some(content) = content {
-                response["candidates"][0]["content"] = content;
-            } else {
-                response["candidates"][0]
-                    .as_object_mut()
-                    .unwrap()
-                    .remove("content");
+            for content in [
+                None,
+                Some(serde_json::json!({})),
+                Some(serde_json::json!({"role":"model","parts":[]})),
+                Some(serde_json::json!({"parts":[{"text":""}]})),
+            ] {
+                let mut response = raw.clone();
+                if let Some(content) = content {
+                    response["candidates"][0]["content"] = content;
+                } else {
+                    response["candidates"][0]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("content");
+                }
+                assert!(
+                    matches!(parse_response(&task, &response).unwrap(), ParsedOutput::Transcript { cues } if cues.is_empty())
+                );
             }
-            assert!(
-                matches!(parse_response(&task, &response).unwrap(), ParsedOutput::Transcript { cues } if cues.is_empty())
-            );
+            for content in [
+                serde_json::json!({"parts":[{"text":"speech without timing"}]}),
+                serde_json::json!({"parts":[{"functionCall":{"name":"untrusted"}}]}),
+                serde_json::json!({"parts":null}),
+                serde_json::json!(null),
+            ] {
+                let mut response = raw.clone();
+                response["candidates"][0]["content"] = content;
+                assert!(parse_response(&task, &response).is_err());
+            }
+            let mut incomplete = raw.clone();
+            incomplete["candidates"][0]["finishReason"] = serde_json::json!("MAX_TOKENS");
+            assert!(parse_response(&task, &incomplete).is_err());
+            let mut uncertain = raw.clone();
+            uncertain["usageMetadata"]["totalTokenCount"] = serde_json::json!(53);
+            assert!(parse_response(&task, &uncertain).is_err());
         }
-        for content in [
-            serde_json::json!({"parts":[{"text":"speech without timing"}]}),
-            serde_json::json!({"parts":[{"functionCall":{"name":"untrusted"}}]}),
-            serde_json::json!({"parts":null}),
-            serde_json::json!(null),
-        ] {
-            let mut response = raw.clone();
-            response["candidates"][0]["content"] = content;
-            assert!(parse_response(&task, &response).is_err());
-        }
-        let mut incomplete = raw.clone();
-        incomplete["candidates"][0]["finishReason"] = serde_json::json!("MAX_TOKENS");
-        assert!(parse_response(&task, &incomplete).is_err());
-        let mut uncertain = raw;
-        uncertain["usageMetadata"]["totalTokenCount"] = serde_json::json!(53);
-        assert!(parse_response(&task, &uncertain).is_err());
     }
 
     #[test]

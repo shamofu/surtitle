@@ -68,7 +68,7 @@ impl StreamResponse {
     }
 
     fn merge(&mut self, value: Value) -> Result<Option<String>, ()> {
-        if !value.is_object() || value.get("error").is_some() {
+        if !value.is_object() || value.get("error").is_some_and(|v| !v.is_null()) {
             return Err(());
         }
         let mut delta = String::new();
@@ -81,7 +81,7 @@ impl StreamResponse {
                 if !candidate.is_object()
                     || candidate
                         .get("index")
-                        .is_some_and(|i| i.as_u64() != Some(0))
+                        .is_some_and(|i| !i.is_null() && i.as_u64() != Some(0))
                 {
                     return Err(());
                 }
@@ -97,7 +97,7 @@ impl StreamResponse {
                             None | Some(Value::Bool(false)) => {}
                             _ => return Err(()),
                         }
-                        if let Some(text) = part.get("text") {
+                        if let Some(text) = part.get("text").filter(|v| !v.is_null()) {
                             delta.push_str(text.as_str().ok_or(())?);
                         }
                     }
@@ -109,7 +109,7 @@ impl StreamResponse {
                     self.final_usage = false;
                     self.text.push_str(&delta);
                 }
-                if let Some(reason) = candidate.get("finishReason") {
+                if let Some(reason) = candidate.get("finishReason").filter(|v| !v.is_null()) {
                     let reason = reason.as_str().ok_or(())?;
                     if reason.len() > 64
                         || !reason.bytes().all(|b| b.is_ascii_uppercase() || b == b'_')
@@ -130,7 +130,7 @@ impl StreamResponse {
                 }
             }
         }
-        if let Some(usage) = value.get("usageMetadata") {
+        if let Some(usage) = value.get("usageMetadata").filter(|v| !v.is_null()) {
             if !usage.is_object() {
                 return Err(());
             }
@@ -144,7 +144,7 @@ impl StreamResponse {
             if version.len() <= 200
                 && version
                     .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b"-._@".contains(&b))
+                    .all(|b| b.is_ascii_alphanumeric() || b"-._@:/".contains(&b))
             {
                 if self
                     .model_version
@@ -291,5 +291,41 @@ mod tests {
         assert!(StreamResponse::default()
             .push(&vec![b'x'; MAX_RESPONSE_BYTES + 1])
             .is_err());
+    }
+
+    #[test]
+    fn explicit_null_optional_fields_and_model_version_slashes_are_accepted() {
+        let mut stream = StreamResponse::default();
+        stream
+            .push(&frame(json!({
+                "error": null,
+                "usageMetadata": null,
+                "modelVersion": "publishers/google/models/gemini-3.8-flash:001",
+                "candidates": [{
+                    "index": null,
+                    "finishReason": null,
+                    "content": {"parts": [{"text": null}, {"text": "Hello"}]}
+                }]
+            })))
+            .unwrap();
+        stream
+            .push(&frame(json!({
+                "error": null,
+                "modelVersion": "publishers/google/models/gemini-3.8-flash:001",
+                "candidates": [{"index": 0, "finishReason": "STOP"}],
+                "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5}
+            })))
+            .unwrap();
+        let result = stream.finish().unwrap();
+        assert_eq!(
+            result["candidates"][0]["content"]["parts"][0]["text"],
+            "Hello"
+        );
+        assert_eq!(result["candidates"][0]["finishReason"], "STOP");
+        assert_eq!(result["usageMetadata"]["candidatesTokenCount"], 5);
+        assert_eq!(
+            result["modelVersion"],
+            "publishers/google/models/gemini-3.8-flash:001"
+        );
     }
 }
