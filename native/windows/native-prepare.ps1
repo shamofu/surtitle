@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param([switch]$WithDevModel)
 $ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $true
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $manifestPath = Join-Path $repoRoot 'native/runtime-windows-x64.json'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
@@ -19,22 +21,53 @@ function Assert-Hash([string]$path, [string]$expected) {
     if ($expected -notmatch '^[0-9a-fA-F]{64}$' -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing artifact or invalid manifest hash: $path" }
     if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $expected) { throw "SHA-256 mismatch: $path" }
 }
-function Get-Verified([string]$url, [string]$destination, [string]$hash) {
-    if (Test-Path -LiteralPath $destination) { Assert-Hash $destination $hash; return }
+function Invoke-HttpsDownload([string]$url, [string]$destination, [string[]]$allowedHosts, [string]$expectedHash) {
     $uri = [Uri]$url
-    if ($uri.Scheme -ne 'https' -or $uri.Host -notin @('github.com','raw.githubusercontent.com')) { throw "Unexpected upstream URL: $url" }
-    $partial = $destination + '.partial'
-    Invoke-WebRequest -Uri $url -OutFile $partial -MaximumRedirection 8 -TimeoutSec 900
-    Assert-Hash $partial $hash
-    Move-Item -LiteralPath $partial -Destination $destination
+    if ($uri.Scheme -ne 'https' -or $uri.Host -notin $allowedHosts) { throw "Unexpected upstream URL: $url" }
+    if (Test-Path -LiteralPath $destination -PathType Leaf) {
+        if ($expectedHash) { Assert-Hash $destination $expectedHash }
+        return
+    }
+    $partial = $destination + '.' + [Guid]::NewGuid().ToString('N') + '.partial'
+    $curl = Join-Path $env:SystemRoot 'System32/curl.exe'
+    try {
+        & $curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 30 --max-time 600 --retry 2 --retry-all-errors --retry-delay 2 --output $partial $url
+        if ($LASTEXITCODE -ne 0) { throw "Download failed ($LASTEXITCODE): $url" }
+        if ($expectedHash) { Assert-Hash $partial $expectedHash }
+        Move-Item -LiteralPath $partial -Destination $destination
+    } finally {
+        if (Test-Path -LiteralPath $partial -PathType Leaf) { Remove-Item -LiteralPath $partial -Force }
+    }
 }
-function Get-RuntimeArchive([string]$url, [string]$destination) {
-    if (Test-Path -LiteralPath $destination -PathType Leaf) { return }
-    $uri = [Uri]$url
-    if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'github.com') { throw "Unexpected upstream URL: $url" }
-    $partial = $destination + '.partial'
-    Invoke-WebRequest -Uri $url -OutFile $partial -MaximumRedirection 8 -TimeoutSec 900
-    Move-Item -LiteralPath $partial -Destination $destination
+function Get-Verified([string]$url, [string]$destination, [string]$hash) {
+    Invoke-HttpsDownload $url $destination @('github.com', 'raw.githubusercontent.com') $hash
+}
+function Get-RuntimeArchive([string]$url, [string]$destination, [string]$expectedHash) {
+    Invoke-HttpsDownload $url $destination @('github.com', 'api.nuget.org') $expectedHash
+}
+function Extract-SelectedZipEntries([string]$archivePath, [string]$destinationRoot, $runtimeFiles) {
+    $zip = [IO.Compression.ZipFile]::OpenRead($archivePath)
+    try {
+        foreach ($file in $runtimeFiles) {
+            $rel = [string]$file.source
+            if (-not $rel -or [IO.Path]::IsPathRooted($rel) -or ($rel -split '[\\/]' -contains '..')) {
+                throw "Unsafe archive source path: $rel"
+            }
+            $entryName = $rel.Replace('\', '/')
+            $entry = $zip.GetEntry($entryName)
+            if (-not $entry) {
+                throw "Missing entry in native archive: $entryName"
+            }
+            $outPath = [IO.Path]::GetFullPath((Join-Path $destinationRoot $rel))
+            if (-not $outPath.StartsWith($destinationRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Unsafe archive extract path: $rel"
+            }
+            New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($outPath)) -Force | Out-Null
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $outPath, $true)
+        }
+    } finally {
+        $zip.Dispose()
+    }
 }
 function Copy-Runtime([string]$source, [string]$target) {
     # Avoid replacing an identical DLL that an open application may have loaded.
@@ -49,27 +82,36 @@ $runtime = Resolve-RepoPath 'work/resources/native'
 New-Item -ItemType Directory -Path $cache,$runtime -Force | Out-Null
 foreach ($component in $manifest.components) {
     Write-Host "Preparing $($component.id) $($component.version) for development."
-    if ($component.format -eq 'source-build') {
-        $staging = Resolve-RepoPath $component.localRuntimePath
-    } else {
-        if ($component.format -ne 'zip') { throw "Unsupported native archive format: $($component.format)" }
-        if ($component.id -notmatch '^[A-Za-z0-9_.-]+$' -or $component.version -notmatch '^[A-Za-z0-9_.-]+$' -or
-            [IO.Path]::GetFileName($component.archiveFile) -ne $component.archiveFile) { throw 'Unsafe native archive cache path' }
-        $versionCache = Join-Path $cache ($component.id + '-' + $component.version)
-        New-Item -ItemType Directory -Path $versionCache -Force | Out-Null
-        $archive = Join-Path $versionCache $component.archiveFile
-        Get-RuntimeArchive $component.archiveUrl $archive
-        $staging = Join-Path $cache ($component.id + '-' + [Guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $staging | Out-Null
-        Expand-Archive -LiteralPath $archive -DestinationPath $staging
-    }
-    foreach ($file in $component.runtimeFiles) {
-        $source = [IO.Path]::GetFullPath((Join-Path $staging $file.source))
-        if (-not $source.StartsWith($staging + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe archive source path' }
-        if ([IO.Path]::GetFileName($file.target) -ne $file.target) { throw 'Native target must be a plain filename' }
-        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing native runtime: $source" }
-        $target = Join-Path $runtime $file.target
-        Copy-Runtime $source $target
+    $tempStaging = $null
+    try {
+        if ($component.format -eq 'source-build') {
+            $staging = Resolve-RepoPath $component.localRuntimePath
+        } else {
+            if ($component.format -ne 'zip') { throw "Unsupported native archive format: $($component.format)" }
+            if ($component.id -notmatch '^[A-Za-z0-9_.-]+$' -or $component.version -notmatch '^[A-Za-z0-9_.-]+$' -or
+                [IO.Path]::GetFileName($component.archiveFile) -ne $component.archiveFile) { throw 'Unsafe native archive cache path' }
+            $versionCache = Join-Path $cache ($component.id + '-' + $component.version)
+            New-Item -ItemType Directory -Path $versionCache -Force | Out-Null
+            $archive = Join-Path $versionCache $component.archiveFile
+            $expectedHash = if ($component.PSObject.Properties['archiveSha256']) { [string]$component.archiveSha256 } else { '' }
+            Get-RuntimeArchive $component.archiveUrl $archive $expectedHash
+            $tempStaging = Join-Path $cache ($component.id + '-' + [Guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $tempStaging | Out-Null
+            Extract-SelectedZipEntries $archive $tempStaging $component.runtimeFiles
+            $staging = $tempStaging
+        }
+        foreach ($file in $component.runtimeFiles) {
+            $source = [IO.Path]::GetFullPath((Join-Path $staging $file.source))
+            if (-not $source.StartsWith($staging + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe archive source path' }
+            if ([IO.Path]::GetFileName($file.target) -ne $file.target) { throw 'Native target must be a plain filename' }
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing native runtime: $source" }
+            $target = Join-Path $runtime $file.target
+            Copy-Runtime $source $target
+        }
+    } finally {
+        if ($tempStaging -and (Test-Path -LiteralPath $tempStaging)) {
+            Remove-Item -LiteralPath $tempStaging -Recurse -Force
+        }
     }
     foreach ($notice in $component.noticeFiles) {
         $source = Resolve-RepoPath $notice.path

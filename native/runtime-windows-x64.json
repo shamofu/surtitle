@@ -32,18 +32,19 @@
     {
       "id": "onnxruntime",
       "version": "1.29.0",
-      "provider": "microsoft/onnxruntime (official CPU release)",
-      "sourcePage": "https://github.com/microsoft/onnxruntime/releases/tag/v1.29.0",
-      "archiveUrl": "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-win-x64-1.29.0.zip",
-      "archiveFile": "ort.zip",
+      "provider": "Microsoft.ML.OnnxRuntime (official NuGet CPU release)",
+      "sourcePage": "https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime/1.29.0",
+      "archiveUrl": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.29.0/microsoft.ml.onnxruntime.1.29.0.nupkg",
+      "archiveFile": "microsoft.ml.onnxruntime.1.29.0.zip",
+      "archiveSha256": "4557021fec4da3924e2e12ff44b1cc50b176de0d2c5c7daa89ab11c208b3a454",
       "format": "zip",
       "runtimeFiles": [
         {
-          "source": "onnxruntime-win-x64-1.29.0/lib/onnxruntime.dll",
+          "source": "runtimes/win-x64/native/onnxruntime.dll",
           "target": "onnxruntime.dll"
         },
         {
-          "source": "onnxruntime-win-x64-1.29.0/lib/onnxruntime_providers_shared.dll",
+          "source": "runtimes/win-x64/native/onnxruntime_providers_shared.dll",
           "target": "onnxruntime_providers_shared.dll"
         }
       ],

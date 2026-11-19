@@ -74,10 +74,13 @@ jobs:
           sudo apt-get install -y --no-install-recommends build-essential cmake perl pkg-config clang libfontconfig1-dev libfreetype6-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb-shape0-dev libxcb-xfixes0-dev libvulkan-dev mesa-vulkan-drivers libssl-dev xvfb dbus-x11 ffmpeg libmpv-dev fonts-noto-cjk
       - name: Production feature contract
         run: |
-          set -o pipefail
-          cargo tree --locked --package surtitle --no-default-features --edges normal,build --prefix none --format '{p}|{f}' | python3 - <<'PY'
-          import re, sys
-          lines = sys.stdin.read().splitlines()
+          python3 - <<'PY'
+          import re, subprocess
+          lines = subprocess.check_output(
+              ["cargo", "tree", "--locked", "--package", "surtitle", "--no-default-features",
+               "--edges", "normal,build", "--prefix", "none", "--format", "{p}|{f}"],
+              text=True,
+          ).splitlines()
           for line in lines:
               if re.match(r'^(?:tauri(?:-\S+)?|wry|webview2(?:-\S+)?|webkit2gtk(?:-\S+)?) v', line):
                   raise SystemExit(f"Browser runtime dependency in production graph: {line}")
@@ -175,6 +178,11 @@ jobs:
           cargo test -p surtitle-ai --no-default-features --locked --doc
       - name: Rust lint
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Cache ONNX Runtime archive
+        uses: actions/cache@v6.1.0
+        with:
+          path: work/native-cache/onnxruntime-1.29.0/microsoft.ml.onnxruntime.1.29.0.zip
+          key: ort-windows-1.29.0-nuget
       - name: Prepare native runtime and smoke test
         run: |
           pwsh native/windows/native-prepare.ps1 -WithDevModel
@@ -203,8 +211,8 @@ jobs:
           }
           if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne $expectedHash) { throw 'Test FFmpeg archive SHA-256 mismatch.' }
           Expand-Archive -LiteralPath $zip -DestinationPath $dir -Force
-          $ffmpeg = Join-Path $dir "ffmpeg-$version-essentials_build/bin/ffmpeg.exe"
-          $ffprobe = Join-Path $dir "ffmpeg-$version-essentials_build/bin/ffprobe.exe"
+          $ffmpeg = [IO.Path]::GetFullPath((Join-Path $dir "ffmpeg-$version-essentials_build/bin/ffmpeg.exe"))
+          $ffprobe = [IO.Path]::GetFullPath((Join-Path $dir "ffmpeg-$version-essentials_build/bin/ffprobe.exe"))
           if (-not (Test-Path -LiteralPath $ffmpeg -PathType Leaf) -or -not (Test-Path -LiteralPath $ffprobe -PathType Leaf)) { throw 'Missing pinned FFmpeg or ffprobe.' }
           "SURTITLE_TEST_FFMPEG=$ffmpeg" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Required FFmpeg, libmpv and Silero integration tests
@@ -282,11 +290,16 @@ jobs:
           }
           if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne $expectedHash) { throw 'NSIS archive SHA-256 mismatch.' }
           Expand-Archive -LiteralPath $zip -DestinationPath $dir -Force
-          $makensis = Join-Path $dir "nsis-$version/makensis.exe"
+          $makensis = [IO.Path]::GetFullPath((Join-Path $dir "nsis-$version/makensis.exe"))
           if (-not (Test-Path -LiteralPath $makensis -PathType Leaf)) { throw "Missing makensis.exe at $makensis" }
           $actualVersion = (& $makensis /VERSION).Trim()
           if ($actualVersion -ne "v$version") { throw "Expected NSIS v$version, got $actualVersion" }
           "SURTITLE_NSIS_COMPILER=$makensis" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Cache ONNX Runtime archive
+        uses: actions/cache@v6.1.0
+        with:
+          path: work/native-cache/onnxruntime-1.29.0/microsoft.ml.onnxruntime.1.29.0.zip
+          key: ort-windows-1.29.0-nuget
       - name: Build installer package
         run: |
           pwsh native/windows/package.ps1

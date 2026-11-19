@@ -106,9 +106,9 @@ $vcMinDisplay = if ($vcMinimum.EndsWith('.0')) { $vcMinimum.Substring(0, $vcMini
 
 $targetDirRaw = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } elseif ($env:CARGO_BUILD_TARGET_DIR) { $env:CARGO_BUILD_TARGET_DIR } else { 'work/target' }
 $targetDir = if ([IO.Path]::IsPathRooted($targetDirRaw)) { [IO.Path]::GetFullPath($targetDirRaw) } else { [IO.Path]::GetFullPath((Join-Path $repoRoot $targetDirRaw)) }
-$resourcesDir = Join-Path $repoRoot 'work/resources'
-$nativeDir = Join-Path $resourcesDir 'native'
-$noticesDir = Join-Path $resourcesDir 'notices'
+$resourcesDir = [IO.Path]::GetFullPath((Join-Path $repoRoot 'work/resources'))
+$nativeDir = [IO.Path]::GetFullPath((Join-Path $resourcesDir 'native'))
+$noticesDir = [IO.Path]::GetFullPath((Join-Path $resourcesDir 'notices'))
 
 Push-Location $repoRoot
 try {
@@ -162,7 +162,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'cargo fetch failed.' }
     }
 
-    $binary = Join-Path $targetDir 'release/surtitle.exe'
+    $binary = [IO.Path]::GetFullPath((Join-Path $targetDir 'release/surtitle.exe'))
     Assert-RegularFile $binary 'production executable'
 
     if (Test-Path -LiteralPath $noticesDir) {
@@ -199,12 +199,13 @@ try {
         Copy-Item -LiteralPath $lucideNotice -Destination (Join-Path $noticesDir 'gpui-kit-assets-LICENSE-LUCIDE') -Force
     }
 
-    $nsisDir = Join-Path $targetDir 'release/bundle/nsis'
+    $nsisDir = [IO.Path]::GetFullPath((Join-Path $targetDir 'release/bundle/nsis'))
     if (Test-Path -LiteralPath $nsisDir) {
         Remove-Item -LiteralPath $nsisDir -Recurse -Force
     }
     New-Item -ItemType Directory -Path $nsisDir -Force | Out-Null
-    $outputExe = Join-Path $nsisDir ("{0}_{1}_x64-setup.exe" -f $identity.productName, $version)
+    $outputExe = [IO.Path]::GetFullPath((Join-Path $nsisDir ("{0}_{1}_x64-setup.exe" -f $identity.productName, $version)))
+    $nsisScript = [IO.Path]::GetFullPath((Join-Path $repoRoot 'packaging/windows.nsi'))
 
     & $makensis `
         '/INPUTCHARSET' 'UTF8' `
@@ -218,7 +219,7 @@ try {
         ("/DAPP_OUTPUT=" + (Format-NsisDefine $outputExe)) `
         ("/DSURTITLE_VC_MINIMUM_VERSION=" + (Format-NsisDefine $vcMinDisplay)) `
         ("/DSURTITLE_VC_DOWNLOAD_URL=" + (Format-NsisDefine $vcDownloadUrl)) `
-        (Join-Path $repoRoot 'packaging/windows.nsi')
+        $nsisScript
     if ($LASTEXITCODE -ne 0) { throw 'makensis failed.' }
 
     Assert-RegularFile $outputExe 'Windows NSIS installer'
