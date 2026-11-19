@@ -12,32 +12,29 @@ Data lives under `%LOCALAPPDATA%\app.surtitle.desktop`. Local media is reference
 
 ## Development
 
-Windows requires Visual Studio C++ Build Tools, Node.js from `.node-version`, pnpm from `package.json`, Rust from `rust-toolchain.toml`, PowerShell 7 and 7-Zip. Install Rust before pnpm dependencies. From the repository root:
+Windows requires Visual Studio C++ Build Tools, Rust from [rust-toolchain.toml](rust-toolchain.toml), PowerShell 7, and 7-Zip. From the repository root:
 
 ```powershell
-pnpm install --frozen-lockfile
 # First build or obtain native output at work/native-ci-artifact (see the native guide).
 pwsh -File native/windows/native-prepare.ps1
 pwsh -File native/windows/native-smoke.ps1
-pnpm dev
+cargo run --locked --package surtitle
 ```
 
-The [native guide](docs/native-runtime.md) covers building dependencies with wslc or Docker Buildx and preparing Windows resources. The optional [Dev Container](.devcontainer/README.md) supports Linux development; Windows is the supported desktop platform.
+The [native guide](docs/native-runtime.md) covers building dependencies with wslc or Docker Buildx, preparing Windows resources, and packaging the NSIS installer. The optional [Dev Container](.devcontainer/README.md) supports Linux development; Windows is the supported desktop platform.
 
 | Command | Purpose |
 | --- | --- |
-| `pnpm dev` | Run the native GPUI desktop |
-| `pnpm build` | Build the native desktop |
-| `pnpm test` | Build, process and distribution helper tests |
-| `pnpm test:rust` | Rust workspace tests with all features |
-| `pnpm test:rust:no-default-features` | AI tests without development features |
-| `pnpm test:rust:required <suite>` | Explicit FFmpeg/native integration tests |
-| `pnpm lint:rust` / `pnpm fmt:rust:check` | Rust lint and formatting |
-| `pnpm package:app` | Locked Cargo release and standard NSIS installer |
+| `cargo run --locked --package surtitle` | Run the native GPUI desktop |
+| `cargo build --locked --package surtitle` | Build the native desktop |
+| `cargo nextest run --workspace --all-features --locked --profile ci` | Rust workspace tests with all features |
+| `cargo nextest run -p surtitle-ai --no-default-features --locked --profile ci-no-default` | AI tests without development features |
+| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | Rust lint |
+| `cargo fmt --all -- --check` | Rust formatting check |
+| `cargo deny check licenses bans sources` | Dependency license and source audit |
+| `pwsh -File native/windows/package.ps1` | Locked Cargo release and NSIS installer |
 
-Node and pnpm run development helpers, fixture generation and formal verification; they are not shipped as the UI runtime.
-
-`pnpm install --frozen-lockfile` acquires JavaScript and Rust dependencies using both lockfiles. Build output and reports live under `work/`: Cargo uses `work/target`, prepared resources use `work/resources`, and distribution evidence uses `work/artifacts`. Use `pnpm rust <subcommand> ...` for other Cargo operations; in PowerShell quote a forwarded separator as `'--'`. pnpm supplies the Cargo output default while respecting explicit `CARGO_TARGET_DIR` or `CARGO_BUILD_TARGET_DIR` settings. When invoking Cargo directly outside the Dev Container or CI, set its target directory yourself. See [testing](docs/testing.md) for preparation, required suites and validation limits.
+Build output and staged resources live under `work/` (`CARGO_TARGET_DIR = "work/target"` is configured in `.cargo/config.toml`; prepared resources use `work/resources`). See [testing](docs/testing.md) for preparation and native integration suites.
 
 ## Documentation
 
@@ -54,18 +51,18 @@ Node and pnpm run development helpers, fixture generation and formal verificatio
 
 ## CI and releases
 
-The **Test and release** workflow runs for pushes and PRs to `main` and pushes of `v*` tags. Its aggregate `ci` check requires version validation, native dependencies, Linux, Windows and package verification to succeed. Installer tests cover installation, installed-app execution, overwrite, uninstall and learning-data retention.
+The **Test and release** workflow runs for pushes and PRs to `main` and pushes of `v*` tags. Its aggregate `ci` check requires native dependencies, Linux, Windows, and installer packaging to succeed.
 
 Only a stable `vX.Y.Z` tag matching the application version and a commit in `main` history can publish, after that tag's required CI jobs succeed. Publication uses artifacts from the same workflow run and verifies the remote tag still identifies the tested commit. Release notes use GitHub CLI's standard generated notes. Published versions and assets are not replaced; Windows installers are unsigned.
 
 To release:
 
-1. Set the stable version in `[workspace.package].version` in `Cargo.toml`; installer/release metadata derives from it. Run `pnpm rust update --workspace --offline` and `node scripts/check-release.mjs --version-only`. Include the workspace lockfile changes; independently versioned crates change only when needed.
+1. Set the stable version in `[workspace.package].version` in `Cargo.toml`; installer and release metadata derive from it. Run `cargo update --workspace --offline` and commit the `Cargo.toml` / `Cargo.lock` changes.
 2. Follow the repository's approval rules for commits, tags and PRs. Put the version change on `main` and wait for its CI to pass, then create and push the matching version tag at that tested commit.
 3. The tag workflow validates, builds and publishes. Rerun the same workflow for a transient failure. If an incomplete draft release remains, remove only that draft before rerunning. Code fixes or a tag pointing to the wrong version/commit require a new version and tag.
 
-Each release contains the Windows installer, `surtitle-source.zip` with corresponding source, and `SHA256SUMS.txt` for those two downloads. The same Actions run retains manifests, dependency inventories and smoke results in its release and package-evidence artifacts. See the [native guide](docs/native-runtime.md) for distribution requirements and [source rebuild instructions](native/SOURCE-REBUILD.md).
+Each release contains the Windows installer, `libmpv-source.tar.gz`, and `SHA256SUMS.txt`. See the [native guide](docs/native-runtime.md) for distribution requirements.
 
 ## License
 
-Surtitle is GPL-3.0-or-later. Third-party components retain their own terms. Distribution includes required notices and corresponding source for bundled components.
+Surtitle is GPL-3.0-or-later. Third-party components retain their own terms. Distribution includes required notices and libmpv corresponding source.

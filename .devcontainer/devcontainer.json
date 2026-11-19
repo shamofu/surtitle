@@ -8,9 +8,6 @@
   "workspaceFolder": "/workspaces/surtitle",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/surtitle,type=bind",
   "mounts": [
-    "source=surtitle-${devcontainerId}-pnpm,target=/workspaces/surtitle/.pnpm,type=volume,volume-nocopy",
-    "source=surtitle-${devcontainerId}-cargo,target=/workspaces/surtitle/.cargo,type=volume,volume-nocopy",
-    "source=surtitle-${devcontainerId}-node-modules,target=/workspaces/surtitle/node_modules,type=volume,volume-nocopy",
     "source=surtitle-${devcontainerId}-work,target=/workspaces/surtitle/work,type=volume,volume-nocopy"
   ],
   "updateRemoteUserUID": true,
@@ -19,7 +16,7 @@
     "CARGO_TARGET_DIR": "/workspaces/surtitle/work/target",
     "SURTITLE_RESOURCE_DIR": "/workspaces/surtitle/work/resources"
   },
-  "postCreateCommand": "sudo chown -R --no-dereference \"$(id -u):$(id -g)\" .pnpm .cargo node_modules && sudo chown --no-dereference \"$(id -u):$(id -g)\" work && pnpm install --frozen-lockfile",
+  "postCreateCommand": "sudo chown --no-dereference \"$(id -u):$(id -g)\" work",
   "customizations": {
     "vscode": {
       "extensions": [

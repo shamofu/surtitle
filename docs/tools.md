@@ -32,11 +32,4 @@ Managed packages are Windows x64 only; Linux development/CI selects installed to
 
 ## Verification
 
-The [routine tests](testing.md#routine-checks) cover discovery, snapshot changes, literal arguments, archive/hash validation and update lifecycle offline. Required native suites also run real FFmpeg extraction against generated inputs:
-
-```powershell
-$env:SURTITLE_TEST_FFMPEG = 'C:\path\ffmpeg.exe'
-pnpm test:rust:required windows-native
-```
-
-Linux selects `pnpm test:rust:required linux-ffmpeg`. The stream-selection regression checks that each absolute audio index produces its expected frequency. These checks use explicit local executables and generated media, without depending on live releases; see [testing](testing.md) for setup.
+The [routine tests](testing.md#routine-checks) cover discovery, snapshot changes, literal arguments, archive/hash validation and update lifecycle offline. Required native tests also run real FFmpeg extraction against generated inputs when `SURTITLE_TEST_FFMPEG` is set to an absolute FFmpeg executable paired with `ffprobe` in the same directory; see [testing](testing.md) for setup and commands.

@@ -2,7 +2,12 @@
 !include "x64.nsh"
 !define SURTITLE_VC_HELPER "${__FILEDIR__}\vc-prerequisite.ps1"
 !define SURTITLE_RUNTIME_MANIFEST "${__FILEDIR__}\runtime-windows-x64.json"
-!include "${__FILEDIR__}\..\work\installer-prerequisite.nsh"
+!ifndef SURTITLE_VC_MINIMUM_VERSION
+  !error "Define SURTITLE_VC_MINIMUM_VERSION from native/runtime-windows-x64.json."
+!endif
+!ifndef SURTITLE_VC_DOWNLOAD_URL
+  !error "Define SURTITLE_VC_DOWNLOAD_URL from native/runtime-windows-x64.json."
+!endif
 
 ; Explicit Windows language IDs work before the installer expands MUI_LANGUAGE.
 LangString SurtitleVcConsent 1033 "Surtitle requires Microsoft Visual C++ x64 Runtime ${SURTITLE_VC_MINIMUM_VERSION} or newer.$\r$\n$\r$\nDownload it directly from Microsoft, verify its signature, and open Microsoft's installer now? Microsoft will ask you to accept its terms and may request administrator permission. No automatic restart will occur.$\r$\n$\r$\nIf offline, install the prerequisite separately and run Setup again."

@@ -1,16 +1,12 @@
 # Byte-bound inputs retain original bytes on all hosts.
-/package.json -text
-/.pnpmfile.mjs -text
-/.node-version -text
+/.cargo/config.toml -text
 /.devcontainer/Dockerfile -text
 /.devcontainer/README.md -text
 /.devcontainer/devcontainer.json -text
 /.dockerignore -text
 /.gitattributes -text
 /.github/workflows/ci.yml -text
-/native/SOURCE-REBUILD.md -text
 /native/build/** -text
-/native/installer-inputs.json -text
 /native/installer-notices/** -text
 /native/libmpv-ThirdPartyNotices.txt -text
 /native/onnxruntime-ActualDependencyNotices.txt -text
@@ -20,9 +16,7 @@
 /native/silero-LICENSE -text
 /native/vc-prerequisite.ps1 -text
 /native/windows-prerequisite.nsh -text
-/native/windows/native-installer-prepare.py -text
 /native/windows/native-prepare.ps1 -text
 /native/windows/native-smoke.ps1 -text
-/native/windows/package-installer-smoke.ps1 -text
-/native/windows/package-verify.ps1 -text
-/scripts/release.mjs -text
+/native/windows/package.ps1 -text
+/packaging/licenses.hbs -text

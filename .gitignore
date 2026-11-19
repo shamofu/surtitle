@@ -1,6 +1,3 @@
-/node_modules/
-/.pnpm/
-/.cargo/config.toml
 /work/
 target/
 /.env

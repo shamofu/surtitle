@@ -22,8 +22,6 @@ jobs:
           outputs: type=local,dest=work/native-ci-artifact
           cache-from: type=gha,scope=native-dependencies-linux-amd64-v2
           cache-to: type=gha,scope=native-dependencies-linux-amd64-v2,mode=max
-          secrets: |
-            github_token=${{ github.token }}
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: native-build-${{ github.sha }}

@@ -114,20 +114,6 @@ meson_build mpv -Ddefault_library=shared -Dlibmpv=true -Dcplayer=false \
   -Dwasapi=enabled -Dwin32-threads=enabled -Dbuild-date=false -Dvector=enabled \
   -Dd3d-hwaccel=enabled -Djpeg=disabled -Dshaderc=enabled -Dspirv-cross=enabled
 
-output="/out/native-build"
-mkdir -p "$output/runtime" "$output/logs" "$output/toolchain-notices"
-cp "$prefix/bin/libmpv-2.dll" "$output/runtime/"
-if [[ -f "$output/runtime/libmpv-2.dll" ]]; then
-  mv -- "$output/runtime/libmpv-2.dll" "$output/runtime/mpv-2.dll"
-fi
-cp -a "$logs/." "$output/logs/"
-cp "$ffmpeg_output/config.h" "$ffmpeg_output/ffbuild/config.mak" "$output/logs/"
-for project in dav1d freetype harfbuzz fribidi libass libplacebo mpv; do
-  cp "$build_root/objects/$project/meson-info/intro-buildoptions.json" "$output/logs/$project-buildoptions.json"
-  cp "$build_root/objects/$project/meson-info/intro-dependencies.json" "$output/logs/$project-dependencies.json"
-done
-dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' > "$output/toolchain-packages.tsv"
-for package in gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix mingw-w64-common mingw-w64-x86-64-dev; do
-  cp "/usr/share/doc/$package/copyright" "$output/toolchain-notices/$package-copyright"
-done
+mkdir -p /out
+cp "$prefix/bin/libmpv-2.dll" /out/mpv-2.dll
 printf 'Build completed; run the native smoke and application playback tests.\n'

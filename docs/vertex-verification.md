@@ -21,7 +21,7 @@ The validation CLI below uses one request per job and does not opt into the appl
 Run from the repository root. Select a new validation directory rather than normal application data.
 
 ```powershell
-pnpm rust build -p surtitle-ai-validation --locked
+cargo build -p surtitle-ai-validation --locked
 $validator = Join-Path (Get-Location) 'work\target\debug\surtitle-ai-validation.exe'
 $validationRoot = Join-Path (Get-Location) 'work\vertex-validation'
 New-Item -ItemType Directory -Path (Split-Path $validationRoot) -Force | Out-Null

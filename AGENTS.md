@@ -27,7 +27,7 @@
 ## Architecture and runtime guardrails
 
 - Maintain crate boundaries ([docs/architecture.md](docs/architecture.md)): `surtitle` (`crates/desktop`, GPUI views, controllers, and native host), `surtitle-core` (SQLite learning data, subtitle parsing, FSRS scheduling, and portable archives), `surtitle-tools` (executable discovery, bounded processes, and managed updates), `surtitle-ai` (request/approval lifecycle, Vertex and OpenAI adapters, DPAPI credentials, charge accounting, and local audio preparation), and `surtitle-ai-validation` (development-only validation CLI, excluded from distribution).
-- Keep the production desktop dependency graph (`surtitle` built with `--no-default-features`) free of Electron, Tauri, WebView, and browser runtimes, and free of development or test features (`development-validation`, `e2e-fixtures`, `e2e-test`, `test-support`), as enforced by `scripts/check-production-features.mjs`.
+- Keep the production desktop dependency graph (`surtitle` built with `--no-default-features`) free of Electron, Tauri, WebView, and browser runtimes, and free of development or test features (`development-validation`, `e2e-fixtures`, `e2e-test`, `test-support`), as enforced by CI and `native/windows/package.ps1`.
 - Keep GPUI entities and native window lifetimes on the GUI thread, and run blocking or asynchronous work on the explicit Tokio runtime. UI-facing methods receive typed state and credential status only, never saved API keys, service-account JSON, or access tokens.
 - Preserve the Windows video composition architecture: `mpv-2.dll` windowless `gpu-next` D3D11 composition swapchain transferred via the private owned-COM bridge (`native/build/patches/mpv-owned-composition-swapchain.patch`) and published with UI pixels in one DirectComposition transaction. Never use mpv's borrowed `display-swapchain` property, and never copy video frames through CPU buffers into GPUI. Review and preserve the scoped GPUI patches in `patches/gpui-pre` and `patches/gpui-pre-windows` when updating GPUI.
 
@@ -48,26 +48,23 @@
 - Keep local audio preparation (FFmpeg mono 16 kHz PCM extraction, pinned Silero VAD via bundled CPU ONNX Runtime, and bounded FLAC encoding) strictly offline with zero provider requests. Spawn external tools with literal arguments, no shell interpretation, verified executable hashes, and bounded output ([docs/tools.md](docs/tools.md)).
 - Require an explicit user-reviewed quote and immutable approval before any paid provider request. Reserve budget in `charges.sqlite` before dispatch, serialize outbound requests through the single shared HTTP lane across Vertex and OpenAI, and keep per-service budgets independent (`0` means unlimited).
 - Never introduce automatic model switching/fallback, unapproved paid retries, or automatic release/refund of unknown outcomes. Only transcription jobs perform the explicitly approved transient HTTP 429 chunk retries (at most two retries / three sends total per chunk, honoring server `Retry-After` and persistent pacing).
-- When modifying AI claim, dispatch, retry, pacing, hold, or provider-isolation logic, keep the bounded TLA+ models (`verification/tla/AiLedger.tla`, `verification/tla/ProviderLedger.tla` via `pnpm test:formal`) and boundary replay tests (`crates/ai/src/vertex/fault_tests/model_boundary_replay.rs`) consistent.
+- When modifying AI claim, dispatch, retry, pacing, hold, or provider-isolation logic, keep the boundary replay tests (`crates/ai/src/vertex/fault_tests/model_boundary_replay.rs`) and ledger/provider isolation tests consistent.
 
 ## Authoritative inputs and workspace layout
 
-- Use the single authoritative source for each version and dependency pin ([docs/native-runtime.md](docs/native-runtime.md), [.devcontainer/README.md](.devcontainer/README.md), [native/SOURCE-REBUILD.md](native/SOURCE-REBUILD.md)):
-  - Application version: `[workspace.package].version` in `Cargo.toml` (checked by `scripts/check-release.mjs`).
-  - Rust toolchain and installer/runtime notices: `native/installer-inputs.json`, `rust-toolchain.toml`, and `[workspace.package].rust-version` in `Cargo.toml`.
-  - Node.js and pnpm: `.node-version` and `packageManager` in `package.json`.
-  - Native runtime DLLs, Silero VAD model, and VC Runtime prerequisite: `native/runtime-windows-x64.json`, `native/build/sources.json`, and `native/build/onnxruntime-sources.json`.
-  - Formal verification toolchain: `verification/toolchain.json`.
-  - License allowlists: `deny.toml`, `about.toml`, and `scripts/audit-js-licenses.mjs`.
-- Keep all build outputs, staged resources, test results, and packaging artifacts under ignored `work/` (`work/target`, `work/resources`, `work/artifacts`, `work/test-results`). Use `pnpm rust <subcommand>` or set `CARGO_TARGET_DIR=work/target` when invoking Cargo directly outside the Dev Container or CI.
+- Use the single authoritative source for each version and dependency pin ([docs/native-runtime.md](docs/native-runtime.md), [.devcontainer/README.md](.devcontainer/README.md)):
+  - Application version: `[workspace.package].version` in `Cargo.toml`.
+  - Rust toolchain: `rust-toolchain.toml` and `[workspace.package].rust-version` in `Cargo.toml`.
+  - Native runtime DLLs, Silero VAD model, and VC Runtime prerequisite: `native/runtime-windows-x64.json` and `native/build/sources.json`.
+  - License allowlists: `deny.toml` and `about.toml`.
+- Keep all build outputs, staged resources, test results, and packaging artifacts under ignored `work/` (`work/target`, `work/resources`, `work/artifacts`, `work/test-results`), as configured by `.cargo/config.toml`.
 
 ## Verification and evidence honesty
 
-- Keep ordinary unit, integration, script, and formal checks offline with zero paid provider requests ([docs/testing.md](docs/testing.md)).
+- Keep ordinary unit and integration checks offline with zero paid provider requests ([docs/testing.md](docs/testing.md)).
 - When changing platform-dependent Rust code (`cfg(windows)` / `cfg(unix)`), verify compilation, tests, and Clippy on both Windows and Linux (Dev Container), and explicitly report any CI or platform checks that were not run locally.
-- Update the required integration test registry in `e2e/support/run-required-rust-tests.mjs` whenever moving or renaming an ignored native integration test.
-- Never claim Windows native acceptance (`packaging/native-acceptance.json`), physical D3D11/DirectComposition rendering, real Japanese IME, measured audio output, multi-DPI/monitor transitions, or GPU performance from Linux builds, fake-platform GPUI tests, or guard-only checks. Leave unmeasured external acceptance cases as `not_run` / unclaimed.
-- Never bypass the hosted-runner or disposable-account profile guards in `native/windows/package-verify.ps1`, `native/windows/native-acceptance.ps1`, or `pnpm build:native:e2e`; never point fixture or installer tests at a normal `%LOCALAPPDATA%\app.surtitle.desktop` profile.
+- Never claim physical D3D11/DirectComposition rendering, real Japanese IME, measured audio output, multi-DPI/monitor transitions, or GPU performance from Linux builds, fake-platform GPUI tests, or guard-only checks. Leave unmeasured hardware or manual checks unclaimed.
+- Never point development, validation CLI, or fixture runs at a normal `%LOCALAPPDATA%\app.surtitle.desktop` profile.
 
 ## Specification map
 
@@ -79,7 +76,6 @@
 | Live Vertex CLI setup and bounded evaluation | [docs/vertex-verification.md](docs/vertex-verification.md) |
 | Learning backups (JSON/ZIP), exports, and restore semantics | [docs/data-transfer.md](docs/data-transfer.md) |
 | External and managed CLI tool discovery, execution, and updates | [docs/tools.md](docs/tools.md) |
-| Routine checks, TLA+ formal models, required native suites, and acceptance gates | [docs/testing.md](docs/testing.md) |
+| Routine checks and native Rust integration suites | [docs/testing.md](docs/testing.md) |
 | Native libmpv/ORT build, staging, prerequisites, and NSIS packaging | [docs/native-runtime.md](docs/native-runtime.md) |
-| Rebuilding from the published corresponding-source archive | [native/SOURCE-REBUILD.md](native/SOURCE-REBUILD.md) |
 | Linux Dev Container environment and volume isolation | [.devcontainer/README.md](.devcontainer/README.md) |

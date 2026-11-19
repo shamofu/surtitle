@@ -21,9 +21,6 @@
         }
       ],
       "redistribution": {
-        "dependencyInventory": {
-          "path": "work/native-ci-artifact/libmpv-build-evidence.json"
-        },
         "correspondingSource": {
           "path": "work/native-ci-artifact/libmpv-source.tar.gz"
         }
@@ -60,15 +57,7 @@
         {
           "path": "native/onnxruntime-ActualDependencyNotices.txt"
         }
-      ],
-      "redistribution": {
-        "dependencyInventory": {
-          "path": "work/native-ci-artifact/onnxruntime-source-inventory.json"
-        },
-        "correspondingSource": {
-          "path": "work/native-ci-artifact/onnxruntime-source.tar.gz"
-        }
-      }
+      ]
     }
   ],
   "models": [

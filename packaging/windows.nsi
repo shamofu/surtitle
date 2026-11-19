@@ -1,5 +1,5 @@
 ; SPDX-License-Identifier: GPL-3.0-or-later
-; Standalone NSIS installer. Build inputs are supplied by scripts/package-app.mjs.
+; Standalone NSIS installer. Build inputs are supplied by native/windows/package.ps1.
 Unicode true
 ManifestDPIAware true
 RequestExecutionLevel user

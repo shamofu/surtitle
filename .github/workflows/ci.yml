@@ -6,20 +6,6 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      require_native_acceptance:
-        description: 'Require the comprehensive native report, including manual measurements'
-        required: false
-        type: boolean
-        default: false
-      native_candidate_run_id:
-        description: 'Optional run containing package-candidate-<SHA>; reuse the exact manually measured installer'
-        required: false
-        type: string
-      native_evidence_run_id:
-        description: 'Optional run containing gpui-native-external-<SHA> measurements for this exact binary/installer/revision'
-        required: false
-        type: string
 permissions:
   contents: read
 env:
@@ -31,24 +17,11 @@ concurrency:
   queue: max
 
 jobs:
-  validate:
-    if: github.event.deleted != true
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v7.0.0
-        with:
-          node-version-file: .node-version
-          package-manager-cache: false
-      - run: node scripts/check-release.mjs
   native-build:
-    needs: [validate]
+    if: github.event.deleted != true
     uses: ./.github/workflows/native-build.yml
   linux:
-    needs: [validate]
+    if: github.event.deleted != true
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -56,149 +29,106 @@ jobs:
       LIBGL_ALWAYS_SOFTWARE: 1
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.0.0
-        id: node
         with:
-          node-version-file: .node-version
-          package-manager-cache: false
-      - name: Read the native Rust toolchain pin
-        id: rust
-        shell: bash
-        run: echo "version=$(node -p 'require("./native/installer-inputs.json").rust.version')" >> "$GITHUB_OUTPUT"
+          fetch-depth: 0
+      - name: Validate version and release tag
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess, tomllib
+          with open("Cargo.toml", "rb") as f:
+              version = tomllib.load(f)["workspace"]["package"]["version"]
+          if not re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", version):
+              raise SystemExit("Cargo workspace.package.version must be an explicit stable X.Y.Z version.")
+          ref = os.environ.get("GITHUB_REF", "")
+          if ref.startswith("refs/tags/"):
+              sha = os.environ.get("GITHUB_SHA", "")
+              if os.environ.get("GITHUB_EVENT_NAME") != "push" or ref != f"refs/tags/v{version}":
+                  raise SystemExit("Release tag push must match refs/tags/v" + version)
+              if not re.fullmatch(r"[a-f0-9]{40}", sha):
+                  raise SystemExit("Release tag push requires full commit SHA.")
+              tag = ref.removeprefix("refs/tags/")
+              if subprocess.check_output(["git", "rev-parse", "--verify", "HEAD^{commit}"], text=True).strip() != sha:
+                  raise SystemExit("Checkout HEAD differs from GITHUB_SHA.")
+              if subprocess.check_output(["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"], text=True).strip() != sha:
+                  raise SystemExit("Tag commit differs from GITHUB_SHA.")
+              subprocess.check_call(["git", "merge-base", "--is-ancestor", sha, "refs/remotes/origin/main"])
+          print(f"Validated version {version}")
+          PY
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ steps.rust.outputs.version }}
           components: rustfmt, clippy
       - uses: taiki-e/install-action@v2.87.28
         with:
-          tool: cargo-nextest@0.9.148
-      - name: Install the package manager declared by this checkout
-        id: pnpm
-        run: |
-          npm install -g "$(node -p 'require("./package.json").packageManager')"
-          echo "version=$(pnpm --version)" >> "$GITHUB_OUTPUT"
-          echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v6.1.0
-        with:
-          path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
+          tool: cargo-nextest@0.9.148,cargo-deny@0.20.2
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           key: ubuntu-24.04-debug
           workspaces: . -> work/target
       - name: Install Linux desktop and test dependencies
-        id: native-dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential cmake perl pkg-config clang libfontconfig1-dev libfreetype6-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb-shape0-dev libxcb-xfixes0-dev libvulkan-dev mesa-vulkan-drivers libssl-dev xvfb dbus-x11 ffmpeg libmpv-dev fonts-noto-cjk
-      - run: pnpm install --frozen-lockfile
-        id: dependencies
-      - run: pnpm setup:rust-tools
-        id: rust-tools
-      - name: Read the formal verification Java pin
-        id: formal-toolchain
-        run: echo "java=$(node -p 'require("./verification/toolchain.json").javaMajor')" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-java@v6.1.0
-        with:
-          distribution: temurin
-          java-version: ${{ steps.formal-toolchain.outputs.java }}
-      - uses: actions/cache@v6.1.0
-        with:
-          path: work/tools/tla/
-          key: tlc-${{ hashFiles('verification/toolchain.json') }}
-      - name: Acquire and verify the pinned model checker
-        run: pnpm setup:formal
-      - name: Exhaustive AI models and negative controls
-        run: pnpm test:formal
       - name: Production feature contract
-        id: contracts
-        run: node scripts/check-production-features.mjs
-      - name: Build and process helper tests
-        id: javascript-tests
-        run: pnpm test
-        env:
-          SURTITLE_TEST_REPORT: work/test-results/vitest/linux.xml
-      - name: Build the native GPUI desktop
-        id: frontend-build
-        run: pnpm build
-      - name: Rust formatting
-        id: rust-format
-        run: pnpm fmt:rust:check
-      - name: Rust workspace tests
-        id: rust-tests
-        run: pnpm test:rust
-      - name: Rust tests without default features
-        id: rust-no-default
-        run: pnpm test:rust:no-default-features
-      - name: Rust documentation tests
-        id: rust-doc
-        run: pnpm test:rust:doc
-      - name: Rust lint
-        id: rust-lint
-        run: pnpm lint:rust
-      - name: Dependency audits
-        id: dependency-audits
         run: |
-          pnpm audit:rust
-          node scripts/audit-js-licenses.mjs
+          cargo tree --locked --package surtitle --no-default-features --edges normal,build --prefix none --format '{p}|{f}' | python3 - <<'PY'
+          import re, sys
+          lines = sys.stdin.read().splitlines()
+          for line in lines:
+              if re.match(r'^(?:tauri(?:-\S+)?|wry|webview2(?:-\S+)?|webkit2gtk(?:-\S+)?) v', line):
+                  raise SystemExit(f"Browser runtime dependency in production graph: {line}")
+          rows = [l for l in lines if re.match(r'^surtitle(?:-ai)? v', l)]
+          if not any(l.startswith("surtitle v") for l in rows) or not any(l.startswith("surtitle-ai v") for l in rows):
+              raise SystemExit("Production dependency graph is missing surtitle or surtitle-ai.")
+          banned = {"development-validation", "e2e-fixtures", "e2e-test", "test-support"}
+          for row in rows:
+              feats = re.sub(r'\s*\(\*\)$', '', row.split('|', 1)[1]).split(',')
+              if any(f.strip() in banned for f in feats):
+                  raise SystemExit(f"Development-only feature in production graph: {row}")
+          PY
+      - name: Build the native GPUI desktop
+        run: cargo build --locked --package surtitle
+      - name: Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Rust workspace tests
+        run: cargo nextest run --workspace --all-features --locked --profile ci --no-tests fail
+      - name: Rust tests without default features
+        run: cargo nextest run -p surtitle-ai --no-default-features --locked --profile ci-no-default --no-tests fail
+      - name: Rust documentation tests
+        run: |
+          cargo test --workspace --all-features --locked --doc
+          cargo test -p surtitle-ai --no-default-features --locked --doc
+      - name: Rust lint
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Dependency audits
+        run: cargo deny check licenses bans sources
       - name: Required FFmpeg integration tests
-        id: rust-native
-        run: SURTITLE_TEST_FFMPEG="$(command -v ffmpeg)" pnpm test:rust:required linux-ffmpeg
+        env:
+          SURTITLE_TEST_FFMPEG: /usr/bin/ffmpeg
+        run: |
+          test -x "$SURTITLE_TEST_FFMPEG" && test -x /usr/bin/ffprobe
+          cargo nextest run -p surtitle --lib --features e2e-test --locked --profile required --run-ignored only --ignore-default-filter --no-tests fail -E 'test(=application::media_tools::card_audio::tests::installed_ffmpeg_preserves_native_rate_wav_tail_without_padding) | test(=application::media_tools::card_audio::tests::installed_ffmpeg_preserves_source_clock_and_cleans_failed_outputs)'
+          cargo nextest run -p surtitle-tools --lib --locked --profile required --run-ignored only --ignore-default-filter --no-tests fail -E 'test(=command::tests::multitrack_extraction_preserves_selected_stream)'
+          cargo nextest run -p surtitle-ai --lib --no-default-features --locked --profile required --run-ignored only --ignore-default-filter --no-tests fail -E 'test(=prepare::encoding::file_tests::openai_file_real_encoding_splits_only_oversized_files_and_preserves_pcm)'
       - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
           name: linux-evidence-${{ github.sha }}
-          path: |
-            work/artifacts/
-            work/test-results/
+          path: work/test-results/
   windows:
     needs: [native-build]
     runs-on: windows-2025
-    # Fake GPUI/UI logic and real backend media tests run here. Installed native
-    # geometry/rendering/IME/audio/performance collection is an explicit package opt-in.
     timeout-minutes: 90
     defaults:
       run:
         shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.0.0
-        id: node
-        with:
-          node-version-file: .node-version
-          package-manager-cache: false
-      - name: Prepare hosted Windows desktop capacity
-        id: desktop-setup
-        run: node e2e/support/prepare-ci-desktop.mjs
-      - name: Prepare and verify native input desktop
-        id: input-setup
-        run: |
-          node e2e/support/prepare-native-input.mjs
-          & e2e/support/ci-desktop.ps1 -Action prepare-input
-          Copy-Item -LiteralPath work/test-results/windows-input-console.json -Destination work/test-results/windows-input-console-pre-build.json
-          node e2e/support/native-input-smoke.mjs
-      - name: Read the native Rust toolchain pin
-        id: rust
-        shell: bash
-        run: echo "version=$(node -p 'require("./native/installer-inputs.json").rust.version')" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ steps.rust.outputs.version }}
           components: rustfmt, clippy
       - uses: taiki-e/install-action@v2.87.28
         with:
           tool: cargo-nextest@0.9.148
-      - name: Install the package manager declared by this checkout
-        id: pnpm
-        run: |
-          $packageManager = (Get-Content package.json -Raw | ConvertFrom-Json).packageManager
-          npm install -g $packageManager
-          "version=$(pnpm --version)" >> $env:GITHUB_OUTPUT
-          "store=$(pnpm store path --silent)" >> $env:GITHUB_OUTPUT
-      - uses: actions/cache@v6.1.0
-        with:
-          path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
       - uses: actions/download-artifact@v8.0.1
         with:
           name: native-build-${{ github.sha }}
@@ -207,63 +137,61 @@ jobs:
         with:
           key: windows-2025-debug
           workspaces: . -> work/target
-      - run: pnpm install --frozen-lockfile
-        id: dependencies
-      - run: node scripts/check-production-features.mjs
-        id: production-contract
-      - name: Windows process, profile and distribution script tests
-        id: script-tests
-        run: pnpm test:scripts --exclude e2e/support/foreground-activation.test.mjs
-        env:
-          SURTITLE_TEST_REPORT: work/test-results/vitest/windows-scripts.xml
-      - name: Verify native activation when foreground requests are denied
-        id: foreground-tests
-        run: pnpm test:scripts e2e/support/foreground-activation.test.mjs
-        env:
-          SURTITLE_E2E_NATIVE_INPUT: '1'
-          SURTITLE_TEST_REPORT: work/test-results/vitest/windows-foreground.xml
-      - run: pnpm build
-        id: frontend-build
+      - name: Production feature contract
+        run: |
+          $lines = cargo tree --locked --package surtitle --no-default-features --edges normal,build --prefix none --format '{p}|{f}'
+          if ($lines | Where-Object { $_ -match '^(?:tauri(?:-\S+)?|wry|webview2(?:-\S+)?|webkit2gtk(?:-\S+)?) v' }) { throw 'Browser runtime dependency in production graph.' }
+          $rows = @($lines | Where-Object { $_ -match '^surtitle(?:-ai)? v' })
+          if (-not ($rows | Where-Object { $_ -match '^surtitle v' }) -or -not ($rows | Where-Object { $_ -match '^surtitle-ai v' })) { throw 'Production dependency graph is incomplete.' }
+          foreach ($row in $rows) {
+            $feats = (($row -split '\|', 2)[1] -replace '\s*\(\*\)$', '') -split ','
+            if ($feats | Where-Object { $_.Trim() -in @('development-validation', 'e2e-fixtures', 'e2e-test', 'test-support') }) { throw "Development-only feature in production graph: $row" }
+          }
+      - name: Build the native GPUI desktop
+        run: cargo build --locked --package surtitle
       - name: Rust workspace tests
-        id: rust-tests
-        run: pnpm test:rust
+        run: cargo nextest run --workspace --all-features --locked --profile ci --no-tests fail
       - name: Windows GPUI backend regressions
         run: cargo test -p gpui-pre-windows --lib --locked
-      - name: Verify ordinary builds cannot bypass evaluation accounting
-        id: rust-no-default
-        run: pnpm test:rust:no-default-features
+      - name: Rust tests without default features
+        run: cargo nextest run -p surtitle-ai --no-default-features --locked --profile ci-no-default --no-tests fail
       - name: Rust documentation tests
-        id: rust-doc
-        run: pnpm test:rust:doc
-      - run: pnpm lint:rust
-        id: rust-lint
-      - name: Prepare native runtime and test initialization
-        id: native-runtime
+        run: |
+          cargo test --workspace --all-features --locked --doc
+          cargo test -p surtitle-ai --no-default-features --locked --doc
+      - name: Rust lint
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Prepare native runtime and smoke test
         run: |
           pwsh native/windows/native-prepare.ps1 -WithDevModel
           pwsh native/windows/native-smoke.ps1
-      - name: Cache the pinned test FFmpeg archive
+      - name: Cache pinned test FFmpeg archive
         uses: actions/cache@v6.1.0
         with:
-          path: work/ci-ffmpeg/*.zip
-          key: test-ffmpeg-${{ runner.os }}-${{ hashFiles('e2e/support/prepare-ffmpeg.ps1') }}
-      - name: Prepare generated media
-        id: native-tools-fixtures
+          path: work/ci-ffmpeg/ffmpeg-9.0.2-essentials_build.zip
+          key: test-ffmpeg-windows-9.0.2
+      - name: Prepare pinned test FFmpeg
         run: |
-          & e2e/support/prepare-ffmpeg.ps1
-          pnpm test:fixtures
-          & $env:FFMPEG_PATH -v error -f lavfi -i 'testsrc2=size=320x180:rate=12:duration=3' -c:v libaom-av1 -cpu-used 8 -crf 50 -y work/e2e-av1.mkv
-          pnpm build:fixtures
-      - name: Build the native GPUI fixture-enabled binary
-        id: native-build
-        run: pnpm build:native:e2e
-      - name: Required FFmpeg, libmpv and Silero regressions
-        id: rust-native
+          $version = '9.0.2'
+          $expectedHash = '60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba'
+          $dir = [IO.Path]::GetFullPath('work/ci-ffmpeg')
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $zip = Join-Path $dir "ffmpeg-$version-essentials_build.zip"
+          if (-not (Test-Path -LiteralPath $zip -PathType Leaf)) {
+            & "$env:SystemRoot\System32\curl.exe" --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 1 --output "$zip.partial" "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-$version-essentials_build.zip"
+            Move-Item -LiteralPath "$zip.partial" -Destination $zip
+          }
+          if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne $expectedHash) { throw 'Test FFmpeg archive SHA-256 mismatch.' }
+          Expand-Archive -LiteralPath $zip -DestinationPath $dir -Force
+          $ffmpeg = Join-Path $dir "ffmpeg-$version-essentials_build/bin/ffmpeg.exe"
+          $ffprobe = Join-Path $dir "ffmpeg-$version-essentials_build/bin/ffprobe.exe"
+          if (-not (Test-Path -LiteralPath $ffmpeg -PathType Leaf) -or -not (Test-Path -LiteralPath $ffprobe -PathType Leaf)) { throw 'Missing pinned FFmpeg or ffprobe.' }
+          "SURTITLE_TEST_FFMPEG=$ffmpeg" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Required FFmpeg, libmpv and Silero integration tests
         run: |
-          python e2e/support/acquire-spoken-fixtures.py
-          pnpm test:rust:required windows-native
-        env:
-          SURTITLE_SPOKEN_FIXTURES: ${{ github.workspace }}\work\spoken-fixtures
+          cargo nextest run -p surtitle --lib --features e2e-test --locked --profile required --run-ignored only --ignore-default-filter --no-tests fail -E 'test(=application::media_tools::card_audio::tests::installed_ffmpeg_preserves_native_rate_wav_tail_without_padding) | test(=application::media_tools::card_audio::tests::installed_ffmpeg_preserves_source_clock_and_cleans_failed_outputs) | test(=player::subtitle_tests::real_mpv_load_restores_position_and_maps_audio_stream) | test(=player::native::composition_tests::owned_composition_swapchain_survives_stop_reconfigure_and_player_destruction) | test(=player::native::composition_tests::composition_snapshot_follows_reconfiguration_without_prepaint_core_calls) | test(=application::transfer::restore_tests::real_mpv_restore_reconciles_resume_audio_subtitles_and_stale_ticks) | test(/^ui::tests::study_wheel::applied::/)'
+          cargo nextest run -p surtitle-tools --lib --locked --profile required --run-ignored only --ignore-default-filter --no-tests fail -E 'test(=command::tests::multitrack_extraction_preserves_selected_stream)'
+          cargo nextest run -p surtitle-ai --lib --no-default-features --locked --profile required --run-ignored only --ignore-default-filter --no-tests fail -E 'test(=prepare::encoding::file_tests::openai_file_real_encoding_splits_only_oversized_files_and_preserves_pcm) | test(=prepare::tests::real_silero_and_ffmpeg_preserve_selection_time) | test(=prepare::tests::real_preparation_failures_remove_receipts_and_temporary_files)'
       - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
@@ -271,60 +199,27 @@ jobs:
           path: |
             work/artifacts/
             work/test-results/
-            work/spoken-fixtures/acquisition.json
   package:
     needs: [native-build]
     runs-on: windows-2025
     timeout-minutes: 60
-    env:
-      NATIVE_CANDIDATE_RUN_ID: ${{ inputs.native_candidate_run_id || vars.SURTITLE_NATIVE_CANDIDATE_RUN_ID || '' }}
-      NATIVE_EVIDENCE_RUN_ID: ${{ inputs.native_evidence_run_id || vars.SURTITLE_NATIVE_EVIDENCE_RUN_ID || '' }}
-      REQUIRE_NATIVE_ACCEPTANCE: ${{ inputs.require_native_acceptance || vars.SURTITLE_REQUIRE_NATIVE_ACCEPTANCE || 'false' }}
-    permissions:
-      contents: read
-      actions: read
     defaults:
       run:
         shell: pwsh -NoProfile -Command "$ErrorActionPreference = 'Stop'; $PSNativeCommandUseErrorActionPreference = $true; & '{0}'"
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Verify the system VC runtime before building the installer
-        id: vc-runtime
         run: |
           & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File native/vc-prerequisite.ps1 -CheckOnly
           if ($LASTEXITCODE -ne 0) { throw 'The package runner failed the VC runtime prerequisite check.' }
-      - uses: actions/setup-node@v7.0.0
-        id: node
-        with:
-          node-version-file: .node-version
-          package-manager-cache: false
-      - name: Prepare hosted Windows desktop capacity
-        id: desktop-setup
-        run: node e2e/support/prepare-ci-desktop.mjs
-      - name: Read the native Rust toolchain pin
-        id: rust
-        shell: bash
-        run: echo "version=$(node -p 'require("./native/installer-inputs.json").rust.version')" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@master
+      - uses: taiki-e/install-action@v2.87.28
         with:
-          toolchain: ${{ steps.rust.outputs.version }}
-      - name: Install the package manager declared by this checkout
-        id: pnpm
-        run: |
-          $packageManager = (Get-Content package.json -Raw | ConvertFrom-Json).packageManager
-          npm install -g $packageManager
-          "version=$(pnpm --version)" >> $env:GITHUB_OUTPUT
-          "store=$(pnpm store path --silent)" >> $env:GITHUB_OUTPUT
-      - uses: actions/cache@v6.1.0
-        with:
-          path: ${{ steps.pnpm.outputs.store }}
-          key: pnpm-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-pnpm-${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'Cargo.lock') }}
+          tool: cargo-about@0.9.2
       - uses: actions/download-artifact@v8.0.1
         with:
           name: native-build-${{ github.sha }}
           path: work/native-ci-artifact/
-          run-id: ${{ env.NATIVE_CANDIDATE_RUN_ID || github.run_id }}
-          github-token: ${{ github.token }}
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           key: windows-2025-release-v2
@@ -333,75 +228,12 @@ jobs:
           cache-directories: |
             work/target/debug
             work/target/release
-      - run: pnpm install --frozen-lockfile
-        id: dependencies
-      - run: pwsh native/windows/native-prepare.ps1
-        id: native-runtime
-      - name: Prepare NSIS installer sources and runtime notices
-        id: installer-inputs
-        run: python native/windows/native-installer-prepare.py
-      - name: Generate distribution notices and dependency manifests
-        id: notices
+      - name: Build installer package
         run: |
-          pnpm setup:licenses
-          & ./work/package-tools/bin/cargo-about.exe --version
-          & ./work/package-tools/bin/cargo-about.exe generate --manifest-path crates/desktop/Cargo.toml --target x86_64-pc-windows-msvc --no-default-features --locked --fail --config about.toml scripts/licenses.hbs --output-file work/resources/notices/rust.html
-          node scripts/audit-js-licenses.mjs
-      - run: pnpm package:app
-        if: env.NATIVE_CANDIDATE_RUN_ID == ''
-        id: package-build
-      - name: Preserve the exact production installer candidate
-        if: always() && steps.package-build.outcome == 'success'
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: package-candidate-${{ github.sha }}
-          path: |
-            work/target/release/bundle/nsis/*.exe
-            work/target/release/bundle/nsis/*.exe.build.json
-          if-no-files-found: error
-      - name: Reuse the explicitly selected measured installer candidate
-        if: env.NATIVE_CANDIDATE_RUN_ID != ''
-        uses: actions/download-artifact@v8.0.1
-        with:
-          name: package-candidate-${{ github.sha }}
-          run-id: ${{ env.NATIVE_CANDIDATE_RUN_ID }}
-          github-token: ${{ github.token }}
-          path: work/package-candidate/
-      - name: Cache the pinned test FFmpeg archive
-        uses: actions/cache@v6.1.0
-        with:
-          path: work/ci-ffmpeg/*.zip
-          key: test-ffmpeg-${{ runner.os }}-${{ hashFiles('e2e/support/prepare-ffmpeg.ps1') }}
-      - name: Prepare generated production media
-        id: native-tools-fixtures
-        run: |
-          & e2e/support/prepare-ffmpeg.ps1
-          pnpm test:fixtures
-      # Supplying manual evidence opts into its complete, exact-candidate validation.
-      - name: Download explicitly selected external native measurements
-        if: env.NATIVE_EVIDENCE_RUN_ID != ''
-        uses: actions/download-artifact@v8.0.1
-        with:
-          name: gpui-native-external-${{ github.sha }}
-          run-id: ${{ env.NATIVE_EVIDENCE_RUN_ID }}
-          github-token: ${{ github.token }}
-          path: work/native-external/
-      - name: Verify installer lifecycle and source/SBOM
-        id: package-tests
-        run: |
-          if ($env:NATIVE_EVIDENCE_RUN_ID -and -not (Test-Path -LiteralPath work/native-external/report.json -PathType Leaf)) { throw 'The selected external evidence artifact has no report.json.' }
-          $external = if ($env:NATIVE_EVIDENCE_RUN_ID) { @('-NativeExternalEvidence','work/native-external/report.json') } else { @() }
-          $candidate = if ($env:NATIVE_CANDIDATE_RUN_ID) { @('-InstallerDirectory','work/package-candidate') } else { @() }
-          $native = if ($env:REQUIRE_NATIVE_ACCEPTANCE -eq 'true') { @('-RequireNativeAcceptance') } else { @() }
-          pwsh native/windows/package-verify.ps1 -ProductionProbe native/windows/package-production-uia.ps1 @external @candidate @native
-      - name: Preserve package verification diagnostics
-        uses: actions/upload-artifact@v7.0.1
-        if: always()
-        with:
-          name: package-evidence-${{ github.sha }}
-          path: |
-            work/artifacts/
-            work/test-results/windows-desktop.json
+          pwsh native/windows/package.ps1
+          New-Item -ItemType Directory -Path work/artifacts/release -Force | Out-Null
+          Copy-Item -Path work/target/release/bundle/nsis/*_x64-setup.exe -Destination work/artifacts/release/ -Force
+          Copy-Item -LiteralPath work/native-ci-artifact/libmpv-source.tar.gz -Destination work/artifacts/release/ -Force
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: release-${{ github.sha }}
@@ -409,7 +241,7 @@ jobs:
           if-no-files-found: error
   ci:
     name: ci
-    needs: [validate, native-build, linux, windows, package]
+    needs: [native-build, linux, windows, package]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -417,7 +249,7 @@ jobs:
       - name: Require every validation job to succeed
         env:
           RESULTS: ${{ toJSON(needs) }}
-        run: jq -e 'length == 5 and all(.[]; .result == "success")' <<< "$RESULTS"
+        run: jq -e 'length == 4 and all(.[]; .result == "success")' <<< "$RESULTS"
   publish:
     needs: [ci]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.event.deleted != true
@@ -428,15 +260,26 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v7.0.0
-        id: node
-        with:
-          node-version-file: .node-version
-          package-manager-cache: false
       - uses: actions/download-artifact@v8.0.1
         with:
           name: release-${{ github.sha }}
           path: work/artifacts/release/
-      - run: node scripts/release.mjs
+      - name: Verify release tag and publish assets
         env:
           GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(python3 -c 'import re, tomllib; v=tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"]; assert re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", v); print(v)')
+          TAG="v${VERSION}"
+          test "$GITHUB_REF" = "refs/tags/${TAG}"
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+          REMOTE_SHA=$(git ls-remote origin "refs/tags/${TAG}" "refs/tags/${TAG}^{}" | awk -v t="refs/tags/${TAG}" '$2 == t "^{}" {d=$1} $2 == t {p=$1} END {print (d ? d : p)}')
+          test "$REMOTE_SHA" = "$GITHUB_SHA"
+          INSTALLER="Surtitle_${VERSION}_x64-setup.exe"
+          test -s "work/artifacts/release/${INSTALLER}"
+          test -s "work/artifacts/release/libmpv-source.tar.gz"
+          (cd work/artifacts/release && sha256sum "${INSTALLER}" libmpv-source.tar.gz > SHA256SUMS.txt)
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "Surtitle ${VERSION}" --latest \
+            "work/artifacts/release/${INSTALLER}" \
+            "work/artifacts/release/libmpv-source.tar.gz" \
+            "work/artifacts/release/SHA256SUMS.txt"

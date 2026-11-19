@@ -5,22 +5,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libvulkan-dev mesa-vulkan-drivers libssl-dev xvfb dbus-x11 ffmpeg libmpv-dev \
     fonts-noto-cjk unzip zip && rm -rf /var/lib/apt/lists/*
 USER vscode
-COPY native/installer-inputs.json /tmp/surtitle-installer-inputs.json
+COPY rust-toolchain.toml /tmp/surtitle-rust-toolchain.toml
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal \
-    --default-toolchain "$(python3 -c 'import json; print(json.load(open("/tmp/surtitle-installer-inputs.json"))["rust"]["version"])')"
+    --default-toolchain "$(python3 -c 'import tomllib; print(tomllib.load(open("/tmp/surtitle-rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
 ENV PATH="/home/vscode/.cargo/bin:${PATH}"
 RUN rustup component add rustfmt clippy
-RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-COPY .node-version /tmp/surtitle-node-version
-COPY --chown=vscode:vscode package.json /tmp/surtitle-bootstrap/package.json
-RUN bash -lc '. "$HOME/.nvm/nvm.sh" && nvm install "$(cat /tmp/surtitle-node-version)" && npm install -g "$(node -p "require(\"/tmp/surtitle-bootstrap/package.json\").packageManager")" && mkdir -p /home/vscode/.local/bin && ln -s "$(which node)" /home/vscode/.local/bin/node && ln -s "$(which pnpm)" /home/vscode/.local/bin/pnpm'
-ENV PATH="/home/vscode/.local/bin:${PATH}"
-RUN PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=never pnpm --dir /tmp/surtitle-bootstrap setup:rust-tools
-RUN PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=never pnpm --dir /tmp/surtitle-bootstrap setup:nextest
-USER root
-COPY verification/toolchain.json /tmp/surtitle-formal-toolchain.json
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    "openjdk-$(python3 -c 'import json; print(json.load(open("/tmp/surtitle-formal-toolchain.json"))["javaMajor"])')-jre-headless" \
-    && rm -rf /var/lib/apt/lists/*
-USER vscode
+RUN cargo install cargo-deny --version 0.20.2 --locked \
+    && cargo install cargo-nextest --version 0.9.148 --locked
 WORKDIR /workspaces/surtitle
