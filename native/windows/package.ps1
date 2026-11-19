@@ -130,6 +130,9 @@ try {
         }
     }
 
+    $cargoAbout = Resolve-CargoAbout $repoRoot
+    $makensis = Resolve-Makensis
+
     $expectedNativeFiles = @()
     foreach ($component in $manifest.components) {
         foreach ($file in $component.runtimeFiles) {
@@ -150,12 +153,23 @@ try {
         Assert-RegularFile (Join-Path $nativeDir $file) 'native runtime resource'
     }
 
+    if (-not $NoBuild) {
+        $env:CARGO_TARGET_DIR = $targetDir
+        & cargo build --release --locked --package surtitle --no-default-features
+        if ($LASTEXITCODE -ne 0) { throw 'cargo build failed.' }
+    } else {
+        & cargo fetch --locked --target x86_64-pc-windows-msvc
+        if ($LASTEXITCODE -ne 0) { throw 'cargo fetch failed.' }
+    }
+
+    $binary = Join-Path $targetDir 'release/surtitle.exe'
+    Assert-RegularFile $binary 'production executable'
+
     if (Test-Path -LiteralPath $noticesDir) {
         Remove-Item -LiteralPath $noticesDir -Recurse -Force
     }
     New-Item -ItemType Directory -Path $noticesDir -Force | Out-Null
 
-    $cargoAbout = Resolve-CargoAbout $repoRoot
     & $cargoAbout generate --manifest-path (Join-Path $repoRoot 'crates/desktop/Cargo.toml') --target x86_64-pc-windows-msvc --no-default-features --locked --fail --config (Join-Path $repoRoot 'about.toml') (Join-Path $repoRoot 'packaging/licenses.hbs') --output-file (Join-Path $noticesDir 'rust.html')
     if ($LASTEXITCODE -ne 0) { throw 'cargo-about failed.' }
     Assert-RegularFile (Join-Path $noticesDir 'rust.html') 'Rust dependency license notices'
@@ -185,16 +199,6 @@ try {
         Copy-Item -LiteralPath $lucideNotice -Destination (Join-Path $noticesDir 'gpui-kit-assets-LICENSE-LUCIDE') -Force
     }
 
-    if (-not $NoBuild) {
-        $env:CARGO_TARGET_DIR = $targetDir
-        & cargo build --release --locked --package surtitle --no-default-features
-        if ($LASTEXITCODE -ne 0) { throw 'cargo build failed.' }
-    }
-
-    $binary = Join-Path $targetDir 'release/surtitle.exe'
-    Assert-RegularFile $binary 'production executable'
-
-    $makensis = Resolve-Makensis
     $nsisDir = Join-Path $targetDir 'release/bundle/nsis'
     if (Test-Path -LiteralPath $nsisDir) {
         Remove-Item -LiteralPath $nsisDir -Recurse -Force
