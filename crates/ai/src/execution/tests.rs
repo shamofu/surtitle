@@ -12,6 +12,7 @@ fn task() -> RequestTask {
             end_ms: 1000,
             text: "Hello.".into(),
         }],
+        context_cues: vec![],
     }
 }
 fn binding() -> PreparationBinding {
@@ -908,5 +909,40 @@ fn openai_audio_prompt_is_bounded_nonempty_and_audio_only() {
         value["openai_audio_prompt"] = json!("Recording context.");
         let execution: ExecutionConfig = serde_json::from_value(value).unwrap();
         assert!(execution.validate().is_err());
+    }
+}
+
+#[test]
+fn gemini_4_supports_xhigh_level_and_rejects_minimal_or_budget_before_quote() {
+    for model_id in [
+        "gemini-4-hydrogen",
+        "gemini-4-neon",
+        "gemini-4-carbon",
+        "gemini-4-argon",
+    ] {
+        for level in ["LOW", "MEDIUM", "HIGH", "XHIGH"] {
+            let mut execution = config();
+            execution.model_id = model_id.into();
+            execution.thinking = ThinkingConfig::Level {
+                level: level.into(),
+            };
+            execution.validate().unwrap();
+        }
+        let mut omit = config();
+        omit.model_id = model_id.into();
+        omit.thinking = ThinkingConfig::Omit;
+        omit.validate().unwrap();
+
+        for rejected in [
+            ThinkingConfig::Level {
+                level: "MINIMAL".into(),
+            },
+            ThinkingConfig::Budget { tokens: 512 },
+        ] {
+            let mut execution = config();
+            execution.model_id = model_id.into();
+            execution.thinking = rejected;
+            assert!(execution.validate().is_err(), "{model_id}");
+        }
     }
 }

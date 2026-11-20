@@ -175,6 +175,7 @@ impl AiStore {
                 != vec![RequestTask::Translation {
                     target_language: "ja".into(),
                     cues: expected,
+                    context_cues: vec![],
                 }]
         {
             return Err(AiError::Invalid(
@@ -285,6 +286,7 @@ mod tests {
                         text: "See you tomorrow.".into(),
                     },
                 ],
+                context_cues: vec![],
             }],
         )
     }

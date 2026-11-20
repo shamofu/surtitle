@@ -55,13 +55,7 @@ pub(super) fn quote_for_ui_with_policy(
         .as_ref()
         .map_or(1, |policy| u64::from(policy.max_retries) + 1);
     let base_additional = quote.additional_reservation_microusd;
-    let additional = base_additional
-        .map(|amount| {
-            amount
-                .checked_mul(multiplier)
-                .context("Retry reservation exceeds the supported amount")
-        })
-        .transpose()?;
+    let additional = base_additional;
     let remaining: Vec<_> = quote
         .requests
         .iter()
@@ -213,6 +207,46 @@ pub(super) fn quote_for_ui_with_policy(
     })
 }
 
+fn surrounding_context(
+    all: &[surtitle_core::SubtitleSegment],
+    target: &[SourceCue],
+) -> Vec<SourceCue> {
+    let Some(first_id) = target.first().map(|cue| cue.id.as_str()) else {
+        return Vec::new();
+    };
+    let Some(last_id) = target.last().map(|cue| cue.id.as_str()) else {
+        return Vec::new();
+    };
+    let usable: Vec<_> = all
+        .iter()
+        .filter(|segment| {
+            surtitle_core::is_usable_subtitle_status(&segment.status)
+                && !segment.text.trim().is_empty()
+        })
+        .collect();
+    let Some(first_idx) = usable.iter().position(|segment| segment.id == first_id) else {
+        return Vec::new();
+    };
+    let Some(last_idx) = usable.iter().rposition(|segment| segment.id == last_id) else {
+        return Vec::new();
+    };
+    let before = &usable[first_idx.saturating_sub(5)..first_idx];
+    let after_start = (last_idx + 1).min(usable.len());
+    let after_end = (after_start + 5).min(usable.len());
+    let after = &usable[after_start..after_end];
+    before
+        .iter()
+        .chain(after.iter())
+        .filter(|segment| !target.iter().any(|cue| cue.id == segment.id))
+        .map(|segment| SourceCue {
+            id: segment.id.clone(),
+            start_ms: segment.start_ms,
+            end_ms: segment.end_ms,
+            text: segment.text.clone(),
+        })
+        .collect()
+}
+
 pub async fn create_quote(
     state: AppState,
     request: QuoteRequest,
@@ -234,9 +268,9 @@ pub async fn create_quote(
         // Keep responses bounded; each translation request includes a small immutable set.
         if let Some(term)=request.focus_term.as_deref().map(str::trim).filter(|s|!s.is_empty()) {
             ensure!(request.kind=="vocabulary","selected term explanations use vocabulary jobs");
-            requests.push(RequestTask::Explanation{term:term.into(),learning_language:media.learning_language.clone(),explanation_language:media.explanation_language.clone(),proficiency:p.settings.proficiency.clone(),cues:cues.clone()});
+            requests.push(RequestTask::Explanation{term:term.into(),learning_language:media.learning_language.clone(),explanation_language:media.explanation_language.clone(),proficiency:p.settings.proficiency.clone(),cues:cues.clone(),context_cues:surrounding_context(&all,&cues)});
         } else {for group in cues.chunks(if request.kind=="translate"{30}else{60}) {
-            requests.push(match request.kind.as_str(){"translate"=>RequestTask::Translation{target_language:media.explanation_language.clone(),cues:group.to_vec()},"vocabulary"=>RequestTask::Vocabulary{learning_language:media.learning_language.clone(),explanation_language:media.explanation_language.clone(),cues:group.to_vec(),max_items:20},_=>bail!("invalid AI task")});
+            requests.push(match request.kind.as_str(){"translate"=>RequestTask::Translation{target_language:media.explanation_language.clone(),cues:group.to_vec(),context_cues:surrounding_context(&all,group)},"vocabulary"=>RequestTask::Vocabulary{learning_language:media.learning_language.clone(),explanation_language:media.explanation_language.clone(),proficiency:Some(p.settings.proficiency.clone()),cues:group.to_vec(),max_items:20},_=>bail!("invalid AI task")});
         }}
         let purpose = if request.focus_term.as_deref().is_some_and(|term| !term.trim().is_empty()) { "explanation" } else if request.kind == "translate" { "translation" } else { "vocabulary" };
         let execution = crate::application::models::execution_for(&p.settings, purpose, request.model)?;
@@ -244,7 +278,7 @@ pub async fn create_quote(
         // Text jobs bind to the exact selected textual input, not an expensive video hash.
         let source_hash=sha256_bytes(&serde_json::to_vec(&cues)?);
         let plan=PreparedJob::new(format!("{} · {}",media.title,request.kind),p.settings.project_for(provider).to_owned(),credential,PreparationBinding{media_id:media.id.clone(),transcript_revision:transcript_fingerprint(&all)?,source_sha256:source_hash,settings_sha256:settings_hash},requests,execution)?;
-        let plan=if request.kind=="vocabulary" {plan.with_text_failure_policy(TextFailurePolicy::SkipRejected)?} else {plan};
+        let plan=if matches!(request.kind.as_str(), "vocabulary" | "translate") {plan.with_text_failure_policy(TextFailurePolicy::SkipRejected)?} else {plan};
         let quote=state.ai.prepare(plan)?;
         let context=QuoteContext{media_id:media.id.clone(),kind:request.kind.clone(),start_ms:request.start_ms,end_ms:request.end_ms};
         {state.preferences.update(|p| {p.quotes.insert(quote.id.clone(),context);p.quote_generations.insert(quote.id.clone(),generation);Ok(()) }) ?;}

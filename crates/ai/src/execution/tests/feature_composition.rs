@@ -59,6 +59,7 @@ fn text_request_json_keeps_legacy_bytes_inside_prompt_strings_and_arrays() {
             RequestTask::Vocabulary {
                 learning_language: "en".into(),
                 explanation_language: "ja".into(),
+                proficiency: None,
                 cues: vec![SourceCue {
                     id: "cue-1".into(),
                     start_ms: 0,
@@ -81,6 +82,7 @@ fn text_request_json_keeps_legacy_bytes_inside_prompt_strings_and_arrays() {
                     end_ms: 1000,
                     text: "Hello.".into(),
                 }],
+                context_cues: vec![],
             },
             r#"{"explanationLanguage":"ja","learningLanguage":"en","proficiency":"intermediate","subtitles":[{"end_ms":1000,"id":"cue-1","start_ms":0,"text":"Hello."}],"term":"Hello"}"#,
         ),

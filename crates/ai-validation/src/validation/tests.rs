@@ -19,6 +19,7 @@ fn task() -> RequestTask {
             end_ms: 1000,
             text: "Hello.".into(),
         }],
+        context_cues: vec![],
     }
 }
 
@@ -313,6 +314,7 @@ fn report_binds_selected_term_proficiency_and_frozen_request_body_without_key_ac
             end_ms: 1000,
             text: "Hello.".into(),
         }],
+        context_cues: vec![],
     };
     let prepared = make_plan(
         "text-quality".into(),

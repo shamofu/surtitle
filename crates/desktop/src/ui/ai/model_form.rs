@@ -197,7 +197,7 @@ impl ModelForm {
         let base = base.unwrap_or(AiModelPreference {
             model_id: String::new(),
             transcription_mode: "transcribe".into(),
-            max_output_tokens: 4096,
+            max_output_tokens: 8192,
             thinking_level: None,
             thinking_budget: None,
             price: None,
@@ -229,11 +229,11 @@ impl ModelForm {
             model_id: String::new(),
             transcription_mode: "transcribe".into(),
             max_output_tokens: if self.purpose == "explanation" {
-                4096
-            } else if self.purpose == "vocabulary" {
                 8192
-            } else {
+            } else if self.purpose == "vocabulary" {
                 12288
+            } else {
+                16384
             },
             thinking_level: None,
             thinking_budget: None,
@@ -485,9 +485,9 @@ fn parse_model(
     }
     let tokens = integer(value("maxOutputTokens"), 1, 1_048_576)
         .ok_or("Output tokens must be a complete integer between 1 and 1,048,576")?;
-    let level = value("thinkingLevel").trim();
-    if !["", "minimal", "low", "medium", "high"].contains(&level) {
-        return Err("Thinking level must be empty, minimal, low, medium or high".into());
+    let level = value("thinkingLevel").trim().to_ascii_uppercase();
+    if !["", "MINIMAL", "LOW", "MEDIUM", "HIGH", "XHIGH"].contains(&level.as_str()) {
+        return Err("Thinking level must be empty, minimal, low, medium, high or xhigh".into());
     }
     let budget = if value("thinkingBudget").is_empty() {
         None
@@ -508,11 +508,25 @@ fn parse_model(
     if provider == AiProvider::Openai && budget.is_some() {
         return Err("OpenAI uses thinking levels, not a thinking token budget".into());
     }
+    if provider == AiProvider::Vertex && id.to_ascii_lowercase().starts_with("gemini-4-") {
+        if budget.is_some() {
+            return Err(
+                "Gemini 4 uses thinking levels (LOW, MEDIUM, HIGH, XHIGH), not a thinking token budget"
+                    .into(),
+            );
+        }
+        if level == "MINIMAL" {
+            return Err(
+                "Gemini 4 does not support MINIMAL thinking level; use LOW, MEDIUM, HIGH, or XHIGH"
+                    .into(),
+            );
+        }
+    }
     let mut model = AiModelPreference {
         model_id: id.into(),
         transcription_mode: mode.into(),
         max_output_tokens: tokens,
-        thinking_level: (!level.is_empty()).then(|| level.into()),
+        thinking_level: (!level.is_empty()).then_some(level),
         thinking_budget: budget,
         price: if id == base.model_id && mode == base.transcription_mode {
             base.price.clone()
@@ -615,7 +629,7 @@ impl Render for ModelForm {
                     "thinkingLevel",
                     localized(
                         cx,
-                        "思考レベル（空欄・minimal・low・medium・high） / Thinking level",
+                        "思考レベル（空欄・minimal・low・medium・high・xhigh） / Thinking level",
                     ),
                 ),
                 (
@@ -797,6 +811,13 @@ mod tests {
         raw.insert("thinkingLevel".into(), "high".into());
         raw.insert("thinkingBudget".into(), "1024".into());
         assert!(parse_model(&raw, &b, AiProvider::Openai, "transcription").is_err());
+        raw.remove("thinkingBudget");
+        raw.insert("thinkingLevel".into(), "xhigh".into());
+        raw.insert("modelId".into(), "gemini-4-argon".into());
+        let gemini4 = parse_model(&raw, &b, AiProvider::Vertex, "explanation").unwrap();
+        assert_eq!(gemini4.thinking_level.as_deref(), Some("XHIGH"));
+        raw.insert("thinkingLevel".into(), "minimal".into());
+        assert!(parse_model(&raw, &b, AiProvider::Vertex, "explanation").is_err());
     }
     #[test]
     fn turning_off_a_restored_override_uses_the_current_global_model_and_price() {

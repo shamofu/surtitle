@@ -575,11 +575,13 @@ pub async fn create_draft_selection_quote(
                     explanation_language: media.explanation_language,
                     proficiency: p.settings.proficiency.clone(),
                     cues: cues.clone(),
+                    context_cues: Vec::new(),
                 }
             } else {
                 RequestTask::Vocabulary {
                     learning_language: media.learning_language,
                     explanation_language: media.explanation_language,
+                    proficiency: Some(p.settings.proficiency.clone()),
                     cues: cues.clone(),
                     max_items: 20,
                 }

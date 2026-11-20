@@ -19,6 +19,7 @@ fn task() -> RequestTask {
                 text: "Thanks.".into(),
             },
         ],
+        context_cues: vec![],
     }
 }
 fn output(term: &str, ids: Vec<&str>) -> String {
@@ -73,6 +74,7 @@ fn split_expression_requires_every_contributing_cue_without_relaxing_citations()
                 text: "forward to the trip, even though it has been delayed.".into(),
             },
         ],
+        context_cues: vec![],
     };
     t.validate().unwrap();
     let body = t.body(None).unwrap();

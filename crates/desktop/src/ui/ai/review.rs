@@ -69,8 +69,6 @@ pub(super) struct ReviewDialog {
     busy: bool,
     loading: bool,
     error: Option<String>,
-    acknowledged: bool,
-    unpriced: bool,
     _subscriptions: Vec<Subscription>,
 }
 impl ReviewDialog {
@@ -131,8 +129,6 @@ impl ReviewDialog {
             busy: false,
             loading: false,
             error: None,
-            acknowledged: false,
-            unpriced: false,
             _subscriptions: vec![observed, changed],
         }
     }
@@ -227,8 +223,6 @@ impl ReviewDialog {
                         this.review = loaded.review.map(Arc::new);
                         this.runtime = loaded.runtime;
                         this.error = loaded.review_error;
-                        this.acknowledged = false;
-                        this.unpriced = false;
                     }
                     Err(error) => this.error = Some(error),
                 }
@@ -303,8 +297,6 @@ impl ReviewDialog {
                 async move { commands::ai::create_retry_quote(&state, job) },
                 |this, quote, _| {
                     this.quote = Some(Arc::new(quote));
-                    this.acknowledged = false;
-                    this.unpriced = false;
                 },
             ),
             _ => {}
@@ -326,13 +318,9 @@ impl ReviewDialog {
             self.error = Some(error);
             return;
         }
-        if !self.acknowledged || ((quote.unpriced || quote.maximum_usd.is_none()) && !self.unpriced)
-        {
-            return;
-        }
         let backend = self.session.read(cx).backend.clone();
         let state = backend.state.clone();
-        let unpriced = self.unpriced;
+        let unpriced = quote.unpriced || quote.maximum_usd.is_none();
         self.perform(
             cx,
             async move {
@@ -492,8 +480,6 @@ impl ReviewDialog {
                 },
                 |this, quote, _| {
                     this.quote = Some(Arc::new(quote));
-                    this.acknowledged = false;
-                    this.unpriced = false;
                 },
             ),
         }
@@ -817,25 +803,6 @@ impl Render for ReviewDialog {
             if let Some(reason) = &blocked {
                 content = content.child(reason.clone());
             }
-            content=content.child(Button::new("review-ai-approval").label(if self.acknowledged{localized(cx, "✓ 範囲・費用・再試行・出力の注意を確認 / Scope and limits reviewed")}else{localized(cx, "□ 表示した範囲・費用・再試行・出力の注意を確認 / Review this scope and limits")}).disabled(disabled).on_click(cx.listener(|this,_,_,cx|{this.acknowledged = !this.acknowledged;cx.notify();})));
-            if quote.unpriced || quote.maximum_usd.is_none() {
-                content = content.child(
-                    Button::new("review-unpriced-approval")
-                        .label(if self.unpriced {
-                            localized(cx, "✓ 料金不明を承知 / Unknown price acknowledged")
-                        } else {
-                            localized(
-                                cx,
-                                "□ 金額上限が保証されないことを承知 / Acknowledge unknown price",
-                            )
-                        })
-                        .disabled(disabled)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.unpriced = !this.unpriced;
-                            cx.notify();
-                        })),
-                );
-            }
             content = content.child(
                 Button::new("approve-reviewed-quote")
                     .primary()
@@ -850,12 +817,7 @@ impl Render for ReviewDialog {
                             "この見積もりを承認して開始 / Approve this estimate and start",
                         )
                     })
-                    .disabled(
-                        disabled
-                            || blocked.is_some()
-                            || !self.acknowledged
-                            || ((quote.unpriced || quote.maximum_usd.is_none()) && !self.unpriced),
-                    )
+                    .disabled(disabled || blocked.is_some())
                     .on_click(cx.listener(|this, _, _, cx| this.approve(cx))),
             );
         }

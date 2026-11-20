@@ -125,6 +125,7 @@ fn quote_plan(state: &AppState, selected: &DraftStudySelection) -> PreparedJob {
         vec![RequestTask::Vocabulary {
             learning_language: "en".into(),
             explanation_language: "ja".into(),
+            proficiency: None,
             cues: sources,
             max_items: 5,
         }],

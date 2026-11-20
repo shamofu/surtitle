@@ -23,9 +23,23 @@ impl AiStore {
     }
 
     /// Only call when the native worker knows no paid request was sent (e.g. key import
-    /// or fingerprint failed). HTTP errors with unknown usage must use mark_unknown.
+    /// or fingerprint failed).
     pub fn release_unsent(&self, attempt_id: &str, code: &str) -> Result<()> {
         self.finish_attempt(attempt_id, Some(0), None, None, Some(code), "released")
+    }
+
+    /// Release the monetary hold for a definitive pre-generation HTTP client rejection
+    /// (400, 401, 403, 404, 409, 422) while moving the request and job to review.
+    pub fn release_rejected_http(&self, attempt_id: &str, status: u16) -> Result<()> {
+        let code = format!("http_{status}");
+        self.finish_attempt(
+            attempt_id,
+            Some(0),
+            None,
+            None,
+            Some(&code),
+            "rejected_http",
+        )
     }
 
     pub fn settle(
@@ -153,7 +167,7 @@ impl AiStore {
                 "Attempt is already final; settlement is never applied twice".into(),
             ));
         }
-        if state == "released" && previous != "reserved" {
+        if matches!(state, "released" | "rejected_http") && previous != "reserved" {
             return Err(AiError::UnknownOutcome);
         }
         tx.execute("UPDATE ai_attempts SET state=?,charged_microusd=?,settled_at_ms=?,usage_json=? WHERE id=?",params![state,charged.map(|n|n as i64),self.now_ms(),usage.map(serde_json::to_string).transpose()?,id])?;

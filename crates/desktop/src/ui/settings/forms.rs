@@ -63,9 +63,9 @@ pub fn budget_patch(
 }
 pub fn recommended_tokens(purpose: &str) -> u32 {
     match purpose {
-        "explanation" => 4096,
-        "vocabulary" => 8192,
-        _ => 12288,
+        "explanation" => 8192,
+        "vocabulary" => 12288,
+        _ => 16384,
     }
 }
 fn empty_model(purpose: &str) -> AiModelPreference {
@@ -279,12 +279,19 @@ pub fn model_patch(
         "modelId" => {
             value.model_id = raw.into();
             value.price = None;
+            let lower = raw.trim().to_ascii_lowercase();
             if provider == "vertex" && purpose == "transcription" {
-                let lower = raw.to_ascii_lowercase();
                 if lower.contains("transcribe") {
                     value.transcription_mode = "transcribe".into();
-                } else if lower.contains("flash") {
+                } else if lower.starts_with("gemini-") {
                     value.transcription_mode = "subtitles".into();
+                }
+            }
+            if provider == "vertex" && lower.starts_with("gemini-4-") {
+                value.thinking_budget = None;
+                input.remove("thinkingBudget");
+                if value.thinking_level.as_deref() == Some("MINIMAL") {
+                    value.thinking_level = Some("LOW".into());
                 }
             }
             input.insert("manual".into(), Value::Bool(false));
@@ -457,6 +464,39 @@ pub fn location_patch(fields: &EditFields, raw: &str) -> Result<EditFields, Stri
     ]))
 }
 
+pub fn recommended_vertex_models_patch(fields: &EditFields) -> Result<EditFields, String> {
+    let mut values = models(fields, "vertex")?;
+    let mut all = inputs(fields)?;
+    for (purpose, model_id, transcription_mode, thinking_level) in [
+        ("transcription", "gemini-3.5-transcribe", "transcribe", None),
+        ("translation", "gemini-4-hydrogen", "subtitles", Some("LOW")),
+        ("vocabulary", "gemini-4-neon", "subtitles", Some("MEDIUM")),
+        ("explanation", "gemini-4-argon", "subtitles", Some("HIGH")),
+    ] {
+        let preference = AiModelPreference {
+            model_id: model_id.into(),
+            transcription_mode: transcription_mode.into(),
+            max_output_tokens: recommended_tokens(purpose),
+            thinking_level: thinking_level.map(Into::into),
+            thinking_budget: None,
+            price: None,
+        };
+        let draft = input_draft(&Map::new(), "vertex", purpose, &preference);
+        all.insert(format!("vertex:{purpose}"), Value::Object(draft));
+        values.insert(purpose.into(), preference);
+    }
+    Ok(EditFields::from([
+        (
+            "aiModels".into(),
+            serde_json::to_string(&values).map_err(|error| error.to_string())?,
+        ),
+        (
+            "modelInputs".into(),
+            serde_json::to_string(&all).map_err(|error| error.to_string())?,
+        ),
+    ]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -586,6 +626,46 @@ mod tests {
                 .unwrap()
                 .audio_microusd_per_minute,
             Some(6000)
+        );
+    }
+
+    #[test]
+    fn gemini_4_model_selection_updates_transcription_mode_and_clears_unsupported_thinking() {
+        let mut fields = EditFields::new();
+        fields.extend(
+            model_patch(&fields, "vertex", "transcription", "modelId", "gemini-4-hydrogen")
+                .unwrap(),
+        );
+        assert_eq!(
+            model(&fields, "vertex", "transcription").transcription_mode,
+            "subtitles"
+        );
+        fields.extend(
+            model_patch(&fields, "vertex", "explanation", "thinkingMode", "budget").unwrap(),
+        );
+        fields.extend(
+            model_patch(&fields, "vertex", "explanation", "modelId", "gemini-4-argon").unwrap(),
+        );
+        assert_eq!(
+            model(&fields, "vertex", "explanation").thinking_budget,
+            None
+        );
+        let recommended = recommended_vertex_models_patch(&fields).unwrap();
+        assert_eq!(
+            model(&recommended, "vertex", "transcription").model_id,
+            "gemini-3.5-transcribe"
+        );
+        assert_eq!(
+            model(&recommended, "vertex", "translation").model_id,
+            "gemini-4-hydrogen"
+        );
+        assert_eq!(
+            model(&recommended, "vertex", "vocabulary").model_id,
+            "gemini-4-neon"
+        );
+        assert_eq!(
+            model(&recommended, "vertex", "explanation").model_id,
+            "gemini-4-argon"
         );
     }
 }

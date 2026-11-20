@@ -47,8 +47,6 @@ pub(super) struct RequestDialog {
     operation_id: Option<String>,
     started: bool,
     error: Option<String>,
-    acknowledged: bool,
-    unpriced: bool,
     source_invalid: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -204,13 +202,29 @@ impl RequestDialog {
             operation_id: None,
             started: false,
             error: None,
-            acknowledged: false,
-            unpriced: false,
             source_invalid: false,
             _subscriptions: subscriptions,
         };
         this.persist(cx);
         this.load_preparations(cx);
+        if this.value.kind != "transcribe"
+            && this
+                .model(cx)
+                .is_some_and(|model| !model.model_id.trim().is_empty())
+            && this
+                .session
+                .read(cx)
+                .snapshot
+                .as_ref()
+                .is_some_and(|snapshot| match snapshot.settings.active_provider {
+                    surtitle_core::AiProvider::Vertex => snapshot.settings.credential_configured,
+                    surtitle_core::AiProvider::Openai => {
+                        snapshot.settings.openai.credential_configured
+                    }
+                })
+        {
+            this.estimate(None, cx);
+        }
         this
     }
     fn configuration(&self, cx: &gpui_kit::App) -> (surtitle_core::AiProvider, u64) {
@@ -245,8 +259,6 @@ impl RequestDialog {
         self.quote = None;
         self.value.quote_id = None;
         self.value.preparation_id = None;
-        self.acknowledged = false;
-        self.unpriced = false;
         self.persist(cx);
         cx.notify();
     }
@@ -454,8 +466,6 @@ impl RequestDialog {
                 this.value.preparation_id = preparation;
                 this.value.quote_id = Some(quote.id.clone());
                 this.quote = Some(Arc::new(quote));
-                this.acknowledged = false;
-                this.unpriced = false;
                 if !this.store.frozen() {
                     this.persist(cx);
                 }
@@ -481,15 +491,11 @@ impl RequestDialog {
             self.error = Some(error);
             return;
         }
-        if !self.acknowledged || ((quote.unpriced || quote.maximum_usd.is_none()) && !self.unpriced)
-        {
-            return;
-        }
         let backend = self.session.read(cx).backend.clone();
         let state = backend.state.clone();
         let id = self.value.id.clone();
         let source = self.value.clone();
-        let unknown = self.unpriced;
+        let unknown = quote.unpriced || quote.maximum_usd.is_none();
         self.perform(
             cx,
             async move {
@@ -799,25 +805,6 @@ impl Render for RequestDialog {
             if let Some(reason) = &blocked {
                 content = content.child(reason.clone());
             }
-            content=content.child(Button::new("ack-scope").label(if self.acknowledged{localized(cx, "✓ 範囲・送信上限・再試行と実験的な出力を確認しました / Scope and limits reviewed")}else{localized(cx, "□ 範囲・料金・再試行・出力の注意を確認 / Review scope, cost, retries and output limitations")}).disabled(frozen).on_click(cx.listener(|this,_,_,cx|{this.acknowledged = !this.acknowledged;cx.notify();})));
-            if quote.unpriced || quote.maximum_usd.is_none() {
-                content = content.child(
-                    Button::new("ack-unpriced")
-                        .label(if self.unpriced {
-                            localized(cx, "✓ 料金不明のまま承認する / Approve unknown pricing")
-                        } else {
-                            localized(
-                                cx,
-                                "□ 金額上限が保証されないことを承知 / Acknowledge unknown pricing",
-                            )
-                        })
-                        .disabled(frozen)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.unpriced = !this.unpriced;
-                            cx.notify();
-                        })),
-                );
-            }
             content = content.child(
                 Button::new("approve-ai-quote")
                     .primary()
@@ -825,12 +812,7 @@ impl Render for RequestDialog {
                         cx,
                         "表示した見積もりを承認して開始 / Approve this estimate and start",
                     ))
-                    .disabled(
-                        frozen
-                            || blocked.is_some()
-                            || !self.acknowledged
-                            || ((quote.unpriced || quote.maximum_usd.is_none()) && !self.unpriced),
-                    )
+                    .disabled(frozen || blocked.is_some())
                     .on_click(cx.listener(|this, _, _, cx| this.approve(cx))),
             );
         }

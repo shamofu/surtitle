@@ -86,6 +86,7 @@ fn translation_fixture() -> (tempfile::TempDir, AppState, PreparedJob) {
         vec![RequestTask::Translation {
             target_language: "ja".into(),
             cues: vec![cue()],
+            context_cues: vec![],
         }],
         crate::application::models::fixture_execution(),
     )

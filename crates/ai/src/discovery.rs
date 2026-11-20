@@ -335,8 +335,18 @@ fn matches_model(description: &str, model_id: &str) -> bool {
         .any(|(i, window)| {
             window == model
                 && description.get(i + model.len()).is_none_or(|word| {
-                    !["lite", "image", "live", "preview", "experimental", "exp"]
-                        .contains(&word.as_str())
+                    ![
+                        "lite",
+                        "image",
+                        "live",
+                        "preview",
+                        "experimental",
+                        "exp",
+                        "cyber",
+                        "permissive",
+                        "customtools",
+                    ]
+                    .contains(&word.as_str())
                 })
         })
 }
@@ -447,6 +457,30 @@ mod tests {
         assert!(!matches_model(
             "Gemini 3.8 Flash input tokens",
             "gemini-3.8-flash-preview"
+        ));
+        assert!(matches_model(
+            "Gemini 4 Hydrogen input text tokens",
+            "gemini-4-hydrogen"
+        ));
+        assert!(matches_model(
+            "Gemini 4 Neon output tokens",
+            "gemini-4-neon"
+        ));
+        assert!(matches_model(
+            "Gemini 4 Argon input tokens",
+            "gemini-4-argon"
+        ));
+        assert!(matches_model(
+            "Gemini 4 Carbon input tokens",
+            "gemini-4-carbon"
+        ));
+        assert!(!matches_model(
+            "Gemini 4 Carbon Cyber Permissive input tokens",
+            "gemini-4-carbon"
+        ));
+        assert!(!matches_model(
+            "Gemini 4 Argon Cyber Permissive output tokens",
+            "gemini-4-argon"
         ));
     }
 
