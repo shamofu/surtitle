@@ -465,8 +465,19 @@ async fn execute_observed_with_io(
             }
             return Err(AiError::Provider(status));
         }
-        // Conservatively retain the reservation even for rejected HTTP requests;
-        // no response usage means the client cannot prove the billing outcome.
+        if matches!(status, 400 | 401 | 403 | 404 | 409 | 422) {
+            store.release_rejected_http(&reservation.attempt_id, status)?;
+            observe(
+                observer,
+                &reservation,
+                ExecutionStage::Rejected,
+                None,
+                Some(status),
+            );
+            return Err(AiError::Provider(status));
+        }
+        // Retain the reservation for ambiguous 3xx/5xx/other HTTP responses where
+        // the client cannot prove whether paid token generation occurred.
         store.mark_unknown(&reservation.attempt_id)?;
         observe(
             observer,
@@ -957,7 +968,7 @@ fn parse_text_response(
     let candidate = &candidates[0];
     match candidate.get("finishReason").and_then(Value::as_str) {
         Some("STOP") => {}
-        Some("MAX_TOKENS") => return Err(Reason::OutputLimit),
+        Some("MAX_TOKENS" | "CONTINUATION") => return Err(Reason::OutputLimit),
         Some(
             "SAFETY" | "RECITATION" | "BLOCKLIST" | "PROHIBITED_CONTENT" | "SPII" | "IMAGE_SAFETY",
         ) => return Err(Reason::Blocked),
@@ -1095,6 +1106,7 @@ mod tests {
         let task = RequestTask::Vocabulary {
             learning_language: "en".into(),
             explanation_language: "ja".into(),
+            proficiency: None,
             cues: vec![crate::SourceCue {
                 id: "known".into(),
                 start_ms: 0,
@@ -1111,10 +1123,13 @@ mod tests {
         let task = RequestTask::Vocabulary {
             learning_language: "en".into(),
             explanation_language: "ja".into(),
+            proficiency: None,
             cues: vec![],
             max_items: 1,
         };
         let raw = serde_json::json!({"candidates":[{"finishReason":"MAX_TOKENS","content":{"parts":[{"text":"{\"items\":[]}"}]}}]});
         assert!(parse_response(&task, &raw).is_err());
+        let cont = serde_json::json!({"candidates":[{"finishReason":"CONTINUATION","content":{"parts":[{"text":"{\"items\":[]}"}]}}]});
+        assert!(parse_response(&task, &cont).is_err());
     }
 }

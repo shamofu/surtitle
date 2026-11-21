@@ -77,6 +77,7 @@ pub(super) fn verify_task_sources(db: &surtitle_core::Store, plan: &PreparedJob)
             RequestTask::Translation {
                 target_language,
                 cues,
+                ..
             } => {
                 ensure!(
                     *target_language == media.explanation_language,
@@ -119,11 +120,18 @@ pub(super) fn verify_current_binding(state: &AppState, plan: &PreparedJob) -> Re
         "Provider connection or credential changed; create a new quote"
     );
     for task in &plan.requests {
-        if let RequestTask::Explanation { proficiency, .. } = task {
-            ensure!(
-                *proficiency == p.settings.proficiency,
-                "proficiency changed; create a new quote"
-            );
+        match task {
+            RequestTask::Explanation { proficiency, .. }
+            | RequestTask::Vocabulary {
+                proficiency: Some(proficiency),
+                ..
+            } => {
+                ensure!(
+                    *proficiency == p.settings.proficiency,
+                    "proficiency changed; create a new quote"
+                );
+            }
+            _ => {}
         }
     }
     drop(p);
@@ -145,11 +153,18 @@ pub(crate) fn verify_application_binding(state: &AppState, plan: &PreparedJob) -
     // contents, whereas rotating a key must not require another paid request.
     let p = state.preferences.read()?;
     for task in &plan.requests {
-        if let RequestTask::Explanation { proficiency, .. } = task {
-            ensure!(
-                *proficiency == p.settings.proficiency,
-                "proficiency changed; review the saved result"
-            );
+        match task {
+            RequestTask::Explanation { proficiency, .. }
+            | RequestTask::Vocabulary {
+                proficiency: Some(proficiency),
+                ..
+            } => {
+                ensure!(
+                    *proficiency == p.settings.proficiency,
+                    "proficiency changed; review the saved result"
+                );
+            }
+            _ => {}
         }
     }
     drop(p);

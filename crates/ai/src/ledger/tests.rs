@@ -16,6 +16,7 @@ pub(super) fn plan() -> PreparedJob {
         vec![RequestTask::Vocabulary {
             learning_language: "en".into(),
             explanation_language: "ja".into(),
+            proficiency: None,
             cues: vec![SourceCue {
                 id: "cue".into(),
                 start_ms: 0,

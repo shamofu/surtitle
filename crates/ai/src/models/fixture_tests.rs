@@ -34,6 +34,7 @@ fn dictionary_headword_is_preserved_without_weakening_selected_term_validation()
     let task = RequestTask::Vocabulary {
         learning_language: "ja".into(),
         explanation_language: "en".into(),
+        proficiency: None,
         cues: vec![cue.clone()],
         max_items: 1,
     };
@@ -49,6 +50,7 @@ fn dictionary_headword_is_preserved_without_weakening_selected_term_validation()
         explanation_language: "en".into(),
         proficiency: "B1".into(),
         cues: vec![cue],
+        context_cues: vec![],
     };
     // Extracted headwords are canonicalized, but an explicitly selected phrase
     // must still be returned exactly; a model cannot silently replace that input.
@@ -106,6 +108,7 @@ fn level_specific_preparations_freeze_distinct_inputs_without_altering_original_
             explanation_language: "ja".into(),
             proficiency: proficiency.into(),
             cues: cues(),
+            context_cues: vec![],
         };
         let plan = PreparedJob::fixture(
             "level".into(),
@@ -134,6 +137,7 @@ fn task(kind: &str) -> RequestTask {
         "vocabulary" => RequestTask::Vocabulary {
             learning_language: "en".into(),
             explanation_language: "ja".into(),
+            proficiency: None,
             cues: cues(),
             max_items: 1,
         },
@@ -143,10 +147,12 @@ fn task(kind: &str) -> RequestTask {
             explanation_language: "ja".into(),
             proficiency: "B1".into(),
             cues: cues(),
+            context_cues: vec![],
         },
         "translation" => RequestTask::Translation {
             target_language: "ja".into(),
             cues: cues(),
+            context_cues: vec![],
         },
         "audio" => RequestTask::AudioTranscription {
             language: "auto".into(),

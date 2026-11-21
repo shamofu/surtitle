@@ -104,6 +104,7 @@ pub(crate) fn seed_ai_recovery_fixture(state: &AppState) -> Result<()> {
             vec![RequestTask::Translation {
                 target_language: "ja".into(),
                 cues,
+                context_cues: vec![],
             }],
             crate::application::models::fixture_execution(),
         )?)?;

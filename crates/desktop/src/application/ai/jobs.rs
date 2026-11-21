@@ -367,19 +367,21 @@ async fn run_approved_with<E: JobExecutor>(
                     if !wait_for_dispatch(&state, &quote_id, &approval_id, at).await? {
                         return Ok(());
                     }
-                    phase = "source";
-                    let verify_state = state.clone();
-                    let verify_plan = plan.clone();
-                    state
-                        .runtime
-                        .clone()
-                        .spawn_blocking(move || {
-                            crate::application::transcript::storage::verify_audio_source_content(
-                                &verify_state,
-                                &verify_plan,
-                            )
-                        })
-                        .await??;
+                    if has_audio {
+                        phase = "source";
+                        let verify_state = state.clone();
+                        let verify_plan = plan.clone();
+                        state
+                            .runtime
+                            .clone()
+                            .spawn_blocking(move || {
+                                crate::application::transcript::storage::verify_audio_source_content(
+                                    &verify_state,
+                                    &verify_plan,
+                                )
+                            })
+                            .await??;
+                    }
                     continue;
                 }
                 Err(AiError::InFlight) => {

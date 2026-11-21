@@ -1,5 +1,5 @@
 use super::*;
-use crate::{AudioAttachment, BudgetLimits, ParsedOutput};
+use crate::{AudioAttachment, BudgetLimits, ParsedOutput, RequestTask};
 use std::sync::atomic::Ordering;
 
 struct Fixture {
@@ -110,12 +110,9 @@ fn retry_scope_preserves_digest_counts_and_financial_holds_through_exhaustion() 
         }
         let summary = f.store.summary().unwrap();
         assert!(summary.unknown_attempts.is_empty());
-        assert_eq!(summary.unpriced_attempts, if unpriced { 3 } else { 0 });
+        assert_eq!(summary.unpriced_attempts, 0);
         assert_eq!(summary.daily_actual_charged_microusd, 0);
-        assert_eq!(
-            summary.daily_held_microusd,
-            f.quote.requests[0].estimated_max_microusd.unwrap_or(0) * 3
-        );
+        assert_eq!(summary.daily_held_microusd, 0);
         assert_eq!(
             f.store.retry_status(&f.quote.id).unwrap().unwrap().state,
             "exhausted"
@@ -166,21 +163,15 @@ fn legacy_scope_and_historical_unknown_never_gain_automatic_retries() {
     let reservation = f.reserve(&approval);
     let status = f.reject(&reservation, None);
     assert_eq!(status.max_retries, 0);
-    assert_eq!(f.store.summary().unwrap().unknown_attempts.len(), 1);
-    assert!(f
-        .store
-        .reapprove_scope_with_retry(&f.quote.id, &f.quote.digest, true, true, Some(1))
-        .is_err());
-    f.store
-        .acknowledge_unknown(&reservation.attempt_id)
-        .unwrap();
+    assert!(f.store.summary().unwrap().unknown_attempts.is_empty());
+    assert_eq!(f.store.quote(&f.quote.id).unwrap().state, "needs_review");
     let renewed = f
         .store
         .reapprove_scope_with_retry(&f.quote.id, &f.quote.digest, true, true, Some(1))
         .unwrap();
     assert_ne!(renewed, approval);
     assert_eq!(f.reserve(&renewed).ordinal, 0);
-    assert_eq!(f.store.summary().unwrap().unpriced_attempts, 2);
+    assert_eq!(f.store.summary().unwrap().unpriced_attempts, 1);
 }
 
 #[test]
@@ -189,7 +180,7 @@ fn approval_checks_worst_case_budget_and_limits_policy_to_transcription() {
     let cost = f.quote.estimated_max_microusd.unwrap();
     f.store
         .set_budget(BudgetLimits {
-            per_job_microusd: cost * 2,
+            per_job_microusd: cost - 1,
             daily_microusd: 0,
             monthly_microusd: 0,
         })
@@ -199,6 +190,13 @@ fn approval_checks_worst_case_budget_and_limits_policy_to_transcription() {
             .approve_scope_with_retry(&f.quote.id, &f.quote.digest, false, true, Some(1)),
         Err(AiError::BudgetExceeded("job"))
     ));
+    f.store
+        .set_budget(BudgetLimits {
+            per_job_microusd: cost,
+            daily_microusd: 0,
+            monthly_microusd: 0,
+        })
+        .unwrap();
     assert!(f
         .store
         .approve_scope_with_retry(&f.quote.id, &f.quote.digest, false, true, Some(2))
@@ -209,11 +207,11 @@ fn approval_checks_worst_case_budget_and_limits_policy_to_transcription() {
         .store
         .transcription_retry_policy(&text.id)
         .unwrap()
-        .is_none());
+        .is_some());
     assert!(f
         .store
         .approve_scope_with_retry(&text.id, &text.digest, false, true, Some(1))
-        .is_err());
+        .is_ok());
 }
 
 #[test]
@@ -233,7 +231,7 @@ fn pause_cancel_restart_and_new_approval_invalidate_waiters_without_refunding() 
             }
         }
         assert!(f.store.reserve_next_scoped(&f.quote.id, &approval).is_err());
-        assert_eq!(f.store.summary().unwrap().unpriced_attempts, 1);
+        assert_eq!(f.store.summary().unwrap().unpriced_attempts, 0);
         assert!(f.store.summary().unwrap().unknown_attempts.is_empty());
         if action == "cancel" {
             continue;
@@ -358,7 +356,7 @@ fn lowering_budget_during_wait_prevents_another_reservation() {
     f.advance_to(status.next_retry_at.as_deref().unwrap());
     f.store
         .set_budget(BudgetLimits {
-            per_job_microusd: reservation.reserved_microusd.unwrap(),
+            per_job_microusd: reservation.reserved_microusd.unwrap() - 1,
             daily_microusd: 0,
             monthly_microusd: 0,
         })
@@ -406,7 +404,8 @@ fn persisted_legacy_approval_without_generation_remains_one_send_only() {
     f.store.validate_dispatch(&reserved).unwrap();
     assert_eq!(f.reject(&reserved, None).max_retries, 0);
     assert!(f.store.reserve_next(&f.quote.id).is_err());
-    assert_eq!(f.store.summary().unwrap().unknown_attempts.len(), 1);
+    assert!(f.store.summary().unwrap().unknown_attempts.is_empty());
+    assert_eq!(f.store.quote(&f.quote.id).unwrap().state, "needs_review");
 }
 
 #[test]
@@ -490,10 +489,7 @@ fn paused_response_retains_server_floor_and_priced_holds_across_calendar_days() 
         Err(AiError::RetryWaiting(_))
     ));
     f.store.clock.fetch_add(86_400_000, Ordering::SeqCst);
-    assert_eq!(
-        f.store.summary().unwrap().daily_held_microusd,
-        reservation.reserved_microusd.unwrap()
-    );
+    assert_eq!(f.store.summary().unwrap().daily_held_microusd, 0);
     assert!(f.store.retry_not_before(&f.quote.id).unwrap().is_none());
     let quote = f.store.refresh_quote(&f.quote.id).unwrap();
     let renewed = f

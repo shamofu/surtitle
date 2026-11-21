@@ -404,6 +404,30 @@ impl SettingsView {
         let model = forms::model(&fields, provider, purpose);
         let audio = provider == "openai" && purpose == "transcription";
         let mut model_section = section(self.t("用途ごとのモデル", "Models by task", cx), cx)
+            .when(provider == "vertex", |view| {
+                view.child(
+                    button("vertex-recommended-models")
+                        .label(self.t(
+                            "おすすめのGemini 4構成を設定",
+                            "Set up recommended Gemini 4 combination",
+                            cx,
+                        ))
+                        .disabled(frozen)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            match forms::recommended_vertex_models_patch(&this.fields(cx)) {
+                                Ok(patch) => {
+                                    this.change(patch, cx);
+                                    this.notice = Some(this.t(
+                                        "用途別のおすすめモデル（Gemini 3.5 Transcribe / Gemini 4 Hydrogen・Neon・Argon）を設定しました。",
+                                        "Configured the recommended models by task (Gemini 3.5 Transcribe / Gemini 4 Hydrogen, Neon, Argon).",
+                                        cx,
+                                    ));
+                                }
+                                Err(error) => this.error = Some(error),
+                            }
+                        })),
+                )
+            })
             .child(
                 row().flex_wrap().children(
                     [
@@ -424,6 +448,29 @@ impl SettingsView {
                     }),
                 ),
             )
+            .when(provider == "vertex", |view| {
+                let presets = [
+                    "gemini-4-hydrogen",
+                    "gemini-4-neon",
+                    "gemini-4-carbon",
+                    "gemini-4-argon",
+                    "gemini-3.5-transcribe",
+                ];
+                view.child(
+                    row().flex_wrap().children(presets.into_iter().map(|preset| {
+                        let p = provider.to_owned();
+                        button(gpui_kit::SharedString::from(format!(
+                            "vertex-preset-{purpose}-{preset}"
+                        )))
+                        .label(preset)
+                        .selected(model.model_id.trim() == preset)
+                        .disabled(frozen)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.model_change(&p, purpose, "modelId", preset, cx)
+                        }))
+                    })),
+                )
+            })
             .child(
                 button("model-discovery")
                     .label(self.t("サービスからモデル候補を取得", "Fetch model candidates", cx))
@@ -509,13 +556,25 @@ impl SettingsView {
                     .on_click(cx.listener(move|this,_,_,cx|this.model_change(&p,purpose,"standardTokens","",cx))));
         }
         if provider == "vertex" {
+            let is_gemini_4 = model
+                .model_id
+                .trim()
+                .to_ascii_lowercase()
+                .starts_with("gemini-4-");
             let mode = if model.thinking_level.is_some() {
                 "level"
-            } else if model.thinking_budget.is_some() {
+            } else if model.thinking_budget.is_some() && !is_gemini_4 {
                 "budget"
             } else {
                 "omit"
             };
+            let mut mode_choices = vec![
+                ("omit", self.t("モデル既定値", "Model default", cx)),
+                ("level", self.t("レベル指定", "Set level", cx)),
+            ];
+            if !is_gemini_4 {
+                mode_choices.push(("budget", self.t("トークン予算", "Token budget", cx)));
+            }
             model_section = model_section
                 .child(div().child(self.t("思考設定", "Thinking configuration", cx)))
                 .child(self.model_choices(
@@ -523,22 +582,24 @@ impl SettingsView {
                     purpose,
                     "thinkingMode",
                     mode,
-                    vec![
-                        ("omit", self.t("モデル既定値", "Model default", cx)),
-                        ("level", self.t("レベル指定", "Set level", cx)),
-                        ("budget", self.t("トークン予算", "Token budget", cx)),
-                    ],
+                    mode_choices,
                     cx,
                 ));
             if mode == "level" {
+                let levels: &[&'static str] = if is_gemini_4 {
+                    &["LOW", "MEDIUM", "HIGH", "XHIGH"]
+                } else {
+                    &["MINIMAL", "LOW", "MEDIUM", "HIGH", "XHIGH"]
+                };
                 model_section = model_section.child(
                     self.model_choices(
                         provider,
                         purpose,
                         "thinkingLevel",
                         model.thinking_level.as_deref().unwrap_or("LOW"),
-                        ["MINIMAL", "LOW", "MEDIUM", "HIGH"]
-                            .into_iter()
+                        levels
+                            .iter()
+                            .copied()
                             .map(|level| (level, level.into()))
                             .collect(),
                         cx,

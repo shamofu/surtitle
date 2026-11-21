@@ -1,7 +1,8 @@
 //! Approval-bound, bounded retries of explicit HTTP 429 responses only.
-//! A rejection is operationally known, but its monetary hold is never refunded.
+//! A 429 rate-limit rejection releases its pre-dispatch monetary hold so retry attempts
+//! or subsequent requests do not double-count unconsumed budget.
 use super::{audit, AiStore, ReservedRequest};
-use crate::{AiError, PreparedJob, RequestTask, Result};
+use crate::{AiError, PreparedJob, Result};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
@@ -86,14 +87,7 @@ impl AiStore {
         if self.development.is_some() {
             return None;
         }
-        (!plan.requests.is_empty()
-            && plan.requests.iter().all(|task| {
-                matches!(
-                    task,
-                    RequestTask::AudioTranscription { .. } | RequestTask::TranscribePreview { .. }
-                )
-            }))
-        .then_some(RetryPolicy {
+        (!plan.requests.is_empty()).then_some(RetryPolicy {
             version: 1,
             max_retries: 2,
         })
@@ -152,8 +146,26 @@ impl AiStore {
                     jitter,
                 },
             )?;
+            tx.execute(
+                "UPDATE ai_attempts SET state='rejected_429',charged_microusd=0,settled_at_ms=? WHERE id=? AND state='reserved'",
+                params![at, reservation.attempt_id],
+            )?;
+            tx.execute(
+                "UPDATE ai_requests SET state='failed',error_code='rate_limited' WHERE job_id=? AND ordinal=?",
+                params![reservation.job_id, reservation.ordinal],
+            )?;
+            tx.execute(
+                "UPDATE ai_jobs SET state='needs_review' WHERE id=? AND state NOT IN ('cancelled','paused')",
+                [&reservation.job_id],
+            )?;
+            audit(
+                &tx,
+                at,
+                "rejected_429",
+                Some(&reservation.job_id),
+                &reservation.attempt_id,
+            )?;
             tx.commit()?;
-            self.mark_unknown(&reservation.attempt_id)?;
             return Ok(RetryStatus {
                 state: "exhausted".into(),
                 ordinal: reservation.ordinal,
@@ -197,7 +209,7 @@ impl AiStore {
             floor
         };
         let next = next.into_iter().chain(pacing_floor).max();
-        tx.execute("UPDATE ai_attempts SET state='rejected_429',settled_at_ms=? WHERE id=? AND state='reserved'", params![at,reservation.attempt_id])?;
+        tx.execute("UPDATE ai_attempts SET state='rejected_429',charged_microusd=0,settled_at_ms=? WHERE id=? AND state='reserved'", params![at,reservation.attempt_id])?;
         tx.execute(
             "UPDATE ai_requests SET state=?,error_code='rate_limited' WHERE job_id=? AND ordinal=?",
             params![

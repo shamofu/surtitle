@@ -17,10 +17,10 @@ pub(super) fn sum_estimates<'a>(
     })
 }
 pub(super) fn unpriced_count(conn: &Connection, job: Option<&str>) -> Result<u64> {
-    Ok(conn.query_row("SELECT COUNT(*) FROM ai_attempts WHERE reserve_microusd IS NULL AND state!='released' AND (?1 IS NULL OR job_id=?1)",[job],|r|r.get::<_,i64>(0))? as u64)
+    Ok(conn.query_row("SELECT COUNT(*) FROM ai_attempts WHERE reserve_microusd IS NULL AND state NOT IN ('released','rejected_429','rejected_http') AND (?1 IS NULL OR job_id=?1)",[job],|r|r.get::<_,i64>(0))? as u64)
 }
 pub(super) fn unpriced_count_for(conn: &Connection, provider: AiProvider) -> Result<u64> {
-    Ok(conn.query_row("SELECT COUNT(*) FROM ai_attempts a JOIN ai_jobs j ON j.id=a.job_id WHERE a.reserve_microusd IS NULL AND a.state!='released' AND COALESCE(json_extract(j.plan_json,'$.execution.provider'),'vertex')=?", [provider.as_str()], |r| r.get::<_, i64>(0))? as u64)
+    Ok(conn.query_row("SELECT COUNT(*) FROM ai_attempts a JOIN ai_jobs j ON j.id=a.job_id WHERE a.reserve_microusd IS NULL AND a.state NOT IN ('released','rejected_429','rejected_http') AND COALESCE(json_extract(j.plan_json,'$.execution.provider'),'vertex')=?", [provider.as_str()], |r| r.get::<_, i64>(0))? as u64)
 }
 pub(super) fn validate_scope(
     conn: &Connection,

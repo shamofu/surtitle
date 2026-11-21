@@ -653,8 +653,6 @@ struct SelectionEditor {
     recovery: Vec<UiDraft>,
     quote: Option<Arc<AiQuote>>,
     candidates: Vec<Candidate>,
-    acknowledged: bool,
-    unpriced: bool,
     busy: bool,
     error: Option<String>,
     _subscriptions: Vec<Subscription>,
@@ -923,8 +921,6 @@ impl SelectionEditor {
             recovery: vec![],
             quote: None,
             candidates: vec![],
-            acknowledged: false,
-            unpriced: false,
             busy: false,
             error: None,
             _subscriptions: subscriptions,
@@ -1259,8 +1255,6 @@ impl SelectionEditor {
                 this.model_continuation.quote_id = Some(quote.id.clone());
                 this.persist_models(cx);
                 this.quote = Some(Arc::new(quote));
-                this.acknowledged = false;
-                this.unpriced = false;
             },
         );
     }
@@ -1283,13 +1277,9 @@ impl SelectionEditor {
             self.error = Some(error);
             return;
         }
-        if !self.acknowledged || ((quote.unpriced || quote.maximum_usd.is_none()) && !self.unpriced)
-        {
-            return;
-        }
         let backend = self.session.read(cx).backend.clone();
         let state = backend.state.clone();
-        let unpriced = self.unpriced;
+        let unpriced = quote.unpriced || quote.maximum_usd.is_none();
         self.perform(
             cx,
             async move {
@@ -1604,56 +1594,13 @@ impl Render for SelectionEditor {
                 content = content.child(reason.clone());
             }
             content = content.child(
-                Button::new("bookmark-ack-quote")
-                    .label(if self.acknowledged {
-                        localized(
-                            cx,
-                            "✓ 範囲・費用・上限・再試行を確認 / Scope and limits reviewed",
-                        )
-                    } else {
-                        localized(
-                            cx,
-                            "□ 範囲・費用・上限・再試行を確認 / Review scope and limits",
-                        )
-                    })
-                    .disabled(frozen)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.acknowledged = !this.acknowledged;
-                        cx.notify();
-                    })),
-            );
-            if quote.unpriced || quote.maximum_usd.is_none() {
-                content = content.child(
-                    Button::new("bookmark-ack-unpriced")
-                        .label(if self.unpriced {
-                            localized(cx, "✓ 料金不明を承知 / Unknown price acknowledged")
-                        } else {
-                            localized(
-                                cx,
-                                "□ 料金不明・上限保証なしを承知 / Acknowledge unknown price",
-                            )
-                        })
-                        .disabled(frozen)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.unpriced = !this.unpriced;
-                            cx.notify();
-                        })),
-                );
-            }
-            content = content.child(
                 Button::new("bookmark-approve-ai")
                     .primary()
                     .label(localized(
                         cx,
                         "表示した見積もりを承認して開始 / Approve displayed estimate and start",
                     ))
-                    .disabled(
-                        frozen
-                            || !confirmed
-                            || block.is_some()
-                            || !self.acknowledged
-                            || ((quote.unpriced || quote.maximum_usd.is_none()) && !self.unpriced),
-                    )
+                    .disabled(frozen || !confirmed || block.is_some())
                     .on_click(cx.listener(|this, _, _, cx| this.approve(cx))),
             );
         }

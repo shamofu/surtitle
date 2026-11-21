@@ -152,7 +152,7 @@ fn legacy_plans_still_stop_on_rejected_output_and_keep_their_serialized_identity
 }
 
 #[test]
-fn skip_policy_survives_execution_changes_and_cannot_be_used_for_translation() {
+fn skip_policy_survives_execution_changes_allows_translation_and_rejects_audio() {
     let original = plan(2);
     let changed = original
         .clone()
@@ -164,18 +164,40 @@ fn skip_policy_survives_execution_changes_and_cannot_be_used_for_translation() {
         unreachable!()
     };
     let translation = PreparedJob::new(
+        original.title.clone(),
+        original.project_id.clone(),
+        original.credential_id.clone(),
+        original.binding.clone(),
+        vec![RequestTask::Translation {
+            target_language: "ja".into(),
+            cues,
+            context_cues: vec![],
+        }],
+        original.execution.clone(),
+    )
+    .unwrap();
+    assert!(translation
+        .with_text_failure_policy(TextFailurePolicy::SkipRejected)
+        .is_ok());
+
+    let audio = PreparedJob::fixture(
         original.title,
         original.project_id,
         original.credential_id,
         original.binding,
-        vec![RequestTask::Translation {
-            target_language: "ja".into(),
-            cues,
+        vec![RequestTask::AudioTranscription {
+            language: "en".into(),
+            audio: crate::AudioAttachment {
+                path: "unused.flac".into(),
+                sha256: crate::sha256_bytes(b"audio"),
+                byte_len: 5,
+                mime_type: "audio/flac".into(),
+                source_start_ms: 0,
+                duration_ms: 1000,
+            },
         }],
-        original.execution,
-    )
-    .unwrap();
-    assert!(translation
+    );
+    assert!(audio
         .with_text_failure_policy(TextFailurePolicy::SkipRejected)
         .is_err());
 }

@@ -283,10 +283,7 @@ fn rejection_slows_subsequent_chunks_and_three_successes_recover_gradually() {
     }
     assert_eq!(f.lane().0, 0);
     assert_eq!(f.store.summary().unwrap().unknown_attempts.len(), 0);
-    assert_eq!(
-        f.store.summary().unwrap().daily_held_microusd,
-        4 * f.quote.requests[0].estimated_max_microusd.unwrap()
-    );
+    assert_eq!(f.store.summary().unwrap().daily_held_microusd, 0);
 }
 
 #[test]

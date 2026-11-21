@@ -280,7 +280,9 @@ impl PreparedJob {
             && self.requests.iter().any(|task| {
                 !matches!(
                     task,
-                    RequestTask::Vocabulary { .. } | RequestTask::Explanation { .. }
+                    RequestTask::Vocabulary { .. }
+                        | RequestTask::Explanation { .. }
+                        | RequestTask::Translation { .. }
                 )
             })
         {
