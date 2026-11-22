@@ -645,8 +645,7 @@ async fn http429_retries_only_failed_section_and_preserves_progressive_manual_ed
         fixture.quote.total_output_tokens * 3
     );
     assert!(
-        (fixture.quote.maximum_usd.unwrap() - fixture.quote.estimated_usd.unwrap()).abs()
-            < 1e-10
+        (fixture.quote.maximum_usd.unwrap() - fixture.quote.estimated_usd.unwrap()).abs() < 1e-10
     );
     let service = fixture.service(Scenario::TranscriptionSecond429ThenSuccess);
     let worker = fixture.start(fixture.approve_retries(false), service.clone());

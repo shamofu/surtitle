@@ -374,19 +374,14 @@ fn validate_context_cues(cues: &[SourceCue], context_cues: &[SourceCue]) -> Resu
     if context_cues.is_empty() {
         return Ok(());
     }
-    if context_cues.len() > 100
-        || serde_json::to_vec(&(cues, context_cues))?.len() > 100_000
-    {
+    if context_cues.len() > 100 || serde_json::to_vec(&(cues, context_cues))?.len() > 100_000 {
         return Err(AiError::Invalid(
             "Surrounding context subtitles exceed the 100 KB request limit".into(),
         ));
     }
     let mut ids: std::collections::HashSet<_> = cues.iter().map(|c| &c.id).collect();
     if context_cues.iter().any(|c| {
-        c.id.is_empty()
-            || c.text.trim().is_empty()
-            || c.start_ms >= c.end_ms
-            || !ids.insert(&c.id)
+        c.id.is_empty() || c.text.trim().is_empty() || c.start_ms >= c.end_ms || !ids.insert(&c.id)
     }) {
         return Err(AiError::Invalid(
             "Surrounding context subtitle IDs and time intervals must be valid and distinct from target subtitles".into(),

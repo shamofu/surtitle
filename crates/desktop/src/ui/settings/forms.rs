@@ -633,8 +633,14 @@ mod tests {
     fn gemini_4_model_selection_updates_transcription_mode_and_clears_unsupported_thinking() {
         let mut fields = EditFields::new();
         fields.extend(
-            model_patch(&fields, "vertex", "transcription", "modelId", "gemini-4-hydrogen")
-                .unwrap(),
+            model_patch(
+                &fields,
+                "vertex",
+                "transcription",
+                "modelId",
+                "gemini-4-hydrogen",
+            )
+            .unwrap(),
         );
         assert_eq!(
             model(&fields, "vertex", "transcription").transcription_mode,
@@ -644,7 +650,14 @@ mod tests {
             model_patch(&fields, "vertex", "explanation", "thinkingMode", "budget").unwrap(),
         );
         fields.extend(
-            model_patch(&fields, "vertex", "explanation", "modelId", "gemini-4-argon").unwrap(),
+            model_patch(
+                &fields,
+                "vertex",
+                "explanation",
+                "modelId",
+                "gemini-4-argon",
+            )
+            .unwrap(),
         );
         assert_eq!(
             model(&fields, "vertex", "explanation").thinking_budget,
