@@ -202,6 +202,7 @@ impl OfflineVertexService {
                 let RequestTask::Translation {
                     target_language,
                     cues,
+                    ..
                 } = task
                 else {
                     return Err(AiError::Invalid(

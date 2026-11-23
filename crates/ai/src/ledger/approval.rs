@@ -299,14 +299,7 @@ impl AiStore {
             }
         }
         if plan.execution.price.is_some() {
-            check_budget(
-                &tx,
-                job_id,
-                pending_cost
-                    .checked_mul(u64::from(max_retries + 1))
-                    .ok_or_else(|| AiError::Invalid("Cost overflow".into()))?,
-                at,
-            )?;
+            check_budget(&tx, job_id, pending_cost, at)?;
         }
         #[cfg(feature = "development-validation")]
         self.check_development_budget(&tx, pending_cost, true)?;

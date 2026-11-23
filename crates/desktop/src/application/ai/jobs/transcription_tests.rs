@@ -645,8 +645,7 @@ async fn http429_retries_only_failed_section_and_preserves_progressive_manual_ed
         fixture.quote.total_output_tokens * 3
     );
     assert!(
-        (fixture.quote.maximum_usd.unwrap() - fixture.quote.estimated_usd.unwrap() * 3.).abs()
-            < 1e-10
+        (fixture.quote.maximum_usd.unwrap() - fixture.quote.estimated_usd.unwrap()).abs() < 1e-10
     );
     let service = fixture.service(Scenario::TranscriptionSecond429ThenSuccess);
     let worker = fixture.start(fixture.approve_retries(false), service.clone());
@@ -683,7 +682,7 @@ async fn http429_retries_only_failed_section_and_preserves_progressive_manual_ed
     corrected.text = "Kept while waiting for HTTP 429.".into();
     corrected.status = "confirmed".into();
     crate::application::subtitles::edit_segment(fixture.state.clone(), corrected.clone()).unwrap();
-    assert!(fixture.state.ai.summary().unwrap().daily_held_microusd > 0);
+    assert_eq!(fixture.state.ai.summary().unwrap().daily_held_microusd, 0);
     let retained_spend = fixture
         .state
         .ai
@@ -771,7 +770,7 @@ async fn http429_exhaustion_stops_after_three_sends_and_retains_accounting() {
         attempts(fixture.directory.path(), &fixture.quote.id).len(),
         3
     );
-    assert!(fixture.state.ai.summary().unwrap().daily_held_microusd > 0);
+    assert_eq!(fixture.state.ai.summary().unwrap().daily_held_microusd, 0);
 }
 
 #[tokio::test]
@@ -928,17 +927,23 @@ async fn in_flight_http429_does_not_hide_pause_or_cancellation_in_snapshot() {
 }
 
 #[tokio::test]
-async fn legacy_approval_keeps_http429_unknown_without_automatic_retry() {
+async fn legacy_approval_stops_http429_without_automatic_retry_and_releases_hold() {
     let fixture = Fixture::new().await;
     let service = fixture.service(Scenario::Transcription429ThenSuccess);
     finished(fixture.start(fixture.approve(), service.clone()))
         .await
         .unwrap_err();
     assert_eq!(service.sent_ordinals(), [0]);
-    assert_eq!(
-        fixture.state.ai.summary().unwrap().unknown_attempts.len(),
-        1
+    assert!(
+        fixture
+            .state
+            .ai
+            .summary()
+            .unwrap()
+            .unknown_attempts
+            .is_empty()
     );
+    assert_eq!(fixture.state.ai.summary().unwrap().daily_held_microusd, 0);
     assert!(
         fixture
             .state
@@ -947,27 +952,14 @@ async fn legacy_approval_keeps_http429_unknown_without_automatic_retry() {
             .unwrap()
             .is_none()
     );
-    for (locale, acknowledgement) in [
-        ("ja", "結果不明の要求を確認"),
-        ("en", "Acknowledge the unknown request"),
-    ] {
-        fixture
-            .state
-            .preferences
-            .update(|p| {
-                p.settings.locale = locale.into();
-                Ok(())
-            })
-            .unwrap();
-        let snapshot = super::super::snapshot::get_app_snapshot(fixture.state.clone()).unwrap();
-        let job = snapshot
-            .jobs
-            .iter()
-            .find(|job| job.id == fixture.quote.id)
-            .unwrap();
-        assert_eq!(job.status, "unknown");
-        assert!(job.message.as_ref().unwrap().contains(acknowledgement));
-    }
+    let snapshot = super::super::snapshot::get_app_snapshot(fixture.state.clone()).unwrap();
+    let job = snapshot
+        .jobs
+        .iter()
+        .find(|job| job.id == fixture.quote.id)
+        .unwrap();
+    assert_eq!(job.status, "failed");
+    assert_eq!(job.issue.as_ref().unwrap().http_status, Some(429));
 }
 
 #[tokio::test]

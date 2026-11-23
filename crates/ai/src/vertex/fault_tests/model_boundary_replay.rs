@@ -249,7 +249,7 @@ async fn reject429_unknown_local_reuse_acknowledge_reapprove_keeps_both_holds() 
             result => panic!("Reject429 expected RetryWaiting: {result:?}"),
         };
         let hold = h.quote.requests[0].estimated_max_microusd.unwrap_or(0);
-        assert_accounts(&h.store, 0, hold, u64::from(unpriced));
+        assert_accounts(&h.store, 0, 0, 0);
         assert!(matches!(
             execute_scoped_with_io(
                 &h.store,
@@ -277,7 +277,7 @@ async fn reject429_unknown_local_reuse_acknowledge_reapprove_keeps_both_holds() 
             Err(AiError::UnknownOutcome)
         ));
         let id = attempt(&h.transport.db_path, &h.quote.id);
-        assert_accounts(&h.store, 0, 2 * hold, if unpriced { 2 } else { 0 });
+        assert_accounts(&h.store, 0, hold, u64::from(unpriced));
         assert!(matches!(
             h.store
                 .reapprove_scope_with_retry(&h.quote.id, &h.quote.digest, true, true, Some(1)),
@@ -292,15 +292,15 @@ async fn reject429_unknown_local_reuse_acknowledge_reapprove_keeps_both_holds() 
             .store
             .select_transcript_reparse(&h.quote.id, 0, &candidate.id)
             .is_err());
-        assert_accounts(&h.store, 0, 2 * hold, if unpriced { 2 } else { 0 });
+        assert_accounts(&h.store, 0, hold, u64::from(unpriced));
         h.store.acknowledge_unknown(&id).unwrap();
-        assert_accounts(&h.store, 0, 2 * hold, if unpriced { 2 } else { 0 });
+        assert_accounts(&h.store, 0, hold, u64::from(unpriced));
         let renewed = h
             .store
             .reapprove_scope_with_retry(&h.quote.id, &h.quote.digest, true, true, Some(1))
             .unwrap();
         assert_ne!(approval, renewed);
-        assert_accounts(&h.store, 0, 2 * hold, if unpriced { 2 } else { 0 });
+        assert_accounts(&h.store, 0, hold, u64::from(unpriced));
         assert!(matches!(
             execute_scoped_with_io(
                 &h.store,
@@ -334,8 +334,8 @@ async fn reject429_unknown_local_reuse_acknowledge_reapprove_keeps_both_holds() 
         assert_accounts(
             &h.store,
             if unpriced { 0 } else { 60 },
-            2 * hold,
-            if unpriced { 3 } else { 0 },
+            hold,
+            if unpriced { 2 } else { 0 },
         );
         assert_eq!(h.store.quote(&h.quote.id).unwrap().state, "completed");
         assert!(execute_scoped_with_io(

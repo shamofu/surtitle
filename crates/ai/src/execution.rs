@@ -282,6 +282,15 @@ impl ExecutionConfig {
         ) {
             return Err(AiError::Invalid("Invalid Vertex response mode".into()));
         }
+        if self.provider == AiProvider::Vertex
+            && self.model_id.to_ascii_lowercase().starts_with("gemini-4-")
+            && (matches!(self.thinking, ThinkingConfig::Budget { .. })
+                || matches!(&self.thinking, ThinkingConfig::Level { level } if level == "MINIMAL"))
+        {
+            return Err(AiError::Invalid(
+                "Gemini 4 models require thinking level LOW, MEDIUM, HIGH, XHIGH, or model default; MINIMAL and token budgets are not supported".into(),
+            ));
+        }
         match &self.thinking {
             ThinkingConfig::Omit => {}
             ThinkingConfig::Level { level }

@@ -514,6 +514,7 @@ fn task() -> RequestTask {
     RequestTask::Vocabulary {
         learning_language: "en".into(),
         explanation_language: "ja".into(),
+        proficiency: None,
         max_items: 2,
         cues: vec![SourceCue {
             id: "cue-one".into(),
@@ -739,7 +740,7 @@ async fn successful_request_uses_real_body_and_durable_reservation_then_settles_
         assert_eq!(requests.len(), 1);
         assert_eq!(
             requests[0].url,
-            "https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google/models/gemini-3.8-flash:generateContent"
+            "https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google/models/gemini-4-neon:generateContent"
         );
         assert_eq!(
             &requests[0].body,
@@ -793,6 +794,7 @@ async fn semantic_refinements_are_frozen_and_old_approval_never_authorizes_new_p
                         end_ms: 2000,
                         text: "Take your time.".into(),
                     }],
+                    context_cues: vec![],
                 }
             }],
             vec![
@@ -1042,6 +1044,7 @@ async fn scoped_parse_failure_keeps_generated_diagnostics_after_known_usage_sett
                 text: "forward to the trip, even though it has been delayed.".into(),
             },
         ],
+        context_cues: vec![],
     };
     let generated = json!({"items":[{"term":"look forward to","meaning":"楽しみにする","explanation":"期待を表す。","example":"I look forward to the trip.","sourceCueIds":["cue-19"]}]}).to_string();
     let response = json!({
@@ -1279,7 +1282,7 @@ async fn cancellation_after_send_preserves_charge_without_resurrecting_the_job()
 
 #[tokio::test]
 async fn http_rejections_and_redirects_retain_unknown_without_reading_or_retrying() {
-    for status in [301, 302, 307, 308, 401, 403, 429, 500, 502, 503] {
+    for status in [301, 302, 307, 308, 500, 502, 503] {
         let response = FakeResponse::json(json!({
             "error": FAKE_PROVIDER_SECRET,
             "location": "https://evil.invalid/credential-collector"
@@ -1290,6 +1293,25 @@ async fn http_rejections_and_redirects_retain_unknown_without_reading_or_retryin
         assert!(matches!(error, AiError::Provider(n) if n == status));
         assert_sanitized(&error);
         h.assert_unknown();
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
+        assert!(h.execute().await.is_err());
+        assert_eq!(h.sends(), 1);
+    }
+    for status in [400, 401, 403, 404, 409, 422, 429] {
+        let response = FakeResponse::json(json!({
+            "error": FAKE_PROVIDER_SECRET,
+            "location": "https://evil.invalid/credential-collector"
+        }));
+        let reads = response.reads.clone();
+        let h = Harness::new(vec![Ok(FakeResponse { status, ..response })]);
+        let error = h.execute().await.unwrap_err();
+        assert!(matches!(error, AiError::Provider(n) if n == status));
+        assert_sanitized(&error);
+        let summary = h.store.summary().unwrap();
+        assert!(summary.unknown_attempts.is_empty());
+        assert_eq!(summary.daily_charged_or_held_microusd, 0);
+        assert_eq!(h.store.quote(&h.quote.id).unwrap().state, "needs_review");
+        assert!(h.store.response(&h.quote.id, 0).unwrap().is_none());
         assert_eq!(reads.load(Ordering::SeqCst), 0);
         assert!(h.execute().await.is_err());
         assert_eq!(h.sends(), 1);
@@ -2176,6 +2198,7 @@ fn openai_text_purpose_cases() -> Vec<(RequestTask, Value)> {
             RequestTask::Translation {
                 target_language: "ja".into(),
                 cues: cues.clone(),
+                context_cues: vec![],
             },
             json!({"translations":[{"id":"cue-one","translation":"ゆっくりで大丈夫"}]}),
         ),
@@ -2186,6 +2209,7 @@ fn openai_text_purpose_cases() -> Vec<(RequestTask, Value)> {
                 explanation_language: "ja".into(),
                 proficiency: "B1".into(),
                 cues,
+                context_cues: vec![],
             },
             explanation,
         ),
