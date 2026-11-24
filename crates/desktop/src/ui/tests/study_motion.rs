@@ -549,7 +549,7 @@ fn companion_motion_reverses_without_jumping_and_preserves_the_query(cx: &mut Te
                     .try_find("subtitle-search")
                     .is_none_or(|node| node.focused() != Some(true))
             );
-            window.input("must not edit hidden search", app);
+            window.input("check_away", app);
             bounds
         })
         .unwrap();

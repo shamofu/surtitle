@@ -130,6 +130,10 @@ pub(crate) enum UiEvent {
         intent: super::ai::AiIntent,
         cues: Vec<surtitle_core::SubtitleSegment>,
     },
+    StartReview {
+        language: Option<String>,
+        media_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -216,6 +220,14 @@ impl Session {
     }
     pub fn navigate(&mut self, route: Route, cx: &mut Context<Self>) {
         cx.emit(UiEvent::Navigate(route));
+    }
+    pub fn start_review(
+        &mut self,
+        language: Option<String>,
+        media_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        cx.emit(UiEvent::StartReview { language, media_id });
     }
     pub fn request_transfer(&mut self, cx: &mut Context<Self>) {
         cx.emit(UiEvent::Transfer);

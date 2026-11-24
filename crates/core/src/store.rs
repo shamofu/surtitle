@@ -13,7 +13,7 @@ pub(crate) mod draft_study;
 mod management;
 mod transcript_publication;
 mod transcript_ranges;
-pub use cards::CardSourceSnapshot;
+pub use cards::{CardSourceSnapshot, preview_review_intervals};
 pub use management::CardEditState;
 pub use transcript_publication::{TranscriptPublicationRange, TranscriptPublicationReport};
 pub use transcript_ranges::TranscriptRangeEdit;

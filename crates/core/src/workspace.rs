@@ -139,6 +139,7 @@ fn validate_fields(kind: &str, fields: &BTreeMap<String, String>) -> Result<()> 
             "retention",
             "retentionInput",
             "sentencePause",
+            "reviewAutoplayAudio",
             "replayContextMs",
             "proficiency",
             "vertexLocation",

@@ -152,6 +152,27 @@ impl From<fsrs::MemoryState> for MemoryState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewIntervals {
+    pub again_minutes: u32,
+    pub hard_days: u32,
+    pub good_days: u32,
+    pub easy_days: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewReceipt {
+    pub card: StudyCard,
+    pub review_id: String,
+    pub learning_generation: String,
+    pub previous_memory: Option<MemoryState>,
+    pub previous_review_count: u32,
+    pub previous_last_review: Option<String>,
+    pub previous_due_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Review {
@@ -219,6 +240,8 @@ pub struct AppSettings {
     pub retention: f32,
     #[serde(default)]
     pub sentence_pause: bool,
+    #[serde(default)]
+    pub review_autoplay_audio: bool,
     #[serde(default = "default_replay_context")]
     pub replay_context_ms: u16,
     #[serde(default = "default_proficiency")]
@@ -300,6 +323,7 @@ impl Default for AppSettings {
             credential_configured: false,
             retention: 0.9,
             sentence_pause: false,
+            review_autoplay_audio: false,
             replay_context_ms: default_replay_context(),
             proficiency: default_proficiency(),
             ai_models: Default::default(),
@@ -473,5 +497,22 @@ mod settings_tests {
         assert_eq!(legacy.daily_budget_usd, 12.);
         assert_eq!(legacy.monthly_budget_usd, None);
         assert_eq!(legacy.per_job_budget_usd, None);
+    }
+
+    #[test]
+    fn missing_review_autoplay_audio_defaults_false_and_true_roundtrips() {
+        let defaults = AppSettings::default();
+        assert!(!defaults.review_autoplay_audio);
+        let mut wire = serde_json::to_value(defaults).unwrap();
+        wire.as_object_mut().unwrap().remove("reviewAutoplayAudio");
+        let legacy: AppSettings = serde_json::from_value(wire.clone()).unwrap();
+        assert!(!legacy.review_autoplay_audio);
+        wire["reviewAutoplayAudio"] = serde_json::json!(true);
+        let enabled: AppSettings = serde_json::from_value(wire).unwrap();
+        assert!(enabled.review_autoplay_audio);
+        assert_eq!(
+            serde_json::to_value(enabled).unwrap()["reviewAutoplayAudio"],
+            true
+        );
     }
 }

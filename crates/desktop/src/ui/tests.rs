@@ -7,6 +7,7 @@ mod card_dialog;
 mod control_motion;
 mod form_stability;
 mod keyboard;
+mod language_ux;
 mod layout_stability;
 mod library_playback;
 mod list_motion;

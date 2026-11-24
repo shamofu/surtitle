@@ -66,6 +66,8 @@ impl StudyView {
     ) {
         if tab != self.companion_tab || !self.companion_open {
             let transfer_focus = self.companion_has_focus(window, cx);
+            self.retained_selection = None;
+            self.clear_retained_after_up = false;
             gpui_kit::base::TextSelection::clear(window, cx);
             if transfer_focus {
                 let focus = if tab == CompanionTab::Transcript {
@@ -99,6 +101,8 @@ impl StudyView {
 
     pub(super) fn close_companion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.companion_open {
+            self.retained_selection = None;
+            self.clear_retained_after_up = false;
             gpui_kit::base::TextSelection::clear(window, cx);
             if self.companion_has_focus(window, cx) {
                 self.focus.focus(window, cx);

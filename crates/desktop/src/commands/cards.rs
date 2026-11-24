@@ -1,12 +1,39 @@
 use crate::application::AppState;
 type IpcResult<T> = std::result::Result<T, String>;
-pub fn rate_card(state: &AppState, card_id: String, rating: String) -> IpcResult<()> {
+pub fn rate_card_with_receipt(
+    state: &AppState,
+    card_id: String,
+    rating: String,
+) -> IpcResult<surtitle_core::ReviewReceipt> {
     let committed_changes = state.changes.clone();
     let changed_cards = Some(card_id.clone());
-    let result = crate::application::cards::rate_card(state.clone(), card_id, rating);
+    let result = crate::application::cards::rate_card_with_receipt(state.clone(), card_id, rating);
     if result.is_ok() {
         committed_changes.publish(
             crate::application::changes::ChangeDomain::Cards,
+            changed_cards.clone(),
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Review,
+            changed_cards,
+        );
+    }
+    result
+}
+pub fn undo_review(
+    state: &AppState,
+    receipt: surtitle_core::ReviewReceipt,
+) -> IpcResult<surtitle_core::StudyCard> {
+    let committed_changes = state.changes.clone();
+    let changed_cards = Some(receipt.card.id.clone());
+    let result = crate::application::cards::undo_review(state.clone(), receipt);
+    if result.is_ok() {
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Cards,
+            changed_cards.clone(),
+        );
+        committed_changes.publish(
+            crate::application::changes::ChangeDomain::Review,
             changed_cards,
         );
     }

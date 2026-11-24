@@ -52,13 +52,24 @@ pub async fn save_card_with_editor_draft(
     .await
     .map_err(err)
 }
-pub fn rate_card(state: AppState, card_id: String, rating: String) -> IpcResult<()> {
+pub fn rate_card_with_receipt(
+    state: AppState,
+    card_id: String,
+    rating: String,
+) -> IpcResult<surtitle_core::ReviewReceipt> {
     (|| {
         let retention = state.settings()?.retention;
-        lock(&state.db)?.rate_card(&card_id, &rating, retention, chrono::Utc::now())?;
-        Ok(())
+        lock(&state.db)?.rate_card_with_receipt(&card_id, &rating, retention, chrono::Utc::now())
     })()
     .map_err(err)
+}
+pub fn undo_review(
+    state: AppState,
+    receipt: surtitle_core::ReviewReceipt,
+) -> IpcResult<surtitle_core::StudyCard> {
+    lock(&state.db)
+        .and_then(|mut db| db.undo_review(&receipt))
+        .map_err(err)
 }
 pub fn get_card_edit_state(
     state: AppState,

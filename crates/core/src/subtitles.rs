@@ -30,6 +30,165 @@ fn timestamp(value: &str) -> Result<u64> {
     Ok(((h * 60 + m) * 60 + s) * 1000 + ms.parse::<u64>()?)
 }
 
+/// Strip known SRT/WebVTT/ASS inline markup while keeping bare `&` and non-tag `<` intact.
+pub fn clean_cue_text(raw: &str) -> String {
+    let without_ass = strip_ass_overrides(raw);
+    let without_ruby_notes = strip_ruby_annotations(&without_ass);
+    let without_tags = strip_known_tags(&without_ruby_notes);
+    let decoded = decode_entities(&without_tags);
+    decoded
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn strip_ass_overrides(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(pos) = rest.find("{\\") {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos + 2..];
+        if let Some(close) = after.find('}') {
+            rest = &after[close + 1..];
+        } else {
+            out.push_str("{\\");
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn find_closing_tag(haystack: &str, name: &str) -> Option<usize> {
+    let mut offset = 0;
+    while let Some(pos) = haystack[offset..].find("</") {
+        let start = offset + pos;
+        let after = &haystack[start + 2..];
+        if after.len() > name.len() && after[..name.len()].eq_ignore_ascii_case(name) {
+            let tail = &after[name.len()..];
+            let trimmed = tail.trim_start_matches(|c: char| c.is_ascii_whitespace());
+            if trimmed.starts_with('>') {
+                let consumed = after.len() - trimmed.len() + 1;
+                return Some(start + 2 + consumed);
+            }
+        }
+        offset = start + 2;
+    }
+    None
+}
+
+fn strip_ruby_annotations(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(pos) = rest.find('<') {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos + 1..];
+        let matched = ["rt", "rp"].into_iter().find(|name| {
+            after.len() > name.len()
+                && after[..name.len()].eq_ignore_ascii_case(name)
+                && after[name.len()..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c == '>' || c.is_ascii_whitespace())
+        });
+        if let Some(name) = matched
+            && let Some(open_end) = after.find('>')
+            && !after[..open_end].contains('<')
+            && let Some(close_end) = find_closing_tag(&after[open_end + 1..], name)
+        {
+            rest = &after[open_end + 1 + close_end..];
+            continue;
+        }
+        out.push('<');
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+fn is_known_inline_tag(inner: &str) -> bool {
+    if inner.contains('<') || inner.contains('\n') {
+        return false;
+    }
+    let inner = inner.trim_end_matches(|c: char| c.is_ascii_whitespace());
+    if inner.is_empty() {
+        return false;
+    }
+    if let Some(closing) = inner.strip_prefix('/') {
+        let name = closing.trim_end_matches(|c: char| c.is_ascii_whitespace());
+        return [
+            "i", "b", "u", "s", "font", "c", "v", "lang", "ruby", "rb", "rt", "rp",
+        ]
+        .iter()
+        .any(|known| name.eq_ignore_ascii_case(known));
+    }
+    if inner.contains('.') && !inner.contains(',') && timestamp(inner).is_ok() {
+        return true;
+    }
+    let name_len = inner
+        .find(|c: char| c == '.' || c.is_ascii_whitespace())
+        .unwrap_or(inner.len());
+    let name = &inner[..name_len];
+    ["i", "b", "u", "s", "font", "c", "v", "lang", "ruby", "rb"]
+        .iter()
+        .any(|known| name.eq_ignore_ascii_case(known))
+}
+
+fn strip_known_tags(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(pos) = rest.find('<') {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos + 1..];
+        if let Some(close) = after.find('>') {
+            let candidate = &after[..close];
+            if !candidate.contains('<') && is_known_inline_tag(candidate) {
+                rest = &after[close + 1..];
+                continue;
+            }
+        }
+        out.push('<');
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+fn decode_entities(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(pos) = rest.find('&') {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos..];
+        let matched = [
+            ("&amp;", "&"),
+            ("&lt;", "<"),
+            ("&gt;", ">"),
+            ("&nbsp;", " "),
+            ("&quot;", "\""),
+            ("&#39;", "'"),
+            ("&apos;", "'"),
+            ("&lrm;", ""),
+            ("&rlm;", ""),
+        ]
+        .into_iter()
+        .find(|(entity, _)| {
+            after.len() >= entity.len() && after[..entity.len()].eq_ignore_ascii_case(entity)
+        });
+        if let Some((entity, replacement)) = matched {
+            out.push_str(replacement);
+            rest = &after[entity.len()..];
+        } else {
+            out.push('&');
+            rest = &after[1..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 pub fn parse(input: &str, media_id: &str) -> Result<Vec<SubtitleSegment>> {
     ensure!(
         input.len() <= 64 * 1024 * 1024,
@@ -61,7 +220,7 @@ pub fn parse(input: &str, media_id: &str) -> Result<Vec<SubtitleSegment>> {
         let start_ms = timestamp(start.trim())?;
         let end_ms = timestamp(end.split_whitespace().next().context("missing end time")?)?;
         ensure!(end_ms > start_ms, "subtitle must have positive duration");
-        let text = lines[index + 1..].join("\n");
+        let text = clean_cue_text(&lines[index + 1..].join("\n"));
         if text.trim().is_empty() {
             continue;
         }
@@ -163,5 +322,23 @@ mod tests {
             })
             .collect();
         assert_eq!(parse(&input, "six-hour").unwrap().len(), 20_000);
+    }
+
+    #[test]
+    fn inline_markup_ruby_ass_and_entities_are_cleaned_without_breaking_plain_symbols() {
+        let srt = "1\n00:00:01,000 --> 00:00:03,000\n{\\an8}<i><font color=\"#fff\">Hello</font></i> &amp; <b>world</b>\n";
+        assert_eq!(parse(srt, "m").unwrap()[0].text, "Hello & world");
+
+        let vtt = "WEBVTT\n\n00:01.000 --> 00:04.500\n<v.loud Alice><c.yellow>Take</c> <00:01.500>care &lt;3 &amp;lt;tag&gt;</v>\n";
+        assert_eq!(parse(vtt, "m").unwrap()[0].text, "Take care <3 &lt;tag>");
+
+        let ruby = "1\n00:00:01,000 --> 00:00:03,000\n<ruby>約束<rp>(</rp><rt>やくそく</rt><rp>)</rp></ruby>を守る\n";
+        assert_eq!(parse(ruby, "m").unwrap()[0].text, "約束を守る");
+
+        let math = "1\n00:00:01,000 --> 00:00:03,000\nx < 5 & y > 2 &lrm;done\n";
+        assert_eq!(parse(math, "m").unwrap()[0].text, "x < 5 & y > 2 done");
+
+        let empty_after_strip = "1\n00:00:01,000 --> 00:00:02,000\n{\\an8}<i>   </i>\n";
+        assert!(parse(empty_after_strip, "m").unwrap().is_empty());
     }
 }

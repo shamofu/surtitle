@@ -4,13 +4,17 @@ use super::{
     source_editors::{DraftAction, DraftOutcome, SourceEditors, SourceKey, SourceOptions},
     style::*,
 };
+use gpui_kit::assets::IconName;
 use gpui_kit::base::{Disableable, TestSupportExt};
 use gpui_kit::component::{
     ActiveTheme,
     button::ButtonVariants,
     input::{InputEditsEvent, InputEvent, Textarea, TextareaState},
 };
-use gpui_kit::{AppContext, Context, Entity, Subscription, Window, div, prelude::*, px, size};
+use gpui_kit::{
+    AppContext, Context, Entity, EntityInputHandler, Focusable, Subscription, Window, canvas, div,
+    prelude::*, px, size,
+};
 use std::collections::BTreeMap;
 use surtitle_core::{SaveCard, SubtitleSegment};
 
@@ -147,6 +151,10 @@ struct SourceForm {
     delivered: BTreeMap<String, String>,
     busy: bool,
     done: bool,
+    focused_initial: bool,
+    previewing: bool,
+    retained_selection: Option<String>,
+    clear_retained_after_up: bool,
     error: Option<String>,
     _subscriptions: Vec<Subscription>,
     rebind_preview: Option<Vec<SubtitleSegment>>,
@@ -235,6 +243,10 @@ impl SourceForm {
             delivered,
             busy: false,
             done: false,
+            focused_initial: false,
+            previewing: false,
+            retained_selection: None,
+            clear_retained_after_up: false,
             error: None,
             rebind_preview: None,
             _subscriptions: subscriptions,
@@ -383,6 +395,148 @@ impl SourceForm {
         };
         self.dispatch(action, cx);
     }
+    fn preview_audio(&mut self, cx: &mut Context<Self>) {
+        let ja = self.session.read(cx).text("ja", "en") == "ja";
+        let t =
+            move |ja_text: &'static str, en_text: &'static str| if ja { ja_text } else { en_text };
+        if self.busy || self.previewing || self.editors.read(cx).frozen() {
+            return;
+        }
+        let registry = self.editors.read(cx);
+        let Some(view) = registry.view(&self.key) else {
+            return;
+        };
+        let Some(options) = registry.options(&self.key) else {
+            return;
+        };
+        let source = view
+            .draft
+            .as_ref()
+            .map(|draft| &draft.draft.source_cues)
+            .unwrap_or(&options.source_cues);
+        let range = if options.kind == "subtitle" {
+            let start = view
+                .fields
+                .get("start")
+                .and_then(|v| parse_time(v))
+                .ok_or_else(|| t("開始時刻を確認してください", "Check start time").to_owned());
+            let end = view
+                .fields
+                .get("end")
+                .and_then(|v| parse_time(v))
+                .ok_or_else(|| t("終了時刻を確認してください", "Check end time").to_owned());
+            start.and_then(|s| {
+                end.and_then(|e| {
+                    if e > s {
+                        Ok((s, e))
+                    } else {
+                        Err(t("終了は開始より後にしてください", "End must follow start").into())
+                    }
+                })
+            })
+        } else if view.fields.contains_key("audioStart") {
+            let start = view
+                .fields
+                .get("audioStart")
+                .and_then(|v| parse_time(v))
+                .ok_or_else(|| {
+                    t("音声の開始時刻を確認してください", "Check audio start").to_owned()
+                });
+            let end = view
+                .fields
+                .get("audioEnd")
+                .and_then(|v| parse_time(v))
+                .ok_or_else(|| t("音声の終了時刻を確認してください", "Check audio end").to_owned());
+            start.and_then(|s| {
+                end.and_then(|e| {
+                    if e <= s {
+                        Err(t(
+                            "音声の終了は開始より後にしてください",
+                            "Audio end must follow start",
+                        )
+                        .into())
+                    } else if e - s > 180_000 {
+                        Err(t(
+                            "保存できる音声は3分以内です",
+                            "Audio range must be at most 3 minutes",
+                        )
+                        .into())
+                    } else {
+                        Ok((s, e))
+                    }
+                })
+            })
+        } else if let (Some(first), Some(last)) = (source.first(), source.last()) {
+            Ok((first.start_ms, last.end_ms))
+        } else {
+            Err("Subtitle source is missing".into())
+        };
+        let (start_ms, end_ms) = match range {
+            Ok(range) => range,
+            Err(error) => {
+                self.error = Some(error);
+                cx.notify();
+                return;
+            }
+        };
+        let media_id = options.media_id.clone();
+        let backend = self.session.read(cx).backend.clone();
+        let state = backend.state.clone();
+        let host = backend.host.clone();
+        self.previewing = true;
+        self.error = None;
+        run(
+            &backend,
+            cx,
+            async move {
+                crate::commands::playback::preview_media_range(
+                    host, &state, media_id, start_ms, end_ms,
+                )
+                .await
+            },
+            |this, result, _| {
+                this.previewing = false;
+                if let Err(error) = result {
+                    this.error = Some(error);
+                }
+            },
+        );
+    }
+    fn set_term_from_text(&mut self, value: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy || self.done || self.editors.read(cx).frozen() {
+            return;
+        }
+        let value = value.trim().to_owned();
+        if value.is_empty() {
+            return;
+        }
+        if value.len() >= 4096 {
+            let ja = self.session.read(cx).text("ja", "en") == "ja";
+            self.error = Some(
+                if ja {
+                    "語句が長すぎます（4096バイト未満にしてください）"
+                } else {
+                    "Phrase is too long (must be under 4096 bytes)"
+                }
+                .into(),
+            );
+            cx.notify();
+            return;
+        }
+        let Some(view) = self.editors.read(cx).view(&self.key) else {
+            return;
+        };
+        let mut fields = view.fields.clone();
+        fields.insert("term".into(), value.clone());
+        self.delivered.insert("term".into(), value.clone());
+        if let Some(input) = self.inputs.get("term") {
+            input.update(cx, |input, cx| input.set_value(value, window, cx));
+        }
+        self.editors
+            .update(cx, |editors, cx| editors.change(&self.key, fields, cx));
+        self.error = None;
+        cx.notify();
+    }
     fn dispatch(&mut self, action: DraftAction, cx: &mut Context<Self>) {
         self.busy = true;
         let backend = self.session.read(cx).backend.clone();
@@ -404,6 +558,42 @@ impl SourceForm {
                 Err(error) => this.error = Some(error),
             }
         });
+    }
+    fn focus_composing(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.inputs.values().any(|input| {
+            input.read(cx).focus_handle(cx).is_focused(window)
+                && input.update(cx, |input, cx| {
+                    input.marked_text_range(window, cx).is_some()
+                })
+        })
+    }
+    fn try_shortcut_save(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.focus_composing(window, cx) {
+            return true;
+        }
+        let view = self.editors.read(cx).view(&self.key);
+        let stale = view.is_some_and(|v| v.draft.as_ref().is_some_and(|d| d.stale));
+        let ready = view.is_some_and(|v| v.ready);
+        if ready && !stale && !self.busy && !self.done && !self.editors.read(cx).frozen() {
+            self.save(cx);
+            return true;
+        }
+        false
+    }
+    fn preview_audio_button(&self, ready: bool, cx: &mut Context<Self>) -> Button {
+        let ja = self.session.read(cx).text("ja", "en") == "ja";
+        let label = if ja {
+            "原音を試聴"
+        } else {
+            "Preview audio"
+        };
+        compact_button("source-preview-audio")
+            .ghost()
+            .icon(IconName::Volume2)
+            .accessibility_id("source-preview-audio")
+            .label(label)
+            .disabled(self.busy || self.previewing || !ready || self.editors.read(cx).frozen())
+            .on_click(cx.listener(|this, _, _, cx| this.preview_audio(cx)))
     }
     fn rebind(&mut self, cx: &mut Context<Self>) {
         let ja = self.session.read(cx).text("ja", "en") == "ja";
@@ -451,24 +641,31 @@ impl SourceForm {
     }
 }
 impl Render for SourceForm {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let ja = self.session.read(cx).text("ja", "en") == "ja";
         let t =
             move |ja_text: &'static str, en_text: &'static str| if ja { ja_text } else { en_text };
-        let view = self.editors.read(cx).view(&self.key);
-        let ready = view.is_some_and(|view| view.ready);
-        let stale = view.is_some_and(|view| view.draft.as_ref().is_some_and(|draft| draft.stale));
+        let (ready, stale, saving, view_error, draft_cues, term_empty, example_nonempty) = {
+            let view = self.editors.read(cx).view(&self.key);
+            (
+                view.is_some_and(|view| view.ready),
+                view.is_some_and(|view| view.draft.as_ref().is_some_and(|draft| draft.stale)),
+                view.is_some_and(|view| view.saving),
+                view.and_then(|view| view.error.clone()),
+                view.and_then(|view| {
+                    view.draft
+                        .as_ref()
+                        .map(|view| view.draft.source_cues.clone())
+                }),
+                view.and_then(|view| view.fields.get("term"))
+                    .is_none_or(|term| term.trim().is_empty()),
+                view.and_then(|view| view.fields.get("example"))
+                    .is_some_and(|example| !example.trim().is_empty()),
+            )
+        };
         let disabled = self.busy || self.done || !ready || self.editors.read(cx).frozen();
-        let error = self
-            .error
-            .clone()
-            .or_else(|| view.and_then(|view| view.error.clone()));
-        let source = view
-            .and_then(|view| {
-                view.draft
-                    .as_ref()
-                    .map(|view| view.draft.source_cues.clone())
-            })
+        let error = self.error.clone().or(view_error);
+        let source = draft_cues
             .or_else(|| {
                 self.editors
                     .read(cx)
@@ -481,6 +678,33 @@ impl Render for SourceForm {
             .read(cx)
             .options(&self.key)
             .is_some_and(|options| options.kind == "subtitle");
+        if ready && !disabled && !self.focused_initial {
+            self.focused_initial = true;
+            let any_focused = self
+                .inputs
+                .values()
+                .any(|input| input.read(cx).focus_handle(cx).is_focused(window));
+            if !any_focused {
+                let target = if is_subtitle {
+                    "text"
+                } else if term_empty {
+                    "term"
+                } else {
+                    "meaning"
+                };
+                if let Some(input) = self.inputs.get(target) {
+                    input.read(cx).focus_handle(cx).focus(window, cx);
+                }
+            }
+        }
+        let live_selected = gpui_kit::base::TextSelection::selected_text(window, cx)
+            .trim()
+            .to_owned();
+        if !live_selected.is_empty() {
+            self.retained_selection = Some(live_selected.clone());
+            self.clear_retained_after_up = false;
+        }
+        let has_selected_text = !live_selected.is_empty() || self.retained_selection.is_some();
         let field = |name: &str, label: &'static str, height: f32| {
             column()
                 .gap_1()
@@ -508,7 +732,7 @@ impl Render for SourceForm {
             0
         } else if !ready {
             1
-        } else if view.is_some_and(|view| view.saving) {
+        } else if saving {
             2
         } else {
             3
@@ -521,6 +745,126 @@ impl Render for SourceForm {
             .gap_0()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
+            .capture_key_down(cx.listener(|this, _, window, cx| {
+                if this.clear_retained_after_up
+                    && gpui_kit::base::TextSelection::selected_text(window, cx)
+                        .trim()
+                        .is_empty()
+                {
+                    this.clear_retained_after_up = false;
+                    this.retained_selection = None;
+                }
+            }))
+            .capture_action(cx.listener(|this, action: &gpui_kit::base::input::Enter, window, cx| {
+                if !action.secondary || action.shift {
+                    cx.propagate();
+                    return;
+                }
+                if this.try_shortcut_save(window, cx) {
+                    cx.stop_propagation();
+                } else {
+                    cx.propagate();
+                }
+            }))
+            .on_key_down(cx.listener(|this, event: &gpui_kit::KeyDownEvent, window, cx| {
+                if !event.is_held
+                    && !event.prefer_character_input
+                    && event.keystroke.key == "enter"
+                    && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+                    && !event.keystroke.modifiers.alt
+                    && !event.keystroke.modifiers.shift
+                    && this.try_shortcut_save(window, cx)
+                {
+                    cx.stop_propagation();
+                }
+            }))
+            .child({
+                let entity = cx.entity().downgrade();
+                canvas(
+                    |_, _, _| (),
+                    move |_, _, window, _| {
+                        let down_entity = entity.clone();
+                        window.on_mouse_event(
+                            move |event: &gpui_kit::MouseDownEvent, phase, window, cx| {
+                                if phase.capture() && event.button == gpui_kit::MouseButton::Left {
+                                    let live =
+                                        gpui_kit::base::TextSelection::selected_text(window, cx)
+                                            .trim()
+                                            .to_owned();
+                                    let _ = down_entity.update(cx, |this, _| {
+                                        if !live.is_empty() {
+                                            this.retained_selection = Some(live);
+                                            this.clear_retained_after_up = false;
+                                        } else if this.clear_retained_after_up {
+                                            this.clear_retained_after_up = false;
+                                            this.retained_selection = None;
+                                        }
+                                    });
+                                }
+                            },
+                        );
+                        let move_entity = entity.clone();
+                        window.on_mouse_event(
+                            move |_: &gpui_kit::MouseMoveEvent, phase, window, cx| {
+                                if phase.capture() {
+                                    let live =
+                                        gpui_kit::base::TextSelection::selected_text(window, cx)
+                                            .trim()
+                                            .to_owned();
+                                    if !live.is_empty() {
+                                        let _ = move_entity.update(cx, |this, cx| {
+                                            let changed = this.retained_selection.as_deref()
+                                                != Some(live.as_str());
+                                            this.retained_selection = Some(live);
+                                            this.clear_retained_after_up = false;
+                                            if changed {
+                                                cx.notify();
+                                            }
+                                        });
+                                    }
+                                }
+                            },
+                        );
+                        let up_entity = entity;
+                        window.on_mouse_event(
+                            move |event: &gpui_kit::MouseUpEvent, phase, window, cx| {
+                                if event.button != gpui_kit::MouseButton::Left {
+                                    return;
+                                }
+                                let live = gpui_kit::base::TextSelection::selected_text(window, cx)
+                                    .trim()
+                                    .to_owned();
+                                if phase.capture() {
+                                    let _ = up_entity.update(cx, |this, cx| {
+                                        if !live.is_empty() {
+                                            this.retained_selection = Some(live);
+                                            this.clear_retained_after_up = false;
+                                            cx.notify();
+                                        } else if this.retained_selection.is_some() {
+                                            this.clear_retained_after_up = true;
+                                        }
+                                    });
+                                } else {
+                                    let _ = up_entity.update(cx, |this, cx| {
+                                        if !live.is_empty() {
+                                            this.retained_selection = Some(live);
+                                            this.clear_retained_after_up = false;
+                                            cx.notify();
+                                        } else if this.clear_retained_after_up {
+                                            this.clear_retained_after_up = false;
+                                            if this.retained_selection.take().is_some() {
+                                                cx.notify();
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                        );
+                    },
+                )
+                .absolute()
+                .size_0()
+            })
             .child(column().flex_shrink_0().px_5().py_4().gap_1()
                 .border_b_1().border_color(cx.theme().border)
                 .child(div().text_size(px(20.)).font_weight(gpui_kit::FontWeight::SEMIBOLD)
@@ -532,7 +876,9 @@ impl Render for SourceForm {
                 })))
             .child(column().id("source-editor-scroll").test_support().flex_1().min_h_0().overflow_y_scroll().p_5().gap_4()
             .when(is_subtitle, |body| body.child(column().gap_2().p_3().rounded(px(8.)).border_1().border_color(cx.theme().border)
-                .child(muted(t("元の字幕・出典", "Original subtitle and source")))
+                .child(row().justify_between().gap_2()
+                    .child(muted(t("元の字幕・出典", "Original subtitle and source")))
+                    .child(self.preview_audio_button(ready, cx)))
                 .children(source.iter().map(|cue|div().child(format!("{}–{}  {}", precise(cue.start_ms), precise(cue.end_ms), cue.text))))
                 .when(source.iter().any(|cue|cue.timing_precision=="source_block"), |body|body.child(muted(t("この時刻は取得元の音声範囲です。本文の修正だけでは正確な字幕時刻には変わりません。", "These times identify the source audio range; editing text does not establish precise subtitle timing."))))))
             .when(is_subtitle, |body|body
@@ -558,8 +904,42 @@ impl Render for SourceForm {
                 .child(field("example", t("例文・元の文脈", "Example and original context"), 96.))
                 .child(field("explanation", t("解説・メモ（任意）", "Explanation or notes (optional)"), 72.))
                 .child(column().gap_2().p_3().rounded(px(8.)).border_1().border_color(cx.theme().border)
-                    .child(muted(t("復習に残す音声と出典", "Audio and source for review")))
-                    .children(source.iter().map(|cue| div().child(format!("{}–{}  {}", precise(cue.start_ms), precise(cue.end_ms), cue.text))))
+                    .child(row().justify_between().gap_2()
+                        .child(muted(t("復習に残す音声と出典", "Audio and source for review")))
+                        .child(self.preview_audio_button(ready, cx)))
+                    .children(source.iter().enumerate().map(|(cue_index, cue)| {
+                        row().items_start().gap_2()
+                            .child(div().text_size(px(12.)).text_color(cx.theme().muted_foreground).child(format!("{}–{}", precise(cue.start_ms), precise(cue.end_ms))))
+                            .child(
+                                div()
+                                    .id(("source-cue-accessible", cue_index))
+                                    .test_support()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(gpui_kit::base::SelectableText::new(
+                                        ("source-cue-text", cue_index),
+                                        cue.text.clone(),
+                                    )),
+                            )
+                    }))
+                    .child(row().flex_wrap().gap_2()
+                        .child(compact_button("source-use-selection").ghost().accessibility_id("source-use-selection").label(t("選択箇所を語句に入れる", "Use selection as phrase")).disabled(disabled || !has_selected_text).on_click(cx.listener(|this, _, window, cx| {
+                            let live = gpui_kit::base::TextSelection::selected_text(window, cx)
+                                .trim()
+                                .to_owned();
+                            this.clear_retained_after_up = false;
+                            let selected = if !live.is_empty() {
+                                this.retained_selection = None;
+                                live
+                            } else {
+                                this.retained_selection.take().unwrap_or_default()
+                            };
+                            this.set_term_from_text(selected, window, cx);
+                        })))
+                        .child(compact_button("source-use-example").ghost().accessibility_id("source-use-example").label(t("例文全体を語句に入れる", "Use example as phrase")).disabled(disabled || !example_nonempty).on_click(cx.listener(|this, _, window, cx| {
+                            let example = this.editors.read(cx).view(&this.key).and_then(|v| v.fields.get("example").cloned()).unwrap_or_default();
+                            this.set_term_from_text(example, window, cx);
+                        }))))
                     .when(self.inputs.contains_key("audioStart"), |body| body
                         .child(muted(t("発話の正確な時刻は未確定です。取得元の範囲内で、保存する音声を選んでください（3分以内）。", "Exact speech timing is unavailable. Select up to 3 minutes within the source audio range to save.")))
                         .child(row().items_start().flex_shrink_0()

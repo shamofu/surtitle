@@ -123,6 +123,28 @@ impl SettingsView {
                             cx.notify();
                         })),
                 ),
+            )
+            .child(
+                Switch::new("settings-review-autoplay-audio")
+                    .label(self.t(
+                        "復習時に音声を自動再生",
+                        "Play audio automatically during review",
+                        cx,
+                    ))
+                    .checked(
+                        fields
+                            .get("reviewAutoplayAudio")
+                            .is_some_and(|raw| raw == "true"),
+                    )
+                    .disabled(frozen)
+                    .on_change(cx.listener(|this, checked: &bool, _, cx| {
+                        this.change_one(
+                            "reviewAutoplayAudio",
+                            if *checked { "true" } else { "false" },
+                            cx,
+                        );
+                        this.blur(cx);
+                    })),
             );
         if custom {
             review = review.child(self.raw_input(
