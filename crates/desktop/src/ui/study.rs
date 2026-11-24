@@ -59,6 +59,8 @@ pub(crate) struct StudyView {
     companion_visible: bool,
     looping: Option<(u64, u64)>,
     selection_source: Option<String>,
+    retained_selection: Option<(String, String)>,
+    clear_retained_after_up: bool,
     follow: bool,
     last_caption: Option<usize>,
     list_scroll: gpui_kit::UniformListScrollHandle,
@@ -265,6 +267,8 @@ impl StudyView {
             companion_visible: true,
             looping: None,
             selection_source: None,
+            retained_selection: None,
+            clear_retained_after_up: false,
             follow: true,
             last_caption: None,
             list_scroll: gpui_kit::UniformListScrollHandle::new(),
@@ -678,23 +682,25 @@ impl StudyView {
         window: &mut Window,
         cx: &mut gpui_kit::App,
     ) -> Option<(SubtitleSegment, String)> {
-        let text = gpui_kit::base::TextSelection::selected_text(window, cx)
+        let live = gpui_kit::base::TextSelection::selected_text(window, cx)
             .trim()
             .to_owned();
-        if text.is_empty() {
+        let (source_id, text) = if !live.is_empty() {
+            (self.selection_source.as_deref()?, live)
+        } else if let Some((id, cached)) = &self.retained_selection {
+            (id.as_str(), cached.clone())
+        } else {
             return None;
-        }
-        self.selection_source
-            .as_ref()
-            .and_then(|id| {
-                self.segments
-                    .iter()
-                    .find(|cue| &cue.id == id && cue.text.contains(&text))
-            })
+        };
+        self.segments
+            .iter()
+            .find(|cue| cue.id == source_id && cue.text.contains(&text))
             .map(|cue| (cue.clone(), text))
     }
     fn select_text_source(&mut self, id: Option<String>, cx: &mut Context<Self>) {
         self.selection_source = id;
+        self.retained_selection = None;
+        self.clear_retained_after_up = false;
         self.follow = false;
         self.control("pause", None, cx);
     }
@@ -860,10 +866,21 @@ impl Render for StudyView {
         if self.companion_visible && !subtitle_panel {
             // Fullscreen can hide the panel independently of its toggle. Retire
             // its copy selection and focus before the old tree becomes inert.
+            self.retained_selection = None;
+            self.clear_retained_after_up = false;
             gpui_kit::base::TextSelection::clear(window, cx);
             if self.companion_has_focus(window, cx) {
                 self.focus.focus(window, cx);
             }
+        }
+        let live_selected = gpui_kit::base::TextSelection::selected_text(window, cx)
+            .trim()
+            .to_owned();
+        if !live_selected.is_empty()
+            && let Some(id) = self.selection_source.clone()
+        {
+            self.retained_selection = Some((id, live_selected));
+            self.clear_retained_after_up = false;
         }
         self.companion_visible = subtitle_panel;
         let session = self.session.read(cx);
@@ -1081,15 +1098,17 @@ impl Render for StudyView {
                                                     ) >= 3.0
                                             );
                                             let _ = inspect_view.update(cx, |this, cx| {
-                                                let has_selection = this
-                                                    .selected_text(window, cx)
-                                                    .is_some_and(|(cue, _)| {
-                                                        Some(&cue.id)
+                                                let live_selection =
+                                                    gpui_kit::base::TextSelection::selected_text(
+                                                        window, cx,
+                                                    );
+                                                let has_selection =
+                                                    !live_selection.trim().is_empty()
+                                                        && this.selection_source.as_deref()
                                                             == this
                                                                 .segments
                                                                 .get(index)
-                                                                .map(|c| &c.id)
-                                                    });
+                                                                .map(|c| c.id.as_str());
                                                 this.selected.clear();
                                                 this.selected.insert(index);
                                                 this.selection_anchor = Some(index);
@@ -1100,17 +1119,16 @@ impl Render for StudyView {
                                                 }
                                             });
                                         })
-                                        .on_mouse_down(
-                                            gpui_kit::MouseButton::Left,
-                                            move |_, _, cx| {
+                                        .capture_any_mouse_down(move |event, _, cx| {
+                                            if event.button == gpui_kit::MouseButton::Left {
                                                 let _ = selection_view.update(cx, |this, cx| {
                                                     this.select_text_source(
                                                         Some(selection_id.clone()),
                                                         cx,
                                                     )
                                                 });
-                                            },
-                                        )
+                                            }
+                                        })
                                         .child(
                                             column()
                                                 .id(format!("cue-content-{}", cue.id))
@@ -1702,15 +1720,16 @@ impl Render for StudyView {
                                             .min_h(px(0.))
                                             .overflow_y_scroll()
                                             .px_1()
-                                            .on_mouse_down(
-                                                gpui_kit::MouseButton::Left,
-                                                cx.listener(move |this, _, _, cx| {
-                                                    this.select_text_source(
-                                                        caption_source.clone(),
-                                                        cx,
-                                                    )
-                                                }),
-                                            )
+                                            .capture_any_mouse_down(cx.listener(
+                                                move |this, event: &gpui_kit::MouseDownEvent, _, cx| {
+                                                    if event.button == gpui_kit::MouseButton::Left {
+                                                        this.select_text_source(
+                                                            caption_source.clone(),
+                                                            cx,
+                                                        );
+                                                    }
+                                                },
+                                            ))
                                             .text_size(px(28.))
                                             .line_height(gpui_kit::relative(1.4))
                                             .child(
@@ -1963,6 +1982,14 @@ impl Render for StudyView {
             .when(companion_progress > 0., |body| body.child(companion));
         column().key_context("SurtitleStudy").track_focus(&self.focus).tab_group()
             .capture_key_down(cx.listener(|this, event: &gpui_kit::KeyDownEvent, window, cx| {
+                if this.clear_retained_after_up
+                    && gpui_kit::base::TextSelection::selected_text(window, cx)
+                        .trim()
+                        .is_empty()
+                {
+                    this.clear_retained_after_up = false;
+                    this.retained_selection = None;
+                }
                 if event.keystroke.key == "escape" {
                     use gpui_kit::EntityInputHandler;
                     this.escape_had_preedit |= event.prefer_character_input
@@ -2110,6 +2137,88 @@ impl Render for StudyView {
                 }),
             )
             .size_full().px_6().pt_3().pb_4().gap_4().bg(cx.theme().background)
+            .child({
+                let entity = cx.entity().downgrade();
+                canvas(
+                    |_, _, _| (),
+                    move |_, _, window, _| {
+                        let down_entity = entity.clone();
+                        window.on_mouse_event(
+                            move |event: &gpui_kit::MouseDownEvent, phase, window, cx| {
+                                if phase.capture() && event.button == gpui_kit::MouseButton::Left {
+                                    let live =
+                                        gpui_kit::base::TextSelection::selected_text(window, cx)
+                                            .trim()
+                                            .to_owned();
+                                    let _ = down_entity.update(cx, |this, _| {
+                                        if !live.is_empty() {
+                                            this.retained_selection =
+                                                this.selection_source.clone().map(|id| (id, live));
+                                            this.clear_retained_after_up = false;
+                                        } else if this.clear_retained_after_up {
+                                            this.clear_retained_after_up = false;
+                                            this.retained_selection = None;
+                                        }
+                                    });
+                                }
+                            },
+                        );
+                        let move_entity = entity.clone();
+                        window.on_mouse_event(
+                            move |_: &gpui_kit::MouseMoveEvent, phase, window, cx| {
+                                if phase.capture() {
+                                    let live =
+                                        gpui_kit::base::TextSelection::selected_text(window, cx)
+                                            .trim()
+                                            .to_owned();
+                                    if !live.is_empty() {
+                                        let _ = move_entity.update(cx, |this, _| {
+                                            this.retained_selection =
+                                                this.selection_source.clone().map(|id| (id, live));
+                                            this.clear_retained_after_up = false;
+                                        });
+                                    }
+                                }
+                            },
+                        );
+                        let up_entity = entity;
+                        window.on_mouse_event(
+                            move |event: &gpui_kit::MouseUpEvent, phase, window, cx| {
+                                if event.button != gpui_kit::MouseButton::Left {
+                                    return;
+                                }
+                                let live = gpui_kit::base::TextSelection::selected_text(window, cx)
+                                    .trim()
+                                    .to_owned();
+                                if phase.capture() {
+                                    let _ = up_entity.update(cx, |this, _| {
+                                        if !live.is_empty() {
+                                            this.retained_selection =
+                                                this.selection_source.clone().map(|id| (id, live));
+                                            this.clear_retained_after_up = false;
+                                        } else if this.retained_selection.is_some() {
+                                            this.clear_retained_after_up = true;
+                                        }
+                                    });
+                                } else {
+                                    let _ = up_entity.update(cx, |this, _| {
+                                        if !live.is_empty() {
+                                            this.retained_selection =
+                                                this.selection_source.clone().map(|id| (id, live));
+                                            this.clear_retained_after_up = false;
+                                        } else if this.clear_retained_after_up {
+                                            this.clear_retained_after_up = false;
+                                            this.retained_selection = None;
+                                        }
+                                    });
+                                }
+                            },
+                        );
+                    },
+                )
+                .absolute()
+                .size_0()
+            })
             .when(self.rebind_request.is_some(),|body|body.child(row().p_3().flex_wrap()
                 .child(div().flex_1().child(t("AI依頼の新しい出典を選んでください。モデル設定と入力は保持されています。","Select new source subtitles for the saved AI request.")))
                 .child(button("confirm-ai-source").primary().label(t("選択した字幕を使う","Use selected subtitles")).disabled(self.selected.is_empty()||self.sources.read(cx).frozen()).on_click(cx.listener(|this,_,_,cx|this.confirm_ai_source(cx))))

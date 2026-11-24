@@ -12,7 +12,7 @@ use gpui_kit::component::{
     input::{InputEditsEvent, InputEvent, Textarea, TextareaState},
 };
 use gpui_kit::{
-    AppContext, Context, Entity, EntityInputHandler, Focusable, Subscription, Window, div,
+    AppContext, Context, Entity, EntityInputHandler, Focusable, Subscription, Window, canvas, div,
     prelude::*, px, size,
 };
 use std::collections::BTreeMap;
@@ -153,6 +153,8 @@ struct SourceForm {
     done: bool,
     focused_initial: bool,
     previewing: bool,
+    retained_selection: Option<String>,
+    clear_retained_after_up: bool,
     error: Option<String>,
     _subscriptions: Vec<Subscription>,
     rebind_preview: Option<Vec<SubtitleSegment>>,
@@ -243,6 +245,8 @@ impl SourceForm {
             done: false,
             focused_initial: false,
             previewing: false,
+            retained_selection: None,
+            clear_retained_after_up: false,
             error: None,
             rebind_preview: None,
             _subscriptions: subscriptions,
@@ -693,9 +697,14 @@ impl Render for SourceForm {
                 }
             }
         }
-        let has_selected_text = !gpui_kit::base::TextSelection::selected_text(window, cx)
+        let live_selected = gpui_kit::base::TextSelection::selected_text(window, cx)
             .trim()
-            .is_empty();
+            .to_owned();
+        if !live_selected.is_empty() {
+            self.retained_selection = Some(live_selected.clone());
+            self.clear_retained_after_up = false;
+        }
+        let has_selected_text = !live_selected.is_empty() || self.retained_selection.is_some();
         let field = |name: &str, label: &'static str, height: f32| {
             column()
                 .gap_1()
@@ -736,6 +745,16 @@ impl Render for SourceForm {
             .gap_0()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
+            .capture_key_down(cx.listener(|this, _, window, cx| {
+                if this.clear_retained_after_up
+                    && gpui_kit::base::TextSelection::selected_text(window, cx)
+                        .trim()
+                        .is_empty()
+                {
+                    this.clear_retained_after_up = false;
+                    this.retained_selection = None;
+                }
+            }))
             .capture_action(cx.listener(|this, action: &gpui_kit::base::input::Enter, window, cx| {
                 if !action.secondary || action.shift {
                     cx.propagate();
@@ -759,6 +778,93 @@ impl Render for SourceForm {
                     cx.stop_propagation();
                 }
             }))
+            .child({
+                let entity = cx.entity().downgrade();
+                canvas(
+                    |_, _, _| (),
+                    move |_, _, window, _| {
+                        let down_entity = entity.clone();
+                        window.on_mouse_event(
+                            move |event: &gpui_kit::MouseDownEvent, phase, window, cx| {
+                                if phase.capture() && event.button == gpui_kit::MouseButton::Left {
+                                    let live =
+                                        gpui_kit::base::TextSelection::selected_text(window, cx)
+                                            .trim()
+                                            .to_owned();
+                                    let _ = down_entity.update(cx, |this, _| {
+                                        if !live.is_empty() {
+                                            this.retained_selection = Some(live);
+                                            this.clear_retained_after_up = false;
+                                        } else if this.clear_retained_after_up {
+                                            this.clear_retained_after_up = false;
+                                            this.retained_selection = None;
+                                        }
+                                    });
+                                }
+                            },
+                        );
+                        let move_entity = entity.clone();
+                        window.on_mouse_event(
+                            move |_: &gpui_kit::MouseMoveEvent, phase, window, cx| {
+                                if phase.capture() {
+                                    let live =
+                                        gpui_kit::base::TextSelection::selected_text(window, cx)
+                                            .trim()
+                                            .to_owned();
+                                    if !live.is_empty() {
+                                        let _ = move_entity.update(cx, |this, cx| {
+                                            let changed = this.retained_selection.as_deref()
+                                                != Some(live.as_str());
+                                            this.retained_selection = Some(live);
+                                            this.clear_retained_after_up = false;
+                                            if changed {
+                                                cx.notify();
+                                            }
+                                        });
+                                    }
+                                }
+                            },
+                        );
+                        let up_entity = entity;
+                        window.on_mouse_event(
+                            move |event: &gpui_kit::MouseUpEvent, phase, window, cx| {
+                                if event.button != gpui_kit::MouseButton::Left {
+                                    return;
+                                }
+                                let live = gpui_kit::base::TextSelection::selected_text(window, cx)
+                                    .trim()
+                                    .to_owned();
+                                if phase.capture() {
+                                    let _ = up_entity.update(cx, |this, cx| {
+                                        if !live.is_empty() {
+                                            this.retained_selection = Some(live);
+                                            this.clear_retained_after_up = false;
+                                            cx.notify();
+                                        } else if this.retained_selection.is_some() {
+                                            this.clear_retained_after_up = true;
+                                        }
+                                    });
+                                } else {
+                                    let _ = up_entity.update(cx, |this, cx| {
+                                        if !live.is_empty() {
+                                            this.retained_selection = Some(live);
+                                            this.clear_retained_after_up = false;
+                                            cx.notify();
+                                        } else if this.clear_retained_after_up {
+                                            this.clear_retained_after_up = false;
+                                            if this.retained_selection.take().is_some() {
+                                                cx.notify();
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                        );
+                    },
+                )
+                .absolute()
+                .size_0()
+            })
             .child(column().flex_shrink_0().px_5().py_4().gap_1()
                 .border_b_1().border_color(cx.theme().border)
                 .child(div().text_size(px(20.)).font_weight(gpui_kit::FontWeight::SEMIBOLD)
@@ -804,11 +910,30 @@ impl Render for SourceForm {
                     .children(source.iter().enumerate().map(|(cue_index, cue)| {
                         row().items_start().gap_2()
                             .child(div().text_size(px(12.)).text_color(cx.theme().muted_foreground).child(format!("{}–{}", precise(cue.start_ms), precise(cue.end_ms))))
-                            .child(div().flex_1().min_w_0().child(gpui_kit::base::SelectableText::new(("source-cue-text", cue_index), cue.text.clone())))
+                            .child(
+                                div()
+                                    .id(("source-cue-accessible", cue_index))
+                                    .test_support()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(gpui_kit::base::SelectableText::new(
+                                        ("source-cue-text", cue_index),
+                                        cue.text.clone(),
+                                    )),
+                            )
                     }))
                     .child(row().flex_wrap().gap_2()
                         .child(compact_button("source-use-selection").ghost().accessibility_id("source-use-selection").label(t("選択箇所を語句に入れる", "Use selection as phrase")).disabled(disabled || !has_selected_text).on_click(cx.listener(|this, _, window, cx| {
-                            let selected = gpui_kit::base::TextSelection::selected_text(window, cx);
+                            let live = gpui_kit::base::TextSelection::selected_text(window, cx)
+                                .trim()
+                                .to_owned();
+                            this.clear_retained_after_up = false;
+                            let selected = if !live.is_empty() {
+                                this.retained_selection = None;
+                                live
+                            } else {
+                                this.retained_selection.take().unwrap_or_default()
+                            };
                             this.set_term_from_text(selected, window, cx);
                         })))
                         .child(compact_button("source-use-example").ghost().accessibility_id("source-use-example").label(t("例文全体を語句に入れる", "Use example as phrase")).disabled(disabled || !example_nonempty).on_click(cx.listener(|this, _, window, cx| {

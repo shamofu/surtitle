@@ -193,7 +193,7 @@ fn study_shortcuts_and_non_fullscreen_escape_respect_ime_and_companion_toggle(
     harness.wait_window(cx, dialog, "SourceForm visible", |window| {
         window
             .try_find("close-source")
-            .is_some_and(|node| node.visible())
+            .is_some_and(|node| node.visible() && node.disabled() != Some(true))
     });
     cx.update_window(dialog, |_, window, app| window.click("close-source", app))
         .unwrap();
@@ -277,7 +277,8 @@ fn transcript_drag_preserves_selection_cue_save_opens_directly_and_shift_click_s
     harness.wait(cx, "SourceForm opened from cue-save", |_, app| {
         secondary_window(&harness, app).is_some()
     });
-    cx.update_window(harness.window, |_, window, _| {
+    cx.update_window(harness.window, |_, window, app| {
+        window.render_frame(app);
         assert!(
             window
                 .try_find("study-page-transcript")
@@ -323,6 +324,7 @@ fn transcript_drag_preserves_selection_cue_save_opens_directly_and_shift_click_s
 
     // 2. Drag across cue-accessible-text-c1 (>= 5 px): creates TextSelection and stays on Transcript.
     cx.update_window(harness.window, |_, window, app| {
+        window.render_frame(app);
         let bounds = window.find("cue-accessible-text-c1").bounds();
         window.drag(
             point(bounds.left() + px(2.), bounds.top() + px(12.)),
@@ -367,12 +369,40 @@ fn transcript_drag_preserves_selection_cue_save_opens_directly_and_shift_click_s
 #[gpui_kit::test]
 fn source_form_focus_quick_fill_and_ctrl_enter_respects_ime(cx: &mut TestAppContext) {
     let harness = Harness::open(cx);
-    open_study(&harness, cx);
+    let template = commands::subtitles::list_segments(&harness.state, "ui-media".into())
+        .unwrap()
+        .remove(0);
+    let cues: Vec<SubtitleSegment> = [
+        ("c1", "Make yourself at home.", 0, 900),
+        ("c2", "Help yourself to tea.", 1000, 1900),
+    ]
+    .into_iter()
+    .map(|(id, text, start_ms, end_ms)| SubtitleSegment {
+        id: id.into(),
+        text: text.into(),
+        start_ms,
+        end_ms,
+        ..template.clone()
+    })
+    .collect();
+    Store::open(harness.root.path().join("learning.sqlite"))
+        .unwrap()
+        .set_segments("ui-media", &cues)
+        .unwrap();
+    harness
+        .state
+        .changes
+        .publish(ChangeDomain::Subtitles, Some("ui-media".into()));
 
-    // 1. Open phrase SourceForm without preselection -> initial focus lands on source-term,
+    open_study(&harness, cx);
+    harness.wait_window(cx, harness.window, "seeded cues rendered", |window| {
+        window.try_find("cue-row-c1").is_some() && window.try_find("cue-row-c2").is_some()
+    });
+
+    // 1. Open phrase SourceForm without preselection on c2 -> initial focus lands on source-term,
     // source-preview-audio is visible, and source-use-example fills term.
     cx.update_window(harness.window, |_, window, app| {
-        window.click("cue-save-ui-cue", app);
+        window.click("cue-save-c2", app);
     })
     .unwrap();
     harness.wait(cx, "SourceForm window opened", |_, app| {
@@ -405,12 +435,34 @@ fn source_form_focus_quick_fill_and_ctrl_enter_respects_ime(cx: &mut TestAppCont
     cx.simulate_window_resize(dialog, size(px(640.), px(980.)));
 
     cx.update_window(dialog, |_, window, app| {
+        window.render_frame(app);
         window.click("source-use-example", app);
         window.render_frame(app);
         let focused = window
             .focused_input(app)
             .expect("source-use-example keeps focus on source-term");
-        assert_eq!(textarea_value(&focused, app), "Make yourself at home.");
+        assert_eq!(textarea_value(&focused, app), "Help yourself to tea.");
+
+        let bounds = window.find(("source-cue-accessible", 0usize)).bounds();
+        window.drag(
+            point(bounds.left() + px(2.), bounds.center().y),
+            point(bounds.left() + px(80.), bounds.center().y),
+            app,
+        );
+        window.render_frame(app);
+        let cue_selected = gpui_kit::base::TextSelection::selected_text(window, app)
+            .trim()
+            .to_owned();
+        assert!(
+            !cue_selected.is_empty() && cue_selected.len() < "Help yourself to tea.".len(),
+            "expected partial cue text selection in SourceForm, got {cue_selected:?}"
+        );
+        window.click("source-use-selection", app);
+        window.render_frame(app);
+        assert_eq!(
+            window.find_by_label("Word or phrase").value(),
+            Some(cue_selected.as_str())
+        );
         window.click("close-source", app);
     })
     .unwrap();
@@ -418,22 +470,24 @@ fn source_form_focus_quick_fill_and_ctrl_enter_respects_ime(cx: &mut TestAppCont
         app.windows().len() == 1
     });
 
-    // 2. Prefilled term (via text selection) starts initial focus on source-meaning.
-    cx.update_window(harness.window, |_, window, app| {
-        let bounds = window.find("caption-accessible-text").bounds();
-        window.drag(
-            point(bounds.left() + px(2.), bounds.center().y),
-            point(bounds.left() + px(90.), bounds.center().y),
-            app,
-        );
-        assert!(
-            !gpui_kit::base::TextSelection::selected_text(window, app)
+    // 2. Prefilled term (via text selection on c1) starts initial focus on source-meaning.
+    let selected = cx
+        .update_window(harness.window, |_, window, app| {
+            window.render_frame(app);
+            let bounds = window.find("caption-accessible-text").bounds();
+            window.drag(
+                point(bounds.left() + px(2.), bounds.center().y),
+                point(bounds.left() + px(90.), bounds.center().y),
+                app,
+            );
+            let selected = gpui_kit::base::TextSelection::selected_text(window, app)
                 .trim()
-                .is_empty()
-        );
-        window.click("save-phrase", app);
-    })
-    .unwrap();
+                .to_owned();
+            assert!(!selected.is_empty());
+            window.click("save-phrase", app);
+            selected
+        })
+        .unwrap();
     harness.wait(cx, "prefilled SourceForm opened", |_, app| {
         secondary_window(&harness, app).is_some()
     });
@@ -454,6 +508,10 @@ fn source_form_focus_quick_fill_and_ctrl_enter_respects_ime(cx: &mut TestAppCont
             is_textarea_focused(window, "Meaning"),
             "SourceForm with prefilled term must focus source-meaning initially"
         );
+        assert_eq!(
+            window.find_by_label("Word or phrase").value(),
+            Some(selected.as_str())
+        );
         window.click("close-source", app);
     })
     .unwrap();
@@ -461,10 +519,11 @@ fn source_form_focus_quick_fill_and_ctrl_enter_respects_ime(cx: &mut TestAppCont
         app.windows().len() == 1
     });
 
-    // 3. Open subtitle SourceForm via cue-more -> "Edit subtitle": verify initial focus on
+    // 3. Open subtitle SourceForm via cue-more-c1 -> "Edit subtitle": verify initial focus on
     // Subtitle, IME marked_text_range protection on Ctrl+Enter, and commit via Ctrl+Enter.
     cx.update_window(harness.window, |_, window, app| {
-        window.click("cue-more-ui-cue", app);
+        window.render_frame(app);
+        window.click("cue-more-c1", app);
         window.render_frame(app);
         window.press("down", app);
         window.press("enter", app);
@@ -523,26 +582,28 @@ fn source_form_focus_quick_fill_and_ctrl_enter_respects_ime(cx: &mut TestAppCont
     harness.wait_window(
         cx,
         sub_dialog,
-        "subtitle SourceForm shows Saved and disables save",
+        "subtitle SourceForm finishes saving and enables Close",
         |window| {
             window
                 .try_find("save-source")
                 .is_some_and(|node| node.disabled() == Some(true))
-        },
-    );
-    harness.wait(
-        cx,
-        "Ctrl+Enter saved updated subtitle in learning.sqlite",
-        |_, _| {
-            commands::subtitles::list_segments(&harness.state, "ui-media".into())
-                .unwrap()
-                .first()
-                .is_some_and(|cue| {
-                    cue.text != "Make yourself at home." && cue.text.contains("Updated")
+                && window.try_find("close-source").is_some_and(|node| {
+                    node.disabled() != Some(true) && node.label() == Some("Close")
                 })
         },
     );
+    let updated_c1 = commands::subtitles::list_segments(&harness.state, "ui-media".into())
+        .unwrap()
+        .into_iter()
+        .find(|cue| cue.id == "c1")
+        .expect("c1 subtitle exists");
+    assert!(
+        updated_c1.text != "Make yourself at home." && updated_c1.text.contains("Updated"),
+        "expected updated c1 text, got {:?}",
+        updated_c1.text
+    );
     cx.update_window(sub_dialog, |_, window, app| {
+        window.render_frame(app);
         window.click("close-source", app);
     })
     .unwrap();
@@ -665,6 +726,7 @@ fn review_intervals_undo_scope_card_audio_and_autoplay_setting(cx: &mut TestAppC
     .unwrap();
     cx.run_until_parked();
     cx.update_window(harness.window, |_, window, app| {
+        window.render_frame(app);
         let a11y = window.debug_a11y_tree_json().expect("a11y tree");
         assert!(a11y.contains("bonjour"));
         assert!(!a11y.contains("at home"));
@@ -747,6 +809,7 @@ fn review_intervals_undo_scope_card_audio_and_autoplay_setting(cx: &mut TestAppC
     });
 
     cx.update_window(harness.window, |_, window, app| {
+        window.render_frame(app);
         window.click("review-complete", app);
         window.press("z", app);
     })
@@ -803,13 +866,28 @@ fn review_intervals_undo_scope_card_audio_and_autoplay_setting(cx: &mut TestAppC
         window.click("review-undo", app);
     })
     .unwrap();
-    harness.wait(cx, "mid-session undo restored both due cards", |_, _| {
-        commands::ai::get_app_snapshot(&harness.state)
-            .unwrap()
-            .cards
-            .iter()
-            .all(|card| card.review_count == 0)
-    });
+    harness.wait(
+        cx,
+        "mid-session undo restored both due cards",
+        |view, app| {
+            view.session
+                .read(app)
+                .snapshot
+                .as_ref()
+                .is_some_and(|snap| snap.cards.iter().all(|card| card.review_count == 0))
+        },
+    );
+    harness.wait_window(
+        cx,
+        harness.window,
+        "mid-session undo rendered restored review card",
+        |window| {
+            window.try_find("review-undo").is_none()
+                && window
+                    .try_find("review-reveal")
+                    .is_some_and(|node| node.visible())
+        },
+    );
 
     // Verify disabled review_autoplay_audio never attempted playback earlier.
     cx.update_window(harness.window, |_, window, _| {
@@ -837,9 +915,20 @@ fn review_intervals_undo_scope_card_audio_and_autoplay_setting(cx: &mut TestAppC
         window.click("settings-review-autoplay-audio", app);
     })
     .unwrap();
-    harness.wait(cx, "reviewAutoplayAudio saved to preferences", |_, _| {
-        harness.state.settings().unwrap().review_autoplay_audio
-    });
+    harness.wait(
+        cx,
+        "reviewAutoplayAudio saved to preferences",
+        |view, app| {
+            harness.state.settings().unwrap().review_autoplay_audio
+                && !view.editors.read(app).pending()
+                && view
+                    .session
+                    .read(app)
+                    .snapshot
+                    .as_ref()
+                    .is_some_and(|snap| snap.settings.review_autoplay_audio)
+        },
+    );
 
     harness.route(cx, "review");
     harness.wait_window(
