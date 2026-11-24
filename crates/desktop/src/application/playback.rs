@@ -438,6 +438,121 @@ pub fn play_source_range(
         .map_err(err)
     }
 }
+
+/// Preview an arbitrary source interval for modal editors. Keeps the current
+/// Study media attached when already open; otherwise plays detached without
+/// altering saved resume positions.
+pub fn preview_media_range(
+    app: crate::runtime::DesktopHost,
+    state: AppState,
+    media_id: String,
+    start_ms: u64,
+    end_ms: u64,
+) -> impl std::future::Future<Output = IpcResult<()>> + Send + 'static {
+    enum PreviewTarget {
+        Attached(MediaControlLease),
+        Detached(u64),
+    }
+    let target = if start_ms >= end_ms {
+        Err(anyhow::anyhow!("Preview end time must follow start time"))
+    } else {
+        state.playback.operation().and_then(|mut operation| {
+            if operation.current_media().as_deref() == Some(media_id.as_str()) {
+                operation
+                    .reserve_control(
+                        media_id.clone(),
+                        &Control {
+                            action: "source-seek".into(),
+                            value: None,
+                            start_ms: Some(start_ms),
+                            end_ms: Some(end_ms),
+                            bounds: None,
+                            track_kind: None,
+                        },
+                    )
+                    .map(PreviewTarget::Attached)
+            } else {
+                operation.reserve_load().map(PreviewTarget::Detached)
+            }
+        })
+    };
+    async move {
+        let target = target.map_err(err)?;
+        on_main(app, move || {
+            let mut playback = state.playback.operation()?;
+            let context = state.settings()?.replay_context_ms;
+            ensure!(
+                context <= 1000,
+                "Playback context must be between 0 and 1000 ms"
+            );
+            match target {
+                PreviewTarget::Attached(lease) => {
+                    playback.apply_control(&lease, |_| Ok(()))?;
+                    let player = playback.player()?;
+                    let snapshot = player.poll();
+                    ensure!(
+                        snapshot.ready,
+                        "Wait for the media player to finish loading"
+                    );
+                    ensure!(
+                        start_ms < end_ms && end_ms <= snapshot.duration_ms,
+                        "Preview range is outside the recording"
+                    );
+                    let padded_start = start_ms.saturating_sub(u64::from(context));
+                    let padded_end = end_ms
+                        .saturating_add(u64::from(context))
+                        .min(snapshot.duration_ms);
+                    player.control(&Control {
+                        action: "seek".into(),
+                        value: None,
+                        start_ms: Some(padded_start),
+                        end_ms: Some(padded_end),
+                        bounds: None,
+                        track_kind: None,
+                    })
+                }
+                PreviewTarget::Detached(generation) => {
+                    playback.apply_load(generation, |playback| {
+                        let media = lock(&state.db)?.media(&media_id)?;
+                        if media.duration_ms > 0 {
+                            ensure!(
+                                end_ms <= media.duration_ms,
+                                "Preview range is outside the recording"
+                            );
+                        }
+                        let padded_start = start_ms.saturating_sub(u64::from(context));
+                        let padded_end = if media.duration_ms > 0 {
+                            end_ms
+                                .saturating_add(u64::from(context))
+                                .min(media.duration_ms)
+                        } else {
+                            end_ms.saturating_add(u64::from(context))
+                        };
+                        let player = playback.player()?;
+                        player.hide();
+                        player.load_selected(
+                            Path::new(&media.path),
+                            padded_start,
+                            media.audio_stream_index,
+                        )?;
+                        player.control(&Control {
+                            action: "seek".into(),
+                            value: None,
+                            start_ms: Some(padded_start),
+                            end_ms: Some(padded_end),
+                            bounds: None,
+                            track_kind: None,
+                        })?;
+                        playback.detach();
+                        Ok(())
+                    })
+                }
+            }
+        })
+        .await
+        .map_err(err)
+    }
+}
 pub async fn player_control(
     app: crate::runtime::DesktopHost,
     state: AppState,
@@ -838,5 +953,93 @@ mod source_playback_tests {
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
         assert!(settings.sentence_pause);
         assert_eq!(settings.vertex_project, "retained-project");
+    }
+
+    #[tokio::test]
+    async fn preview_media_range_rejects_invalid_interval_out_of_bounds_and_missing_media_without_mutating_position()
+     {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = tokio::runtime::Handle::current();
+        let state = crate::application::Services::open_with_runtime(
+            dir.path().to_path_buf(),
+            runtime.clone(),
+        )
+        .unwrap();
+        let host = crate::runtime::DesktopHost::new(
+            runtime,
+            |work| {
+                work();
+                Ok(())
+            },
+            |_| Ok(()),
+            |_| {},
+        );
+        let media_path = dir.path().join("sample.mp4");
+        std::fs::write(&media_path, b"fixture media").unwrap();
+        {
+            let db = lock(&state.db).unwrap();
+            db.put_media(&surtitle_core::Media {
+                id: "m1".into(),
+                title: "Sample".into(),
+                path: media_path.to_string_lossy().into_owned(),
+                kind: "video".into(),
+                duration_ms: 1000,
+                learning_language: "en".into(),
+                explanation_language: "ja".into(),
+                created_at: surtitle_core::now(),
+                last_position_ms: 420,
+                audio_stream_index: None,
+                subtitle_stream_index: None,
+                segment_count: 0,
+                card_count: 0,
+                status: "ready".into(),
+                error: None,
+            })
+            .unwrap();
+        }
+
+        let same_bounds =
+            preview_media_range(host.clone(), state.clone(), "m1".into(), 500, 500).await;
+        assert!(
+            same_bounds
+                .unwrap_err()
+                .contains("Preview end time must follow start time")
+        );
+
+        let inverted =
+            preview_media_range(host.clone(), state.clone(), "m1".into(), 700, 500).await;
+        assert!(
+            inverted
+                .unwrap_err()
+                .contains("Preview end time must follow start time")
+        );
+
+        let out_of_bounds =
+            preview_media_range(host.clone(), state.clone(), "m1".into(), 100, 1200).await;
+        assert!(
+            out_of_bounds
+                .unwrap_err()
+                .contains("Preview range is outside the recording")
+        );
+
+        let missing =
+            preview_media_range(host.clone(), state.clone(), "missing".into(), 100, 500).await;
+        assert!(missing.is_err());
+
+        // Player is uninitialized here; verify failure is clean and never touches last_position_ms.
+        let uninitialized =
+            preview_media_range(host.clone(), state.clone(), "m1".into(), 100, 500).await;
+        assert!(uninitialized.is_err());
+
+        assert_eq!(
+            lock(&state.db)
+                .unwrap()
+                .media("m1")
+                .unwrap()
+                .last_position_ms,
+            420
+        );
+        host.shutdown();
+        state.shutdown();
     }
 }

@@ -477,6 +477,7 @@ pub struct SettingsPatch {
     pub(crate) vertex_location: Option<String>,
     pub(crate) retention: Option<f32>,
     pub(crate) sentence_pause: Option<bool>,
+    pub(crate) review_autoplay_audio: Option<bool>,
     pub(crate) replay_context_ms: Option<u16>,
     pub(crate) proficiency: Option<String>,
     pub(crate) ai_models: Option<std::collections::BTreeMap<String, AiModelPreference>>,
@@ -496,6 +497,7 @@ impl SettingsPatch {
             || self.vertex_location.is_some()
             || self.retention.is_some()
             || self.sentence_pause.is_some()
+            || self.review_autoplay_audio.is_some()
             || self.replay_context_ms.is_some()
             || self.proficiency.is_some()
             || self.ai_models.is_some()
@@ -519,6 +521,7 @@ impl SettingsPatch {
             vertex_location,
             retention,
             sentence_pause,
+            review_autoplay_audio,
             replay_context_ms,
             proficiency
         );
@@ -1255,5 +1258,48 @@ mod settings_tests {
         .unwrap();
         assert!(next.settings.ai_models["translation"].price.is_none());
         assert!(!next.settings.credential_configured);
+    }
+
+    #[test]
+    fn settings_patch_round_trips_review_autoplay_audio_without_resetting_defaults() {
+        let root = tempfile::tempdir().unwrap();
+        let state = Services::open(root.path().to_path_buf()).unwrap();
+        let initial = get_settings_state(state.clone()).unwrap();
+        assert!(!initial.settings.review_autoplay_audio);
+
+        let enabled = update_settings_patch(
+            state.clone(),
+            initial.revision,
+            patch(serde_json::json!({ "reviewAutoplayAudio": true })),
+        )
+        .unwrap();
+        assert!(enabled.settings.review_autoplay_audio);
+
+        let disabled = update_settings_patch(
+            state.clone(),
+            enabled.revision,
+            patch(serde_json::json!({ "reviewAutoplayAudio": false })),
+        )
+        .unwrap();
+        assert!(!disabled.settings.review_autoplay_audio);
+
+        assert!(
+            serde_json::from_value::<SettingsPatch>(
+                serde_json::json!({ "reviewAutoplayAudio": "yes" }),
+            )
+            .is_err()
+        );
+
+        let reenabled = update_settings_patch(
+            state.clone(),
+            disabled.revision,
+            patch(serde_json::json!({ "reviewAutoplayAudio": true })),
+        )
+        .unwrap();
+        assert!(reenabled.settings.review_autoplay_audio);
+
+        drop(state);
+        let reopened = Services::open(root.path().to_path_buf()).unwrap();
+        assert!(reopened.settings().unwrap().review_autoplay_audio);
     }
 }

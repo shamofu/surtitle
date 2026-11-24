@@ -269,18 +269,37 @@ impl Store {
         retention: f32,
         at: chrono::DateTime<chrono::Utc>,
     ) -> Result<StudyCard> {
+        Ok(self
+            .rate_card_with_receipt(card_id, rating, retention, at)?
+            .card)
+    }
+    pub fn rate_card_with_receipt(
+        &mut self,
+        card_id: &str,
+        rating: &str,
+        retention: f32,
+        at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<ReviewReceipt> {
         ensure!((0.7..=0.97).contains(&retention), "retention out of range");
-        let mut card = self.card(card_id)?;
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let data: String = tx
+            .query_row("SELECT data FROM cards WHERE id=?", [card_id], |row| {
+                row.get(0)
+            })
+            .optional()?
+            .context("item not found")?;
+        let mut card: StudyCard = serde_json::from_str(&data)?;
         ensure!(!card.suspended, "card is suspended");
-        let elapsed = card
-            .last_review
-            .as_deref()
-            .map(chrono::DateTime::parse_from_rfc3339)
-            .transpose()?
-            .map(|last| (at - last.with_timezone(&chrono::Utc)).num_days().max(0) as u32)
-            .unwrap_or(0);
-        let states =
-            fsrs::FSRS::default().next_states(card.memory.map(Into::into), retention, elapsed)?;
+        let generation: String = tx.query_row(
+            "SELECT value FROM learning_metadata WHERE key='generation'",
+            [],
+            |row| row.get(0),
+        )?;
+        let previous_memory = card.memory;
+        let previous_review_count = card.review_count;
+        let previous_last_review = card.last_review.clone();
+        let previous_due_at = card.due_at.clone();
+        let states = compute_fsrs_states(&card, retention, at)?;
         let state = match rating {
             "again" => states.again,
             "hard" => states.hard,
@@ -288,7 +307,7 @@ impl Store {
             "easy" => states.easy,
             _ => anyhow::bail!("invalid review rating"),
         };
-        let days = state.interval.round().clamp(1., 36500.) as u32;
+        let days = interval_days(state.interval);
         card.memory = Some(state.memory.into());
         card.review_count = card
             .review_count
@@ -309,7 +328,6 @@ impl Store {
             reviewed_at: at.to_rfc3339(),
             scheduled_days: if rating == "again" { 0 } else { days },
         };
-        let tx = self.conn.transaction()?;
         tx.execute(
             "UPDATE cards SET data=? WHERE id=?",
             params![serde_json::to_string(&card)?, card.id],
@@ -319,8 +337,101 @@ impl Store {
             params![review.id, review.card_id, serde_json::to_string(&review)?],
         )?;
         tx.commit()?;
-        Ok(card)
+        Ok(ReviewReceipt {
+            card,
+            review_id: review.id,
+            learning_generation: generation,
+            previous_memory,
+            previous_review_count,
+            previous_last_review,
+            previous_due_at,
+        })
     }
+    /// Undo a single completed review if no newer review or restore superseded it.
+    /// Concurrent text edits to the card remain intact.
+    pub fn undo_review(&mut self, receipt: &ReviewReceipt) -> Result<StudyCard> {
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let generation: String = tx.query_row(
+            "SELECT value FROM learning_metadata WHERE key='generation'",
+            [],
+            |row| row.get(0),
+        )?;
+        ensure!(
+            generation == receipt.learning_generation,
+            "Learning data was restored; cannot undo previous review"
+        );
+        let review_card_id: Option<String> = tx
+            .query_row(
+                "SELECT card_id FROM reviews WHERE id=?",
+                [&receipt.review_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        ensure!(
+            review_card_id.as_deref() == Some(receipt.card.id.as_str()),
+            "Review record is no longer current"
+        );
+        let data: String = tx
+            .query_row(
+                "SELECT data FROM cards WHERE id=?",
+                [&receipt.card.id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .context("Card no longer exists")?;
+        let mut current: StudyCard = serde_json::from_str(&data)?;
+        ensure!(
+            current.review_count == receipt.card.review_count
+                && current.due_at == receipt.card.due_at
+                && current.last_review == receipt.card.last_review,
+            "Card was reviewed again; cannot undo"
+        );
+        current.memory = receipt.previous_memory;
+        current.review_count = receipt.previous_review_count;
+        current.last_review = receipt.previous_last_review.clone();
+        current.due_at = receipt.previous_due_at.clone();
+        tx.execute(
+            "UPDATE cards SET data=? WHERE id=?",
+            params![serde_json::to_string(&current)?, current.id],
+        )?;
+        tx.execute("DELETE FROM reviews WHERE id=?", [&receipt.review_id])?;
+        tx.commit()?;
+        Ok(current)
+    }
+}
+
+fn interval_days(interval: f32) -> u32 {
+    interval.round().clamp(1., 36500.) as u32
+}
+
+fn compute_fsrs_states(
+    card: &StudyCard,
+    retention: f32,
+    at: chrono::DateTime<chrono::Utc>,
+) -> Result<fsrs::NextStates> {
+    ensure!((0.7..=0.97).contains(&retention), "retention out of range");
+    let elapsed = card
+        .last_review
+        .as_deref()
+        .map(chrono::DateTime::parse_from_rfc3339)
+        .transpose()?
+        .map(|last| (at - last.with_timezone(&chrono::Utc)).num_days().max(0) as u32)
+        .unwrap_or(0);
+    Ok(fsrs::FSRS::default().next_states(card.memory.map(Into::into), retention, elapsed)?)
+}
+
+pub fn preview_review_intervals(
+    card: &StudyCard,
+    retention: f32,
+    at: chrono::DateTime<chrono::Utc>,
+) -> Result<ReviewIntervals> {
+    let states = compute_fsrs_states(card, retention, at)?;
+    Ok(ReviewIntervals {
+        again_minutes: 1,
+        hard_days: interval_days(states.hard.interval),
+        good_days: interval_days(states.good.interval),
+        easy_days: interval_days(states.easy.interval),
+    })
 }
 
 #[cfg(test)]
@@ -415,5 +526,67 @@ mod tests {
             }
         }
         assert_eq!(total_reviews, 63);
+    }
+
+    #[test]
+    fn preview_matches_rate_card_and_undo_restores_schedule_while_preserving_text_edits() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut store = Store::open(temp.path().join("learning.sqlite")).unwrap();
+        let card: StudyCard = serde_json::from_value(serde_json::json!({
+            "id": "undo-card", "mediaId": "fixture",
+            "segmentId": "fixture-cue", "term": "phrase", "meaning": "meaning",
+            "example": "Example.", "language": "en",
+            "dueAt": "2026-01-01T00:00:00Z", "createdAt": "2026-01-01T00:00:00Z",
+            "reviewCount": 0, "audioPath": "fixture-audio.wav", "suspended": false,
+        }))
+        .unwrap();
+        store.put_card(&card).unwrap();
+
+        let at = Utc.with_ymd_and_hms(2026, 1, 2, 12, 0, 0).unwrap();
+        let preview = preview_review_intervals(&card, 0.9, at).unwrap();
+        assert_eq!(preview.again_minutes, 1);
+        assert!(preview.hard_days >= 1 && preview.good_days >= preview.hard_days);
+        assert!(preview.easy_days >= preview.good_days);
+
+        let receipt = store
+            .rate_card_with_receipt(&card.id, "good", 0.9, at)
+            .unwrap();
+        assert_eq!(receipt.card.review_count, 1);
+        let expected_due = (at + Duration::days(preview.good_days.into())).to_rfc3339();
+        assert_eq!(receipt.card.due_at, expected_due);
+        assert_eq!(store.list_reviews().unwrap().len(), 1);
+
+        // An intermediate edit to the card's text must survive undo.
+        store
+            .edit_card(&EditCard {
+                id: card.id.clone(),
+                term: "edited phrase".into(),
+                meaning: "edited meaning".into(),
+                example: "Edited example.".into(),
+                translation: None,
+                explanation: Some("note".into()),
+            })
+            .unwrap();
+
+        let undone = store.undo_review(&receipt).unwrap();
+        assert_eq!(undone.review_count, 0);
+        assert_eq!(undone.due_at, "2026-01-01T00:00:00Z");
+        assert!(undone.memory.is_none());
+        assert!(undone.last_review.is_none());
+        assert_eq!(undone.term, "edited phrase");
+        assert_eq!(undone.meaning, "edited meaning");
+        assert_eq!(undone.explanation.as_deref(), Some("note"));
+        assert!(store.list_reviews().unwrap().is_empty());
+
+        // Double undo is rejected cleanly.
+        assert!(store.undo_review(&receipt).is_err());
+
+        // Undo across restore generation is rejected even if a matching review id existed.
+        let again_receipt = store
+            .rate_card_with_receipt(&card.id, "easy", 0.9, at)
+            .unwrap();
+        let mut wrong_generation = again_receipt.clone();
+        wrong_generation.learning_generation = "different-generation".into();
+        assert!(store.undo_review(&wrong_generation).is_err());
     }
 }

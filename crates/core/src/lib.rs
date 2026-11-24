@@ -12,7 +12,7 @@ pub use editor_draft::*;
 pub use model::*;
 pub use replay::{AudioClipRange, replay_range};
 pub use sentences::sentence_ranges;
-pub use store::Store;
+pub use store::{Store, preview_review_intervals};
 pub use transcript_issue::*;
 
 mod source_cues;

@@ -16,7 +16,7 @@ use gpui_kit::component::{
 use gpui_kit::{
     AppContext, Context, Entity, Focusable, Subscription, Window, div, prelude::*, px, relative,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use surtitle_core::StudyCard;
 
 #[derive(Clone)]
@@ -53,6 +53,11 @@ pub(crate) struct CardsView {
     review_started: Option<std::time::Instant>,
     review_wipe: f32,
     language: Option<String>,
+    media_filter: Option<String>,
+    last_undo: Option<surtitle_core::ReviewReceipt>,
+    autoplay_card_id: Option<String>,
+    last_generation: u64,
+    review_active: bool,
     due_timer: Option<gpui_kit::Task<()>>,
     next_due: Option<String>,
     expanded: Option<String>,
@@ -84,6 +89,11 @@ impl CardsView {
             }
         });
         let editing = cx.observe(&editors, |_, _, cx| cx.notify());
+        let last_generation = session
+            .read(cx)
+            .backend
+            .generation
+            .load(std::sync::atomic::Ordering::Acquire);
         Self {
             session,
             editors,
@@ -107,6 +117,11 @@ impl CardsView {
             review_started: None,
             review_wipe: 1.,
             language: None,
+            media_filter: None,
+            last_undo: None,
+            autoplay_card_id: None,
+            last_generation,
+            review_active: false,
             due_timer: None,
             next_due: None,
             expanded: None,
@@ -116,6 +131,22 @@ impl CardsView {
             row_motion: Default::default(),
             list_ids: Vec::new(),
             _subscriptions: vec![input, changes, editing],
+        }
+    }
+    pub fn set_scope(
+        &mut self,
+        language: Option<String>,
+        media_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.language = language;
+        self.media_filter = media_id;
+        cx.notify();
+    }
+    pub fn set_active(&mut self, active: bool) {
+        self.review_active = active;
+        if !active {
+            self.autoplay_card_id = None;
         }
     }
     pub fn focus(&self, window: &mut Window, cx: &mut gpui_kit::App) {
@@ -197,6 +228,7 @@ impl CardsView {
                         "review-outgoing-audio"
                     })
                     .label(t("文脈を聴く", "Listen in context"))
+                    .tooltip(t("文脈を聴く (R)", "Listen in context (R)"))
                     .disabled(disabled)
                     .on_click(cx.listener(move |this, _, _, cx| this.audio(audio_id.clone(), cx))),
                 ),
@@ -369,6 +401,7 @@ impl CardsView {
                     .icon(IconName::Pencil)
                     .accessibility_id(edit_control_id)
                     .label(t("編集", "Edit"))
+                    .tooltip(t("編集 (E)", "Edit (E)"))
                     .disabled(disabled)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open(edit_id.clone(), window, cx);
@@ -651,12 +684,13 @@ impl CardsView {
         run(
             &backend,
             cx,
-            async move { commands::cards::rate_card(&state, id, rating) },
+            async move { commands::cards::rate_card_with_receipt(&state, id, rating) },
             move |this, result, cx| {
                 this.busy = false;
                 match result {
-                    Ok(()) => {
+                    Ok(receipt) => {
                         this.reviewed.insert(reviewed_id, previous_due);
+                        this.last_undo = Some(receipt);
                         this.revealed = false;
                         this.focus_after_rating = return_focus;
                         this.session.update(cx, |session, cx| session.refresh(cx));
@@ -665,6 +699,166 @@ impl CardsView {
                 }
             },
         );
+    }
+    fn undo_last_review(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy || self.editors.read(cx).frozen() {
+            return;
+        }
+        let Some(receipt) = self.last_undo.clone() else {
+            return;
+        };
+        let return_focus = [&self.focus, &self.prompt_focus, &self.answer_focus]
+            .into_iter()
+            .chain(self.rating_focus.iter())
+            .find(|focus| focus.is_focused(window))
+            .cloned();
+        self.busy = true;
+        self.error = None;
+        let backend = self.session.read(cx).backend.clone();
+        let state = backend.state.clone();
+        let card_id = receipt.card.id.clone();
+        run(
+            &backend,
+            cx,
+            async move { commands::cards::undo_review(&state, receipt) },
+            move |this, result, cx| {
+                this.busy = false;
+                match result {
+                    Ok(_) => {
+                        this.last_undo = None;
+                        this.reviewed.remove(&card_id);
+                        this.revealed = false;
+                        this.autoplay_card_id = Some(card_id);
+                        this.review_outgoing = None;
+                        this.review_started = None;
+                        this.review_wipe = 1.;
+                        this.focus_after_rating = return_focus;
+                        this.session.update(cx, |session, cx| session.refresh(cx));
+                    }
+                    Err(error) => this.error = Some(error),
+                }
+            },
+        );
+    }
+    fn language_dropdown(
+        &self,
+        id: &'static str,
+        languages: &BTreeSet<String>,
+        ja: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let t =
+            move |ja_text: &'static str, en_text: &'static str| if ja { ja_text } else { en_text };
+        let selected_language = self.language.clone();
+        let language_view = cx.entity().downgrade();
+        let language_label = self.language.as_ref().map_or_else(
+            || t("すべての言語", "All languages").to_owned(),
+            |code| language_name(code, ja),
+        );
+        let language_labels = std::iter::once(t("すべての言語", "All languages").to_owned())
+            .chain(languages.iter().map(|code| language_name(code, ja)))
+            .collect::<Vec<_>>();
+        let owned_languages = languages.iter().cloned().collect::<Vec<_>>();
+        button(id)
+            .accessibility_label(language_label.clone())
+            .child(state_label(
+                language_label,
+                &language_labels
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            ))
+            .icon(IconName::ChevronDown)
+            .accessibility_id(id)
+            .dropdown_menu(move |mut menu, _, _| {
+                let view = language_view.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(t("すべての言語", "All languages"))
+                        .checked(selected_language.is_none())
+                        .on_click(move |_, _, cx| {
+                            let _ = view.update(cx, |this, cx| {
+                                this.language = None;
+                                cx.notify();
+                            });
+                        }),
+                );
+                for language in &owned_languages {
+                    let view = language_view.clone();
+                    let code = language.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(language_name(language, ja))
+                            .checked(selected_language.as_ref() == Some(language))
+                            .on_click(move |_, _, cx| {
+                                let _ = view.update(cx, |this, cx| {
+                                    this.language = Some(code.clone());
+                                    cx.notify();
+                                });
+                            }),
+                    );
+                }
+                menu
+            })
+    }
+    fn media_dropdown(
+        &self,
+        id: &'static str,
+        media_options: &[(String, String)],
+        ja: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let t =
+            move |ja_text: &'static str, en_text: &'static str| if ja { ja_text } else { en_text };
+        let selected_media = self.media_filter.clone();
+        let media_view = cx.entity().downgrade();
+        let media_label = selected_media
+            .as_ref()
+            .and_then(|target| {
+                media_options
+                    .iter()
+                    .find(|(media_id, _)| media_id == target)
+                    .map(|(_, title)| title.clone())
+            })
+            .unwrap_or_else(|| t("すべての作品", "All media").to_owned());
+        let media_labels = std::iter::once(t("すべての作品", "All media").to_owned())
+            .chain(media_options.iter().map(|(_, title)| title.clone()))
+            .collect::<Vec<_>>();
+        let owned_media = media_options.to_vec();
+        button(id)
+            .accessibility_label(media_label.clone())
+            .child(state_label(
+                media_label,
+                &media_labels.iter().map(String::as_str).collect::<Vec<_>>(),
+            ))
+            .icon(IconName::ChevronDown)
+            .accessibility_id(id)
+            .dropdown_menu(move |mut menu, _, _| {
+                let view = media_view.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(t("すべての作品", "All media"))
+                        .checked(selected_media.is_none())
+                        .on_click(move |_, _, cx| {
+                            let _ = view.update(cx, |this, cx| {
+                                this.media_filter = None;
+                                cx.notify();
+                            });
+                        }),
+                );
+                for (media_id, title) in &owned_media {
+                    let view = media_view.clone();
+                    let target = media_id.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(title.clone())
+                            .checked(selected_media.as_ref() == Some(media_id))
+                            .on_click(move |_, _, cx| {
+                                let _ = view.update(cx, |this, cx| {
+                                    this.media_filter = Some(target.clone());
+                                    cx.notify();
+                                });
+                            }),
+                    );
+                }
+                menu
+            })
     }
 }
 impl Render for CardsView {
@@ -686,6 +880,18 @@ impl Render for CardsView {
             });
         }
         self.arm_due_timer(cx);
+        let generation = self
+            .session
+            .read(cx)
+            .backend
+            .generation
+            .load(std::sync::atomic::Ordering::Acquire);
+        if self.last_generation != generation {
+            self.last_generation = generation;
+            self.last_undo = None;
+            self.reviewed.clear();
+            self.autoplay_card_id = None;
+        }
         let snapshot = self.session.read(cx).snapshot.clone();
         let query = self.search.read(cx).value().trim().to_lowercase();
         let now = self.session.read(cx).utc_now();
@@ -693,17 +899,48 @@ impl Render for CardsView {
             !card.suspended
                 && chrono::DateTime::parse_from_rfc3339(&card.due_at).is_ok_and(|date| date <= now)
         };
+        let languages: BTreeSet<String> = snapshot
+            .as_ref()
+            .into_iter()
+            .flat_map(|s| &s.cards)
+            .map(|c| c.language.clone())
+            .collect();
+        let media_options: Vec<(String, String)> = {
+            let mut map = BTreeMap::new();
+            if let Some(s) = snapshot.as_ref() {
+                for card in &s.cards {
+                    let title = s
+                        .media
+                        .iter()
+                        .find(|m| m.id == card.media_id)
+                        .map(|m| m.title.clone())
+                        .unwrap_or_else(|| card.source_title.clone());
+                    map.entry(card.media_id.clone()).or_insert(title);
+                }
+            }
+            let mut options: Vec<(String, String)> = map.into_iter().collect();
+            options.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+            options
+        };
         let cards: Vec<StudyCard> = snapshot
             .as_ref()
             .into_iter()
             .flat_map(|s| &s.cards)
             .filter(|card| {
-                if self.review {
-                    return due(card) && self.reviewed.get(&card.id) != Some(&card.due_at);
-                }
-                self.language
+                let matches_scope = self
+                    .language
                     .as_ref()
                     .is_none_or(|language| language == &card.language)
+                    && self
+                        .media_filter
+                        .as_ref()
+                        .is_none_or(|media_id| media_id == &card.media_id);
+                if self.review {
+                    return matches_scope
+                        && due(card)
+                        && self.reviewed.get(&card.id) != Some(&card.due_at);
+                }
+                matches_scope
                     && (query.is_empty()
                         || [
                             &card.term,
@@ -728,6 +965,37 @@ impl Render for CardsView {
                 self.prompt_focus.focus(window, cx);
             }
             let current = cards.first().cloned();
+            let autoplay_enabled = snapshot
+                .as_ref()
+                .is_some_and(|s| s.settings.review_autoplay_audio);
+            if !self.review_active || !autoplay_enabled {
+                self.autoplay_card_id = None;
+            } else if !disabled && window.is_visible() {
+                if let Some(card) = &current {
+                    if self.autoplay_card_id.as_deref() != Some(card.id.as_str()) {
+                        self.autoplay_card_id = Some(card.id.clone());
+                        if card.audio_path.is_some() {
+                            let id = card.id.clone();
+                            let entity = cx.entity().downgrade();
+                            let handle = window.window_handle();
+                            gpui_kit::App::defer(cx, move |cx| {
+                                let visible = handle
+                                    .update(cx, |_, window, _| window.is_visible())
+                                    .unwrap_or(false);
+                                if visible {
+                                    let _ = entity.update(cx, |this, cx| {
+                                        if this.review_active && !this.busy {
+                                            this.audio(id, cx);
+                                        }
+                                    });
+                                }
+                            });
+                        }
+                    }
+                } else {
+                    self.autoplay_card_id = None;
+                }
+            }
             let next_id = current.as_ref().map(|card| card.id.clone());
             if self.review_current != next_id && self.review_current.is_some() && next_id.is_some()
             {
@@ -766,11 +1034,14 @@ impl Render for CardsView {
                 });
             let total = self.reviewed.len() + cards.len();
             let back = self.session.clone();
+            let current_has_audio = current
+                .as_ref()
+                .is_some_and(|card| card.audio_path.is_some());
             let mut page = column()
                 .track_focus(&self.focus)
                 .key_context("SurtitleReview")
-                .on_key_down(
-                    cx.listener(|this, event: &gpui_kit::KeyDownEvent, window, cx| {
+                .on_key_down(cx.listener(
+                    move |this, event: &gpui_kit::KeyDownEvent, window, cx| {
                         if event.is_held
                             || !super::keyboard::page_shortcut(
                                 event,
@@ -782,11 +1053,26 @@ impl Render for CardsView {
                         {
                             return;
                         }
+                        if event.keystroke.key == "z" {
+                            if this.last_undo.is_some() {
+                                this.undo_last_review(window, cx);
+                                cx.stop_propagation();
+                            }
+                            return;
+                        }
                         let Some(id) = this.review_current.clone() else {
                             return;
                         };
                         match event.keystroke.key.as_str() {
                             "space" => this.reveal(window, cx),
+                            "r" => {
+                                if current_has_audio {
+                                    this.audio(id, cx);
+                                } else {
+                                    return;
+                                }
+                            }
+                            "e" => this.open(id, window, cx),
                             "1" if this.revealed => this.rate(id, "again", window, cx),
                             "2" if this.revealed => this.rate(id, "hard", window, cx),
                             "3" if this.revealed => this.rate(id, "good", window, cx),
@@ -794,8 +1080,8 @@ impl Render for CardsView {
                             _ => return,
                         }
                         cx.stop_propagation();
-                    }),
-                )
+                    },
+                ))
                 .id("review-scroll")
                 .role(gpui_kit::accesskit::Role::Group)
                 .aria_label(t("復習", "Review"))
@@ -836,17 +1122,81 @@ impl Render for CardsView {
                                 ))),
                         )
                         .child(
-                            div()
+                            row()
                                 .flex_1()
-                                .text_right()
-                                .text_size(px(13.))
-                                .text_color(theme.muted_foreground)
-                                .child(if ja {
-                                    format!("{} / {total} 件", self.reviewed.len())
-                                } else {
-                                    format!("{} of {total} reviewed", self.reviewed.len())
+                                .justify_end()
+                                .gap_3()
+                                .when(self.last_undo.is_some(), |right| {
+                                    right.child(
+                                        compact_button("review-undo")
+                                            .ghost()
+                                            .icon(IconName::RotateCcw)
+                                            .accessibility_id("review-undo")
+                                            .label(t("直前の評価を戻す", "Undo"))
+                                            .tooltip(t(
+                                                "直前の評価を戻す (Z)",
+                                                "Undo last rating (Z)",
+                                            ))
+                                            .disabled(disabled)
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.undo_last_review(window, cx)
+                                            })),
+                                    )
+                                })
+                                .child({
+                                    let progress_label = if ja {
+                                        format!("{} / {total} 件", self.reviewed.len())
+                                    } else {
+                                        format!("{} of {total} reviewed", self.reviewed.len())
+                                    };
+                                    let progress_reserve = if ja {
+                                        format!("{total} / {total} 件")
+                                    } else {
+                                        format!("{total} of {total} reviewed")
+                                    };
+                                    div()
+                                        .text_size(px(13.))
+                                        .font_features(tabular_numbers())
+                                        .text_color(theme.muted_foreground)
+                                        .child(state_label(
+                                            progress_label.clone(),
+                                            &[progress_label.as_str(), progress_reserve.as_str()],
+                                        ))
                                 }),
                         ),
+                )
+                .when(
+                    languages.len() > 1
+                        || media_options.len() > 1
+                        || self.language.is_some()
+                        || self.media_filter.is_some(),
+                    |page| {
+                        page.child(
+                            row()
+                                .justify_end()
+                                .gap_2()
+                                .flex_wrap()
+                                .when(languages.len() > 1 || self.language.is_some(), |filters| {
+                                    filters.child(self.language_dropdown(
+                                        "review-language",
+                                        &languages,
+                                        ja,
+                                        cx,
+                                    ))
+                                })
+                                .when(
+                                    media_options.len() > 1 || self.media_filter.is_some(),
+                                    |filters| {
+                                        filters.child(self.media_dropdown(
+                                            "review-media",
+                                            &media_options,
+                                            ja,
+                                            cx,
+                                        ))
+                                    },
+                                ),
+                        )
+                    },
                 )
                 .child(
                     div()
@@ -878,6 +1228,36 @@ impl Render for CardsView {
                 );
             if let Some(card) = current {
                 let short = window.viewport_size().height < px(760.);
+                let retention = snapshot.as_ref().map_or(0.9, |s| s.settings.retention);
+                let intervals = surtitle_core::preview_review_intervals(&card, retention, now).ok();
+                let format_days = |days: u32| -> String {
+                    if ja {
+                        format!("{days}日")
+                    } else {
+                        format!("{days}d")
+                    }
+                };
+                let interval_texts = [
+                    intervals.map_or_else(
+                        || if ja { "1分".into() } else { "1m".into() },
+                        |i| {
+                            if ja {
+                                format!("{}分", i.again_minutes)
+                            } else {
+                                format!("{}m", i.again_minutes)
+                            }
+                        },
+                    ),
+                    intervals
+                        .map(|i| format_days(i.hard_days))
+                        .unwrap_or_default(),
+                    intervals
+                        .map(|i| format_days(i.good_days))
+                        .unwrap_or_default(),
+                    intervals
+                        .map(|i| format_days(i.easy_days))
+                        .unwrap_or_default(),
+                ];
                 let body = self.review_card(&card, self.revealed, disabled, true, window, cx);
                 let outgoing = self
                     .review_outgoing
@@ -898,8 +1278,19 @@ impl Render for CardsView {
                         ("easy",t("簡単","Easy"),t("すぐにわかった","Knew it instantly")),
                     ].into_iter().enumerate().map(|(index,(rating,label,detail))| {
                         let id=id.clone();
-                        button(rating).track_focus(&self.rating_focus[index]).accessibility_id(format!("review-rate-{rating}")).accessibility_label(format!("{} {label} — {detail}",index+1)).flex_1().h(px(if short {80.} else {94.})).disabled(disabled)
-                            .child(column().gap_1().items_center().child(div().text_size(px(12.)).text_color(theme.muted_foreground).child((index+1).to_string())).child(div().text_size(px(15.)).font_weight(gpui_kit::FontWeight::MEDIUM).child(label)).child(muted(detail)))
+                        let interval = &interval_texts[index];
+                        let caption = if interval.is_empty() {
+                            (index + 1).to_string()
+                        } else {
+                            format!("{} · {interval}", index + 1)
+                        };
+                        let a11y_label = if interval.is_empty() {
+                            format!("{} {label} — {detail}", index + 1)
+                        } else {
+                            format!("{} {label} ({interval}) — {detail}", index + 1)
+                        };
+                        button(rating).track_focus(&self.rating_focus[index]).accessibility_id(format!("review-rate-{rating}")).accessibility_label(a11y_label).flex_1().h(px(if short {80.} else {94.})).disabled(disabled)
+                            .child(column().gap_1().items_center().child(div().text_size(px(12.)).font_features(tabular_numbers()).text_color(theme.muted_foreground).child(caption)).child(div().text_size(px(15.)).font_weight(gpui_kit::FontWeight::MEDIUM).child(label)).child(muted(detail)))
                             .on_click(cx.listener(move|this,_,window,cx|this.rate(id.clone(),rating,window,cx)))
                     }))))
                     .when(!self.revealed, |body| body.child(div().w_full().h(px(if short {80.} else {94.}))))
@@ -907,6 +1298,7 @@ impl Render for CardsView {
             } else {
                 let library = self.session.clone();
                 let phrases = self.session.clone();
+                let filtered_scope = self.language.is_some() || self.media_filter.is_some();
                 let heading = if self.reviewed.is_empty() {
                     t(
                         "いま復習する表現はありません",
@@ -945,6 +1337,17 @@ impl Render for CardsView {
                         )))
                         .child(
                             row()
+                                .flex_wrap()
+                                .gap_2()
+                                .when(filtered_scope, |actions| {
+                                    actions.child(
+                                        button("review-clear-scope")
+                                            .label(t("すべての表現を復習", "Review all phrases"))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.set_scope(None, None, cx);
+                                            })),
+                                    )
+                                })
                                 .child(
                                     button("review-library")
                                         .primary()
@@ -966,24 +1369,39 @@ impl Render for CardsView {
             }
             return page
                 .when_some(self.error.clone(), |body, error| {
-                    body.child(div().text_color(theme.danger).child(error))
+                    body.child(
+                        div()
+                            .id("review-error")
+                            .test_support()
+                            .role(gpui_kit::accesskit::Role::Alert)
+                            .aria_label(error.clone())
+                            .text_color(theme.danger)
+                            .child(error),
+                    )
                 })
                 .into_any_element();
         }
-        let languages: std::collections::BTreeSet<_> = snapshot
-            .as_ref()
-            .into_iter()
-            .flat_map(|s| &s.cards)
-            .map(|c| c.language.clone())
-            .collect();
         let count = cards.len();
         let total = snapshot.as_ref().map_or(0, |s| s.cards.len());
-        let due_count = snapshot
-            .as_ref()
-            .map_or(0, |s| s.cards.iter().filter(|c| due(c)).count());
+        let due_count = snapshot.as_ref().map_or(0, |s| {
+            s.cards
+                .iter()
+                .filter(|c| {
+                    self.language
+                        .as_ref()
+                        .is_none_or(|language| language == &c.language)
+                        && self
+                            .media_filter
+                            .as_ref()
+                            .is_none_or(|media_id| media_id == &c.media_id)
+                        && due(c)
+                })
+                .count()
+        });
         let mut key = format!(
-            "{:?}:{query}:{:?}:{:?}",
+            "{:?}:{:?}:{query}:{:?}:{:?}",
             self.language,
+            self.media_filter,
             self.expanded,
             window.viewport_size().width
         );
@@ -1004,7 +1422,7 @@ impl Render for CardsView {
             self.list.scroll_px_offset_for_scrollbar(),
         );
         if key != self.list_key {
-            let filter = format!("{:?}:{query}", self.language);
+            let filter = format!("{:?}:{:?}:{query}", self.language, self.media_filter);
             if filter != self.list_filter {
                 let anchor = self.list.logical_scroll_top();
                 let ids = cards.iter().map(|card| card.id.clone()).collect::<Vec<_>>();
@@ -1035,56 +1453,11 @@ impl Render for CardsView {
         self.row_motion.begin_layout();
         let view = cx.entity().downgrade();
         let model = self.session.clone();
-        let selected_language = self.language.clone();
-        let language_view = cx.entity().downgrade();
-        let language_label = self.language.as_ref().map_or_else(
-            || t("すべての言語", "All languages").to_owned(),
-            |code| language_name(code, ja),
-        );
-        let language_labels = std::iter::once(t("すべての言語", "All languages").to_owned())
-            .chain(languages.iter().map(|code| language_name(code, ja)))
-            .collect::<Vec<_>>();
-        let filter = button("card-language")
-            .accessibility_label(language_label.clone())
-            .child(state_label(
-                language_label,
-                &language_labels
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>(),
-            ))
-            .icon(IconName::ChevronDown)
-            .accessibility_id("card-language")
-            .dropdown_menu(move |mut menu, _, _| {
-                let view = language_view.clone();
-                menu = menu.item(
-                    PopupMenuItem::new(t("すべての言語", "All languages"))
-                        .checked(selected_language.is_none())
-                        .on_click(move |_, _, cx| {
-                            let _ = view.update(cx, |this, cx| {
-                                this.language = None;
-                                cx.notify();
-                            });
-                        }),
-                );
-                for language in &languages {
-                    let view = language_view.clone();
-                    let code = language.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(language_name(language, ja))
-                            .checked(selected_language.as_ref() == Some(language))
-                            .on_click(move |_, _, cx| {
-                                let _ = view.update(cx, |this, cx| {
-                                    this.language = Some(code.clone());
-                                    cx.notify();
-                                });
-                            }),
-                    );
-                }
-                menu
-            });
+        let filter = self.language_dropdown("card-language", &languages, ja, cx);
         let export = self.session.clone();
         let review = self.session.clone();
+        let review_language = self.language.clone();
+        let review_media = self.media_filter.clone();
         let expanded = self.expanded.clone();
         let review_label = if due_count > 0 {
             format!("{}  {due_count}", t("復習する", "Start review"))
@@ -1096,34 +1469,39 @@ impl Render for CardsView {
             .child(row().justify_between().gap_6().flex_wrap()
                 .child(column().gap_2().child(title(t("フレーズ帳","Phrases"))).child(div().text_size(px(15.)).text_color(theme.muted_foreground).child(t("作品で出会った表現を、音声と文脈から振り返る。","Return to the phrases you saved, with their original audio and context."))))
                 .child(row().gap_2().child(button("cards-export").icon(IconName::ArrowDownToLine).label(t("書き出す","Export")).disabled(disabled).on_click(move|_,_,cx|export.update(cx,|s,cx|s.request_transfer(cx))))
-                    .child(button("cards-review").primary().icon(IconName::BookOpen).accessibility_label(review_label.clone()).child(state_label(review_label, &[&review_capacity]).font_features(tabular_numbers())).on_click(move|_,_,cx|review.update(cx,|s,cx|s.navigate(Route::Review,cx))))))
+                    .child(button("cards-review").primary().icon(IconName::BookOpen).accessibility_label(review_label.clone()).child(state_label(review_label, &[&review_capacity]).font_features(tabular_numbers())).on_click(move|_,_,cx|review.update(cx,|s,cx|s.start_review(review_language.clone(), review_media.clone(), cx))))))
             .child(row().justify_between().gap_4().flex_wrap()
                 .child(row().gap_2().child(div().text_size(px(17.)).font_weight(gpui_kit::FontWeight::SEMIBOLD).child(t("保存した表現","Saved phrases"))).child(phrase_badge(count.to_string(),false,cx)))
-                .child(row().gap_3().child(filter).child(
-                    Input::new(&self.search)
-                        .id("card-search")
-                        .accessibility_id("card-search")
-                        .aria_label(t("フレーズを検索","Search phrases"))
-                        .prefix(Icon::new(IconName::Search))
-                        .when(!self.search.read(cx).value().is_empty(), |input| {
-                            input.suffix(
-                                icon_button(
-                                    "clear-card-search",
-                                    IconName::X,
-                                    t("検索をクリア", "Clear search"),
+                .child(row().gap_3()
+                    .when(media_options.len() > 1 || self.media_filter.is_some(), |controls| {
+                        controls.child(self.media_dropdown("card-media", &media_options, ja, cx))
+                    })
+                    .child(filter)
+                    .child(
+                        Input::new(&self.search)
+                            .id("card-search")
+                            .accessibility_id("card-search")
+                            .aria_label(t("フレーズを検索","Search phrases"))
+                            .prefix(Icon::new(IconName::Search))
+                            .when(!self.search.read(cx).value().is_empty(), |input| {
+                                input.suffix(
+                                    icon_button(
+                                        "clear-card-search",
+                                        IconName::X,
+                                        t("検索をクリア", "Clear search"),
+                                    )
+                                    .w(px(30.))
+                                    .h(px(30.))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.search
+                                            .update(cx, |search, cx| search.set_value("", window, cx));
+                                        this.search.read(cx).focus_handle(cx).focus(window, cx);
+                                        cx.notify();
+                                    })),
                                 )
-                                .w(px(30.))
-                                .h(px(30.))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.search
-                                        .update(cx, |search, cx| search.set_value("", window, cx));
-                                    this.search.read(cx).focus_handle(cx).focus(window, cx);
-                                    cx.notify();
-                                })),
-                            )
-                        })
-                        .w(px(310.)),
-                ))) ;
+                            })
+                            .w(px(310.)),
+                    ))) ;
         if cards.is_empty() {
             let library = self.session.clone();
             page = page.child(
@@ -1165,6 +1543,7 @@ impl Render for CardsView {
                                 .label(t("絞り込みをリセット", "Reset filters"))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.language = None;
+                                    this.media_filter = None;
                                     this.search.update(cx, |s, cx| s.set_value("", window, cx));
                                     cx.notify();
                                 })),
@@ -1739,6 +2118,13 @@ impl Render for CardForm {
                 .and_then(|view| view.error.clone())
         });
         let close_disabled = self.busy || self.editors.read(cx).frozen();
+        let has_audio = self
+            .session
+            .read(cx)
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.cards.iter().find(|card| card.id == self.card_id))
+            .is_some_and(|card| card.audio_path.is_some());
         super::keyboard::form_tab_navigation(column())
             .id("card-form")
             .size_full()
@@ -1831,6 +2217,28 @@ impl Render for CardForm {
                     .gap_2()
                     .border_t_1()
                     .border_color(cx.theme().border)
+                    .child(
+                        button("card-form-audio")
+                            .ghost()
+                            .icon(IconName::Volume2)
+                            .accessibility_id("card-form-audio")
+                            .label(t("原音を聴く", "Listen"))
+                            .disabled(disabled || !has_audio)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let backend = this.session.read(cx).backend.clone();
+                                let state = backend.state.clone();
+                                let host = backend.host.clone();
+                                let id = this.card_id.clone();
+                                run(
+                                    &backend,
+                                    cx,
+                                    async move {
+                                        commands::playback::play_card_audio(host, &state, id).await
+                                    },
+                                    |this, result, _| this.error = result.err(),
+                                );
+                            })),
+                    )
                     .child(
                         button("suspend-card")
                             .ghost()

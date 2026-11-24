@@ -238,6 +238,18 @@ impl WheelSteps {
 }
 
 impl StudyView {
+    pub(super) fn step_rate(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.playback_ready(cx) || self.sources.read(cx).frozen() {
+            return;
+        }
+        let value = ((self.rate.read(cx).value().end() + delta) * 20.).round() / 20.;
+        let value = value.clamp(0.25, 3.);
+        self.rate
+            .update(cx, |rate, cx| rate.set_value(value, window, cx));
+        self.control("rate", Some(f64::from(value)), cx);
+        cx.notify();
+    }
+
     pub(super) fn queue_position_control(
         &mut self,
         task: impl Future<Output = Result<(), String>> + Send + 'static,
@@ -526,6 +538,11 @@ impl StudyView {
                                         t("選択字幕を繰り返す", "Loop")
                                     },
                                 )
+                                .tooltip(if self.looping.is_some() {
+                                    t("繰り返し解除 (L)", "Stop loop (L)")
+                                } else {
+                                    t("選択字幕を繰り返す (L)", "Loop (L)")
+                                })
                                 .toggled(self.looping.is_some())
                                 .text_color(if self.looping.is_some() {
                                     cx.theme().primary
@@ -544,7 +561,7 @@ impl StudyView {
                                 .tooltip(if fullscreen {
                                     t("全画面表示を解除 (Esc)", "Exit fullscreen (Esc)")
                                 } else {
-                                    t("全画面表示を切り替える", "Toggle fullscreen")
+                                    t("全画面表示を切り替える (F)", "Toggle fullscreen (F)")
                                 })
                                 .toggled(fullscreen)
                                 .accessibility_id("player-fullscreen")
@@ -583,7 +600,7 @@ impl StudyView {
                     .ghost()
                     .icon(IconName::Gauge)
                     .label(format!("{}×", self.rate.read(cx).value()))
-                    .tooltip(t("再生速度", "Playback speed"))
+                    .tooltip(t("再生速度 ([ / ])", "Playback speed ([ / ])"))
                     .w(px(86.))
                     .disabled(disabled),
             )
@@ -634,7 +651,6 @@ impl StudyView {
                                     t("再生速度を下げる", "Decrease playback speed"),
                                     -0.05,
                                     view.clone(),
-                                    rate.clone(),
                                 )
                                 .disabled(disabled),
                             )
@@ -652,7 +668,6 @@ impl StudyView {
                                     t("再生速度を上げる", "Increase playback speed"),
                                     0.05,
                                     view.clone(),
-                                    rate.clone(),
                                 )
                                 .disabled(disabled),
                             ),
@@ -819,24 +834,13 @@ fn rate_step(
     label: &'static str,
     delta: f32,
     owner: WeakEntity<StudyView>,
-    rate: Entity<SliderState>,
 ) -> Button {
     icon_button(id, icon, label)
         .w(px(34.))
         .h(px(34.))
         .rounded_full()
         .on_click(move |_, window, cx| {
-            let value = ((rate.read(cx).value().end() + delta) * 20.).round() / 20.;
-            let value = value.clamp(0.25, 3.);
-            let _ = owner.update(cx, |this, cx| {
-                if !this.playback_ready(cx) || this.sources.read(cx).frozen() {
-                    return;
-                }
-                this.rate
-                    .update(cx, |rate, cx| rate.set_value(value, window, cx));
-                this.control("rate", Some(f64::from(value)), cx);
-                cx.notify();
-            });
+            let _ = owner.update(cx, |this, cx| this.step_rate(delta, window, cx));
         })
 }
 

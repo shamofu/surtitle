@@ -44,6 +44,21 @@ pub fn play_source_range(
 ) -> impl std::future::Future<Output = IpcResult<()>> + Send + 'static {
     crate::application::playback::play_source_range(app, state.clone(), media_id, source_cue_ids)
 }
+pub fn preview_media_range(
+    app: crate::runtime::DesktopHost,
+    state: &AppState,
+    media_id: String,
+    start_ms: u64,
+    end_ms: u64,
+) -> impl std::future::Future<Output = IpcResult<()>> + Send + 'static {
+    crate::application::playback::preview_media_range(
+        app,
+        state.clone(),
+        media_id,
+        start_ms,
+        end_ms,
+    )
+}
 pub async fn player_control(
     app: crate::runtime::DesktopHost,
     state: &AppState,

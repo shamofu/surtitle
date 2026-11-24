@@ -20,6 +20,7 @@ const SETTINGS_KEYS: &[&str] = &[
     "explanationLanguage",
     "retention",
     "sentencePause",
+    "reviewAutoplayAudio",
     "replayContextMs",
     "proficiency",
     "vertexLocation",
@@ -146,7 +147,8 @@ pub fn settings_fields(settings: &AppSettings) -> EditFields {
     text!("locale" => locale, "theme" => theme, "motionPreference" => motion_preference,
         "captionGapMode" => caption_gap_mode, "learningLanguage" => learning_language,
         "explanationLanguage" => explanation_language, "retention" => retention,
-        "sentencePause" => sentence_pause, "replayContextMs" => replay_context_ms,
+        "sentencePause" => sentence_pause, "reviewAutoplayAudio" => review_autoplay_audio,
+        "replayContextMs" => replay_context_ms,
         "proficiency" => proficiency, "vertexLocation" => vertex_location,
         "dailyBudgetUsd" => daily_budget_usd);
     fields.insert(
@@ -310,7 +312,7 @@ fn setting_value(key: &str, raw: &str) -> Option<Value> {
                 .all(|model| (1..=1_048_576).contains(&model.max_output_tokens))
                 .then(|| serde_json::to_value(models).expect("models serialize"))
         }
-        "sentencePause" => Some(Value::Bool(raw == "true")),
+        "sentencePause" | "reviewAutoplayAudio" => Some(Value::Bool(raw == "true")),
         "theme" if !["dark", "light", "system"].contains(&raw) => None,
         "locale" if !["ja", "en"].contains(&raw) => None,
         "activeProvider" if !["vertex", "openai"].contains(&raw) => None,

@@ -94,6 +94,14 @@ impl DesktopView {
                 if let UiEvent::Navigate(route) = event {
                     this.navigate(route.clone(), window, cx);
                 }
+                if let UiEvent::StartReview { language, media_id } = event {
+                    let target_language = language.clone();
+                    let target_media = media_id.clone();
+                    this.review.update(cx, |review, cx| {
+                        review.set_scope(target_language, target_media, cx)
+                    });
+                    this.navigate(Route::Review, window, cx);
+                }
                 if matches!(event, UiEvent::Snapshot) {
                     this.appearance(window, cx);
                     cx.notify();
@@ -342,8 +350,12 @@ impl DesktopView {
             self.ai.update(cx, |view, cx| view.entered(cx));
         }
         if self.route == Route::Review {
-            self.review
-                .update(cx, |review, cx| review.focus(window, cx));
+            self.review.update(cx, |review, cx| {
+                review.set_active(true);
+                review.focus(window, cx);
+            });
+        } else {
+            self.review.update(cx, |review, _| review.set_active(false));
         }
         cx.notify();
     }
