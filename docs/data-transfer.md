@@ -1,11 +1,18 @@
 # Learning data export and restore
 
 JSON preserves learning records and review history without audio. ZIP contains
-the same records and every registered card-audio clip. CSV/TSV export the phrase
-collection; SRT/VTT export a selected media item's source subtitles and, when
-available, a separate translation file. They include only precise timed cues.
-Rows marked **Audio range** (`source_block`) are omitted because their enclosing
-source bounds are not subtitle timings; JSON/ZIP preserve their original text.
+the same records and every registered card-audio clip. CSV/TSV export all saved
+cards with columns `term`, `meaning`, `example`, `translation`, `explanation`,
+`language`, `source`, `start_ms`, `end_ms`, and `due_at` (RFC-4180 quoted with
+`\r\n` line endings and a leading `'` escaping spreadsheet formula prefixes `=`,
+`+`, `-`, `@`, `\t`, `\r`). SRT/VTT import cleans inline markup (stripping ASS
+`{\...}` overrides, `<ruby>` `<rt>`/`<rp>` annotations, known formatting tags,
+and karaoke timestamps, and decoding basic HTML entities while keeping bare `&`
+and non-tag `<`); SRT/VTT export writes a selected media item's source
+subtitles and, when available, a separate translation file, emitting only
+precise timed `cue` rows. Rows marked **Audio range** (`source_block`) are
+omitted because their enclosing source bounds are not subtitle timings; JSON/ZIP
+preserve their original text.
 
 Export from a media item defaults to SRT for that item's subtitles. Export from
 the library defaults to a ZIP backup. JSON/ZIP always cover the whole learning
@@ -56,20 +63,21 @@ guarantee, not a promise against hardware failure or filesystem corruption.
 
 Restore previews and validates the archive before applying it, backs up the
 current learning database, and places restored audio in a new managed directory.
-Pending editor changes are saved before restore, and old editing sessions are
-cleared after replacement commits so they cannot overwrite the restored drafts.
-The learning generation advances in that transaction. Device-local settings,
-existing-card and import drafts in `workspace.sqlite` are excluded from backups;
-old card drafts remain readable as stale input but cannot apply over restored data.
-A committed restore can report cleanup or playback warnings. The restored data
-and refresh still take effect; these warnings do not mean rollback and must not
-prompt repeating the restore.
-It does not import credentials, cost ledgers, paid jobs, execution approvals, or
-external-tool selections. Original media files are not bundled in backups.
-Publication sessions and operational transcript-review decisions are excluded
-and cleared on restore. Pending background output cannot automatically replace
-the restored subtitles, while existing paid-job digests and cost records remain
-in their separate store.
+Pending editor changes are saved before restore, the learning generation
+advances transactionally on commit, and old editing sessions, publication
+sessions, and operational transcript-review state are cleared afterward so
+stale writers or pending background output cannot overwrite restored data or
+drafts. A committed restore can report cleanup or playback warnings; the
+restored data and refresh still take effect, and those warnings must not prompt
+repeating the restore.
+
+Backups exclude and restore never imports original media files, credentials,
+cost ledgers, paid jobs, execution approvals, external-tool selections,
+publication sessions, operational transcript-review decisions, or device-local
+settings and existing-card/import drafts in `workspace.sqlite`. Old card drafts
+in `workspace.sqlite` remain readable as stale input without applying over
+restored cards, and paid-job digests and cost records stay in their separate
+store.
 
 See the [application test guide](testing.md) for export and restore regression
 coverage.

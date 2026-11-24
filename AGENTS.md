@@ -30,6 +30,7 @@
 - Keep the production desktop dependency graph (`surtitle` built with `--no-default-features`) free of Electron, Tauri, WebView, and browser runtimes, and free of development or test features (`development-validation`, `e2e-fixtures`, `e2e-test`, `test-support`), as enforced by CI and `native/windows/package.ps1`.
 - Keep GPUI entities and native window lifetimes on the GUI thread, and run blocking or asynchronous work on the explicit Tokio runtime. UI-facing methods receive typed state and credential status only, never saved API keys, service-account JSON, or access tokens.
 - Preserve the Windows video composition architecture: `mpv-2.dll` windowless `gpu-next` D3D11 composition swapchain transferred via the private owned-COM bridge (`native/build/patches/mpv-owned-composition-swapchain.patch`) and published with UI pixels in one DirectComposition transaction. Never use mpv's borrowed `display-swapchain` property, and never copy video frames through CPU buffers into GPUI. Review and preserve the scoped GPUI patches in `patches/gpui-pre` and `patches/gpui-pre-windows` when updating GPUI.
+- Keep GPUI layout, keyboard, and IME handling stable: reserve control widths across dynamic label/count changes and `ja`/`en` locales with `state_label` / `state_message` and `tabular_numbers()` (`crates/desktop/src/ui/style.rs`); gate single-key page shortcuts with `page_shortcut` (`crates/desktop/src/ui/keyboard.rs`, surface focus only — never inside focused buttons, sliders, inputs, menus, or during IME preedit); and preserve IME `marked_text_range` on `Tab`, `Escape`, and `Ctrl+Enter`.
 
 ## Data, persistence, and subtitle timing guardrails
 
@@ -47,7 +48,7 @@
 - Protect Vertex service-account keys and OpenAI API keys with per-user Windows DPAPI ([docs/ai.md](docs/ai.md), [docs/vertex-verification.md](docs/vertex-verification.md)). Never allow a plaintext fallback, and never pass credentials in command arguments, logs, or evidence files.
 - Keep local audio preparation (FFmpeg mono 16 kHz PCM extraction, pinned Silero VAD via bundled CPU ONNX Runtime, and bounded FLAC encoding) strictly offline with zero provider requests. Spawn external tools with literal arguments, no shell interpretation, verified executable hashes, and bounded output ([docs/tools.md](docs/tools.md)).
 - Require an explicit user-reviewed quote and immutable approval before any paid provider request. Reserve budget in `charges.sqlite` before dispatch, serialize outbound requests through the single shared HTTP lane across Vertex and OpenAI, and keep per-service budgets independent (`0` means unlimited).
-- Never introduce automatic model switching/fallback, unapproved paid retries, or automatic release/refund of genuinely unknown outcomes (timeouts, dropped connections, 3xx/5xx responses, or malformed HTTP 200 streams). Definitive pre-generation HTTP client rejections (`400`, `401`, `403`, `404`, `409`, `422`) and `429` rate-limit responses release their pre-dispatch monetary hold (`charged_microusd = 0`) because no generation occurred. Approved jobs perform bounded transient HTTP 429 retries (at most two retries / three sends total per request, honoring server `Retry-After` and persistent pacing).
+- Never introduce automatic model switching/fallback, unapproved paid retries, or automatic release/refund of genuinely unknown outcomes; only definitive pre-generation rejections and `429` rate-limit responses release pre-dispatch holds, and approved jobs use only the bounded transient `429` retry policy documented in [docs/ai.md](docs/ai.md).
 - When modifying AI claim, dispatch, retry, pacing, hold, or provider-isolation logic, keep the boundary replay tests (`crates/ai/src/vertex/fault_tests/model_boundary_replay.rs`) and ledger/provider isolation tests consistent.
 
 ## Authoritative inputs and workspace layout
@@ -58,6 +59,7 @@
   - Native runtime DLLs, Silero VAD model, and VC Runtime prerequisite: `native/runtime-windows-x64.json` and `native/build/sources.json`.
   - License allowlists: `deny.toml` and `about.toml`.
 - Keep all build outputs, staged resources, test results, and packaging artifacts under ignored `work/` (`work/target`, `work/resources`, `work/artifacts`, `work/test-results`), as configured by `.cargo/config.toml`.
+- Respect `Cargo.toml` workspace membership: `default-members` includes only `crates/core`, `crates/tools`, and `crates/ai` (`surtitle` in `crates/desktop` and `surtitle-ai-validation` require `--workspace` or `-p`), and `patches/gpui-pre` / `patches/gpui-pre-windows` are in `workspace.exclude` (on Windows, run `cargo test -p gpui-pre-windows --lib --locked` explicitly).
 
 ## Verification and evidence honesty
 
