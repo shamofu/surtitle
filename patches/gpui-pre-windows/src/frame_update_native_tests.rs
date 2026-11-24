@@ -120,7 +120,7 @@ fn run_application() {
                     .state
                     .frame_update
                     .retry_at
-                    .set(Some(Instant::now() + Duration::from_millis(100)));
+                    .set(Some(Instant::now() + Duration::from_secs(60)));
                 unsafe {
                     SendMessageW(hwnd, WM_PAINT, None, None);
                 }
@@ -130,6 +130,11 @@ fn run_application() {
                     10,
                     "clean frame must not consume pending geometry early"
                 );
+                native
+                    .state
+                    .frame_update
+                    .retry_at
+                    .set(Some(Instant::now() + Duration::from_millis(20)));
                 let deadline = Instant::now() + Duration::from_secs(5);
                 while geometry.get() != 20 {
                     assert!(

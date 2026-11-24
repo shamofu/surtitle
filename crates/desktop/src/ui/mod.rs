@@ -957,6 +957,7 @@ impl Render for DesktopView {
             cx,
         );
         let session = self.session.read(cx);
+        let now = session.utc_now();
         let due = session.snapshot.as_ref().map_or(0, |snapshot| {
             snapshot
                 .cards
@@ -964,7 +965,7 @@ impl Render for DesktopView {
                 .filter(|card| {
                     !card.suspended
                         && chrono::DateTime::parse_from_rfc3339(&card.due_at)
-                            .is_ok_and(|time| time <= chrono::Utc::now())
+                            .is_ok_and(|time| time <= now)
                 })
                 .count()
         });

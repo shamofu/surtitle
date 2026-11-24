@@ -455,7 +455,7 @@ impl CardsView {
         if !self.review {
             return;
         }
-        let now = chrono::Utc::now();
+        let now = self.session.read(cx).utc_now();
         let next = self
             .session
             .read(cx)
@@ -688,7 +688,7 @@ impl Render for CardsView {
         self.arm_due_timer(cx);
         let snapshot = self.session.read(cx).snapshot.clone();
         let query = self.search.read(cx).value().trim().to_lowercase();
-        let now = chrono::Utc::now();
+        let now = self.session.read(cx).utc_now();
         let due = move |card: &StudyCard| {
             !card.suspended
                 && chrono::DateTime::parse_from_rfc3339(&card.due_at).is_ok_and(|date| date <= now)

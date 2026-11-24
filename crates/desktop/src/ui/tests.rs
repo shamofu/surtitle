@@ -796,15 +796,16 @@ fn review_notifies_when_a_future_card_becomes_due_without_another_data_change(
     cx: &mut TestAppContext,
 ) {
     let harness = Harness::open(cx);
-    let due = chrono::Utc::now() + chrono::Duration::milliseconds(350);
+    let backend = cx.read(|app| harness.view.read(app).session.read(app).backend.clone());
+    let start = chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let due = start + chrono::Duration::seconds(10);
+    backend.set_test_utc(start);
     let card = harness.replace_card(cx, |card| card.due_at = due.to_rfc3339());
     harness.route(cx, "review");
     cx.update_window(harness.window, |_, window, app| {
         window.render_frame(app);
-        assert!(
-            chrono::Utc::now() < due,
-            "fixture must reach the waiting state before its due time"
-        );
         assert!(window.try_find("review-reveal").is_none());
     })
     .unwrap();
@@ -814,27 +815,26 @@ fn review_notifies_when_a_future_card_becomes_due_without_another_data_change(
     let review = cx.read(|app| harness.view.read(app).review.clone());
     let _subscription = cx.update(|app| {
         app.observe(&review, move |_, _| {
-            if chrono::Utc::now() >= due {
-                received.store(true, Ordering::Release);
-            }
+            received.store(true, Ordering::Release);
         })
     });
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let mut previous = Instant::now();
     // Do not force frames while waiting: doing so could make a broken due timer
-    // look correct. Keep the fake timer clock aligned with real Utc instead.
-    while !notified.load(Ordering::Acquire) {
-        let current = Instant::now();
-        cx.executor()
-            .advance_clock(current.duration_since(previous));
-        previous = current;
-        cx.run_until_parked();
-        assert!(
-            Instant::now() < deadline,
-            "review must invalidate itself when this card becomes due"
-        );
-        std::thread::sleep(Duration::from_millis(2));
-    }
+    // look correct. Advance both clocks together without wall-clock races.
+    backend.set_test_utc(start + chrono::Duration::seconds(9));
+    cx.executor().advance_clock(Duration::from_secs(9));
+    cx.run_until_parked();
+    assert!(
+        !notified.load(Ordering::Acquire),
+        "review must not invalidate itself before this card becomes due"
+    );
+
+    backend.set_test_utc(due);
+    cx.executor().advance_clock(Duration::from_secs(1));
+    cx.run_until_parked();
+    assert!(
+        notified.load(Ordering::Acquire),
+        "review must invalidate itself when this card becomes due"
+    );
     cx.update_window(harness.window, |_, window, app| {
         window.render_frame(app);
         assert!(window.find("review-reveal").visible());

@@ -26,6 +26,8 @@ pub(crate) struct Backend {
     pub generation: Arc<AtomicU64>,
     pub in_flight: super::in_flight::InFlight,
     pub exclusive: Arc<AtomicBool>,
+    #[cfg(test)]
+    pub test_utc_ms: Arc<std::sync::atomic::AtomicI64>,
 }
 
 impl Backend {
@@ -36,7 +38,28 @@ impl Backend {
             generation: Arc::new(AtomicU64::new(0)),
             in_flight: Default::default(),
             exclusive: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            test_utc_ms: Arc::new(std::sync::atomic::AtomicI64::new(i64::MIN)),
         }
+    }
+
+    pub fn utc_now(&self) -> chrono::DateTime<chrono::Utc> {
+        #[cfg(test)]
+        {
+            let at = self.test_utc_ms.load(Ordering::SeqCst);
+            if at != i64::MIN {
+                return chrono::DateTime::from_timestamp_millis(at)
+                    .expect("valid test UTC timestamp");
+            }
+        }
+        chrono::Utc::now()
+    }
+
+    #[cfg(test)]
+    pub fn set_test_utc(&self, at: chrono::DateTime<chrono::Utc>) {
+        let millis = at.timestamp_millis();
+        assert_ne!(millis, i64::MIN, "reserved for the system clock");
+        self.test_utc_ms.store(millis, Ordering::SeqCst);
     }
 }
 
@@ -160,6 +183,9 @@ impl Session {
         };
         this.refresh(cx);
         this
+    }
+    pub fn utc_now(&self) -> chrono::DateTime<chrono::Utc> {
+        self.backend.utc_now()
     }
     pub fn text<'a>(&self, ja: &'a str, en: &'a str) -> &'a str {
         if self
